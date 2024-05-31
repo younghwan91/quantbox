@@ -10,12 +10,15 @@ import matplotlib.pyplot as plt
 import tqdm
 import scipy.stats as stats
 from scipy.optimize import minimize
+import statsmodels.api as sm
+from pykalman import KalmanFilter
+import logging
 
-plt.style.use('dark_background')
+plt.style.use('ggplot')
 
 class CryptoPairSelector:
-    def __init__(self, config):
-        self.client = Client(config['API_KEY'], config['API_SECRET'])
+    def __init__(self, client, config):
+        self.client = client
         self.directory = config['SAVING_DIR']
         self.interval = config['INTERVAL']  # Assuming you want to use the interval from the config
         self.n_coins = config['N_COINS']
@@ -24,10 +27,13 @@ class CryptoPairSelector:
         self.csv_filename = config['CSV_FILENAME']
         self.coint_threshold = config['COINT_THRESHOLD']
         self.trading_charge = config['TRADING_CHARGE']
-        self.shapiro_threshold = config['SHAPIRO_THRESHOLD']
-
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S',  # Round to seconds
+                            handlers=[logging.StreamHandler(),  # This will print to console
+                            logging.FileHandler('crypto_pair_selector.log')])  # This will write to a log file
+        
     def load_selected_trading_coins(self):
-        print(f"Loading trading coins from {self.csv_filename}...")
+        logging.info(f"Loading trading coins from {self.csv_filename}...")
         with open(os.path.join(self.directory, self.csv_filename), 'r') as file:
             reader = csv.reader(file)
             coins = [coin for row in reader for coin in row[:self.n_coins]]
@@ -40,16 +46,20 @@ class CryptoPairSelector:
             coin_diff = np.log(df['Close']).diff().dropna()
             coin_diff = coin_diff[coin_diff != 0]
             if len(coin_diff) == 0:
-                print(f'No price difference for {coin}')
+                logging.info(f'No price difference for {coin}')
                 continue
             else:
-                adf_test = adfuller(coin_diff)
-                if adf_test[1] < 0.01:
-                    valid_coins.append(coin)
-                else:
-                    print(f'{coin} is not integrated of order 1')
+                try:
+                    adf_test = adfuller(coin_diff)
+                    if adf_test[1] < 0.01:
+                        valid_coins.append(coin)
+                    else:
+                        logging.info(f'{coin} is not integrated of order 1')
+                except ValueError:
+                    logging.info(f'Sample size too short for {coin}')
+                    continue 
 
-        print(f'Number of coins integrated of order 1: {len(valid_coins)}')
+        logging.info(f'Number of coins integrated of order 1: {len(valid_coins)}')
 
         return valid_coins
 
@@ -82,37 +92,30 @@ class CryptoPairSelector:
             prices2 = np.log(data[coin2].loc[common_indices]['Close'])
             split_index = int(len(prices1) * self.train_ratio)
             try:
-                result_train = coint(prices1[:split_index], prices2[:split_index])
-            except:
-                print(f"Error in cointegration test for pair: {(coin1, coin2)}")
-                print(split_index, len(prices1), len(prices2))            
-            try:
                 result_all = coint(prices1, prices2)
-            except:
-                print(f"Error in cointegration test for pair: {(coin1, coin2)}")
-                print(split_index, len(prices1), len(prices2))
-
-            if result_train[1] < self.coint_threshold and result_all[1] < self.coint_threshold :  # Using a common p-value threshold
-                coint_pairs.append((coin1, coin2))
+                if result_all[1] < self.coint_threshold:  
+                    coint_pairs.append((coin1, coin2))
+            except Exception as e:
+                logging.error(f"Error in cointegration test for pair: {(coin1, coin2)}: {e}")
             
         return coint_pairs
 
     def select_trading_pairs(self):
 
-        print(">>> Loading trading coins...")
+        logging.info(">>> Loading trading coins...")
         trading_pairs_usdt = self.load_selected_trading_coins()
         data = {pair: pd.read_pickle(os.path.join(self.directory, f'{pair}.pkl')) for pair in trading_pairs_usdt}
 
-        print(">>> Finding valid coins...")
+        logging.info(">>> Finding valid coins...")
         valid_coins = self.find_valid_coins(data)
         trading_pairs_usdt = [coin for coin in trading_pairs_usdt if coin in valid_coins]
         data = {coin: df for coin, df in data.items() if coin in valid_coins}
         
-        print(">>> Calculating normalized prices...")
+        logging.info(">>> Calculating normalized prices...")
         all_pairs = list(itertools.combinations(trading_pairs_usdt, 2))
         normalized_prices = self.calculate_normalized_close_prices(data)
 
-        print(">>> Calculating NPD with train ratio...")
+        logging.info(">>> Calculating NPD with train ratio...")
         npd_pairs = self.calculate_npd(normalized_prices, all_pairs)
         npd_pairs.sort(key=lambda x: x[2])
 
@@ -121,127 +124,190 @@ class CryptoPairSelector:
         else:
             selected_npd = [pair[:2] for pair in npd_pairs[:self.max_n_npd]]
 
-        print(">>> Finding cointegrated pairs...")
+        logging.info(">>> Finding cointegrated pairs...")
         coint_pairs = self.find_cointegrated_pairs(selected_npd, data)
 
-        print(f"Length of selected NPD pairs for cointegration testing: {len(selected_npd)} / {len(all_pairs)}")
-        print(f"Length of cointegrated pairs: {len(coint_pairs)} / {len(selected_npd)}")
-        print(f"Cointegrated pairs: {coint_pairs}")
+        logging.info(f"Length of selected NPD pairs for cointegration testing: {len(selected_npd)} / {len(all_pairs)}")
+        logging.info(f"Length of cointegrated pairs: {len(coint_pairs)} / {len(selected_npd)}")
+        logging.info(f"Cointegrated pairs: {coint_pairs}")
 
         return coint_pairs, data
-    
+
     def generate_signal(self, z_spread, threshold_long, threshold_short):
         # Initialize signal with 0
         signal = pd.Series(0, index=z_spread.index)
 
         # initial signal
-        if z_spread[0] > threshold_long:
-            signal[0] = -1
-        elif z_spread[0] < threshold_short:
-            signal[0] = 1
+        if z_spread.iloc[0] > threshold_long:
+            signal.iloc[0] = -1
+        elif z_spread.iloc[0] < threshold_short:
+            signal.iloc[0] = 1
+        
+        # loop
+        for t in range(1, len(z_spread)):
+            if signal.iloc[t-1] == 0:  # if we were in no position
+                if z_spread.iloc[t] <= threshold_long:
+                    signal.iloc[t] = 1
+                elif z_spread.iloc[t] >= threshold_short:
+                    signal.iloc[t] = -1
+                else:
+                    signal.iloc[t] = 0
+            elif signal.iloc[t-1] == 1:  # if we were in a long position
+                if z_spread.iloc[t] >= 0:
+                    signal.iloc[t] = 0
+                else:
+                    signal.iloc[t] = signal.iloc[t-1]
+            else:  # if we were in a short position
+                if z_spread.iloc[t] <= 0:
+                    signal.iloc[t] = 0
+                else:
+                    signal.iloc[t] = signal.iloc[t-1]
+        
+        return signal 
 
+    def get_Kalman_params(self, log_price_1, log_price_2, init_hedge_ratio, init_intercept):
+        
 
-        return signal
+        X = log_price_2.values.reshape(-1, 1)
+        y = log_price_1.values.reshape(-1, 1)
+        delta = 1e-5
+        trans_cov = delta / (1 - delta) * np.eye(2)
+        obs_cov = 10
+        obs_mat = sm.add_constant(X, prepend=False)[:, np.newaxis]
+
+        kf = KalmanFilter(n_dim_obs=1, n_dim_state=2,
+                        initial_state_mean=np.array([init_hedge_ratio, init_intercept]),
+                        initial_state_covariance=np.array([[1, 0], 
+                                                            [0, 1]]),
+                        transition_matrices=np.eye(2),
+                        observation_matrices=obs_mat,
+                        observation_covariance=obs_cov,
+                        transition_covariance=trans_cov)
+        
+        state_means, _ = kf.filter(y)
+        hedge_ratio = state_means[:, 0]
+        intercept = state_means[:, 1]
+
+        return hedge_ratio, intercept
+
+    def calculate_optimal_thresholds(self, mean_spread, std_spread, T):
+        f = lambda s0: -(s0-(self.trading_charge*4))*T*(1-stats.norm.cdf(s0, mean_spread, std_spread))
+        x = np.linspace(0, 0.05, 100)
+        f_values = [f(s0) for s0 in x]
+        s0 = x[np.argmin(f_values)]
+        lower_bound = -(s0-mean_spread)/std_spread
+        upper_bound = (s0-mean_spread)/std_spread
+        return lower_bound, upper_bound, s0
+
+    def calculate_sharpe_ratio(self, returns):
+        mean_returns = returns.mean()
+        std_returns = returns.std()
+        sharpes = mean_returns / std_returns
+        return sharpes
     
-    def plot_cointegrated_pairs(self, data, cointegrated_pairs):
-        print("Plotting cointegrated pairs...")
+    def backtest_pair(self, spread, signal):
+        spread_return = spread.diff()
+        traded_return = signal * spread_return.shift(-1)
+        traded_return.fillna(0, inplace=True)
+        cumulated_return = (traded_return.cumsum()+1)*100
+        return cumulated_return, traded_return
+    
+    def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
+        best_pair = None
+        best_sharpe_ratio = -np.inf
 
-        # sort the cointegrated pairs by the product of shapiro test and spread std
-        # cointegrated_pairs = sorted(cointegrated_pairs, key=lambda x: stats.shapiro(data[x[0]]['Close'] - data[x[1]]['Close'])[0]*np.std(data[x[0]]['Close'] - data[x[1]]['Close']), reverse=True)
-
+        info_pair = {}
         for coin1, coin2 in cointegrated_pairs:
             common_indices = data[coin1].index.intersection(data[coin2].index)
-            prices1 = np.log(data[coin1].loc[common_indices]['Close'])
-            prices2 = np.log(data[coin2].loc[common_indices]['Close'])
-            result_all = coint(prices1, prices2)
-            split_index = int(len(prices1) * self.train_ratio)
-            result_train = coint(prices1[:split_index], prices2[:split_index])
-
+            log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
+            log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
+            
             # Perform linear regression to find the hedge ratio
-            hedge_ratio, intercept = np.polyfit(prices1[:split_index], prices2[:split_index], 1)
-            spread = prices2 - (hedge_ratio * prices1 + intercept)
-            shapiro_test = stats.shapiro(spread)
-            print(f'Shapiro test: {shapiro_test}')
-            if shapiro_test[0] < self.shapiro_threshold:
-                print(f'Spread is not normally distributed for pair: {coin1} and {coin2}')
-                continue
-            '''
-            mean_train != mean_all
-            std_train != std_all
-            '''
+            init_hedge_ratio, init_intercept = np.polyfit(log_price_2, log_price_1, 1)
+            hedge_ratio, intercept = self.get_Kalman_params(log_price_1, log_price_2, init_hedge_ratio, init_intercept)
+            spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
 
             # Z-score the spread
-            z_spread = (spread - spread.mean()) / spread.std()
+            mean_spread = spread.mean()
+            std_spread = spread.std()
+            z_spread = (spread - mean_spread) / std_spread
+
+            # Determine the optimal thresholds
             T = len(spread)
-            f = lambda s0: -(s0-(self.trading_charge*2))*T*(1-stats.norm.cdf(s0, spread.mean(), spread.std()))
-            x = np.linspace(0, 0.05, 100)
-            f_values = [f(s0) for s0 in x]
-            s0 = x[np.argmin(f_values)]
+            lower_bound, upper_bound, _ = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
 
-            print(spread.mean(), spread.std())
-            lower_bound = -(s0-spread.mean())/spread.std()
-            upper_bound = (s0-spread.mean())/spread.std()
-            print(lower_bound, upper_bound)
-            print(z_spread.head())
+            # Generate signal
             signal = self.generate_signal(z_spread, lower_bound, upper_bound)
+            
+            # Backtest the pair
+            cumulated_return, traded_return = self.backtest_pair(spread, signal)
 
-            plt.figure(figsize=(20, 10))
-            row_size = 4
-            plt.subplot(row_size, 1, 1)
-            plt.plot(z_spread)
-            plt.plot(z_spread.index, signal)
-            plt.axvline(z_spread.index[split_index], color='r')
-            plt.axhline(upper_bound, color = 'r', linestyle='--')
-            plt.axhline(lower_bound, color = 'r', linestyle='--')
-            plt.axhline(0.0)
-            plt.ylabel('Z-score')
-            plt.title(f'{coin1} and {coin2} Z-score')
-            plt.text(0.02, 0.95, f'p-value (total): {result_all[1]:.4f}', transform=plt.gca().transAxes, fontsize=12, verticalalignment='top')
-            plt.text(0.02, 0.85, f'p-value (train): {result_train[1]:.4f}', transform=plt.gca().transAxes, fontsize=12, verticalalignment='top')
-            plt.grid(True)
+            # Calculate the Sharpe ratio
+            sharpe_ratio = self.calculate_sharpe_ratio(traded_return)                                
 
-            plt.subplot(row_size, 1, 2)
-            plt.plot(spread)
-            plt.axvline(spread.index[split_index], color='r') 
-            plt.axhline(upper_bound*spread.std()+spread.mean(), color = 'r', linestyle='--')
-            plt.axhline(lower_bound*spread.std()+spread.mean(), color = 'r', linestyle='--')
-            plt.axhline(0.0)
-            plt.ylabel('Spread')
-            plt.title(f'{coin1} and {coin2} and stdev: {np.std(spread):.4f}')
-            plt.grid(True)
+            if sharpe_ratio > best_sharpe_ratio and (z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound) and hedge_ratio[-1] > 0: # Only trade if the current spread is outside the bounds
+                best_sharpe_ratio = sharpe_ratio
+                best_pair = (coin1, coin2)
+                info_pair = {
+                    'cumulated_return': cumulated_return,
+                    'traded_return': traded_return,
+                    'spread': spread,
+                    'signal': signal,
+                    'hedge_ratio': hedge_ratio[-1],
+                    'intercept': intercept[-1],
+                    'mean_spread': mean_spread,
+                    'std_spread': std_spread,
+                    'lower_bound': lower_bound,
+                    'upper_bound': upper_bound,
+                    'z_spread': z_spread,
+                    'instant_return': np.abs(spread.iloc[-1]) - (2*self.trading_charge),
+                    'price1': data[coin1].loc[common_indices]['Close'].iloc[-1],
+                    'price2': data[coin2].loc[common_indices]['Close'].iloc[-1],
+                    'trade_coin1': 'BUY' if signal.iloc[-1] == 1 else 'SELL',
+                    'trade_coin2': 'SELL' if signal.iloc[-1] == 1 else 'BUY'
+                }
+        logging.info(f"Best pair: {best_pair} with Sharpe Ratio: {best_sharpe_ratio:.4f}")
+        try:
+            if ENABLE_PLOT:
+                self.plot_best_pair(best_pair, info_pair)
+        except Exception as e:
+            logging.error(f"Error plotting best pair: {e}")
 
-            plt.subplot(row_size, 1, 3)
-            # signal at t . diff t - (t-1). 
-            # signal at t impact the diff at t+1
-            # Hence, signal at t times the diff.shift(-1)
-            # empty return filled with zeros
-            spread_return = spread.diff()
-            traded_return = signal * spread_return.shift(-1) # should not the signal shift forward instead 
-            traded_return.fillna(0, inplace=True)
-            # cumulated_return = (1+traded_return).cumprod()*100 # compound return
-            cumulated_return = (traded_return.cumsum()+1)*100 # simple return
-            plt.plot(cumulated_return)
-            plt.axvline(z_spread.index[split_index], color='r')
-            plt.ylabel('Cumulated Return (%)')
-            plt.title(f'{coin1} and {coin2} Cumulated Return')
-            plt.grid(True)
+        return best_pair, best_sharpe_ratio, info_pair            
 
-            plt.subplot(row_size, 1, 4)
-            plt.hist(spread, bins=100, density=True, alpha=0.6, color='g')
+    def plot_z_score(self, info_pair, best_pair):
+        plt.subplot(3, 1, 1)
+        plt.plot(info_pair['z_spread'])
+        plt.plot(info_pair['z_spread'].index, info_pair['signal'])
+        plt.axhline(info_pair['upper_bound'], color='r', linestyle='--')
+        plt.axhline(info_pair['lower_bound'], color='r', linestyle='--')
+        plt.axhline(0.0)
+        plt.ylabel('Z-score')
+        plt.title(f'{best_pair[0]} and {best_pair[1]} Z-score')
+        plt.grid(True)
 
-            # Fit a normal distribution to the data
-            mu, std = stats.norm.fit(spread)
+    def plot_spread(self, info_pair, best_pair):
+        plt.subplot(3, 1, 2)
+        plt.plot(info_pair['spread'])
+        plt.axhline((info_pair['upper_bound']*info_pair['std_spread'])+info_pair['mean_spread'], color='r', linestyle='--')
+        plt.axhline((info_pair['lower_bound']*info_pair['std_spread'])+info_pair['mean_spread'], color='r', linestyle='--')
+        plt.axhline(0.0)
+        plt.ylabel('Spread')
+        plt.title(f'{best_pair[0]} and {best_pair[1]} Spread (stdev: {info_pair["std_spread"]:.4f})')
+        plt.grid(True)
 
-            # Plot the PDF
-            xmin, xmax = plt.xlim()
-            x = np.linspace(xmin, xmax, 100)
-            p = stats.norm.pdf(x, mu, std)
-            plt.plot(x, p, 'r', linewidth=2)
+    def plot_cumulated_return(self, info_pair, best_pair):
+        plt.subplot(3, 1, 3)
+        plt.plot(info_pair['cumulated_return'])
+        plt.ylabel('Cumulated Return (%)')
+        plt.title(f'{best_pair[0]} and {best_pair[1]} Cumulated Return')
+        plt.grid(True)
 
-            plt.ylabel('Frequency')
-            plt.title(f'{coin1} and {coin2} Spread Distribution')
-            plt.grid(True)
-
-
-            plt.tight_layout()
-            plt.show()
+    def plot_best_pair(self, best_pair, info_pair):
+        """Plot the results for the best pair."""
+        plt.figure(figsize=(20, 10))
+        self.plot_z_score(info_pair, best_pair)
+        self.plot_spread(info_pair, best_pair)
+        self.plot_cumulated_return(info_pair, best_pair)
+        plt.tight_layout()
+        plt.show()

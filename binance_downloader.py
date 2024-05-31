@@ -5,11 +5,10 @@ from binance.client import Client
 from binance.enums import HistoricalKlinesType
 from tqdm import tqdm
 
-
-
 class BinanceDownloader:
-    def __init__(self, config):
-        self.client = self.initialize_client(config)
+    def __init__(self, config, client):
+        # self.client = self.initialize_client(config)
+        self.client = client
         self.saving_dir = config["SAVING_DIR"]
         self.trading_coins = self.get_trading_coins(self.client, config["QUOTE_COIN"], config["N_COINS"])
         self.config = config
@@ -20,6 +19,7 @@ class BinanceDownloader:
     def get_trading_coins(self, client, quote_coin, n_coins):
         futures_exchange_info = client.futures_exchange_info()
         trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin)]
+
         assert n_coins <= len(trading_coins), "N_COINS is greater than the number of trading coins"
         return trading_coins[:n_coins]
 
