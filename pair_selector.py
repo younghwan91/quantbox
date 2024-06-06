@@ -3,13 +3,11 @@ import csv
 import itertools
 import numpy as np
 import pandas as pd
-from binance.client import Client
 from statsmodels.tsa.stattools import coint
 from statsmodels.tsa.stattools import adfuller
 import matplotlib.pyplot as plt
 import tqdm
 import scipy.stats as stats
-from scipy.optimize import minimize
 import statsmodels.api as sm
 from pykalman import KalmanFilter
 import logging
@@ -83,7 +81,7 @@ class CryptoPairSelector:
             pairs_npd.append((coin1, coin2, npd))
         return pairs_npd
 
-    def find_cointegrated_pairs(self, selected_pairs, data):
+    def find_cointegrated_pairs(self, selected_pairs, data, split):
 
         coint_pairs = []
         for coin1, coin2 in tqdm.tqdm(selected_pairs):
@@ -92,15 +90,21 @@ class CryptoPairSelector:
             prices2 = np.log(data[coin2].loc[common_indices]['Close'])
             split_index = int(len(prices1) * self.train_ratio)
             try:
-                result_all = coint(prices1, prices2)
-                if result_all[1] < self.coint_threshold:  
-                    coint_pairs.append((coin1, coin2))
+                if split:
+                    result_train = coint(prices1[:split_index], prices2[:split_index])
+                    if result_train[1] < self.coint_threshold:
+                        coint_pairs.append((coin1, coin2))
+                else:
+                    result = coint(prices1, prices2)
+                    if result[1] < self.coint_threshold:  
+                        coint_pairs.append((coin1, coin2))
+
             except Exception as e:
                 logging.error(f"Error in cointegration test for pair: {(coin1, coin2)}: {e}")
             
         return coint_pairs
 
-    def select_trading_pairs(self):
+    def select_trading_pairs(self, split = False):
 
         logging.info(">>> Loading trading coins...")
         trading_pairs_usdt = self.load_selected_trading_coins()
@@ -125,7 +129,7 @@ class CryptoPairSelector:
             selected_npd = [pair[:2] for pair in npd_pairs[:self.max_n_npd]]
 
         logging.info(">>> Finding cointegrated pairs...")
-        coint_pairs = self.find_cointegrated_pairs(selected_npd, data)
+        coint_pairs = self.find_cointegrated_pairs(selected_npd, data, split)
 
         logging.info(f"Length of selected NPD pairs for cointegration testing: {len(selected_npd)} / {len(all_pairs)}")
         logging.info(f"Length of cointegrated pairs: {len(coint_pairs)} / {len(selected_npd)}")
@@ -212,6 +216,66 @@ class CryptoPairSelector:
         cumulated_return = (traded_return.cumsum()+1)*100
         return cumulated_return, traded_return
     
+    def observe_all_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
+        for coin1, coin2 in cointegrated_pairs:
+            common_indices = data[coin1].index.intersection(data[coin2].index)
+            log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
+            log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
+            
+            # Perform linear regression to find the hedge ratio
+            split_index = int(len(log_price_1) * self.train_ratio)
+            init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
+            hedge_ratio, intercept = self.get_Kalman_params(log_price_1, log_price_2, init_hedge_ratio, init_intercept)
+            
+            spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
+            kalman_spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
+            # Z-score the spread
+            train_spread = spread[:split_index]
+            mean_spread = train_spread.mean()
+            kalman_mean_spread = kalman_spread.mean()
+            std_spread = train_spread.std()
+            kalman_std_spread = kalman_spread.std()
+            z_spread = (spread - mean_spread) / std_spread
+            kalman_z_spread = (kalman_spread - kalman_mean_spread) / kalman_std_spread
+
+            # Determine the optimal thresholds
+            T = len(spread)
+            lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
+            kalman_lower_bound, kalman_upper_bound, kalman_s0 = self.calculate_optimal_thresholds(kalman_mean_spread, kalman_std_spread, T)
+
+            # Generate signal
+            signal = self.generate_signal(z_spread, lower_bound, upper_bound)
+            kalman_signal = self.generate_signal(kalman_z_spread, kalman_lower_bound, kalman_upper_bound)
+            
+            # Backtest the pair
+            cumulated_return, traded_return = self.backtest_pair(spread, signal)
+            kalman_cumulated_return, kalman_traded_return = self.backtest_pair(kalman_spread, kalman_signal)
+
+            # Calculate the Sharpe ratio
+            sharpe_ratio = self.calculate_sharpe_ratio(traded_return)                                
+            kalman_shape_ratio = self.calculate_sharpe_ratio(kalman_traded_return)
+
+            # check if z spread at the beginnging split is outside the bounds. if not skip
+            print(z_spread.iloc[split_index], upper_bound, lower_bound, sharpe_ratio)
+            if z_spread.iloc[split_index] < upper_bound and z_spread.iloc[split_index] > lower_bound:
+                continue
+
+            if ENABLE_PLOT:
+                # self.plot_pair(coin1, coin2, spread, z_spread, signal, cumulated_return)
+                split_index = int(len(spread) * self.train_ratio)
+
+                plt.figure(figsize=(20, 10))
+                plt.plot(z_spread)
+                plt.plot(kalman_z_spread, 'g')
+                plt.axvline(z_spread.index[split_index], color='r', linestyle='--')
+                plt.plot(z_spread.index, signal)
+                plt.axhline(upper_bound, color='r', linestyle='--')
+                plt.axhline(lower_bound, color='r', linestyle='--')
+                plt.axhline(0.0)
+                plt.ylabel('Z-score')
+                plt.grid(True)
+                plt.show()
+
     def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
         best_pair = None
         best_sharpe_ratio = -np.inf
@@ -224,7 +288,9 @@ class CryptoPairSelector:
             
             # Perform linear regression to find the hedge ratio
             init_hedge_ratio, init_intercept = np.polyfit(log_price_2, log_price_1, 1)
-            hedge_ratio, intercept = self.get_Kalman_params(log_price_1, log_price_2, init_hedge_ratio, init_intercept)
+            # hedge_ratio, intercept = self.get_Kalman_params(log_price_1, log_price_2, init_hedge_ratio, init_intercept)
+            hedge_ratio = init_hedge_ratio
+            intercept = init_intercept
             spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
 
             # Z-score the spread
@@ -245,7 +311,7 @@ class CryptoPairSelector:
             # Calculate the Sharpe ratio
             sharpe_ratio = self.calculate_sharpe_ratio(traded_return)                                
 
-            if sharpe_ratio > best_sharpe_ratio and (z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound) and hedge_ratio[-1] > 0: # Only trade if the current spread is outside the bounds
+            if sharpe_ratio > best_sharpe_ratio and (z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound) and hedge_ratio > 0: # Only trade if the current spread is outside the bounds
                 best_sharpe_ratio = sharpe_ratio
                 best_pair = (coin1, coin2)
                 info_pair = {
@@ -253,8 +319,10 @@ class CryptoPairSelector:
                     'traded_return': traded_return,
                     'spread': spread,
                     'signal': signal,
-                    'hedge_ratio': hedge_ratio[-1],
-                    'intercept': intercept[-1],
+                    # 'hedge_ratio': hedge_ratio[-1],
+                    # 'intercept': intercept[-1],
+                    'hedge_ratio': hedge_ratio,
+                    'intercept': intercept,
                     'mean_spread': mean_spread,
                     'std_spread': std_spread,
                     'lower_bound': lower_bound,
@@ -263,8 +331,8 @@ class CryptoPairSelector:
                     'instant_return': np.abs(spread.iloc[-1]) - (2*self.trading_charge),
                     'price1': data[coin1].loc[common_indices]['Close'].iloc[-1],
                     'price2': data[coin2].loc[common_indices]['Close'].iloc[-1],
-                    'trade_coin1': 'BUY' if signal.iloc[-1] == 1 else 'SELL',
-                    'trade_coin2': 'SELL' if signal.iloc[-1] == 1 else 'BUY'
+                    'trade_coin1': 'SELL' if signal.iloc[-1] == 1 else 'BUY', # Swap BUY and SELL
+                    'trade_coin2': 'BUY' if signal.iloc[-1] == 1 else 'SELL' # Swap BUY and SELL
                 }
         logging.info(f"Best pair: {best_pair} with Sharpe Ratio: {best_sharpe_ratio:.4f}")
         try:

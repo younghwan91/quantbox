@@ -7,7 +7,7 @@ CONFIG = {
     "CSV_FILENAME": "pairs_list.csv",
     "N_COINS": 50,
     "INTERVAL": '5m',
-    "START_STR": '2 day ago',
+    "START_STR": '1 day ago',
     "END_STR": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "MAX_N_NPD": None,
     "TRAIN_RATIO": 0.9,

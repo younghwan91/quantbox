@@ -13,9 +13,6 @@ class BinanceDownloader:
         self.trading_coins = self.get_trading_coins(self.client, config["QUOTE_COIN"], config["N_COINS"])
         self.config = config
 
-    def initialize_client(self, config):
-        return Client(api_key=config["API_KEY"], api_secret=config["API_SECRET"])
-
     def get_trading_coins(self, client, quote_coin, n_coins):
         futures_exchange_info = client.futures_exchange_info()
         trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin)]
