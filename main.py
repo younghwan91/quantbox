@@ -20,12 +20,6 @@ client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
 trader = CryptoTrader(client, CONFIG, ENABLE_PLOT)
 trader.print_futures_balance()
 
-try:
-    account_info = client.futures_account()
-    print("Account info retrieved successfully:")
-except Exception as e:
-    print(f"Error with mainnet: {e}")
-
 if TRADE:
     trader.run_trading_cycle()
  

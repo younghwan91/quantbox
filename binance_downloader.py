@@ -4,6 +4,8 @@ import pandas as pd
 from binance.client import Client
 from binance.enums import HistoricalKlinesType
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import numpy as np
 
 class BinanceDownloader:
     def __init__(self, config, client):
@@ -14,11 +16,31 @@ class BinanceDownloader:
         self.config = config
 
     def get_trading_coins(self, client, quote_coin, n_coins):
-        futures_exchange_info = client.futures_exchange_info()
-        trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin)]
+            futures_exchange_info = client.futures_exchange_info()
+            trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin)]
+            print(f"Number of trading pairs: {len(trading_coins)}")
+            assert n_coins <= len(trading_coins), "N_COINS is greater than the number of trading coins"
+            # Fetch 24-hour trading volume for each coin
+            volume_dict = {}
+            for coin in trading_coins:
+                try:
+                    ticker = client.get_ticker(symbol=coin)
+                    volume_dict[coin] = float(ticker['volume'])  # Using quoteVolume as it is typically more relevant for liquidity
+                except Exception as e:
+                    print(f"Error fetching ticker for {coin}: {e}")
+                    continue
 
-        assert n_coins <= len(trading_coins), "N_COINS is greater than the number of trading coins"
-        return trading_coins[:n_coins]
+            # Sort coins based on trading volume in descending order
+            sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1], reverse=True)
+            num_coins = len(sorted_coins)
+            print(f"Number of trading pairs: {num_coins}")
+
+            # Select the top n_coins based on liquidity
+            top_coins = [coin for coin, volume in sorted_coins[:n_coins]]
+
+            return top_coins
+            
+
 
     def save_trading_coins(self):
         with open(os.path.join(self.saving_dir, self.config["CSV_FILENAME"]), mode='w', newline='') as file:

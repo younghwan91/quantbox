@@ -51,21 +51,33 @@ class CryptoTrader:
     def round_step_size(self, quantity, step_size):
         return math.floor(quantity / step_size) * step_size
 
-    def simulate_order(self, symbol, side, quantity):
+    def validate_order(self, symbol, side, quantity):
         try:
             step_size, tick_size, min_notional, quantity_precision = self.get_symbol_info(symbol)
             rounded_quantity = self.round_step_size(quantity, step_size)
             rounded_quantity = round(rounded_quantity, quantity_precision)
             price = float(self.client.futures_symbol_ticker(symbol=symbol)['price'])
             notional = rounded_quantity * price
-            print(f"Quantity: {quantity}, Rounded Quantity: {rounded_quantity}")
-            print(f"Step size: {step_size}, Tick size: {tick_size}, Min notional: {min_notional}, Quantity precision: {quantity_precision}")
-            print(f"Price: {price}, Notional: {notional}")
+            
+            print("\n" + "="*60)
+            print(f"{'Validating Order':<30} | {symbol} | {side}")
+            print("="*60)
+            print(f"{'Initial Quantity':<30}: {quantity:.4f}")
+            print(f"{'Rounded Quantity':<30}: {rounded_quantity:.4f}")
+            print(f"{'Step Size':<30}: {step_size}")
+            print(f"{'Tick Size':<30}: {tick_size}")
+            print(f"{'Min Notional':<30}: {min_notional}")
+            print(f"{'Quantity Precision':<30}: {quantity_precision}")
+            print(f"{'Price':<30}: {price:.4f}")
+            print(f"{'Order Notional':<30}: {notional:.4f}")
+            print("="*60 + "\n")
+            
             if notional < min_notional:
-                raise ValueError(f"Order notional {notional} is less than the minimum notional {min_notional}")
+                raise ValueError(f"Order notional {notional:.4f} is less than the minimum notional {min_notional:.4f}")
+            
             return rounded_quantity, notional
         except Exception as e:
-            print(f"An exception occurred during simulation: {e}")
+            print(f"An exception occurred during validation: {e}")
             return None, None
 
     def place_order(self, symbol, side, rounded_quantity):
@@ -123,13 +135,15 @@ class CryptoTrader:
             balances = self.client.futures_account_balance()
             for balance in balances:
                 if balance['asset'] == 'USDT':
-                    print("-"*50)
-                    print(f"Asset: {balance['asset']}")
-                    print(f"Available Balance: {float(balance['availableBalance']):.2f}")
-                    print(f"Cross Wallet Balance: {float(balance['crossWalletBalance']):.2f}")
-                    print(f"Cross Unrealized PNL: {float(balance['crossUnPnl']):.2f}")
-                    print(f"Total Wallet Balance: {float(balance['balance']):.2f}")
-                    print("-"*50)
+                    print("="*50)
+                    print(f"{'Futures Account Balance':^50}")
+                    print("="*50)
+                    print(f"{'Asset':<25}: {balance['asset']}")
+                    print(f"{'Available Balance':<25}: {float(balance['availableBalance']):.2f} USDT")
+                    print(f"{'Cross Wallet Balance':<25}: {float(balance['crossWalletBalance']):.2f} USDT")
+                    print(f"{'Cross Unrealized PNL':<25}: {float(balance['crossUnPnl']):.2f} USDT")
+                    print(f"{'Total Wallet Balance':<25}: {float(balance['balance']):.2f} USDT")
+                    print("="*50)
                     break
         except Exception as e:
             print(f"An exception occurred while fetching futures account balance: {e}")
@@ -159,8 +173,8 @@ class CryptoTrader:
 
             self.download_data()
             
-            best_pair, best_sharpe_ratio, info_pair = self.find_cointegrated_pairs()
-            if best_pair is not None and best_sharpe_ratio > 0.1:
+            best_pair, best_sharpe_ratio, info_pair= self.find_cointegrated_pairs()
+            if best_pair is not None and best_sharpe_ratio > (0.1):
                 
                 coin1, coin2 = best_pair
                 hedge_ratio = info_pair['hedge_ratio']
@@ -171,8 +185,9 @@ class CryptoTrader:
                 lower_bound = info_pair['lower_bound']
                 mean_spread = info_pair['mean_spread']
                 std_spread = info_pair['std_spread']
+                kalman_model = info_pair['kalman_model']
 
-                E = capital * (1-2*trading_charge)
+                E = capital * (1 - 2 * trading_charge)
                 S1 = E / (1 + hedge_ratio)
                 S2 = hedge_ratio * S1
                 qty1 = S1 / info_pair['price1']
@@ -180,60 +195,84 @@ class CryptoTrader:
                 coin1_trade = info_pair['trade_coin1']
                 coin2_trade = info_pair['trade_coin2']
 
-                print("-"*50)
-                print(f"Capital: {capital}, Effective capital: {E}")
-                print(f"Hedge ratio: {hedge_ratio}")
-                print(f"Trading pair: {coin1} {coin2}")
-                print(f"Quantity 1: {qty1:.4f}, Quantity 2: {qty2:.4f}")
-                print(f"Trade Coin 1: {coin1_trade}, Trade Coin 2: {coin2_trade}")
-                print("-"*50)
+                print("\n" + "="*60)
+                print(f"{'Capital':<20}: {capital}")
+                print(f"{'Effective Capital':<20}: {E:.2f}")
+                print(f"{'Hedge Ratio':<20}: {hedge_ratio:.4f}")
+                print(f"{'Trading Pair':<20}: {coin1} / {coin2}")
+                print(f"{'Quantity 1':<20}: {qty1:.4f}")
+                print(f"{'Quantity 2':<20}: {qty2:.4f}")
+                print(f"{'Trade Coin 1':<20}: {coin1_trade}")
+                print(f"{'Trade Coin 2':<20}: {coin2_trade}")
+                print("="*60 + "\n")
                 
-                rounded_qty1, cost1 = self.simulate_order(coin1, coin1_trade, qty1)
-                rounded_qty2, cost2 = self.simulate_order(coin2, coin2_trade, qty2)
+                rounded_qty1, cost1 = self.validate_order(coin1, coin1_trade, qty1)
+                rounded_qty2, cost2 = self.validate_order(coin2, coin2_trade, qty2)
                 
                 if rounded_qty1 and rounded_qty2:
-                    print(f"Rounded Quantity for {coin1}: {rounded_qty1}, Cost: {cost1}")
-                    print(f"Rounded Quantity for {coin2}: {rounded_qty2}, Cost: {cost2}")
-                    print(f"Percentage difference from capital: {(cost1+cost2)/capital*100:.2f}%")
+                    capital_usage_percentage = (cost1 + cost2) / capital * 100
+                    print(f"{'Capital usage percentage':<40}: {capital_usage_percentage:.2f}%\n") 
+
                     order1 = self.place_order(coin1, coin1_trade, rounded_qty1)
                     order2 = self.place_order(coin2, coin2_trade, rounded_qty2)
 
                     price1 = float(self.client.futures_symbol_ticker(symbol=coin1)['price'])
                     price2 = float(self.client.futures_symbol_ticker(symbol=coin2)['price'])
                     init_spread = np.log(price1) - (hedge_ratio * np.log(price2) + intercept)
-                    init_z_spread = (init_spread-mean_spread)/std_spread
-                    print(f"Initial Z-spread: {init_z_spread:.2f}")
+                    init_z_spread = (init_spread - mean_spread) / std_spread
+                    
+                    print(f"{'Initial Z-spread':<30}: {init_z_spread:.2f}\n")
 
                     cnt = 0
                     
-
                     while True:
                         price1 = float(self.client.futures_symbol_ticker(symbol=coin1)['price'])
                         price2 = float(self.client.futures_symbol_ticker(symbol=coin2)['price'])
                         spread_i = np.log(price1) - (hedge_ratio * np.log(price2) + intercept)
-                        z_spread_i = (spread_i-mean_spread)/std_spread
+                        z_spread_i = (spread_i - mean_spread) / std_spread
 
-                        print(f"\033[A\033[KHolding positions for the {cnt}th time. Z-spread: {z_spread_i:.2f}, Signal: {signal}, Upper bound: {upper_bound:.2f}, Lower bound: {lower_bound:.2f}")
-                        
+                        print(f"\033[A\033[KOn Iter {cnt}, Z-spread: {z_spread_i:.2f}, Signal: {signal}, Bounds: ({upper_bound:.2f}, {lower_bound:.2f})")
+
                         if signal == 1 and z_spread_i > 0:
                             self.close_all_positions()
                             break
-                        elif signal == 1 and z_spread_i < (init_z_spread-2):
+                        elif signal == 1 and z_spread_i < (init_z_spread - 2):
                             self.close_all_positions()
                             break
                         elif signal == -1 and z_spread_i < 0:
                             self.close_all_positions()
                             break
-                        elif signal == -1 and z_spread_i > (init_z_spread+2):
+                        elif signal == -1 and z_spread_i > (init_z_spread + 2):
                             self.close_all_positions()
                             break
                         else:
                             cnt += 1
-                            
-                        time.sleep(30)
+                        
+                        hedge_ratio, intercept = kalman_model.update(np.log(price1), np.log(price2))
+                        interval_seconds = self.convert_interval_to_seconds(self.config['INTERVAL'])
+                        time.sleep(interval_seconds)
+                        
                 else:
                     print("Error placing orders")
                     time.sleep(60)
             else:
                 print("No cointegrated pairs found")
                 time.sleep(60)
+
+    def convert_interval_to_seconds(self, interval):
+        unit = interval[-1]
+        amount = int(interval[:-1])
+        
+        if unit == 'm':
+            return amount * 60
+        elif unit == 'h':
+            return amount * 3600
+        elif unit == 'd':
+            return amount * 86400
+        elif unit == 'w':
+            return amount * 604800
+        elif unit == 'M':
+            # Rough approximation, as months can vary in length
+            return amount * 2592000
+        else:
+            raise ValueError("Invalid interval format")
