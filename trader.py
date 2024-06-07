@@ -169,12 +169,11 @@ class CryptoTrader:
                 break
             
             capital = self.get_available_balance()
-            capital = capital
 
             self.download_data()
             
-            best_pair, best_sharpe_ratio, info_pair= self.find_cointegrated_pairs()
-            if best_pair is not None and best_sharpe_ratio > (0.1):
+            best_pair, best_sharpe_ratio, info_pair = self.find_cointegrated_pairs()
+            if best_pair is not None and best_sharpe_ratio > 0.1:
                 
                 coin1, coin2 = best_pair
                 hedge_ratio = info_pair['hedge_ratio']
@@ -208,47 +207,43 @@ class CryptoTrader:
                 
                 rounded_qty1, cost1 = self.validate_order(coin1, coin1_trade, qty1)
                 rounded_qty2, cost2 = self.validate_order(coin2, coin2_trade, qty2)
-                
-                if rounded_qty1 and rounded_qty2:
+                spread_0, z_spread_0 = self.compute_spread(coin1, coin2, hedge_ratio, intercept, mean_spread, std_spread)
+                print(f"{'Spread':<30}: {spread_0:.4f}")
+                print(f"{'Z-spread':<30}: {z_spread_0:.4f}")
+
+                if rounded_qty1 and rounded_qty2 and (z_spread_0 > upper_bound or z_spread_0 < lower_bound):
                     capital_usage_percentage = (cost1 + cost2) / capital * 100
                     print(f"{'Capital usage percentage':<40}: {capital_usage_percentage:.2f}%\n") 
 
                     order1 = self.place_order(coin1, coin1_trade, rounded_qty1)
                     order2 = self.place_order(coin2, coin2_trade, rounded_qty2)
 
-                    price1 = float(self.client.futures_symbol_ticker(symbol=coin1)['price'])
-                    price2 = float(self.client.futures_symbol_ticker(symbol=coin2)['price'])
-                    init_spread = np.log(price1) - (hedge_ratio * np.log(price2) + intercept)
-                    init_z_spread = (init_spread - mean_spread) / std_spread
-                    
-                    print(f"{'Initial Z-spread':<30}: {init_z_spread:.2f}\n")
+                    if order1 is None or order2 is None:
+                        print("Error placing orders")
+                        self.close_all_positions()
+                        time.sleep(60)
+                        continue
 
                     cnt = 0
-                    
+
                     while True:
-                        price1 = float(self.client.futures_symbol_ticker(symbol=coin1)['price'])
-                        price2 = float(self.client.futures_symbol_ticker(symbol=coin2)['price'])
-                        spread_i = np.log(price1) - (hedge_ratio * np.log(price2) + intercept)
-                        z_spread_i = (spread_i - mean_spread) / std_spread
 
-                        print(f"\033[A\033[KOn Iter {cnt}, Z-spread: {z_spread_i:.2f}, Signal: {signal}, Bounds: ({upper_bound:.2f}, {lower_bound:.2f})")
+                        if cnt == 0:
+                            spread_i, z_spread_i = spread_0, z_spread_0
+                        else:
+                            price1 = self.get_price(coin1)
+                            price2 = self.get_price(coin2)
+                            hedge_ratio, intercept = kalman_model.update(np.log(price1), np.log(price2))
+                            spread_i, z_spread_i = self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
+                            
+                        print(f"Iteration {cnt}, Spread: {spread_i:.4f}, Z-spread: {z_spread_i:.4f}, Signal: {signal}, Bounds: ({upper_bound:.2f}, {lower_bound:.2f})")
 
-                        if signal == 1 and z_spread_i > 0:
-                            self.close_all_positions()
-                            break
-                        elif signal == 1 and z_spread_i < (init_z_spread - 2):
-                            self.close_all_positions()
-                            break
-                        elif signal == -1 and z_spread_i < 0:
-                            self.close_all_positions()
-                            break
-                        elif signal == -1 and z_spread_i > (init_z_spread + 2):
+                        if self.should_close_position(signal, z_spread_i, z_spread_0, upper_bound, lower_bound):
                             self.close_all_positions()
                             break
                         else:
                             cnt += 1
-                        
-                        hedge_ratio, intercept = kalman_model.update(np.log(price1), np.log(price2))
+                            
                         interval_seconds = self.convert_interval_to_seconds(self.config['INTERVAL'])
                         time.sleep(interval_seconds)
                         
@@ -258,6 +253,31 @@ class CryptoTrader:
             else:
                 print("No cointegrated pairs found")
                 time.sleep(60)
+
+    def compute_spread(self, coin1, coin2, hedge_ratio, intercept, mean_spread, std_spread):
+        price1 = float(self.client.futures_symbol_ticker(symbol=coin1)['price'])
+        price2 = float(self.client.futures_symbol_ticker(symbol=coin2)['price'])
+        return self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
+    
+    def compute_spread_from_prices(self, price1, price2, hedge_ratio, intercept, mean_spread, std_spread):
+        spread = np.log(price1) - (hedge_ratio * np.log(price2) + intercept)
+        z_spread = (spread - mean_spread) / std_spread
+        return spread, z_spread
+
+    def should_close_position(self, signal, z_spread_i, init_z_spread, upper_bound, lower_bound):
+        if signal == 1 and z_spread_i > 0:
+            return True
+        elif signal == 1 and z_spread_i < (init_z_spread - 2):
+            return True
+        elif signal == -1 and z_spread_i < 0:
+            return True
+        elif signal == -1 and z_spread_i > (init_z_spread + 2):
+            return True
+        else:
+            return False
+
+    def get_price(self, coin):
+        return float(self.client.futures_symbol_ticker(symbol=coin)['price'])
 
     def convert_interval_to_seconds(self, interval):
         unit = interval[-1]
