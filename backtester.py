@@ -43,23 +43,23 @@ Interval options:
 - '1M': 1 month
 """
 
-train_day = 1
+train_day = 2
 test_day = 1
 total_day = train_day + test_day
 train_ratio = train_day / total_day
 
 config = {'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
-        'N_COINS': 50,
+        'N_COINS': 20,
         'CSV_FILENAME': 'trading_coins.csv',
         'INTERVAL': '5m',
         'START_STR': f'{total_day} day ago',
         # 'END_STR': dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         'END_STR': (dt.datetime.now() - timedelta(hours=0)).strftime("%Y-%m-%d %H:%M:%S"),
-        'MAX_N_NPD': None,
         'TRAIN_RATIO': train_ratio, 
         'COINT_THRESHOLD': 0.01,
         'TRADING_CHARGE': 0.0005,
+        'CORR_THRESHOLD': 0.5,
           }
 downloader = BinanceDownloader(config, client)
 downloader.download_data()

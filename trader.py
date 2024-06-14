@@ -12,6 +12,7 @@ class CryptoTrader:
 
     def find_cointegrated_pairs(self): 
         print("Finding cointegrated pairs...")
+        
         selector = CryptoPairSelector(self.client, self.config)
         coint_pairs, data = selector.select_trading_pairs()
         best_pair, best_sharpe_ratio, info_pair = selector.select_best_pair(data, coint_pairs, self.enable_plot)
@@ -173,7 +174,7 @@ class CryptoTrader:
             self.download_data()
             
             best_pair, best_sharpe_ratio, info_pair = self.find_cointegrated_pairs()
-            if best_pair is not None and best_sharpe_ratio > 0.1:
+            if best_pair is not None:
                 
                 coin1, coin2 = best_pair
                 hedge_ratio = info_pair['hedge_ratio']

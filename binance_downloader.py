@@ -15,17 +15,19 @@ class BinanceDownloader:
         self.trading_coins = self.get_trading_coins(self.client, config["QUOTE_COIN"], config["N_COINS"])
         self.config = config
 
-    def get_trading_coins(self, client, quote_coin, n_coins):
-            futures_exchange_info = client.futures_exchange_info()
-            trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin)]
-            print(f"Number of trading pairs: {len(trading_coins)}")
-            assert n_coins <= len(trading_coins), "N_COINS is greater than the number of trading coins"
+    def get_trading_coins(self, client, quote_coin, n_coins, sort_by_volume=False):
+        futures_exchange_info = client.futures_exchange_info()
+        trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin)]
+        print(f"Number of trading pairs: {len(trading_coins)}")
+        assert n_coins <= len(trading_coins), "N_COINS is greater than the number of trading coins"
+
+        if sort_by_volume:
             # Fetch 24-hour trading volume for each coin
             volume_dict = {}
             for coin in trading_coins:
                 try:
                     ticker = client.get_ticker(symbol=coin)
-                    volume_dict[coin] = float(ticker['volume'])  # Using quoteVolume as it is typically more relevant for liquidity
+                    volume_dict[coin] = float(ticker['volume'])
                 except Exception as e:
                     print(f"Error fetching ticker for {coin}: {e}")
                     continue
@@ -37,9 +39,11 @@ class BinanceDownloader:
 
             # Select the top n_coins based on liquidity
             top_coins = [coin for coin, volume in sorted_coins[:n_coins]]
+        else:
+            # If not sorting by volume, just select the first n_coins
+            top_coins = trading_coins[:n_coins]
 
-            return top_coins
-            
+        return top_coins
 
 
     def save_trading_coins(self):

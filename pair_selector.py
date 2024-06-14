@@ -13,6 +13,9 @@ from pykalman import KalmanFilter
 import logging
 from statsmodels.regression.linear_model import OLS
 from statsmodels.tools.tools import add_constant
+from scipy.linalg import svd
+from scipy.stats import shapiro
+import ta
 
 #dark background
 plt.style.use('dark_background')
@@ -71,11 +74,12 @@ class CryptoPairSelector:
         self.directory = config['SAVING_DIR']
         self.interval = config['INTERVAL']  # Assuming you want to use the interval from the config
         self.n_coins = config['N_COINS']
-        self.max_n_npd = config['MAX_N_NPD']
         self.train_ratio = config['TRAIN_RATIO']
         self.csv_filename = config['CSV_FILENAME']
         self.coint_threshold = config['COINT_THRESHOLD']
         self.trading_charge = config['TRADING_CHARGE']
+        self.corr_threshold = config['CORR_THRESHOLD']
+        self.normality_threshold = 0.9
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
                             datefmt='%Y-%m-%d %H:%M:%S',  # Round to seconds
                             handlers=[logging.StreamHandler(),  # This will print to console
@@ -90,7 +94,7 @@ class CryptoPairSelector:
             return coins
 
     def find_valid_coins(self, data):
-        valid_coins = []
+
         for coin, df in data.items():
             coin_diff = np.log(df['Close']).diff().dropna()
             coin_diff = coin_diff[coin_diff != 0]
@@ -101,16 +105,17 @@ class CryptoPairSelector:
                 try:
                     adf_test = adfuller(coin_diff)
                     if adf_test[1] < 0.01:
-                        valid_coins.append(coin)
+                        features = self.calculate_features(data = df)
+                        data[coin] = pd.concat([df, features], axis=1)
                     else:
                         logging.info(f'{coin} is not integrated of order 1')
+                        data.pop(coin)
                 except ValueError:
                     logging.info(f'Sample size too short for {coin}')
+                    data.pop(coin)
                     continue 
 
-        logging.info(f'Number of coins integrated of order 1: {len(valid_coins)}')
-
-        return valid_coins
+        return data
 
     def calculate_normalized_close_prices(self, data):
 
@@ -120,70 +125,131 @@ class CryptoPairSelector:
             normalized_prices[coin] = prices / prices.iloc[0]
         return normalized_prices
 
-    def calculate_npd(self, normalized_prices, pairs):
+    def calculate_npd(self, normalized_prices, pairs, split = False):
 
         pairs_npd = []
         for coin1, coin2 in pairs:
             common_indices = normalized_prices[coin1].index.intersection(normalized_prices[coin2].index)
             prices1 = normalized_prices[coin1].loc[common_indices]
             prices2 = normalized_prices[coin2].loc[common_indices]
-            split_index = int(len(prices1) * self.train_ratio)
-            npd = np.sum((prices1[:split_index] - prices2[:split_index]) ** 2)
+            if split:
+                split_index = int(len(prices1) * self.train_ratio)
+                npd = np.sum((prices1[:split_index] - prices2[:split_index]) ** 2)
+            else:
+                npd = np.sum((prices1 - prices2) ** 2)
             pairs_npd.append((coin1, coin2, npd))
+
         return pairs_npd
+    
+    def calculate_correlation(self, normalized_prices, pairs, split = False):
 
-    def find_cointegrated_pairs(self, selected_pairs, data, split):
+        pairs_corr = []
+        for coin1, coin2 in pairs:
+            common_indices = normalized_prices[coin1].index.intersection(normalized_prices[coin2].index)
+            prices1 = normalized_prices[coin1].loc[common_indices]
+            prices2 = normalized_prices[coin2].loc[common_indices]
+            if split:
+                split_index = int(len(prices1) * self.train_ratio)
+                corr = np.corrcoef(prices1[:split_index], prices2[:split_index])[0, 1]
+            else:
+                corr = np.corrcoef(prices1, prices2)[0, 1]
 
+            if corr > self.corr_threshold:
+                pairs_corr.append((coin1, coin2))
+
+        return pairs_corr
+
+    def identify_pairs_candidates(self, selected_pairs, data, split):
+        
         coint_pairs = []
         for coin1, coin2 in tqdm.tqdm(selected_pairs):
-            common_indices = data[coin1].index.intersection(data[coin2].index)
-            prices1 = np.log(data[coin1].loc[common_indices]['Close'])
-            prices2 = np.log(data[coin2].loc[common_indices]['Close'])
-            split_index = int(len(prices1) * self.train_ratio)
             try:
-                if split:
-                    result_train = coint(prices1[:split_index], prices2[:split_index])
-                    if result_train[1] < self.coint_threshold:
-                        coint_pairs.append((coin1, coin2))
-                else:
-                    result = coint(prices1, prices2)
-                    if result[1] < self.coint_threshold:  
-                        coint_pairs.append((coin1, coin2))
+                common_indices = data[coin1].index.intersection(data[coin2].index)
+                prices1 = np.log(data[coin1].loc[common_indices]['Close'])
+                prices2 = np.log(data[coin2].loc[common_indices]['Close'])
+                split_index = int(len(prices1) * self.train_ratio)
+
+                # Calculate hedge ratio
+                hedge_ratio = np.polyfit(prices2, prices1, 1)[0]
+                if 0.3 <= hedge_ratio <= 3.0:
+                    # Calculate spread for the normality test
+                    spread = prices1 - hedge_ratio * prices2
+                    
+                    # Perform Shapiro-Wilk test
+                    shapiro_result = shapiro(spread)
+                    if shapiro_result.statistic > self.normality_threshold:  
+                        if split:
+                            result = coint(prices1[:split_index], prices2[:split_index])
+                        else:
+                            result = coint(prices1, prices2)
+
+                        if result[1] < self.coint_threshold:
+                            coint_pairs.append((coin1, coin2))
 
             except Exception as e:
-                logging.error(f"Error in cointegration test for pair: {(coin1, coin2)}: {e}")
-            
+                logging.error(f"Error in testing pair: {(coin1, coin2)}: {e}")
+
         return coint_pairs
 
-    def select_trading_pairs(self, split = False):
+    def calculate_features(self, data, window_rsi=14, window_stochastic=14, window_ema=20, window_atr=14):
+        features = pd.DataFrame(index=data.index)
 
+        # Calculate RSI (Relative Strength Index) and normalize it to range between 0 and 1
+        features['RSI'] = ta.momentum.RSIIndicator(data['Close'], window=window_rsi).rsi() / 100
+
+        # Calculate Stochastic Oscillator (normalized features: %K and %D)
+        stoch = ta.momentum.StochasticOscillator(data['High'], data['Low'], data['Close'], window=window_stochastic)
+        features['Stoch_k'] = stoch.stoch() / 100
+        features['Stoch_d'] = stoch.stoch_signal() / 100
+
+        # Calculate VWAP (Volume Weighted Average Price)
+        vwap = (data['Volume'] * (data['High'] + data['Low'] + data['Close']) / 3).cumsum() / data['Volume'].cumsum()
+
+        # Calculate P/V Ratio (Price to VWAP Ratio)
+        features['P/V_Ratio'] = data['Close'] / vwap
+
+        # Calculate NPVI (Normalized Price to VWAP Indicator)
+        min_price = data['Close'].min()
+        max_price = data['Close'].max()
+        features['NPVI'] = (data['Close'] - min_price) / (max_price - min_price)
+
+        # Calculate ATR and normalize it
+        atr = ta.volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=window_atr).average_true_range()
+        features['Normalized_ATR'] = atr / data['Close']
+
+        # Normalize volume using a moving average of the volume over a certain window
+        volume_ma = data['Volume'].rolling(window=window_ema).mean()
+        features['Normalized_Volume'] = data['Volume'] / volume_ma
+
+        return features
+
+    def select_trading_pairs(self, split = False):
+        
         logging.info(">>> Loading trading coins...")
         trading_pairs_usdt = self.load_selected_trading_coins()
         data = {pair: pd.read_pickle(os.path.join(self.directory, f'{pair}.pkl')) for pair in trading_pairs_usdt}
 
         logging.info(">>> Finding valid coins...")
-        valid_coins = self.find_valid_coins(data)
-        trading_pairs_usdt = [coin for coin in trading_pairs_usdt if coin in valid_coins]
-        data = {coin: df for coin, df in data.items() if coin in valid_coins}
+        data = self.find_valid_coins(data)
         
         logging.info(">>> Calculating normalized prices...")
         all_pairs = list(itertools.combinations(trading_pairs_usdt, 2))
         normalized_prices = self.calculate_normalized_close_prices(data)
 
-        logging.info(">>> Calculating NPD with train ratio...")
-        npd_pairs = self.calculate_npd(normalized_prices, all_pairs)
-        npd_pairs.sort(key=lambda x: x[2])
+        # logging.info(">>> Calculating NPD with train ratio...")
+        # npd_pairs = self.calculate_npd(normalized_prices, all_pairs)
+        # npd_pairs.sort(key=lambda x: x[2])
 
-        if self.max_n_npd is None:
-            selected_npd = [pair[:2] for pair in npd_pairs]
-        else:
-            selected_npd = [pair[:2] for pair in npd_pairs[:self.max_n_npd]]
+        logging.info(">>> Calculating correlation with train ratio...") # 1차적인 필터링
+        chosen_pairs = self.calculate_correlation(normalized_prices, all_pairs)
+        print(f"Number of pairs: {len(chosen_pairs)}")
 
-        logging.info(">>> Finding cointegrated pairs...")
-        coint_pairs = self.find_cointegrated_pairs(selected_npd, data, split)
+        logging.info(">>> Coinegration and Normality test...")
+        coint_pairs = self.identify_pairs_candidates(chosen_pairs, data, split)
 
-        logging.info(f"Length of selected NPD pairs for cointegration testing: {len(selected_npd)} / {len(all_pairs)}")
-        logging.info(f"Length of cointegrated pairs: {len(coint_pairs)} / {len(selected_npd)}")
+        logging.info(f"Number of all pairs: {len(all_pairs)}")
+        logging.info(f"Number of chosen pairs - correlation: {len(chosen_pairs)}")
+        logging.info(f"Number of cointegrated pairs: {len(coint_pairs)} / {len(chosen_pairs)}")
         logging.info(f"Cointegrated pairs: {coint_pairs}")
 
         return coint_pairs, data
@@ -269,6 +335,30 @@ class CryptoPairSelector:
         
         return half_life
 
+    def tls(self, X, Y):
+        # Combine X and Y to form Z
+        Z = np.hstack((X, Y))
+        
+        # Perform SVD
+        U, S, Vt = svd(Z, full_matrices=False)
+        
+        # Extract the relevant blocks from V
+        n = X.shape[1]
+        V = Vt.T
+        VXY = V[:n, n:]
+        VYY = V[n:, n:]
+        
+        # Calculate TLS regression coefficients
+        B = -np.dot(VXY, np.linalg.inv(VYY))
+        
+        # Calculate the intercept
+        X_mean = np.mean(X, axis=0)
+        Y_mean = np.mean(Y, axis=0)
+        intercept = Y_mean - np.dot(X_mean, B)
+        
+        return B, intercept
+
+    
     def observe_all_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
         for coin1, coin2 in cointegrated_pairs:
             common_indices = data[coin1].index.intersection(data[coin2].index)
@@ -278,7 +368,11 @@ class CryptoPairSelector:
             # Perform linear regression to find the hedge ratio
             split_index = int(len(log_price_1) * self.train_ratio)
             init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
-            hedge_ratio, intercept = self.get_Kalman_params(log_price_1, log_price_2, init_hedge_ratio, init_intercept)
+            # hedge_ratio, intercept = self.get_Kalman_params(log_price_1, log_price_2, init_hedge_ratio, init_intercept)
+            print(init_hedge_ratio)
+            hedge_ratio, intercept = self.tls(log_price_2[:split_index].values.reshape(-1, 1), log_price_1[:split_index].values.reshape(-1, 1))
+            hedge_ratio = np.full_like(log_price_1, hedge_ratio[0][0])
+            intercept = np.full_like(log_price_1, intercept[0])
 
             spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
             kalman_spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
@@ -286,14 +380,19 @@ class CryptoPairSelector:
             train_spread = spread[:split_index]
             mean_spread = train_spread.mean()
             std_spread = train_spread.std()
+
+            kalman_train_spread = kalman_spread[:split_index]
+            kalman_mean_spread = kalman_train_spread.mean()
+            kalman_std_spread = kalman_train_spread.std()
            
             z_spread = (spread - mean_spread) / std_spread
-            kalman_z_spread = (kalman_spread - mean_spread) / std_spread
+            # kalman_z_spread = (kalman_spread - mean_spread) / std_spread
+            kalman_z_spread = (kalman_spread - kalman_mean_spread) / kalman_std_spread
 
             # Determine the optimal thresholds
             T = len(spread)
             lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-            kalman_lower_bound, kalman_upper_bound, kalman_s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
+            kalman_lower_bound, kalman_upper_bound, kalman_s0 = self.calculate_optimal_thresholds(kalman_mean_spread, kalman_std_spread, T)
 
             # Generate signal
             signal = self.generate_signal(z_spread, lower_bound, upper_bound)
@@ -317,8 +416,8 @@ class CryptoPairSelector:
 
             condition1 = z_spread.iloc[split_index] > upper_bound
             condition2 = z_spread.iloc[split_index] < lower_bound
-            if (condition1 or condition2) and ENABLE_PLOT:
-            # if ENABLE_PLOT:
+            # if (condition1 or condition2) and ENABLE_PLOT:
+            if ENABLE_PLOT:
                 split_index = int(len(spread) * self.train_ratio)
 
                 plt.figure(figsize=(20, 10))
