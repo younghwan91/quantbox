@@ -68,6 +68,7 @@ class KalmanModel:
 
         return updated_hedge_ratio, updated_intercept
 
+
 class CryptoPairSelector:
     def __init__(self, client, config):
         self.client = client
@@ -171,7 +172,8 @@ class CryptoPairSelector:
 
                 # Calculate hedge ratio
                 hedge_ratio = np.polyfit(prices2, prices1, 1)[0]
-                if 0.3 <= hedge_ratio <= 3.0:
+                hedge_const = 3.0
+                if (1/hedge_const) <= hedge_ratio <= hedge_const:
                     # Calculate spread for the normality test
                     spread = prices1 - hedge_ratio * prices2
                     
@@ -191,7 +193,14 @@ class CryptoPairSelector:
 
         return coint_pairs
 
+    def _calculate_hurst_exponent(self, time_series):
+        lags = range(2, 100)
+        tau = [np.std(np.subtract(time_series[lag:].to_numpy(), time_series[:-lag].to_numpy())) for lag in lags]
+        poly = np.polyfit(np.log(lags), np.log(tau), 1)
+        return poly[0] * 2.0
+
     def calculate_features(self, data, window_rsi=14, window_stochastic=14, window_ema=20, window_atr=14):
+
         features = pd.DataFrame(index=data.index)
 
         # Calculate RSI (Relative Strength Index) and normalize it to range between 0 and 1
@@ -244,7 +253,7 @@ class CryptoPairSelector:
         chosen_pairs = self.calculate_correlation(normalized_prices, all_pairs)
         print(f"Number of pairs: {len(chosen_pairs)}")
 
-        logging.info(">>> Coinegration and Normality test...")
+        logging.info(">>> Coinegration and Normality test...") # 2차적인 필터링
         coint_pairs = self.identify_pairs_candidates(chosen_pairs, data, split)
 
         logging.info(f"Number of all pairs: {len(all_pairs)}")
@@ -335,116 +344,107 @@ class CryptoPairSelector:
         
         return half_life
 
-    def tls(self, X, Y):
-        # Combine X and Y to form Z
-        Z = np.hstack((X, Y))
-        
-        # Perform SVD
-        U, S, Vt = svd(Z, full_matrices=False)
-        
-        # Extract the relevant blocks from V
-        n = X.shape[1]
-        V = Vt.T
-        VXY = V[:n, n:]
-        VYY = V[n:, n:]
-        
-        # Calculate TLS regression coefficients
-        B = -np.dot(VXY, np.linalg.inv(VYY))
-        
-        # Calculate the intercept
-        X_mean = np.mean(X, axis=0)
-        Y_mean = np.mean(Y, axis=0)
-        intercept = Y_mean - np.dot(X_mean, B)
-        
-        return B, intercept
+    def collect_training_data(self, data, coin1, coin2, z_spread, signal, split_index, std_spread):
+        '''
+        "Position",
+        "Z_Spread",
+        "Std_Spread",
+        "Coin1_RSI",
+        "Coin1_Stoch_k",
+        "Coin1_Stoch_d",
+        "Coin1_P/V_Ratio",
+        "Coin1_NPVI",
+        "Coin1_Normalized_ATR",
+        "Coin1_Normalized_Volume",
+        "Coin2_RSI",
+        "Coin2_Stoch_k",
+        "Coin2_Stoch_d",
+        "Coin2_P/V_Ratio",
+        "Coin2_NPVI",
+        "Coin2_Normalized_ATR",
+        "Coin2_Normalized_Volume",
+        "Choose_Pair"
+        '''
 
-    
+        common_indices = data[coin1].index.intersection(data[coin2].index)
+        coin1_data = data[coin1].loc[common_indices]
+        coin2_data = data[coin2].loc[common_indices]
+        train_sample = []
+        list_of_features = ['RSI', 'Stoch_k', 'Stoch_d', 'P/V_Ratio', 'NPVI', 'Normalized_ATR', 'Normalized_Volume']
+        position = signal.iloc[split_index]
+        z_spread = z_spread.iloc[split_index]
+        train_sample.append(position)
+        train_sample.append(z_spread)
+        train_sample.append(std_spread)
+        train_sample.extend(coin1_data.iloc[split_index][list_of_features].tolist())
+        train_sample.extend(coin2_data.iloc[split_index][list_of_features].tolist())
+        observe_signal = signal.iloc[split_index:]
+        # there is at least one trade
+        choose_pair = len(np.unique(observe_signal)) > 1
+        train_sample.append(choose_pair)
+        return train_sample
+
     def observe_all_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
+        data_samples = []
         for coin1, coin2 in cointegrated_pairs:
+
             common_indices = data[coin1].index.intersection(data[coin2].index)
             log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
             log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
             
-            # Perform linear regression to find the hedge ratio
             split_index = int(len(log_price_1) * self.train_ratio)
             init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
-            # hedge_ratio, intercept = self.get_Kalman_params(log_price_1, log_price_2, init_hedge_ratio, init_intercept)
-            print(init_hedge_ratio)
-            hedge_ratio, intercept = self.tls(log_price_2[:split_index].values.reshape(-1, 1), log_price_1[:split_index].values.reshape(-1, 1))
-            hedge_ratio = np.full_like(log_price_1, hedge_ratio[0][0])
-            intercept = np.full_like(log_price_1, intercept[0])
-
             spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
-            kalman_spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
-            # Z-score the spread
+
+            
+            hurst= self._calculate_hurst_exponent(spread[:split_index])
+            print(f"Hurst Exponent: {hurst}")
+            half_life = self.calculate_half_life(spread[:split_index])
+            print(f"Half-life: {half_life}") 
+
             train_spread = spread[:split_index]
             mean_spread = train_spread.mean()
             std_spread = train_spread.std()
-
-            kalman_train_spread = kalman_spread[:split_index]
-            kalman_mean_spread = kalman_train_spread.mean()
-            kalman_std_spread = kalman_train_spread.std()
-           
             z_spread = (spread - mean_spread) / std_spread
-            # kalman_z_spread = (kalman_spread - mean_spread) / std_spread
-            kalman_z_spread = (kalman_spread - kalman_mean_spread) / kalman_std_spread
-
-            # Determine the optimal thresholds
+  
             T = len(spread)
             lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-            kalman_lower_bound, kalman_upper_bound, kalman_s0 = self.calculate_optimal_thresholds(kalman_mean_spread, kalman_std_spread, T)
-
-            # Generate signal
             signal = self.generate_signal(z_spread, lower_bound, upper_bound)
-            kalman_signal = self.generate_signal(kalman_z_spread, kalman_lower_bound, kalman_upper_bound)
-            
-            # Backtest the pair
             cumulated_return, traded_return = self.backtest_pair(spread, signal)
-            kalman_cumulated_return, kalman_traded_return = self.backtest_pair(kalman_spread, kalman_signal)
-
-            # Calculate the Sharpe ratio
             sharpe_ratio = self.calculate_sharpe_ratio(traded_return)                                
-            kalman_shape_ratio = self.calculate_sharpe_ratio(kalman_traded_return)
-
-            # check if z spread at the beginnging split is outside the bounds. if not skip
             print(f"Z-spread at split index: {z_spread.iloc[split_index]}")
             print(f"Upper bound: {upper_bound}, Lower bound: {lower_bound}")
-            half_life = self.calculate_half_life(spread)
-            kalman_half_life = self.calculate_half_life(kalman_spread)
-            print(f"Half-life: {half_life}") 
-            print(f"Kalman Half-life: {kalman_half_life}")   
 
+            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, split_index, std_spread)
             condition1 = z_spread.iloc[split_index] > upper_bound
             condition2 = z_spread.iloc[split_index] < lower_bound
-            # if (condition1 or condition2) and ENABLE_PLOT:
-            if ENABLE_PLOT:
+            if condition1 or condition2:
+                data_samples.append(data_sample)
+                
+            if (condition1 or condition2) and ENABLE_PLOT:
+            # if ENABLE_PLOT:
+        
                 split_index = int(len(spread) * self.train_ratio)
 
                 plt.figure(figsize=(20, 10))
-                plt.subplot(3, 1, 1)
+                plt.subplot(2, 1, 1)
                 plt.plot(z_spread)
-                plt.plot(kalman_z_spread, 'g')
                 plt.axvline(z_spread.index[split_index], color='r', linestyle='--')
                 plt.plot(z_spread.index, signal)
                 plt.axhline(upper_bound, color='r', linestyle='--')
                 plt.axhline(lower_bound, color='r', linestyle='--')
                 plt.axhline(0.0)
-                #bound for y
                 plt.ylim(-4, 4)
                 plt.ylabel('Z-score')
                 plt.grid(True)
 
-                plt.subplot(3, 1, 2)
-                plt.plot(z_spread.index, hedge_ratio, label='Hedge Ratio', color='g')
-                plt.plot(z_spread.index, init_hedge_ratio*np.ones(len(z_spread)), 'r--', label='Initial Hedge Ratio')
-
-                plt.subplot(3,1,3)
-                plt.plot(z_spread.index, spread, label='Cumulated Return')
-                plt.plot(z_spread.index, kalman_spread, label='Kalman Cumulated Return')
+                plt.subplot(2, 1, 2)
+                plt.plot(z_spread.index, spread)
                 plt.grid(True)
-                plt.legend()
 
                 plt.show()
+
+        return data_samples
 
     def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
         best_pair = None
@@ -550,3 +550,4 @@ class CryptoPairSelector:
         self.plot_cumulated_return(info_pair, best_pair)
         plt.tight_layout()
         plt.show()
+

@@ -4,6 +4,8 @@ from pair_selector import CryptoPairSelector
 from binance_downloader import BinanceDownloader
 import datetime as dt
 from datetime import timedelta
+import numpy as np
+
 
 # Backtester code for testing trading strategies
 
@@ -43,27 +45,32 @@ Interval options:
 - '1M': 1 month
 """
 
-train_day = 2
-test_day = 1
-total_day = train_day + test_day
-train_ratio = train_day / total_day
 
-config = {'SAVING_DIR': 'data',
-        'QUOTE_COIN': 'USDT',
-        'N_COINS': 20,
-        'CSV_FILENAME': 'trading_coins.csv',
-        'INTERVAL': '5m',
-        'START_STR': f'{total_day} day ago',
-        # 'END_STR': dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'END_STR': (dt.datetime.now() - timedelta(hours=0)).strftime("%Y-%m-%d %H:%M:%S"),
-        'TRAIN_RATIO': train_ratio, 
-        'COINT_THRESHOLD': 0.01,
-        'TRADING_CHARGE': 0.0005,
-        'CORR_THRESHOLD': 0.5,
-          }
-downloader = BinanceDownloader(config, client)
-downloader.download_data()
+train_data = []
+for hour_diff in range(2):
+    train_unit = 24*3
+    test_unit = 4
+    total_unit = train_unit + test_unit
+    train_ratio = train_unit / total_unit
 
-selector = CryptoPairSelector(client, config)
-coint_pairs, data = selector.select_trading_pairs(split=True)
-selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=1)
+    config = {'SAVING_DIR': 'data',
+            'QUOTE_COIN': 'USDT',
+            'N_COINS': 100,
+            'CSV_FILENAME': 'trading_coins.csv',
+            'INTERVAL': '5m',
+            'START_STR': f'{total_unit+hour_diff} hours ago',
+            # 'END_STR': dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'END_STR': (dt.datetime.now() - timedelta(hours=hour_diff)).strftime("%Y-%m-%d %H:%M:%S"),
+            'TRAIN_RATIO': train_ratio, 
+            'COINT_THRESHOLD': 0.05,
+            'TRADING_CHARGE': 0.0005,
+            'CORR_THRESHOLD': 0.5,
+            }
+    downloader = BinanceDownloader(config, client)
+    downloader.download_data()
+
+    selector = CryptoPairSelector(client, config)
+    coint_pairs, data = selector.select_trading_pairs(split=True)
+    data_samples = selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=0)
+    train_data.extend(data_samples)
+    np.save('train_data.npy', train_data)

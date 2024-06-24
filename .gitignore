@@ -5,3 +5,4 @@
 *.log
 *.json
 config.py
+*.npy
