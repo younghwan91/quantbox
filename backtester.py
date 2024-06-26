@@ -45,14 +45,15 @@ Interval options:
 - '1M': 1 month
 """
 
+hour_per_day = 24
+train_unit = hour_per_day*1
+test_unit = 3 
+total_unit = train_unit + test_unit
+train_ratio = train_unit / total_unit
 
 train_data = []
-for hour_diff in range(2):
-    train_unit = 24*3
-    test_unit = 4
-    total_unit = train_unit + test_unit
-    train_ratio = train_unit / total_unit
-
+for hour_diff in range(0, hour_per_day*7, test_unit):
+    
     config = {'SAVING_DIR': 'data',
             'QUOTE_COIN': 'USDT',
             'N_COINS': 100,

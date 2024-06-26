@@ -344,7 +344,7 @@ class CryptoPairSelector:
         
         return half_life
 
-    def collect_training_data(self, data, coin1, coin2, z_spread, signal, split_index, std_spread):
+    def collect_training_data(self, data, coin1, coin2, z_spread, signal, split_index, std_spread, half_life):
         '''
         "Position",
         "Z_Spread",
@@ -363,6 +363,7 @@ class CryptoPairSelector:
         "Coin2_NPVI",
         "Coin2_Normalized_ATR",
         "Coin2_Normalized_Volume",
+        "half_life",
         "Choose_Pair"
         '''
 
@@ -378,6 +379,7 @@ class CryptoPairSelector:
         train_sample.append(std_spread)
         train_sample.extend(coin1_data.iloc[split_index][list_of_features].tolist())
         train_sample.extend(coin2_data.iloc[split_index][list_of_features].tolist())
+        train_sample.append(half_life)
         observe_signal = signal.iloc[split_index:]
         # there is at least one trade
         choose_pair = len(np.unique(observe_signal)) > 1
@@ -415,7 +417,7 @@ class CryptoPairSelector:
             print(f"Z-spread at split index: {z_spread.iloc[split_index]}")
             print(f"Upper bound: {upper_bound}, Lower bound: {lower_bound}")
 
-            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, split_index, std_spread)
+            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, split_index, std_spread, half_life)
             condition1 = z_spread.iloc[split_index] > upper_bound
             condition2 = z_spread.iloc[split_index] < lower_bound
             if condition1 or condition2:
