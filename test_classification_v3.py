@@ -3,11 +3,10 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import AdaBoostClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report, roc_curve
-import matplotlib.pyplot as plt
+from joblib import dump
 
 # Load the data
 load_data = np.load('./data/training_data/train_data_1days_1hrs.npy', allow_pickle=True)
-print(load_data)
 
 # Split the data into features (X) and labels (y)
 X = load_data[:, :-1]
@@ -32,10 +31,10 @@ base_estimator = RandomForestClassifier(random_state=42)
 
 # Define the parameter grid for GridSearchCV
 param_grid = {
-    'base_estimator__n_estimators': [50, 100],
-    'base_estimator__max_depth': [3, 5],
-    'base_estimator__min_samples_split': [2, 5],
-    'base_estimator__min_samples_leaf': [1, 2, 4],
+    'estimator__n_estimators': [50, 100],
+    'estimator__max_depth': [3, 5],
+    'estimator__min_samples_split': [2, 5],
+    'estimator__min_samples_leaf': [1, 2, 4],
     'n_estimators': [50, 100],
     'learning_rate': [0.01, 0.1, 1.0]
 }
@@ -56,18 +55,16 @@ print(f"Best parameters found: {best_params}")
 # Train the final model with the best parameters
 best_model = grid_search.best_estimator_
 
+# Save the best model, scaler, and parameters
+dump(best_model, 'best_model.joblib')
+dump(scaler, 'scaler.joblib')
+
 # Predict probabilities
 y_pred_proba = best_model.predict_proba(X_test)[:, 1]
 y_true = y_test
 
-# Find the best threshold from ROC curve
-fpr, tpr, thresholds = roc_curve(y_true, y_pred_proba)
-roc_auc = roc_auc_score(y_true, y_pred_proba)
-optimal_idx = np.argmax(tpr - fpr)
-best_threshold = thresholds[optimal_idx]
-
 # Evaluate the final model with the best threshold
-y_pred = (y_pred_proba >= best_threshold).astype(int)
+y_pred = (y_pred_proba >= 0.5).astype(int)
 accuracy = accuracy_score(y_true, y_pred)
 precision = precision_score(y_true, y_pred)
 recall = recall_score(y_true, y_pred)
@@ -75,7 +72,6 @@ f1 = f1_score(y_true, y_pred)
 conf_matrix = confusion_matrix(y_true, y_pred)
 class_report = classification_report(y_true, y_pred)
 
-print(f'Final Threshold: {best_threshold}')
 print(f'Accuracy: {accuracy:.4f}')
 print(f'Precision: {precision:.4f}')
 print(f'Recall: {recall:.4f}')
@@ -84,15 +80,3 @@ print('Confusion Matrix:')
 print(conf_matrix)
 print('Classification Report:')
 print(class_report)
-
-# Plot ROC Curve
-plt.figure()
-plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-plt.xlim([0.0, 1.0])
-plt.ylim([0.0, 1.05])
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('Receiver Operating Characteristic')
-plt.legend(loc="lower right")
-plt.show()

@@ -13,7 +13,7 @@ from statsmodels.regression.linear_model import OLS
 from statsmodels.tools.tools import add_constant
 from scipy.stats import shapiro
 import ta
-
+from joblib import load
 #dark background
 plt.style.use('dark_background')
 
@@ -261,7 +261,7 @@ class CryptoPairSelector:
         upper_bound = (s0-mean_spread)/std_spread
         return lower_bound, upper_bound, s0
 
-    def calculate_sharpe_ratio(self, returns):
+    def _calculate_sharpe_ratio(self, returns):
         mean_returns = returns.mean()
         std_returns = returns.std()
         sharpes = mean_returns / std_returns
@@ -301,8 +301,11 @@ class CryptoPairSelector:
         
         return half_life
 
-    def collect_training_data(self, data, coin1, coin2, z_spread, signal, split_index, std_spread, half_life):
+    def collect_training_data(self, data, coin1, coin2, z_spread, signal, std_spread, half_life, split_index):
         '''
+        Collects training data for the model.
+
+        Features:
         "Position",
         "Z_Spread",
         "Std_Spread",
@@ -338,11 +341,11 @@ class CryptoPairSelector:
         train_sample.extend(coin2_data.iloc[split_index][list_of_features].tolist())
         train_sample.append(half_life)
         observe_signal = signal.iloc[split_index:]
-        # there is at least one trade
         choose_pair = len(np.unique(observe_signal)) > 1
         train_sample.append(choose_pair)
 
         return train_sample
+
 
     def observe_all_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
         data_samples = []
@@ -370,44 +373,46 @@ class CryptoPairSelector:
             lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
             signal = self.generate_signal(z_spread, lower_bound, upper_bound)
             cumulated_return, traded_return = self.backtest_pair(spread, signal)
-            sharpe_ratio = self.calculate_sharpe_ratio(traded_return)                                
+            sharpe_ratio = self._calculate_sharpe_ratio(traded_return)                                
             print(f"Z-spread at split index: {z_spread.iloc[split_index]}")
             print(f"Upper bound: {upper_bound}, Lower bound: {lower_bound}")
 
-            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, split_index, std_spread, half_life)
+            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, split_index)
             condition1 = z_spread.iloc[split_index] > upper_bound
             condition2 = z_spread.iloc[split_index] < lower_bound
             if condition1 or condition2:
                 data_samples.append(data_sample)
-                
-            if (condition1 or condition2) and ENABLE_PLOT:
-            # if ENABLE_PLOT:
+                if ENABLE_PLOT:
         
-                split_index = int(len(spread) * self.train_ratio)
+                    split_index = int(len(spread) * self.train_ratio)
 
-                plt.figure(figsize=(20, 10))
-                plt.subplot(2, 1, 1)
-                plt.plot(z_spread)
-                plt.axvline(z_spread.index[split_index], color='r', linestyle='--')
-                plt.plot(z_spread.index, signal)
-                plt.axhline(upper_bound, color='r', linestyle='--')
-                plt.axhline(lower_bound, color='r', linestyle='--')
-                plt.axhline(0.0)
-                plt.ylim(-4, 4)
-                plt.ylabel('Z-score')
-                plt.grid(True)
+                    plt.figure(figsize=(20, 10))
+                    plt.subplot(2, 1, 1)
+                    plt.plot(z_spread)
+                    plt.axvline(z_spread.index[split_index], color='r', linestyle='--')
+                    plt.plot(z_spread.index, signal)
+                    plt.axhline(upper_bound, color='r', linestyle='--')
+                    plt.axhline(lower_bound, color='r', linestyle='--')
+                    plt.axhline(0.0)
+                    plt.ylim(-4, 4)
+                    plt.ylabel('Z-score')
+                    plt.grid(True)
 
-                plt.subplot(2, 1, 2)
-                plt.plot(z_spread.index, spread)
-                plt.grid(True)
+                    plt.subplot(2, 1, 2)
+                    plt.plot(z_spread.index, spread)
+                    plt.grid(True)
 
-                plt.show()
+                    plt.show()
 
         return data_samples
 
     def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
+        # Load the trained model
+        model = load('trained_model.joblib')
+        scaler = load('scaler.joblib')
+
         best_pair = None
-        best_sharpe_ratio = -np.inf
+        highest_probability = -np.inf
 
         pair_info = {}
         for coin1, coin2 in cointegrated_pairs:
@@ -417,8 +422,9 @@ class CryptoPairSelector:
             
             # Perform linear regression to find the hedge ratio
             init_hedge_ratio, init_intercept = np.polyfit(log_price_2, log_price_1, 1)
-            kalman_model = KalmanModel(init_hedge_ratio, init_intercept)
-            hedge_ratio, intercept = kalman_model.get_Kalman_params(log_price_1, log_price_2)    
+            hedge_ratio = pd.Series(init_hedge_ratio, index=log_price_1.index)
+            intercept = pd.Series(init_intercept, index=log_price_1.index)
+
             spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
 
             # Z-score the spread
@@ -429,20 +435,19 @@ class CryptoPairSelector:
             # Determine the optimal thresholds
             T = len(spread)
             lower_bound, upper_bound, _ = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-
-            # Generate signal
             signal = self.generate_signal(z_spread, lower_bound, upper_bound)
-            
-            # Backtest the pair
             cumulated_return, traded_return = self.backtest_pair(spread, signal)
-
-            # Calculate the Sharpe ratio
-            sharpe_ratio = self.calculate_sharpe_ratio(traded_return)                                
             half_life = self._calculate_half_life(spread)
 
-            if sharpe_ratio > best_sharpe_ratio and (z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound) and hedge_ratio[-1] > 0: # Only trade if the current spread is outside the bounds
-                best_sharpe_ratio = sharpe_ratio
+            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, split_index=-1)
+            if np.isnan(data_sample).any():
+                continue
+            scaled_features = scaler.transform(data_sample)
+            probability = model.predict_proba(scaled_features)[0][1]
+
+            if probability > 0.5 and probability > highest_probability and (z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound):
                 best_pair = (coin1, coin2)
+                highest_probability = probability
                 pair_info = {
                     'cumulated_return': cumulated_return,
                     'traded_return': traded_return,
@@ -450,13 +455,11 @@ class CryptoPairSelector:
                     'signal': signal,
                     'hedge_ratio': hedge_ratio[-1],
                     'intercept': intercept[-1],
-                    'kalman_model': kalman_model,
                     'mean_spread': mean_spread,
                     'std_spread': std_spread,
                     'lower_bound': lower_bound,
                     'upper_bound': upper_bound,
                     'z_spread': z_spread,
-                    'sharpe_ratio': sharpe_ratio,
                     'half_life': half_life,
                     'instant_return': np.abs(spread.iloc[-1]) - (2*self.trading_charge),
                     'price1': data[coin1].loc[common_indices]['Close'].iloc[-1],
@@ -464,14 +467,23 @@ class CryptoPairSelector:
                     'trade_coin1': 'BUY' if signal.iloc[-1] == 1 else 'SELL',
                     'trade_coin2': 'SELL' if signal.iloc[-1] == 1 else 'BUY' 
                 }
-        logging.info(f"Best pair: {best_pair} with Sharpe Ratio: {best_sharpe_ratio:.4f}")
+        logging.info(f"Best pair: {best_pair} with probability: {highest_probability:.4f}")
         try:
             if ENABLE_PLOT:
                 self.plot_best_pair(best_pair, pair_info)
         except Exception as e:
             logging.error(f"Error plotting best pair: {e}")
 
-        return best_pair, best_sharpe_ratio, pair_info
+        return best_pair, highest_probability, pair_info
+
+    def plot_best_pair(self, best_pair, info_pair):
+        """Plot the results for the best pair."""
+        plt.figure(figsize=(20, 10))
+        self.plot_z_score(info_pair, best_pair)
+        self.plot_spread(info_pair, best_pair)
+        self.plot_cumulated_return(info_pair, best_pair)
+        plt.tight_layout()
+        plt.show()
 
     def plot_z_score(self, info_pair, best_pair):
         plt.subplot(3, 1, 1)
@@ -500,13 +512,3 @@ class CryptoPairSelector:
         plt.ylabel('Cumulated Return (%)')
         plt.title(f'{best_pair[0]} and {best_pair[1]} Cumulated Return')
         plt.grid(True)
-
-    def plot_best_pair(self, best_pair, info_pair):
-        """Plot the results for the best pair."""
-        plt.figure(figsize=(20, 10))
-        self.plot_z_score(info_pair, best_pair)
-        self.plot_spread(info_pair, best_pair)
-        self.plot_cumulated_return(info_pair, best_pair)
-        plt.tight_layout()
-        plt.show()
-

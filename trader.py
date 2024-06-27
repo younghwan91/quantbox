@@ -173,7 +173,7 @@ class CryptoTrader:
 
             self.download_data()
             
-            best_pair, best_sharpe_ratio, info_pair = self.find_cointegrated_pairs()
+            best_pair, highest_probability, info_pair = self.find_cointegrated_pairs()
             if best_pair is not None:
                 
                 coin1, coin2 = best_pair
@@ -185,7 +185,6 @@ class CryptoTrader:
                 lower_bound = info_pair['lower_bound']
                 mean_spread = info_pair['mean_spread']
                 std_spread = info_pair['std_spread']
-                kalman_model = info_pair['kalman_model']
 
                 E = capital * (1 - 2 * trading_charge)
                 S1 = E / (1 + hedge_ratio)
@@ -204,6 +203,7 @@ class CryptoTrader:
                 print(f"{'Quantity 2':<20}: {qty2:.4f}")
                 print(f"{'Trade Coin 1':<20}: {coin1_trade}")
                 print(f"{'Trade Coin 2':<20}: {coin2_trade}")
+                print(f"{'Highest Probability':<20}: {highest_probability:.4f}")
                 print("="*60 + "\n")
                 
                 rounded_qty1, cost1 = self.validate_order(coin1, coin1_trade, qty1)
@@ -234,7 +234,6 @@ class CryptoTrader:
                         else:
                             price1 = self.get_price(coin1)
                             price2 = self.get_price(coin2)
-                            hedge_ratio, intercept = kalman_model.update(np.log(price1), np.log(price2))
                             spread_i, z_spread_i = self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
                             
                         print(f"Iteration {cnt}, Spread: {spread_i:.4f}, Z-spread: {z_spread_i:.4f}, Signal: {signal}, Bounds: ({upper_bound:.2f}, {lower_bound:.2f})")
