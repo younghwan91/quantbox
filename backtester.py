@@ -47,7 +47,7 @@ Interval options:
 
 hour_per_day = 24
 train_unit = hour_per_day*1
-test_unit = 3 
+test_unit = 4 
 total_unit = train_unit + test_unit
 train_ratio = train_unit / total_unit
 

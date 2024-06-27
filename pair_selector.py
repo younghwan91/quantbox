@@ -8,66 +8,14 @@ from statsmodels.tsa.stattools import adfuller
 import matplotlib.pyplot as plt
 import tqdm
 import scipy.stats as stats
-import statsmodels.api as sm
-from pykalman import KalmanFilter
 import logging
 from statsmodels.regression.linear_model import OLS
 from statsmodels.tools.tools import add_constant
-from scipy.linalg import svd
 from scipy.stats import shapiro
 import ta
 
 #dark background
 plt.style.use('dark_background')
-
-class KalmanModel:
-    def __init__(self, init_hedge_ratio, init_intercept, delta=1e-5, obs_cov=1):
-        self.init_hedge_ratio = init_hedge_ratio
-        self.init_intercept = init_intercept
-        self.delta = delta
-        self.trans_cov = delta / (1 - delta) * np.eye(2)
-        self.obs_cov = obs_cov
-        self.kf = None
-        self.state_means = None
-        self.state_covariances = None
-
-    def get_Kalman_params(self, log_price_1, log_price_2):
-        X = log_price_2.values.reshape(-1, 1)
-        y = log_price_1.values.reshape(-1, 1)
-        obs_mat = sm.add_constant(X, prepend=False)[:, np.newaxis]
-        self.kf = KalmanFilter(n_dim_obs=1, n_dim_state=2,
-                               initial_state_mean=np.array([self.init_hedge_ratio, self.init_intercept]),
-                               initial_state_covariance=np.array([[1, 0],
-                                                                  [0, 1]]),
-                               transition_matrices=np.eye(2),
-                               observation_matrices=obs_mat,
-                               observation_covariance=self.obs_cov,
-                               transition_covariance=self.trans_cov)
-
-        self.state_means, self.state_covariances = self.kf.filter(y)
-
-        hedge_ratio = self.state_means[:, 0]
-        intercept = self.state_means[:, 1]
-        return hedge_ratio, intercept
-
-    def update(self, new_log_price_1, new_log_price_2):
-        if self.kf is None or self.state_means is None:
-            raise ValueError("Kalman filter has not been initialized. Call get_Kalman_params first.")
-
-        new_obs_mat = np.asarray([[new_log_price_2, 1]])
-        self.state_means, self.state_covariances = self.kf.filter_update(
-            filtered_state_mean=self.state_means[-1],
-            filtered_state_covariance=self.state_covariances[-1],
-            observation=new_log_price_1,
-            observation_matrix=new_obs_mat
-        )
-        
-        updated_hedge_ratio = self.state_means[0]
-        updated_intercept = self.state_means[1]
-        self.state_means = np.expand_dims(self.state_means, axis = 0)
-
-        return updated_hedge_ratio, updated_intercept
-
 
 class CryptoPairSelector:
     def __init__(self, client, config):
@@ -193,11 +141,19 @@ class CryptoPairSelector:
 
         return coint_pairs
 
-    def _calculate_hurst_exponent(self, time_series):
+    def _calculate_hurst_exponent(self, ts):
         lags = range(2, 100)
-        tau = [np.std(np.subtract(time_series[lag:].to_numpy(), time_series[:-lag].to_numpy())) for lag in lags]
+        tau = [np.std(np.subtract(ts[lag:].to_numpy(), ts[:-lag].to_numpy())) for lag in lags]
         poly = np.polyfit(np.log(lags), np.log(tau), 1)
         return poly[0] * 2.0
+
+    def _variance_ratio(self, ts, lag=2):
+        n = len(ts)
+        mu = np.mean(ts)
+        m = (n - lag + 1) * (1 - lag / n)
+        b = np.sum((ts[lag:] - ts[:-lag])**2) / (2 * m)
+        t = np.sum((ts - mu)**2) / (n - 1)
+        return b / t
 
     def calculate_features(self, data, window_rsi=14, window_stochastic=14, window_ema=20, window_atr=14):
 
@@ -242,6 +198,7 @@ class CryptoPairSelector:
         data = self.find_valid_coins(data)
         
         logging.info(">>> Calculating normalized prices...")
+        trading_pairs_usdt = list(data.keys())
         all_pairs = list(itertools.combinations(trading_pairs_usdt, 2))
         normalized_prices = self.calculate_normalized_close_prices(data)
 
@@ -256,7 +213,7 @@ class CryptoPairSelector:
         logging.info(">>> Coinegration and Normality test...") # 2차적인 필터링
         coint_pairs = self.identify_pairs_candidates(chosen_pairs, data, split)
 
-        logging.info(f"Number of all pairs: {len(all_pairs)}")
+        logging.info(f"Number of all pairs before filtering: {len(all_pairs)}")
         logging.info(f"Number of chosen pairs - correlation: {len(chosen_pairs)}")
         logging.info(f"Number of cointegrated pairs: {len(coint_pairs)} / {len(chosen_pairs)}")
         logging.info(f"Cointegrated pairs: {coint_pairs}")
@@ -317,7 +274,7 @@ class CryptoPairSelector:
         cumulated_return = (traded_return.cumsum()+1)*100
         return cumulated_return, traded_return
     
-    def calculate_half_life(self, spread: pd.Series) -> float:
+    def _calculate_half_life(self, spread: pd.Series) -> float:
 
         # Calculate the first difference of the spread
         spread_lagged = spread.shift(1)
@@ -384,6 +341,7 @@ class CryptoPairSelector:
         # there is at least one trade
         choose_pair = len(np.unique(observe_signal)) > 1
         train_sample.append(choose_pair)
+
         return train_sample
 
     def observe_all_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
@@ -398,10 +356,9 @@ class CryptoPairSelector:
             init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
             spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
 
-            
             hurst= self._calculate_hurst_exponent(spread[:split_index])
             print(f"Hurst Exponent: {hurst}")
-            half_life = self.calculate_half_life(spread[:split_index])
+            half_life = self._calculate_half_life(spread[:split_index])
             print(f"Half-life: {half_life}") 
 
             train_spread = spread[:split_index]
@@ -481,7 +438,7 @@ class CryptoPairSelector:
 
             # Calculate the Sharpe ratio
             sharpe_ratio = self.calculate_sharpe_ratio(traded_return)                                
-            half_life = self.calculate_half_life(spread)
+            half_life = self._calculate_half_life(spread)
 
             if sharpe_ratio > best_sharpe_ratio and (z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound) and hedge_ratio[-1] > 0: # Only trade if the current spread is outside the bounds
                 best_sharpe_ratio = sharpe_ratio

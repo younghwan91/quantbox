@@ -2,18 +2,24 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report, roc_curve
 import matplotlib.pyplot as plt
 
 # Load the data
-load_data = np.load('train_data.npy', allow_pickle=True)
-print(load_data)
+load_data = np.load('./data/training_data/train_data.npy', allow_pickle=True)
 
 # Split the data into features (X) and labels (y)
 X = load_data[:, :-1]
 y = load_data[:, -1]
+
+# Check for and remove rows containing NaN values
+if np.any(np.isnan(X)) or np.any(np.isnan(y)):
+    nan_mask = ~np.isnan(X).any(axis=1)
+    X = X[nan_mask]
+    y = y[nan_mask]
 
 # Split the data into training and testing sets
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -51,11 +57,12 @@ class DeepDNN(nn.Module):
         out = self.fc4(out)
         return out
 
-hidden_size = 128  # Adjust the hidden layer size for efficiency
+hidden_size = 64  # Adjust the hidden layer size for efficiency
 input_size = X_train.shape[1]
 num_classes = 2
-num_epochs = 250
+num_epochs = 500
 learning_rate = 0.001
+batch_size = 32  # Adjust batch size as needed
 
 model = DeepDNN(input_size, hidden_size, num_classes)
 
@@ -63,21 +70,31 @@ model = DeepDNN(input_size, hidden_size, num_classes)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 
-patience = 10
+# Create DataLoader for batch training
+train_dataset = TensorDataset(X_train, y_train)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+# Train the model with early stopping
+patience = 1000
 best_loss = float('inf')
 epochs_without_improvement = 0
 
-# Train the model with early stopping
 for epoch in range(num_epochs):
     model.train()
-    optimizer.zero_grad()
-    outputs = model(X_train)
-    loss = criterion(outputs, y_train)
-    loss.backward()
-    optimizer.step()
+    epoch_loss = 0
+    
+    for batch_X, batch_y in train_loader:
+        optimizer.zero_grad()
+        outputs = model(batch_X)
+        loss = criterion(outputs, batch_y)
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+    
+    epoch_loss /= len(train_loader)
     
     if (epoch + 1) % 10 == 0:
-        print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}')
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss:.4f}')
     
     # Evaluate on validation set
     model.eval()
