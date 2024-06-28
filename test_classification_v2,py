@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from joblib import dump
 
 # Load the data
-load_data = np.load('./data/training_data/train_data_1days_1hrs.npy', allow_pickle=True)
+load_data = np.load('./data/training_data/train_data_2days_1hrs.npy', allow_pickle=True)
 
 # Split the data into features (X) and labels (y)
 X = load_data[:, :-1]
@@ -30,7 +30,7 @@ X_test = scaler.transform(X_test)
 # Train a Random Forest Classifier
 model = RandomForestClassifier(n_estimators=100, random_state=42)
 model.fit(X_train, y_train)
-dump(model, 'best_model.joblib')
+dump(model, 'trained_model.joblib')
 dump(scaler, 'scaler.joblib')
 
 # Predict probabilities
@@ -38,7 +38,7 @@ y_pred_proba = model.predict_proba(X_test)[:, 1]
 y_true = y_test
 
 # Evaluate the final model with the best threshold
-threshold = 0.6
+threshold = 0.5
 y_pred = (y_pred_proba >= threshold).astype(int)
 accuracy = accuracy_score(y_true, y_pred)
 precision = precision_score(y_true, y_pred)

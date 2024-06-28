@@ -43,8 +43,8 @@ class CryptoPairSelector:
             return coins
 
     def find_valid_coins(self, data):
-
-        for coin, df in data.items():
+        items = list(data.items())
+        for coin, df in items:
             coin_diff = np.log(df['Close']).diff().dropna()
             coin_diff = coin_diff[coin_diff != 0]
             if len(coin_diff) == 0:
@@ -147,16 +147,7 @@ class CryptoPairSelector:
         poly = np.polyfit(np.log(lags), np.log(tau), 1)
         return poly[0] * 2.0
 
-    def _variance_ratio(self, ts, lag=2):
-        n = len(ts)
-        mu = np.mean(ts)
-        m = (n - lag + 1) * (1 - lag / n)
-        b = np.sum((ts[lag:] - ts[:-lag])**2) / (2 * m)
-        t = np.sum((ts - mu)**2) / (n - 1)
-        return b / t
-
-    def calculate_features(self, data, window_rsi=14, window_stochastic=14, window_ema=20, window_atr=14):
-
+    def calculate_features(self, data, window_rsi=14, window_stochastic=14, window_ema=20, atr_windows=[14, 20, 50]):
         features = pd.DataFrame(index=data.index)
 
         # Calculate RSI (Relative Strength Index) and normalize it to range between 0 and 1
@@ -169,7 +160,7 @@ class CryptoPairSelector:
 
         # Calculate VWAP (Volume Weighted Average Price)
         vwap = (data['Volume'] * (data['High'] + data['Low'] + data['Close']) / 3).cumsum() / data['Volume'].cumsum()
-
+        
         # Calculate P/V Ratio (Price to VWAP Ratio)
         features['P/V_Ratio'] = data['Close'] / vwap
 
@@ -178,9 +169,10 @@ class CryptoPairSelector:
         max_price = data['Close'].max()
         features['NPVI'] = (data['Close'] - min_price) / (max_price - min_price)
 
-        # Calculate ATR and normalize it
-        atr = ta.volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=window_atr).average_true_range()
-        features['Normalized_ATR'] = atr / data['Close']
+        # Calculate ATR for multiple windows and normalize it
+        for window in atr_windows:
+            atr = ta.volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=window).average_true_range()
+            features[f'Normalized_ATR_{window}'] = atr / data['Close']
 
         # Normalize volume using a moving average of the volume over a certain window
         volume_ma = data['Volume'].rolling(window=window_ema).mean()
@@ -301,7 +293,7 @@ class CryptoPairSelector:
         
         return half_life
 
-    def collect_training_data(self, data, coin1, coin2, z_spread, signal, std_spread, half_life, split_index):
+    def collect_training_data(self, data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, split_index):
         '''
         Collects training data for the model.
 
@@ -314,24 +306,30 @@ class CryptoPairSelector:
         "Coin1_Stoch_d",
         "Coin1_P/V_Ratio",
         "Coin1_NPVI",
-        "Coin1_Normalized_ATR",
+        "Coin1_Normalized_ATR_14",
+        "Coin1_Normalized_ATR_20",
+        "Coin1_Normalized_ATR_50",
         "Coin1_Normalized_Volume",
         "Coin2_RSI",
         "Coin2_Stoch_k",
         "Coin2_Stoch_d",
         "Coin2_P/V_Ratio",
         "Coin2_NPVI",
-        "Coin2_Normalized_ATR",
+        "Coin2_Normalized_ATR_14",
+        "Coin2_Normalized_ATR_20",
+        "Coin2_Normalized_ATR_50",
         "Coin2_Normalized_Volume",
         "half_life",
+        "Hurst_Exponent",
         "Choose_Pair"
         '''
 
         common_indices = data[coin1].index.intersection(data[coin2].index)
+        # Input features
         coin1_data = data[coin1].loc[common_indices]
         coin2_data = data[coin2].loc[common_indices]
         train_sample = []
-        list_of_features = ['RSI', 'Stoch_k', 'Stoch_d', 'P/V_Ratio', 'NPVI', 'Normalized_ATR', 'Normalized_Volume']
+        list_of_features = ['RSI', 'Stoch_k', 'Stoch_d', 'P/V_Ratio', 'NPVI', 'Normalized_ATR_14', 'Normalized_ATR_20', 'Normalized_ATR_50', 'Normalized_Volume']
         position = signal.iloc[split_index]
         z_spread = z_spread.iloc[split_index]
         train_sample.append(position)
@@ -340,6 +338,9 @@ class CryptoPairSelector:
         train_sample.extend(coin1_data.iloc[split_index][list_of_features].tolist())
         train_sample.extend(coin2_data.iloc[split_index][list_of_features].tolist())
         train_sample.append(half_life)
+        train_sample.append(hurst)
+
+        # Output feature
         observe_signal = signal.iloc[split_index:]
         choose_pair = len(np.unique(observe_signal)) > 1
         train_sample.append(choose_pair)
@@ -377,7 +378,7 @@ class CryptoPairSelector:
             print(f"Z-spread at split index: {z_spread.iloc[split_index]}")
             print(f"Upper bound: {upper_bound}, Lower bound: {lower_bound}")
 
-            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, split_index)
+            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, split_index)
             condition1 = z_spread.iloc[split_index] > upper_bound
             condition2 = z_spread.iloc[split_index] < lower_bound
             if condition1 or condition2:
@@ -438,8 +439,9 @@ class CryptoPairSelector:
             signal = self.generate_signal(z_spread, lower_bound, upper_bound)
             cumulated_return, traded_return = self.backtest_pair(spread, signal)
             half_life = self._calculate_half_life(spread)
+            hurst = self._calculate_hurst_exponent(spread)
 
-            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, split_index=-1)
+            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, split_index=-1)
             if np.isnan(data_sample).any():
                 continue
             scaled_features = scaler.transform(data_sample)

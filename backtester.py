@@ -6,24 +6,6 @@ import datetime as dt
 from datetime import timedelta
 import numpy as np
 
-
-# Backtester code for testing trading strategies
-
-TESTNET = 0
-
-with open('binance_id.json', 'r') as file:
-    config = json.load(file)
-    api_key = config['api_key']
-    api_secret = config['api_secret']
-
-client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
-
-# 0) define test configuration
-# 1) donwload historical data
-# 2) select trading pairs
-# 3) run backtest
-# 4) evaluate performance and plot results
-
 """
 Fetch and save klines for a given coin and interval.
 
@@ -44,12 +26,20 @@ Interval options:
 - '1w': 1 week
 - '1M': 1 month
 """
-
+TESTNET = 0
 hour_per_day = 24
-train_unit = hour_per_day*1
-test_unit = 1 
+with open('binance_id.json', 'r') as file:
+    config = json.load(file)
+    api_key = config['api_key']
+    api_secret = config['api_secret']
+
+client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
+
+train_unit = hour_per_day*6
+test_unit = 4 
 total_unit = train_unit + test_unit
 train_ratio = train_unit / total_unit
+create_training_data = 0
 
 train_data = []
 for hour_diff in range(0, hour_per_day*7, test_unit):
@@ -58,7 +48,7 @@ for hour_diff in range(0, hour_per_day*7, test_unit):
             'QUOTE_COIN': 'USDT',
             'N_COINS': 100,
             'CSV_FILENAME': 'trading_coins.csv',
-            'INTERVAL': '5m',
+            'INTERVAL': '15m',
             'START_STR': f'{total_unit+hour_diff} hours ago',
             # 'END_STR': dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'END_STR': (dt.datetime.now() - timedelta(hours=hour_diff)).strftime("%Y-%m-%d %H:%M:%S"),
@@ -72,6 +62,9 @@ for hour_diff in range(0, hour_per_day*7, test_unit):
 
     selector = CryptoPairSelector(client, config)
     coint_pairs, data = selector.select_trading_pairs(split=True)
-    data_samples = selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=0)
+    data_samples = selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=1)
     train_data.extend(data_samples)
-    np.save('train_data.npy', train_data)
+    if create_training_data:
+        np.save('train_data.npy', train_data)
+    else:
+        break

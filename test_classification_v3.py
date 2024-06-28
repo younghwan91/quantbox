@@ -6,7 +6,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from joblib import dump
 
 # Load the data
-load_data = np.load('./data/training_data/train_data_1days_1hrs.npy', allow_pickle=True)
+load_data = np.load('./data/training_data/train_data_2days_1hrs.npy', allow_pickle=True)
 
 # Split the data into features (X) and labels (y)
 X = load_data[:, :-1]
@@ -56,7 +56,7 @@ print(f"Best parameters found: {best_params}")
 best_model = grid_search.best_estimator_
 
 # Save the best model, scaler, and parameters
-dump(best_model, 'best_model.joblib')
+dump(best_model, 'trained_model.joblib')
 dump(scaler, 'scaler.joblib')
 
 # Predict probabilities
