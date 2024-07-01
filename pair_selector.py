@@ -381,7 +381,7 @@ class CryptoPairSelector:
             data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, split_index)
             condition1 = z_spread.iloc[split_index] > upper_bound
             condition2 = z_spread.iloc[split_index] < lower_bound
-            if condition1 or condition2:
+            if (condition1 or condition2) and (upper_bound*std_spread + mean_spread > 0.005):
                 data_samples.append(data_sample)
                 if ENABLE_PLOT:
         

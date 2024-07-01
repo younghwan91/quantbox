@@ -36,10 +36,12 @@ with open('binance_id.json', 'r') as file:
 client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
 
 train_unit = hour_per_day*6
-test_unit = 4 
+test_unit = 5 
 total_unit = train_unit + test_unit
 train_ratio = train_unit / total_unit
-create_training_data = 0
+
+create_training_data = 1
+plot_data = 0
 
 train_data = []
 for hour_diff in range(0, hour_per_day*7, test_unit):
@@ -62,9 +64,9 @@ for hour_diff in range(0, hour_per_day*7, test_unit):
 
     selector = CryptoPairSelector(client, config)
     coint_pairs, data = selector.select_trading_pairs(split=True)
-    data_samples = selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=1)
+    data_samples = selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=plot_data)
     train_data.extend(data_samples)
     if create_training_data:
-        np.save('train_data.npy', train_data)
+        np.save(f'train_data_{train_unit}_{test_unit}.npy', train_data)
     else:
         break
