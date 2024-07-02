@@ -1,15 +1,16 @@
 import datetime as dt
 import os
 
-total_day = 1
+hour_per_day = 24
+total_hours = hour_per_day*3
 
 CONFIG = {
     "FOLDER_NAME": 'futures',
     "SAVING_DIR": 'data',
     "CSV_FILENAME": "pairs_list.csv",
-    "N_COINS": 30,
+    "N_COINS": 100,
     "INTERVAL": '5m',
-    "START_STR": f'{total_day} day ago',
+    "START_STR": f'{total_hours} hour ago',
     "END_STR": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "COINT_THRESHOLD": 0.01,
     "TRAIN_RATIO": 1.0,

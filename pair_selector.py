@@ -409,8 +409,8 @@ class CryptoPairSelector:
 
     def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
         # Load the trained model
-        model = load('trained_model.joblib')
-        scaler = load('scaler.joblib')
+        model = load('./model_param/trained_model.joblib')
+        scaler = load('./model_param/scaler.joblib')
 
         best_pair = None
         highest_probability = -np.inf
@@ -444,10 +444,15 @@ class CryptoPairSelector:
             data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, split_index=-1)
             if np.isnan(data_sample).any():
                 continue
-            scaled_features = scaler.transform(data_sample)
+            scaled_features = scaler.transform(np.array(data_sample[:-1]).reshape(1, -1))
             probability = model.predict_proba(scaled_features)[0][1]
 
-            if probability > 0.5 and probability > highest_probability and (z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound):
+            condition_1 = probability > 0.5
+            condition_2 = probability > highest_probability
+            condition_3 = z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound
+            condition_4 = upper_bound*std_spread + mean_spread > 0.005
+
+            if condition_1 and condition_2 and condition_3 and condition_4:
                 best_pair = (coin1, coin2)
                 highest_probability = probability
                 pair_info = {
