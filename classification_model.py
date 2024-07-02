@@ -6,7 +6,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from joblib import dump
 
 # Load the data
-load_data = np.load('./data/training_data/train_data_2days_1hrs.npy', allow_pickle=True)
+load_data = np.load('./data/training_data/train_data_72_4.npy', allow_pickle=True)
 
 # Split the data into features (X) and labels (y)
 X = load_data[:, :-1]
@@ -34,9 +34,9 @@ param_grid = {
     'estimator__n_estimators': [50, 100],
     'estimator__max_depth': [3, 5],
     'estimator__min_samples_split': [2, 5],
-    'estimator__min_samples_leaf': [1, 2, 4],
+    'estimator__min_samples_leaf': [1, 2],
     'n_estimators': [50, 100],
-    'learning_rate': [0.01, 0.1, 1.0]
+    'learning_rate': [0.01, 0.1]
 }
 
 # Initialize the AdaBoost classifier with RandomForest as the base estimator
