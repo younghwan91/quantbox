@@ -27,9 +27,9 @@ Interval options:
 """
 # Configurations
 TESTNET = 0
-hour_per_day = 24
-generate_training_data = 1
-plot_data = 0
+HOURS_IN_DAY = 24
+GENERATE_TRAINING_DATA = 1
+PLOT_DATA = 0
 
 # Load API credentials
 with open('binance.json', 'r') as file:
@@ -40,19 +40,19 @@ with open('binance.json', 'r') as file:
 client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
 
 # Set parameters for training and testing
-train_unit = hour_per_day * 7
-test_unit = 2
+train_unit = HOURS_IN_DAY * 2
+test_unit = 6
 total_unit = train_unit + test_unit
 train_ratio = train_unit / total_unit
 
 train_data = []
-for hour_diff in range(0, hour_per_day * 7, test_unit):
+for hour_diff in range(0, HOURS_IN_DAY * 30, test_unit):
     config = {
         'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
-        'N_COINS': 200,
+        'N_COINS': 50,
         'CSV_FILENAME': 'trading_coins.csv',
-        'INTERVAL': '15m',
+        'INTERVAL': '5m',
         'START_STR': f'{total_unit + hour_diff} hours ago',
         'END_STR': (dt.datetime.now() - timedelta(hours=hour_diff)).strftime("%Y-%m-%d %H:%M:%S"),
         'TRAIN_RATIO': train_ratio, 
@@ -70,10 +70,10 @@ for hour_diff in range(0, hour_per_day * 7, test_unit):
     coint_pairs, data = selector.select_trading_pairs()
 
     # Observe and collect training data
-    data_samples = selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=plot_data)
+    data_samples = selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=PLOT_DATA)
     train_data.extend(data_samples)
 
-    if generate_training_data:
-        np.save(f'train_data_{train_unit}_{test_unit}.npy', train_data)
+    if GENERATE_TRAINING_DATA:
+        np.save(f'./training_data/train_data_{train_unit}_{test_unit}.npy', train_data)
     else:
         break

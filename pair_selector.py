@@ -13,6 +13,10 @@ from statsmodels.tools.tools import add_constant
 from scipy.stats import shapiro
 import ta
 from joblib import load
+from statsmodels.api import OLS, add_constant
+from sklearn.linear_model import Ridge
+from statsmodels.robust.robust_linear_model import RLM
+import statsmodels.api as sm
 
 # dark background
 plt.style.use('dark_background')
@@ -37,6 +41,11 @@ class CoinDataLoader:
 
 class CoinAnalysis:
     def __init__(self, train_ratio, coint_threshold, corr_threshold, normality_threshold=0.9):
+        if train_ratio < 1:
+            self.split = True
+        else:
+            self.split = False
+
         self.train_ratio = train_ratio
         self.coint_threshold = coint_threshold
         self.corr_threshold = corr_threshold
@@ -66,36 +75,12 @@ class CoinAnalysis:
 
         return data
 
-    def calculate_features(self, data, window_rsi=14, window_stochastic=14, window_ema=20, atr_windows=[14, 20, 50]):
+    def calculate_features(self, data, rsi_windows=[14, 28, 50]):
         features = pd.DataFrame(index=data.index)
 
-        # Calculate RSI (Relative Strength Index) and normalize it to range between 0 and 1
-        features['RSI'] = ta.momentum.RSIIndicator(data['Close'], window=window_rsi).rsi() / 100
-
-        # Calculate Stochastic Oscillator (normalized features: %K and %D)
-        stoch = ta.momentum.StochasticOscillator(data['High'], data['Low'], data['Close'], window=window_stochastic)
-        features['Stoch_k'] = stoch.stoch() / 100
-        features['Stoch_d'] = stoch.stoch_signal() / 100
-
-        # Calculate VWAP (Volume Weighted Average Price)
-        vwap = (data['Volume'] * (data['High'] + data['Low'] + data['Close']) / 3).cumsum() / data['Volume'].cumsum()
-        
-        # Calculate P/V Ratio (Price to VWAP Ratio)
-        features['P/V_Ratio'] = data['Close'] / vwap
-
-        # Calculate NPVI (Normalized Price to VWAP Indicator)
-        min_price = data['Close'].min()
-        max_price = data['Close'].max()
-        features['NPVI'] = (data['Close'] - min_price) / (max_price - min_price)
-
-        # Calculate ATR for multiple windows and normalize it
-        for window in atr_windows:
-            atr = ta.volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=window).average_true_range()
-            features[f'Normalized_ATR_{window}'] = atr / data['Close']
-
-        # Normalize volume using a moving average of the volume over a certain window
-        volume_ma = data['Volume'].rolling(window=window_ema).mean()
-        features['Normalized_Volume'] = data['Volume'] / volume_ma
+        # Calculate RSI for multiple windows and normalize it to range between 0 and 1
+        for window in rsi_windows:
+            features[f'RSI_{window}'] = ta.momentum.RSIIndicator(data['Close'], window=window).rsi() / 100
 
         return features
 
@@ -106,13 +91,13 @@ class CoinAnalysis:
             normalized_prices[coin] = prices / prices.iloc[0]
         return normalized_prices
 
-    def calculate_npd(self, normalized_prices, pairs, split=False):
+    def calculate_npd(self, normalized_prices, pairs):
         pairs_npd = []
         for coin1, coin2 in pairs:
             common_indices = normalized_prices[coin1].index.intersection(normalized_prices[coin2].index)
             prices1 = normalized_prices[coin1].loc[common_indices]
             prices2 = normalized_prices[coin2].loc[common_indices]
-            if split:
+            if self.split:
                 split_index = int(len(prices1) * self.train_ratio)
                 npd = np.sum((prices1[:split_index] - prices2[:split_index]) ** 2)
             else:
@@ -120,13 +105,13 @@ class CoinAnalysis:
             pairs_npd.append((coin1, coin2, npd))
         return pairs_npd
     
-    def calculate_correlation(self, normalized_prices, pairs, split=False):
+    def calculate_correlation(self, normalized_prices, pairs):
         pairs_corr = []
         for coin1, coin2 in pairs:
             common_indices = normalized_prices[coin1].index.intersection(normalized_prices[coin2].index)
             prices1 = normalized_prices[coin1].loc[common_indices]
             prices2 = normalized_prices[coin2].loc[common_indices]
-            if split:
+            if self.split:
                 split_index = int(len(prices1) * self.train_ratio)
                 corr = np.corrcoef(prices1[:split_index], prices2[:split_index])[0, 1]
             else:
@@ -137,7 +122,7 @@ class CoinAnalysis:
 
         return pairs_corr
 
-    def identify_pairs_candidates(self, selected_pairs, data, split):
+    def identify_pairs_candidates(self, selected_pairs, data):
         coint_pairs = []
         for coin1, coin2 in tqdm.tqdm(selected_pairs):
             try:
@@ -156,7 +141,7 @@ class CoinAnalysis:
                     # Perform Shapiro-Wilk test
                     shapiro_result = shapiro(spread)
                     if shapiro_result.statistic > self.normality_threshold:  
-                        if split:
+                        if self.split:
                             result = coint(prices1[:split_index], prices2[:split_index])
                         else:
                             result = coint(prices1, prices2)
@@ -187,12 +172,11 @@ class PairSelector:
         print(f"Number of pairs: {len(chosen_pairs)}")
 
         logging.info(">>> Coinegration and Normality test...")  # 2차적인 필터링
-        coint_pairs = self.analysis.identify_pairs_candidates(chosen_pairs, data, split=False)
+        coint_pairs = self.analysis.identify_pairs_candidates(chosen_pairs, data)
 
         logging.info(f"Number of all pairs before filtering: {len(all_pairs)}")
         logging.info(f"Number of chosen pairs - correlation: {len(chosen_pairs)}")
         logging.info(f"Number of cointegrated pairs: {len(coint_pairs)} / {len(chosen_pairs)}")
-        logging.info(f"Cointegrated pairs: {coint_pairs}")
 
         return coint_pairs, data
 
@@ -252,7 +236,7 @@ class Backtester:
         sharpes = mean_returns / std_returns
         return sharpes
     
-    def _calculate_half_life(self, spread: pd.Series) -> float:
+    def _calculate_half_life_ols(self, spread: pd.Series) -> float:
         spread_lagged = spread.shift(1)
         delta_spread = spread - spread_lagged
 
@@ -265,12 +249,36 @@ class Backtester:
         model = OLS(y, X).fit()
         
         beta = model.params[1]
-        
         theta = -np.log(1 + beta)
-        
         half_life = np.log(2) / theta
         
         return half_life
+
+    def _calculate_half_life_robust(self, spread: pd.Series) -> float:
+        spread_lagged = spread.shift(1)
+        delta_spread = spread - spread_lagged
+
+        spread_lagged = spread_lagged.dropna()
+        delta_spread = delta_spread.dropna()
+
+        X = spread_lagged.values.reshape(-1, 1)
+        y = delta_spread.values.reshape(-1, 1)
+        X = add_constant(X)
+        
+        model = RLM(y, X).fit()
+        beta = model.params[1]
+        theta = -np.log(1 + beta)
+        half_life = np.log(2) / theta
+        
+        return half_life
+
+    def calculate_half_life_methods(self, spread: pd.Series) -> dict:
+        results = {
+            'Half_Life_OLS': self._calculate_half_life_ols(spread),
+            'Half_Life_Robust': self._calculate_half_life_robust(spread),
+        }
+        
+        return results
 
     def _calculate_hurst_exponent(self, ts):
         lags = range(2, 100)
@@ -278,55 +286,48 @@ class Backtester:
         poly = np.polyfit(np.log(lags), np.log(tau), 1)
         return poly[0] * 2.0
 
-    def collect_training_data(self, data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, split_index):
+    def collect_training_data(self, data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, upper_bound, split_index):
         '''
         Collects training data for the model.
 
         Features:
-        "Position",
-        "Z_Spread",
-        "Std_Spread",
-        "Coin1_RSI",
-        "Coin1_Stoch_k",
-        "Coin1_Stoch_d",
-        "Coin1_P/V_Ratio",
-        "Coin1_NPVI",
-        "Coin1_Normalized_ATR_14",
-        "Coin1_Normalized_ATR_20",
-        "Coin1_Normalized_ATR_50",
-        "Coin1_Normalized_Volume",
-        "Coin2_RSI",
-        "Coin2_Stoch_k",
-        "Coin2_Stoch_d",
-        "Coin2_P/V_Ratio",
-        "Coin2_NPVI",
-        "Coin2_Normalized_ATR_14",
-        "Coin2_Normalized_ATR_20",
-        "Coin2_Normalized_ATR_50",
-        "Coin2_Normalized_Volume",
-        "half_life",
-        "Hurst_Exponent",
-        "Choose_Pair"
+        "RSI_14", "RSI_28", "RSI_50", 
+        "Half-life", "Hurst", "Choose_pair"
+
         '''
         common_indices = data[coin1].index.intersection(data[coin2].index)
         coin1_data = data[coin1].loc[common_indices]
         coin2_data = data[coin2].loc[common_indices]
         train_sample = []
-        list_of_features = ['RSI', 'Stoch_k', 'Stoch_d', 'P/V_Ratio', 'NPVI', 'Normalized_ATR_14', 'Normalized_ATR_20', 'Normalized_ATR_50', 'Normalized_Volume']
-        position = signal.iloc[split_index]
-        z_spread = z_spread.iloc[split_index]
-        train_sample.append(position)
-        train_sample.append(z_spread)
+        list_of_features = ['RSI_14', 'RSI_28', 'RSI_50']
+        position_last = signal.iloc[split_index]
+        z_spread_last = z_spread.iloc[split_index]
+        train_sample.append(position_last)
+        train_sample.append(z_spread_last)
         train_sample.append(std_spread)
         train_sample.extend(coin1_data.iloc[split_index][list_of_features].tolist())
         train_sample.extend(coin2_data.iloc[split_index][list_of_features].tolist())
-        train_sample.append(half_life)
+        # train_sample.append(half_life)
+        train_sample.extend(half_life.values())
         train_sample.append(hurst)
 
-        observe_signal = signal.iloc[split_index:]
-        choose_pair = len(np.unique(observe_signal)) > 1
-        train_sample.append(choose_pair)
+        observe_z_spread = z_spread.iloc[split_index:]
 
+        open_position = 0 # 0 don't open, 1 do trade
+        stop_loss = z_spread_last*1.5
+        for i in range(1, len(observe_z_spread)): # check if it generates 2:1 win-loss ratio 
+            if position_last == 1 and observe_z_spread.iloc[i] < stop_loss:
+                break
+            elif position_last == -1 and observe_z_spread.iloc[i] > stop_loss:
+                break
+            elif position_last == 1 and observe_z_spread.iloc[i] > 0:
+                open_position = 1
+                break
+            elif position_last == -1 and observe_z_spread.iloc[i] < 0:
+                open_position = 1
+                break
+
+        train_sample.append(open_position)
         return train_sample
 
     def observe_all_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
@@ -342,8 +343,10 @@ class Backtester:
 
             hurst = self._calculate_hurst_exponent(spread[:split_index])
             print(f"Hurst Exponent: {hurst}")
-            half_life = self._calculate_half_life(spread[:split_index])
-            print(f"Half-life: {half_life}") 
+            # half_life = self._calculate_half_life(spread[:split_index])
+            half_life_methods = self.calculate_half_life_methods(spread[:split_index])
+            # print(f"Half-life: {half_life}") 
+            print(f"Half-life methods: {half_life_methods}")
 
             train_spread = spread[:split_index]
             mean_spread = train_spread.mean()
@@ -358,9 +361,10 @@ class Backtester:
             print(f"Z-spread at split index: {z_spread.iloc[split_index]}")
             print(f"Upper bound: {upper_bound}, Lower bound: {lower_bound}")
 
-            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, split_index)
+            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life_methods, hurst, upper_bound, split_index)
             condition1 = z_spread.iloc[split_index] > upper_bound
             condition2 = z_spread.iloc[split_index] < lower_bound
+
             if (condition1 or condition2) and (upper_bound * std_spread + mean_spread > 0.005):
                 data_samples.append(data_sample)
                 if ENABLE_PLOT:
@@ -380,6 +384,9 @@ class Backtester:
 
                     plt.subplot(2, 1, 2)
                     plt.plot(z_spread.index, spread)
+                    plt.axhline((upper_bound * std_spread) + mean_spread, color='r', linestyle='--')
+                    plt.axhline((lower_bound * std_spread) + mean_spread, color='r', linestyle='--')
+                    plt.axhline(0.0)
                     plt.grid(True)
 
                     plt.show()
