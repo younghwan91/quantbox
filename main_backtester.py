@@ -5,6 +5,7 @@ from binance_downloader import BinanceDownloader
 import datetime as dt
 from datetime import timedelta
 import numpy as np
+
 """
 Fetch and save klines for a given coin and interval.
 
@@ -25,11 +26,14 @@ Interval options:
 - '1w': 1 week
 - '1M': 1 month
 """
+
 # Configurations
 TESTNET = 0
 HOURS_IN_DAY = 24
-GENERATE_TRAINING_DATA = 1
-PLOT_DATA = 0
+MODE = 1
+
+PERFORM_BACKTEST = 0
+PLOT_DATA = 1
 
 # Load API credentials
 with open('binance.json', 'r') as file:
@@ -40,13 +44,13 @@ with open('binance.json', 'r') as file:
 client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
 
 # Set parameters for training and testing
-train_unit = HOURS_IN_DAY * 2
+train_unit = HOURS_IN_DAY * 7
 test_unit = 6
 total_unit = train_unit + test_unit
 train_ratio = train_unit / total_unit
 
-train_data = []
-for hour_diff in range(0, HOURS_IN_DAY * 30, test_unit):
+train_data, train_pair_data = [], []
+for hour_diff in range(0, HOURS_IN_DAY * 60, test_unit):
     config = {
         'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
@@ -68,12 +72,14 @@ for hour_diff in range(0, HOURS_IN_DAY * 30, test_unit):
     # Select trading pairs using the refactored CryptoPairSelector
     selector = CryptoPairSelector(client, config)
     coint_pairs, data = selector.select_trading_pairs()
+    pair_data = selector.save_pairs_and_data(coint_pairs, data)
+    
+    train_pair_data.append(pair_data)
+    np.save(f'./training_data/pair_data_{train_unit}_{test_unit}_{config["INTERVAL"]}.npy', train_pair_data)
+    continue
 
     # Observe and collect training data
-    data_samples = selector.observe_all_pairs(data, coint_pairs, ENABLE_PLOT=PLOT_DATA)
+    data_samples = selector.backtest_pairs(data, coint_pairs, ENABLE_PLOT=PLOT_DATA)
     train_data.extend(data_samples)
 
-    if GENERATE_TRAINING_DATA:
-        np.save(f'./training_data/train_data_{train_unit}_{test_unit}.npy', train_data)
-    else:
-        break
+    np.save(f'./training_data/train_{train_unit}_{test_unit}_{config["INTERVAL"]}.npy', train_data)
