@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Parameters
-p = 0.30  # Probability of winning
+p = 0.40  # Probability of winning
 b = 2.0   # Win-loss ratio
 initial_capital = 1  # Initial capital
 num_bets = 100  # Number of bets

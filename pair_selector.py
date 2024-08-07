@@ -14,9 +14,7 @@ from scipy.stats import shapiro
 import ta
 from joblib import load
 from statsmodels.api import OLS, add_constant
-from sklearn.linear_model import Ridge
 from statsmodels.robust.robust_linear_model import RLM
-import statsmodels.api as sm
 
 # dark background
 plt.style.use('dark_background')
@@ -63,8 +61,9 @@ class CoinAnalysis:
                 try:
                     adf_test = adfuller(coin_diff)
                     if adf_test[1] < 0.01:
-                        features = self.calculate_features(data=df)
-                        data[coin] = pd.concat([df, features], axis=1)
+                        data[coin] = df
+                        # features = self.calculate_features(data=df)
+                        # data[coin] = pd.concat([df, features], axis=1)
                     else:
                         logging.info(f'{coin} is not integrated of order 1')
                         data.pop(coin)
@@ -75,14 +74,141 @@ class CoinAnalysis:
 
         return data
 
-    def calculate_features(self, data, rsi_windows=[14, 28, 50]):
+    def calculate_features(self, coin, data):
+        split_index = int(len(data) * self.train_ratio)
+
+        rsi_windows = [14, 28, 50]
+        macd_windows = (12, 26, 9)  # Standard MACD windows
+        bollinger_window = 20
+        stoch_windows = (14, 3, 3)  # Standard Stochastic Oscillator windows
         features = pd.DataFrame(index=data.index)
 
         # Calculate RSI for multiple windows and normalize it to range between 0 and 1
         for window in rsi_windows:
-            features[f'RSI_{window}'] = ta.momentum.RSIIndicator(data['Close'], window=window).rsi() / 100
+            name = f'{coin}_RSI_{window}'
+            features[name] = ta.momentum.RSIIndicator(data['Close'], window=window).rsi() / 100
 
-        return features
+        # Calculate MACD and its Signal Line, normalized between 0 and 1
+        macd = ta.trend.MACD(data['Close'], 
+                             window_slow=macd_windows[1], 
+                             window_fast=macd_windows[0], 
+                             window_sign=macd_windows[2])
+        features[f'{coin}_MACD'] = macd.macd() / data['Close'].max()
+        features[f'{coin}_MACD_Signal'] = macd.macd_signal() / data['Close'].max()
+        features[f'{coin}_MACD_Hist'] = macd.macd_diff() / data['Close'].max()
+
+        # Calculate Bollinger Bands
+        bollinger = ta.volatility.BollingerBands(data['Close'], window=bollinger_window, window_dev=2)
+        features[f'{coin}_Bollinger_High'] = bollinger.bollinger_hband() / data['Close'].max()
+        features[f'{coin}_Bollinger_Low'] = bollinger.bollinger_lband() / data['Close'].max()
+        features[f'{coin}_Bollinger_Percent'] = bollinger.bollinger_pband()
+
+        # Calculate Stochastic Oscillator and normalize between 0 and 1
+        stoch = ta.momentum.StochasticOscillator(high=data['High'], 
+                                                 low=data['Low'], 
+                                                 close=data['Close'], 
+                                                 window=stoch_windows[0], 
+                                                 smooth_window=stoch_windows[1])
+        features[f'{coin}_Stoch'] = stoch.stoch() / 100
+        features[f'{coin}_Stoch_Signal'] = stoch.stoch_signal() / 100
+
+        # Calculate Average True Range (ATR)
+        atr = ta.volatility.AverageTrueRange(high=data['High'], 
+                                             low=data['Low'], 
+                                             close=data['Close'], 
+                                             window=14)
+        features[f'{coin}_ATR'] = atr.average_true_range() / data['Close'].max()
+
+        # Calculate Exponential Moving Average (EMA)
+        ema_window = 21
+        features[f'{coin}_EMA_{ema_window}'] = ta.trend.EMAIndicator(data['Close'], window=ema_window).ema_indicator() / data['Close'].max()
+
+        # Calculate On-Balance Volume (OBV) normalized
+        obv = ta.volume.OnBalanceVolumeIndicator(close=data['Close'], volume=data['Volume'])
+        features[f'{coin}_OBV'] = obv.on_balance_volume() / data['Volume'].max()
+
+        return features.iloc[split_index]
+
+    def calculate_features_fast(self, coin, data):
+        # Calculate the index at which to split the data
+        split_index = int(len(data) * self.train_ratio)
+        # Define windows for technical indicators
+        rsi_windows = [14, 28, 50]
+        macd_windows = (12, 26, 9)  # Standard MACD windows
+        bollinger_window = 20
+        stoch_windows = (14, 3, 3)  # Standard Stochastic Oscillator windows
+
+        # Define the maximum look-back period needed for calculations
+        max_lookback = max(max(rsi_windows), max(macd_windows), bollinger_window, stoch_windows[0])
+
+        # Extract data needed for calculation around the split index
+        data_segment = data.iloc[max(0, split_index - max_lookback):split_index + 1]
+
+        # Initialize a DataFrame to store features
+        features = pd.DataFrame(index=data_segment.index)
+
+        # Calculate RSI for multiple windows and normalize to range [0, 1]
+        for window in rsi_windows:
+            name = f'{coin}_RSI_{window}'
+            features[name] = ta.momentum.RSIIndicator(data_segment['Close'], window=window).rsi() / 100
+
+        # Calculate MACD and its Signal Line, normalized between 0 and 1
+        macd = ta.trend.MACD(
+            data_segment['Close'], 
+            window_slow=macd_windows[1], 
+            window_fast=macd_windows[0], 
+            window_sign=macd_windows[2]
+        )
+        features[f'{coin}_MACD'] = macd.macd() / data_segment['Close'].max()
+        features[f'{coin}_MACD_Signal'] = macd.macd_signal() / data_segment['Close'].max()
+        features[f'{coin}_MACD_Hist'] = macd.macd_diff() / data_segment['Close'].max()
+
+        # Calculate Bollinger Bands
+        bollinger = ta.volatility.BollingerBands(
+            data_segment['Close'], 
+            window=bollinger_window, 
+            window_dev=2
+        )
+        features[f'{coin}_Bollinger_High'] = bollinger.bollinger_hband() / data_segment['Close'].max()
+        features[f'{coin}_Bollinger_Low'] = bollinger.bollinger_lband() / data_segment['Close'].max()
+        features[f'{coin}_Bollinger_Percent'] = bollinger.bollinger_pband()
+
+        # Calculate Stochastic Oscillator and normalize between 0 and 1
+        stoch = ta.momentum.StochasticOscillator(
+            high=data_segment['High'], 
+            low=data_segment['Low'], 
+            close=data_segment['Close'], 
+            window=stoch_windows[0], 
+            smooth_window=stoch_windows[1]
+        )
+        features[f'{coin}_Stoch'] = stoch.stoch() / 100
+        features[f'{coin}_Stoch_Signal'] = stoch.stoch_signal() / 100
+
+        # Calculate Average True Range (ATR)
+        atr = ta.volatility.AverageTrueRange(
+            high=data_segment['High'], 
+            low=data_segment['Low'], 
+            close=data_segment['Close'], 
+            window=14
+        )
+        features[f'{coin}_ATR'] = atr.average_true_range() / data_segment['Close'].max()
+
+        # Calculate Exponential Moving Average (EMA)
+        ema_window = 21
+        features[f'{coin}_EMA_{ema_window}'] = ta.trend.EMAIndicator(
+            data_segment['Close'], 
+            window=ema_window
+        ).ema_indicator() / data_segment['Close'].max()
+
+        # Calculate On-Balance Volume (OBV) normalized
+        obv = ta.volume.OnBalanceVolumeIndicator(
+            close=data_segment['Close'], 
+            volume=data_segment['Volume']
+        )
+        features[f'{coin}_OBV'] = obv.on_balance_volume() / data_segment['Volume'].max()
+
+        # Extract the features at the split index
+        return features.loc[data.index[split_index]]
 
     def calculate_normalized_close_prices(self, data):
         normalized_prices = {}
@@ -418,6 +544,67 @@ class Backtester:
 
         return data_samples
     
+    def calculate_pair_features(self, data):
+        coin1, coin2 = data.keys()
+
+        features = []
+        common_indices = data[coin1].index.intersection(data[coin2].index)
+        log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
+        log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
+        
+        split_index = int(len(log_price_1) * self.train_ratio)
+        init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
+        spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
+
+        hurst = self._calculate_hurst_exponent(spread[:split_index])
+        half_life_methods = self.calculate_half_life_methods(spread[:split_index])
+        correlation = np.corrcoef(log_price_1[:split_index], log_price_2[:split_index])[0, 1]
+
+        train_spread = spread[:split_index]
+        mean_spread = train_spread.mean()
+        std_spread = train_spread.std()
+        z_spread = (spread - mean_spread) / std_spread
+
+        T = len(spread)
+        lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
+        signal = self.generate_signal(z_spread, lower_bound, upper_bound)
+
+        condition1 = z_spread.iloc[split_index] > upper_bound
+        condition2 = z_spread.iloc[split_index] < lower_bound
+
+        if (condition1 or condition2) and np.abs(spread.iloc[split_index]) > 0.005:
+            z_spread_i = z_spread.iloc[split_index]
+            signal_i = signal.iloc[split_index]
+            features.append(signal_i)
+            features.append(z_spread_i)
+            features.append(std_spread)
+            features.extend(half_life_methods.values())
+            features.append(hurst)
+            features.append(correlation)
+
+            common_indices = data[coin1].index.intersection(data[coin2].index)
+            observe_z_spread = z_spread.iloc[split_index:]
+
+            open_position = 0 
+            stop_loss = z_spread_i*self.stop_loss_ratio
+
+            for i in range(1, len(observe_z_spread)): # check if it generates 2:1 win-loss ratio 
+                if signal_i == 1 and observe_z_spread.iloc[i] < stop_loss:
+                    break
+                elif signal_i == -1 and observe_z_spread.iloc[i] > stop_loss:
+                    break
+                elif signal_i == 1 and observe_z_spread.iloc[i] > 0:
+                    open_position = 1
+                    break
+                elif signal_i == -1 and observe_z_spread.iloc[i] < 0:
+                    open_position = 1
+                    break   
+            features.append(open_position)
+        else:
+            features = None
+
+        return features
+        
     def test_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
         model = load('./model_param/trained_model.joblib')
         scaler = load('./model_param/scaler.joblib')
@@ -645,6 +832,24 @@ class CryptoPairSelector:
         except Exception as e:
             logging.error(f"Error in save_pairs_and_data: {e}")
             raise
+    
+    def extract_features(self, pair_price):
+        try:
+            pair_features = self.backtester.calculate_pair_features(pair_price)
+            features = []
+            if pair_features:
+                for coin, price in pair_price.items():
+                    features.extend(self.analysis.calculate_features(coin, price))
+                    # print(self.analysis.calculate_features(coin, price))
+                    # print(self.analysis.calculate_features_fast(coin, price))
+                    # print('-----------------------------------')
+                features.extend(pair_features)
+            print(features)
+            return features
+        except Exception as e:
+            logging.error(f"Error in extract_features: {e}")
+            raise 
+        pass
 
     def backtest_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
         try:

@@ -108,5 +108,5 @@ def main(file_path, use_grid_search=True):
     print(class_report)
 
 if __name__ == "__main__":
-    file_path = './training_data/train_data_48_6.npy'
+    file_path = './training_data/train_samples_168_6_15m.npy'
     main(file_path, use_grid_search=False)  # Change to False to use default params

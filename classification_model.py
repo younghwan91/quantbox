@@ -49,9 +49,12 @@ def train_with_grid_search(X_train, y_train):
     return best_model
 
 def train_with_default_params(X_train, y_train):
-    ada = AdaBoostClassifier(estimator=RandomForestClassifier(random_state=42, max_depth= 5, min_samples_leaf=1, min_samples_split=2, n_estimators=50), 
-                             random_state=42, n_estimators=100, learning_rate=0.1, algorithm='SAMME')
+    ada = AdaBoostClassifier(estimator=RandomForestClassifier(random_state=42, max_depth= 15, min_samples_leaf=1, min_samples_split=2, n_estimators=25), 
+                             random_state=42, n_estimators=50, learning_rate=0.6, algorithm='SAMME')
     ada.fit(X_train, y_train)
+    # feature importance
+    feature_importance = ada.feature_importances_
+    print(f"Feature importance: {feature_importance}")
     return ada
 
 def evaluate_model(model, X_test, y_test, confidence_threshold):
@@ -84,11 +87,14 @@ def main(file_path, use_grid_search=True):
     print(f"Original dataset shape: {X.shape, y.shape}")
     print(f"Sample data: {X[0]}")
     
+    # count classes in y
+    unique, counts = np.unique(y, return_counts=True)
+    print(dict(zip(unique, counts)))
     # Split the data into training and test sets before SMOTE
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
     # Apply SMOTE only on the training data
-    smote = SMOTE(random_state=42)
+    smote = ADASYN(random_state=42)
     # smote = AllKNN()
     X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
     print(f"Balanced training dataset shape: {X_train_balanced.shape, y_train_balanced.shape}")
@@ -105,7 +111,7 @@ def main(file_path, use_grid_search=True):
         model = train_with_default_params(X_train_scaled, y_train_balanced)
     
     # Evaluate the model using the original test data
-    accuracy, precision, recall, f1, conf_matrix, class_report = evaluate_model(model, X_test_scaled, y_test, confidence_threshold=0.6)
+    accuracy, precision, recall, f1, conf_matrix, class_report = evaluate_model(model, X_test_scaled, y_test, confidence_threshold=0.5)
 
     # Save the model and scaler
     dump(model, './model_param/trained_model.joblib')
@@ -122,5 +128,6 @@ def main(file_path, use_grid_search=True):
     print(class_report)
 
 if __name__ == "__main__":
-    file_path = './training_data/train_data_48_6.npy'
+    file_path = './training_data/train_samples_24_6_5m.npy'
+    
     main(file_path, use_grid_search=0)  # Change to True to use grid search
