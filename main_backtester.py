@@ -5,6 +5,7 @@ from binance_downloader import BinanceDownloader
 import datetime as dt
 from datetime import timedelta
 import numpy as np
+import tqdm
 
 """
 Fetch and save klines for a given coin and interval.
@@ -30,8 +31,8 @@ Interval options:
 # Configurations
 HOURS_IN_DAY = 24
 TESTNET = 0
-PLOT_DATA = 1
-DOWMLOAD_DATA = 0
+PLOT_DATA = 0
+DOWMLOAD_DATA = 1
 
 # Load API credentials
 with open('binance.json', 'r') as file:
@@ -42,7 +43,7 @@ with open('binance.json', 'r') as file:
 client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
 
 # Set parameters for training and testing
-train_time = int(HOURS_IN_DAY * 0.5)
+train_time = int(HOURS_IN_DAY * 7)
 test_time = 6
 total_time = train_time + test_time
 train_ratio = train_time / total_time
@@ -50,11 +51,11 @@ train_ratio = train_time / total_time
 config = {
     'SAVING_DIR': 'data',
     'QUOTE_COIN': 'USDT',
-    'N_COINS': 50,
+    'N_COINS': 100,
     'CSV_FILENAME': 'trading_coins.csv',
-    'INTERVAL': '5m',
+    'INTERVAL': '15m',
     'TRAIN_RATIO': train_ratio, 
-    'COINT_THRESHOLD': 0.05,
+    'COINT_THRESHOLD': 0.01,
     'TRADING_CHARGE': 0.0005,
     'CORR_THRESHOLD': 0.5,
 }
@@ -81,8 +82,9 @@ if DOWMLOAD_DATA:
         pair_data = selector.save_pairs_and_data(coint_pairs, data)
         
         train_pair_data.append(pair_data)
-        np.save(f'./training_data/pair_data_{train_time}_{test_time}_{config["INTERVAL"]}.npy', train_pair_data)
+        np.save(f'./training_data/pair_data_{train_time}_{test_time}_{config["INTERVAL"]}_{days}.npy', train_pair_data)
 
+exit()
 '''
 Backtest trading pairs and save the data.
 '''
@@ -91,8 +93,7 @@ train_pair_data = np.load(f'./training_data/pair_data_{train_time}_{test_time}_{
 selector = CryptoPairSelector(client, config)
 
 train_samples = []
-for t in range(len(train_pair_data)):
-    print(t)
+for t in tqdm.tqdm(range(len(train_pair_data))):
     pair_data_t = train_pair_data[t]
     for pair_name, pair_price  in pair_data_t.items():
         sample = selector.extract_features(pair_price)
@@ -102,7 +103,6 @@ for t in range(len(train_pair_data)):
 train_samples = np.array(train_samples)
 np.save(f'./training_data/train_samples_{train_time}_{test_time}_{config["INTERVAL"]}.npy', train_samples)
 
-exit()
 
 # Observe and collect training data
 data_samples = selector.backtest_pairs(data, coint_pairs, ENABLE_PLOT=PLOT_DATA)

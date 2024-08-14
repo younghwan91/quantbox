@@ -1,35 +1,48 @@
 import numpy as np
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.svm import SVC
+from sklearn.ensemble import AdaBoostClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
 from joblib import dump
-from imblearn.over_sampling import SMOTE, ADASYN
+from imblearn.under_sampling import RandomUnderSampler, NearMiss, TomekLinks, EditedNearestNeighbours, RepeatedEditedNearestNeighbours, AllKNN, CondensedNearestNeighbour, OneSidedSelection, NeighbourhoodCleaningRule, InstanceHardnessThreshold
+from imblearn.over_sampling import SMOTE, ADASYN, SVMSMOTE, BorderlineSMOTE, KMeansSMOTE
+
 def load_data(file_path):
     data = np.load(file_path, allow_pickle=True)
     X = data[:, :-1]
     y = data[:, -1]
+    print(np.unique(y, return_counts=True))
     if np.any(np.isnan(X)) or np.any(np.isnan(y)):
         nan_mask = ~np.isnan(X).any(axis=1)
         X = X[nan_mask]
         y = y[nan_mask]
     return X, y
 
+def balance_classes(X, y):
+    # Balance the classes using undersampling
+    rus = RandomUnderSampler(random_state=42)
+    X_balanced, y_balanced = rus.fit_resample(X, y)
+    return X_balanced, y_balanced
+
 def split_and_scale_data(X, y):
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
     return X_train, X_test, y_train, y_test, scaler
 
 def train_with_grid_search(X_train, y_train):
+    base_estimator = RandomForestClassifier(random_state=42)
     param_grid = {
-        'C': [0.1, 1, 10],
-        'gamma': ['scale', 'auto'],
-        'kernel': ['rbf', 'linear']
+        'estimator__n_estimators': [50, 100],
+        'estimator__max_depth': [3, 5],
+        'estimator__min_samples_split': [2, 5],
+        'estimator__min_samples_leaf': [1, 2],
+        'n_estimators': [50, 100],
+        'learning_rate': [0.01, 0.1]
     }
-    svc = SVC(probability=True, random_state=42)
-    grid_search = GridSearchCV(estimator=svc, param_grid=param_grid, cv=3, scoring='precision', n_jobs=-1, verbose=2)
+    ada = AdaBoostClassifier(estimator=base_estimator, random_state=42, algorithm='SAMME')
+    grid_search = GridSearchCV(estimator=ada, param_grid=param_grid, cv=3, scoring='precision', n_jobs=-1, verbose=2)
     grid_search.fit(X_train, y_train)
     best_params = grid_search.best_params_
     print(f"Best parameters found: {best_params}")
@@ -37,9 +50,13 @@ def train_with_grid_search(X_train, y_train):
     return best_model
 
 def train_with_default_params(X_train, y_train):
-    svc = SVC(probability=True, random_state=42)
-    svc.fit(X_train, y_train)
-    return svc
+    ada = AdaBoostClassifier(estimator=RandomForestClassifier(random_state=42, max_depth= 30, min_samples_leaf=1, min_samples_split=2, n_estimators=50), 
+                             random_state=42, n_estimators=100, learning_rate=0.01, algorithm='SAMME')
+    ada.fit(X_train, y_train)
+    # feature importance
+    feature_importance = ada.feature_importances_
+    print(f"Feature importance: {feature_importance}")
+    return ada
 
 def evaluate_model(model, X_test, y_test, confidence_threshold):
     y_proba = model.predict_proba(X_test)
@@ -47,7 +64,7 @@ def evaluate_model(model, X_test, y_test, confidence_threshold):
     confidence = np.max(y_proba, axis=1)
 
     # Apply confidence threshold
-    confident_mask = confidence > confidence_threshold
+    confident_mask = confidence >= confidence_threshold
     y_pred_confident = y_pred[confident_mask]
     y_test_confident = y_test[confident_mask]
 
@@ -70,13 +87,16 @@ def main(file_path, use_grid_search=True):
     X, y = load_data(file_path)
     print(f"Original dataset shape: {X.shape, y.shape}")
     print(f"Sample data: {X[0]}")
-    
-    # Split the data into training and test sets before SMOTE
-    X_train_balanced, X_test, y_train_balanced, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    # count classes in y
+    unique, counts = np.unique(y, return_counts=True)
+    print(dict(zip(unique, counts)))
+    # Split the data into training and test sets before SMOTE, do not shuffle and take first 20% as test set
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=False)
 
     # Apply SMOTE only on the training data
-    smote = ADASYN(random_state=42)
-    # X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
+    smote = SMOTE(random_state=42)
+    # smote = AllKNN()
+    X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
     print(f"Balanced training dataset shape: {X_train_balanced.shape, y_train_balanced.shape}")
 
     # Scale the training and test data
@@ -108,5 +128,6 @@ def main(file_path, use_grid_search=True):
     print(class_report)
 
 if __name__ == "__main__":
-    file_path = './training_data/train_samples_168_6_15m.npy'
-    main(file_path, use_grid_search=False)  # Change to False to use default params
+    file_path = './training_data/train_samples_24_6_5m.npy'
+    
+    main(file_path, use_grid_search=0)  # Change to True to use grid search

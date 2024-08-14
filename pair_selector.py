@@ -62,8 +62,6 @@ class CoinAnalysis:
                     adf_test = adfuller(coin_diff)
                     if adf_test[1] < 0.01:
                         data[coin] = df
-                        # features = self.calculate_features(data=df)
-                        # data[coin] = pd.concat([df, features], axis=1)
                     else:
                         logging.info(f'{coin} is not integrated of order 1')
                         data.pop(coin)
@@ -73,142 +71,6 @@ class CoinAnalysis:
                     continue 
 
         return data
-
-    def calculate_features(self, coin, data):
-        split_index = int(len(data) * self.train_ratio)
-
-        rsi_windows = [14, 28, 50]
-        macd_windows = (12, 26, 9)  # Standard MACD windows
-        bollinger_window = 20
-        stoch_windows = (14, 3, 3)  # Standard Stochastic Oscillator windows
-        features = pd.DataFrame(index=data.index)
-
-        # Calculate RSI for multiple windows and normalize it to range between 0 and 1
-        for window in rsi_windows:
-            name = f'{coin}_RSI_{window}'
-            features[name] = ta.momentum.RSIIndicator(data['Close'], window=window).rsi() / 100
-
-        # Calculate MACD and its Signal Line, normalized between 0 and 1
-        macd = ta.trend.MACD(data['Close'], 
-                             window_slow=macd_windows[1], 
-                             window_fast=macd_windows[0], 
-                             window_sign=macd_windows[2])
-        features[f'{coin}_MACD'] = macd.macd() / data['Close'].max()
-        features[f'{coin}_MACD_Signal'] = macd.macd_signal() / data['Close'].max()
-        features[f'{coin}_MACD_Hist'] = macd.macd_diff() / data['Close'].max()
-
-        # Calculate Bollinger Bands
-        bollinger = ta.volatility.BollingerBands(data['Close'], window=bollinger_window, window_dev=2)
-        features[f'{coin}_Bollinger_High'] = bollinger.bollinger_hband() / data['Close'].max()
-        features[f'{coin}_Bollinger_Low'] = bollinger.bollinger_lband() / data['Close'].max()
-        features[f'{coin}_Bollinger_Percent'] = bollinger.bollinger_pband()
-
-        # Calculate Stochastic Oscillator and normalize between 0 and 1
-        stoch = ta.momentum.StochasticOscillator(high=data['High'], 
-                                                 low=data['Low'], 
-                                                 close=data['Close'], 
-                                                 window=stoch_windows[0], 
-                                                 smooth_window=stoch_windows[1])
-        features[f'{coin}_Stoch'] = stoch.stoch() / 100
-        features[f'{coin}_Stoch_Signal'] = stoch.stoch_signal() / 100
-
-        # Calculate Average True Range (ATR)
-        atr = ta.volatility.AverageTrueRange(high=data['High'], 
-                                             low=data['Low'], 
-                                             close=data['Close'], 
-                                             window=14)
-        features[f'{coin}_ATR'] = atr.average_true_range() / data['Close'].max()
-
-        # Calculate Exponential Moving Average (EMA)
-        ema_window = 21
-        features[f'{coin}_EMA_{ema_window}'] = ta.trend.EMAIndicator(data['Close'], window=ema_window).ema_indicator() / data['Close'].max()
-
-        # Calculate On-Balance Volume (OBV) normalized
-        obv = ta.volume.OnBalanceVolumeIndicator(close=data['Close'], volume=data['Volume'])
-        features[f'{coin}_OBV'] = obv.on_balance_volume() / data['Volume'].max()
-
-        return features.iloc[split_index]
-
-    def calculate_features_fast(self, coin, data):
-        # Calculate the index at which to split the data
-        split_index = int(len(data) * self.train_ratio)
-        # Define windows for technical indicators
-        rsi_windows = [14, 28, 50]
-        macd_windows = (12, 26, 9)  # Standard MACD windows
-        bollinger_window = 20
-        stoch_windows = (14, 3, 3)  # Standard Stochastic Oscillator windows
-
-        # Define the maximum look-back period needed for calculations
-        max_lookback = max(max(rsi_windows), max(macd_windows), bollinger_window, stoch_windows[0])
-
-        # Extract data needed for calculation around the split index
-        data_segment = data.iloc[max(0, split_index - max_lookback):split_index + 1]
-
-        # Initialize a DataFrame to store features
-        features = pd.DataFrame(index=data_segment.index)
-
-        # Calculate RSI for multiple windows and normalize to range [0, 1]
-        for window in rsi_windows:
-            name = f'{coin}_RSI_{window}'
-            features[name] = ta.momentum.RSIIndicator(data_segment['Close'], window=window).rsi() / 100
-
-        # Calculate MACD and its Signal Line, normalized between 0 and 1
-        macd = ta.trend.MACD(
-            data_segment['Close'], 
-            window_slow=macd_windows[1], 
-            window_fast=macd_windows[0], 
-            window_sign=macd_windows[2]
-        )
-        features[f'{coin}_MACD'] = macd.macd() / data_segment['Close'].max()
-        features[f'{coin}_MACD_Signal'] = macd.macd_signal() / data_segment['Close'].max()
-        features[f'{coin}_MACD_Hist'] = macd.macd_diff() / data_segment['Close'].max()
-
-        # Calculate Bollinger Bands
-        bollinger = ta.volatility.BollingerBands(
-            data_segment['Close'], 
-            window=bollinger_window, 
-            window_dev=2
-        )
-        features[f'{coin}_Bollinger_High'] = bollinger.bollinger_hband() / data_segment['Close'].max()
-        features[f'{coin}_Bollinger_Low'] = bollinger.bollinger_lband() / data_segment['Close'].max()
-        features[f'{coin}_Bollinger_Percent'] = bollinger.bollinger_pband()
-
-        # Calculate Stochastic Oscillator and normalize between 0 and 1
-        stoch = ta.momentum.StochasticOscillator(
-            high=data_segment['High'], 
-            low=data_segment['Low'], 
-            close=data_segment['Close'], 
-            window=stoch_windows[0], 
-            smooth_window=stoch_windows[1]
-        )
-        features[f'{coin}_Stoch'] = stoch.stoch() / 100
-        features[f'{coin}_Stoch_Signal'] = stoch.stoch_signal() / 100
-
-        # Calculate Average True Range (ATR)
-        atr = ta.volatility.AverageTrueRange(
-            high=data_segment['High'], 
-            low=data_segment['Low'], 
-            close=data_segment['Close'], 
-            window=14
-        )
-        features[f'{coin}_ATR'] = atr.average_true_range() / data_segment['Close'].max()
-
-        # Calculate Exponential Moving Average (EMA)
-        ema_window = 21
-        features[f'{coin}_EMA_{ema_window}'] = ta.trend.EMAIndicator(
-            data_segment['Close'], 
-            window=ema_window
-        ).ema_indicator() / data_segment['Close'].max()
-
-        # Calculate On-Balance Volume (OBV) normalized
-        obv = ta.volume.OnBalanceVolumeIndicator(
-            close=data_segment['Close'], 
-            volume=data_segment['Volume']
-        )
-        features[f'{coin}_OBV'] = obv.on_balance_volume() / data_segment['Volume'].max()
-
-        # Extract the features at the split index
-        return features.loc[data.index[split_index]]
 
     def calculate_normalized_close_prices(self, data):
         normalized_prices = {}
@@ -335,7 +197,7 @@ class Backtester:
     def __init__(self, trading_charge, train_ratio):
         self.trading_charge = trading_charge
         self.train_ratio = train_ratio
-        self.stop_loss_ratio = 1.5
+        self.stop_loss_ratio = 2
 
     def generate_signal(self, z_spread, threshold_long, threshold_short):
         signal = pd.Series(0, index=z_spread.index)
@@ -399,82 +261,11 @@ class Backtester:
         
         return half_life
 
-    def _calculate_half_life_robust(self, spread: pd.Series) -> float:
-        spread_lagged = spread.shift(1)
-        delta_spread = spread - spread_lagged
-
-        spread_lagged = spread_lagged.dropna()
-        delta_spread = delta_spread.dropna()
-
-        X = spread_lagged.values.reshape(-1, 1)
-        y = delta_spread.values.reshape(-1, 1)
-        X = add_constant(X)
-        
-        model = RLM(y, X).fit()
-        beta = model.params[1]
-        theta = -np.log(1 + beta)
-        half_life = np.log(2) / theta
-        
-        return half_life
-
-    def calculate_half_life_methods(self, spread: pd.Series) -> dict:
-        results = {
-            'Half_Life_OLS': self._calculate_half_life_ols(spread),
-            'Half_Life_Robust': self._calculate_half_life_robust(spread),
-        }
-        
-        return results
-
     def _calculate_hurst_exponent(self, ts):
         lags = range(2, 100)
         tau = [np.std(np.subtract(ts[lag:].to_numpy(), ts[:-lag].to_numpy())) for lag in lags]
         poly = np.polyfit(np.log(lags), np.log(tau), 1)
         return poly[0] * 2.0
-
-    def collect_training_data(self, data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, upper_bound, correlation, split_index):
-        '''
-        Collects training data for the model.
-
-        Features:
-        "RSI_14", "RSI_28", "RSI_50", 
-        "Half-life", "Hurst", "Choose_pair"
-
-        '''
-        common_indices = data[coin1].index.intersection(data[coin2].index)
-        coin1_data = data[coin1].loc[common_indices]
-        coin2_data = data[coin2].loc[common_indices]
-        train_sample = []
-        list_of_features = ['RSI_14', 'RSI_28', 'RSI_50']
-        position_last = signal.iloc[split_index]
-        z_spread_last = z_spread.iloc[split_index]
-        train_sample.append(position_last)
-        train_sample.append(z_spread_last)
-        train_sample.append(std_spread)
-        train_sample.extend(coin1_data.iloc[split_index][list_of_features].tolist())
-        train_sample.extend(coin2_data.iloc[split_index][list_of_features].tolist())
-        # train_sample.append(half_life)
-        train_sample.extend(half_life.values())
-        train_sample.append(hurst)
-        # train_sample.append(correlation)
-
-        observe_z_spread = z_spread.iloc[split_index:]
-
-        open_position = 0 # 0 don't open, 1 do trade
-        stop_loss = z_spread_last*self.stop_loss_ratio
-        for i in range(1, len(observe_z_spread)): # check if it generates 2:1 win-loss ratio 
-            if position_last == 1 and observe_z_spread.iloc[i] < stop_loss:
-                break
-            elif position_last == -1 and observe_z_spread.iloc[i] > stop_loss:
-                break
-            elif position_last == 1 and observe_z_spread.iloc[i] > 0:
-                open_position = 1
-                break
-            elif position_last == -1 and observe_z_spread.iloc[i] < 0:
-                open_position = 1
-                break
-
-        train_sample.append(open_position)
-        return train_sample
 
     def backtest_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
 
@@ -544,10 +335,9 @@ class Backtester:
 
         return data_samples
     
-    def calculate_pair_features(self, data):
+    def optimize_filter_params(self, data):
         coin1, coin2 = data.keys()
 
-        features = []
         common_indices = data[coin1].index.intersection(data[coin2].index)
         log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
         log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
@@ -556,10 +346,6 @@ class Backtester:
         init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
         spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
 
-        hurst = self._calculate_hurst_exponent(spread[:split_index])
-        half_life_methods = self.calculate_half_life_methods(spread[:split_index])
-        correlation = np.corrcoef(log_price_1[:split_index], log_price_2[:split_index])[0, 1]
-
         train_spread = spread[:split_index]
         mean_spread = train_spread.mean()
         std_spread = train_spread.std()
@@ -567,22 +353,17 @@ class Backtester:
 
         T = len(spread)
         lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-        signal = self.generate_signal(z_spread, lower_bound, upper_bound)
 
         condition1 = z_spread.iloc[split_index] > upper_bound
         condition2 = z_spread.iloc[split_index] < lower_bound
 
         if (condition1 or condition2) and np.abs(spread.iloc[split_index]) > 0.005:
+
+            signal = self.generate_signal(z_spread, lower_bound, upper_bound)
+            
             z_spread_i = z_spread.iloc[split_index]
             signal_i = signal.iloc[split_index]
-            features.append(signal_i)
-            features.append(z_spread_i)
-            features.append(std_spread)
-            features.extend(half_life_methods.values())
-            features.append(hurst)
-            features.append(correlation)
 
-            common_indices = data[coin1].index.intersection(data[coin2].index)
             observe_z_spread = z_spread.iloc[split_index:]
 
             open_position = 0 
@@ -590,8 +371,10 @@ class Backtester:
 
             for i in range(1, len(observe_z_spread)): # check if it generates 2:1 win-loss ratio 
                 if signal_i == 1 and observe_z_spread.iloc[i] < stop_loss:
+                    open_position = 0
                     break
                 elif signal_i == -1 and observe_z_spread.iloc[i] > stop_loss:
+                    open_position = 0
                     break
                 elif signal_i == 1 and observe_z_spread.iloc[i] > 0:
                     open_position = 1
@@ -605,102 +388,9 @@ class Backtester:
 
         return features
         
-    def test_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
-        model = load('./model_param/trained_model.joblib')
-        scaler = load('./model_param/scaler.joblib')
-
-        data_samples = []
-        for coin1, coin2 in cointegrated_pairs:
-            common_indices = data[coin1].index.intersection(data[coin2].index)
-            log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
-            log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
-            
-            split_index = int(len(log_price_1) * self.train_ratio)
-            init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
-            spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
-
-            hurst = self._calculate_hurst_exponent(spread[:split_index])
-            print(f"Hurst Exponent: {hurst}")
-            # half_life = self._calculate_half_life(spread[:split_index])
-            half_life_methods = self.calculate_half_life_methods(spread[:split_index])
-            # print(f"Half-life: {half_life}") 
-            print(f"Half-life methods: {half_life_methods}")
-            correlation = np.corrcoef(log_price_1[:split_index], log_price_2[:split_index])[0, 1]
-
-            train_spread = spread[:split_index]
-            mean_spread = train_spread.mean()
-            std_spread = train_spread.std()
-            z_spread = (spread - mean_spread) / std_spread
-  
-            T = len(spread)
-            lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-            signal = self.generate_signal(z_spread, lower_bound, upper_bound)
-            cumulated_return, traded_return = self.backtest_pair(spread, signal)
-            sharpe_ratio = self._calculate_sharpe_ratio(traded_return)                                
-            print(f"Z-spread at split index: {z_spread.iloc[split_index]}")
-            print(f"Upper bound: {upper_bound}, Lower bound: {lower_bound}")
-
-            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life_methods, hurst, upper_bound, correlation, split_index)
-            condition1 = z_spread.iloc[split_index] > upper_bound
-            condition2 = z_spread.iloc[split_index] < lower_bound
-
-            if (condition1 or condition2) and (upper_bound * std_spread + mean_spread > 0.005):
-                data_samples.append(data_sample)
-
-                if np.isnan(data_sample).any():
-                    continue
-                print(data_sample)
-                scaled_features = scaler.transform(np.array(data_sample[:-1]).reshape(1, -1))
-                probability = model.predict_proba(scaled_features)[0][1]
-                take_trade = probability > 0.5
-                true_label = data_sample[-1]
-
-                if take_trade == true_label == 1:
-                    print(f"Correct trade: {take_trade}")
-                elif take_trade == 1 and true_label == 0:
-                    print(f"False positive: {take_trade}")
-                else:
-                    print("No trade")
-
-                if ENABLE_PLOT:
-                    split_index = int(len(spread) * self.train_ratio)
-
-                    plt.figure(figsize=(20, 10))
-                    plt.subplot(2, 1, 1)
-                    plt.plot(z_spread)
-                    plt.axvline(z_spread.index[split_index], color='r', linestyle='--')
-                    plt.plot(z_spread.index, signal)
-                    plt.axhline(upper_bound, color='r', linestyle='--')
-                    plt.axhline(lower_bound, color='r', linestyle='--')
-                    plt.axhline((np.abs(z_spread.iloc[split_index]) * self.stop_loss_ratio), color='g', linestyle='--')
-                    plt.axhline(-(np.abs(z_spread.iloc[split_index]) * self.stop_loss_ratio), color='g', linestyle='--')
-                    plt.axhline(z_spread.iloc[split_index], color = 'y', linestyle='--')
-                    plt.axhline(0.0)
-                    plt.ylim(-4, 4)
-                    plt.ylabel('Z-score')
-                    plt.title(f'Take trade: {take_trade}, True label: {true_label==1}')
-                    plt.grid(True)
-
-                    plt.subplot(2, 1, 2)
-                    plt.plot(z_spread.index, spread)
-                    plt.axhline((upper_bound * std_spread) + mean_spread, color='r', linestyle='--')
-                    plt.axhline((lower_bound * std_spread) + mean_spread, color='r', linestyle='--')
-                    plt.axhline(0.0)
-                    plt.axhline(np.abs(spread.iloc[split_index])*self.stop_loss_ratio, color='g', linestyle='--')
-                    plt.axhline(-np.abs(spread.iloc[split_index])*self.stop_loss_ratio, color='g', linestyle='--')
-                    plt.axhline(spread.iloc[split_index], color='y', linestyle='--')
-                    plt.grid(True)
-
-                    plt.show()
-
-        return data_samples
-            
-    def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
-        model = load('./model_param/trained_model.joblib')
-        scaler = load('./model_param/scaler.joblib')
+    def select_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
 
         best_pair = None
-        highest_probability = -np.inf
 
         pair_info = {}
         for coin1, coin2 in cointegrated_pairs:
@@ -725,20 +415,12 @@ class Backtester:
             half_life = self._calculate_half_life(spread)
             hurst = self._calculate_hurst_exponent(spread)
 
-            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life, hurst, split_index=-1)
-            if np.isnan(data_sample).any():
-                continue
-            scaled_features = scaler.transform(np.array(data_sample[:-1]).reshape(1, -1))
-            probability = model.predict_proba(scaled_features)[0][1]
 
-            condition_1 = probability > 0.5
-            condition_2 = probability > highest_probability
             condition_3 = z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound
             condition_4 = upper_bound * std_spread + mean_spread > 0.005
 
-            if condition_1 and condition_2 and condition_3 and condition_4:
+            if condition_3 and condition_4:
                 best_pair = (coin1, coin2)
-                highest_probability = probability
                 pair_info = {
                     'cumulated_return': cumulated_return,
                     'traded_return': traded_return,
@@ -758,14 +440,13 @@ class Backtester:
                     'trade_coin1': 'BUY' if signal.iloc[-1] == 1 else 'SELL',
                     'trade_coin2': 'SELL' if signal.iloc[-1] == 1 else 'BUY'
                 }
-        logging.info(f"Best pair: {best_pair} with probability: {highest_probability:.4f}")
         try:
             if ENABLE_PLOT:
                 self.plot_best_pair(best_pair, pair_info)
         except Exception as e:
             logging.error(f"Error plotting best pair: {e}")
 
-        return best_pair, highest_probability, pair_info
+        return best_pair, pair_info
 
     def plot_best_pair(self, best_pair, info_pair):
         plt.figure(figsize=(20, 10))
@@ -826,29 +507,14 @@ class CryptoPairSelector:
             logging.error(f"Error in select_trading_pairs: {e}")
             raise
 
-    def save_pairs_and_data(self, cointegrated_pairs, data):
+    def save_pairs_and_data(self, cointegrated_pairs, data): # already filtered. we try to optimize the saving pairs
         try:
             return self.selector.save_pairs_and_data(cointegrated_pairs, data)
         except Exception as e:
             logging.error(f"Error in save_pairs_and_data: {e}")
             raise
     
-    def extract_features(self, pair_price):
-        try:
-            pair_features = self.backtester.calculate_pair_features(pair_price)
-            features = []
-            if pair_features:
-                for coin, price in pair_price.items():
-                    features.extend(self.analysis.calculate_features(coin, price))
-                    # print(self.analysis.calculate_features(coin, price))
-                    # print(self.analysis.calculate_features_fast(coin, price))
-                    # print('-----------------------------------')
-                features.extend(pair_features)
-            print(features)
-            return features
-        except Exception as e:
-            logging.error(f"Error in extract_features: {e}")
-            raise 
+    def optimize_filter_params(self, cointegrated_pairs, data):
         pass
 
     def backtest_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
@@ -860,7 +526,7 @@ class CryptoPairSelector:
 
     def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
         try:
-            return self.backtester.select_best_pair(data, cointegrated_pairs, ENABLE_PLOT)
+            return self.backtester.select_pair(data, cointegrated_pairs, ENABLE_PLOT)
         except Exception as e:
             logging.error(f"Error in select_best_pair: {e}")
             raise

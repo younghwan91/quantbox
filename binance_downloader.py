@@ -17,7 +17,8 @@ class BinanceDownloader:
 
     def get_trading_coins(self, client, quote_coin, n_coins, sort_by_volume=False):
         futures_exchange_info = client.futures_exchange_info()
-        trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin)]
+        trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin) and info['status'] == 'TRADING']
+
         print(f"Number of trading pairs: {len(trading_coins)}")
         assert n_coins <= len(trading_coins), "N_COINS is greater than the number of trading coins"
 

@@ -1,8 +1,11 @@
 /__pycache__
-/data
-/temp
 
+/data/*
+/training_data/*
+
+/temp
 *.log
 *.json
 config.py
 *.npy
+*.pkl
