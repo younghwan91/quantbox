@@ -38,7 +38,7 @@ class CoinDataLoader:
         return data
 
 class CoinAnalysis:
-    def __init__(self, train_ratio, coint_threshold, corr_threshold, normality_threshold=0.9):
+    def __init__(self, train_ratio, coint_threshold, corr_threshold, normality_threshold=0.05):
         if train_ratio < 1:
             self.split = True
         else:
@@ -134,7 +134,7 @@ class CoinAnalysis:
                     # Filter 2: Normality test
                     spread = prices1 - hedge_ratio * prices2
                     shapiro_result = shapiro(spread)
-                    if shapiro_result.statistic > self.normality_threshold:  
+                    if shapiro_result.pvalue > self.normality_threshold:  
                         
                         # Filter 3: Cointegration test
                         if self.split:

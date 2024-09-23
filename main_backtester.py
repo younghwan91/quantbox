@@ -43,8 +43,8 @@ with open('binance.json', 'r') as file:
 client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
 
 # Set parameters for training and testing
-train_time = int(HOURS_IN_DAY * 7)
-test_time = 6
+train_time = int(HOURS_IN_DAY * 12)
+test_time = 24
 total_time = train_time + test_time
 train_ratio = train_time / total_time
 
@@ -53,9 +53,9 @@ config = {
     'QUOTE_COIN': 'USDT',
     'N_COINS': 100,
     'CSV_FILENAME': 'trading_coins.csv',
-    'INTERVAL': '15m',
+    'INTERVAL': '1h',
     'TRAIN_RATIO': train_ratio, 
-    'COINT_THRESHOLD': 0.01,
+    'COINT_THRESHOLD': 0.05,
     'TRADING_CHARGE': 0.0005,
     'CORR_THRESHOLD': 0.5,
 }
@@ -84,7 +84,6 @@ if DOWMLOAD_DATA:
         train_pair_data.append(pair_data)
         np.save(f'./training_data/pair_data_{train_time}_{test_time}_{config["INTERVAL"]}_{days}.npy', train_pair_data)
 
-exit()
 '''
 Backtest trading pairs and save the data.
 '''
@@ -104,6 +103,7 @@ train_samples = np.array(train_samples)
 np.save(f'./training_data/train_samples_{train_time}_{test_time}_{config["INTERVAL"]}.npy', train_samples)
 
 
+exit()
 # Observe and collect training data
 data_samples = selector.backtest_pairs(data, coint_pairs, ENABLE_PLOT=PLOT_DATA)
 train_data.extend(data_samples)
