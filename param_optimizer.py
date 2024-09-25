@@ -9,7 +9,7 @@ from pyswarm import pso
 import os
 
 # Configuration Variables
-train_hour = 24
+train_hour = 120
 test_hour = 24
 total_hour = train_hour + test_hour
 train_ratio = train_hour / total_hour
@@ -17,17 +17,6 @@ timeframe = '15m'
 days = 90
 trading_fee = 0.00045
 
-'''
-Expand parameter search ranges (entry threshold, risk-reward, stop loss).
-Reassess cointegration or consider other pairs for better mean reversion.
-Incorporate advanced techniques (Kalman filters, PCA) to capture dynamics better.
-Diversify and optimize position sizing to reduce exposure to single trades.
-Trailing stop-loss idea.
-Break-even stop.
-
-1. Downloader update - generate pair_data_24*4 , 24*5_15m_90.npy
-2. Interpretation table
-'''
 
 class PairTradingModel:
     def __init__(self, train_hour, timeframe, days, train_ratio):
@@ -91,7 +80,7 @@ class PairTradingModel:
         return mean_return / std_return
 
     def cost_function(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, slippage=0.006):
-        fval, cnt_win, cnt_loss, cnt_draw, cnt_profit = 0, 0, 0, 0, 0
+        total_profit, cnt_win, cnt_loss, cnt_draw, cnt_profit = 0, 0, 0, 0, 0
         
         total_trade_duration = 0
         total_profit_per_duration = 0
@@ -123,7 +112,7 @@ class PairTradingModel:
                     if signal_0 == 1:
                         if current_z_spread < z_spread_0 - stop_loss or current_z_spread > z_spread_0 + risk_reward_ratio * stop_loss:
                             profit = (current_spread - spread_0) - (2*trading_fee) - slippage
-                            fval += profit
+                            total_profit += profit
                             if current_z_spread > z_spread_0 + risk_reward_ratio * stop_loss:
                                 cnt_win += 1
                             else:
@@ -132,7 +121,7 @@ class PairTradingModel:
                             break                        
                         if i == max_trading_time - 1:
                             profit = (current_spread - spread_0) - (2*trading_fee) - slippage
-                            fval += profit
+                            total_profit += profit
                             cnt_draw += 1
                             returns.append(profit)
                             break
@@ -140,7 +129,7 @@ class PairTradingModel:
                     elif signal_0 == -1:
                         if current_z_spread > z_spread_0 + stop_loss or current_z_spread < z_spread_0 - risk_reward_ratio * stop_loss:
                             profit = (spread_0 - current_spread) - (2*trading_fee) - slippage
-                            fval += profit
+                            total_profit += profit
                             if current_z_spread < z_spread_0 - risk_reward_ratio * stop_loss:
                                 cnt_win += 1
                             else:
@@ -149,7 +138,7 @@ class PairTradingModel:
                             break
                         if i == max_trading_time - 1:
                             profit = (spread_0 - current_spread) - (2*trading_fee) - slippage
-                            fval += profit
+                            total_profit += profit
                             cnt_draw += 1
                             returns.append(profit)
                             break                
@@ -175,27 +164,33 @@ class PairTradingModel:
                 # plt.show()
 
         avg_profit_per_duration = total_profit_per_duration / trade_count if trade_count > 0 else 0
-        avg_profit_per_trade = fval / trade_count if trade_count > 0 else 0
+        avg_profit_per_trade = total_profit / trade_count if trade_count > 0 else 0
 
         T_total = 24
         T_search = 1
+        N_days = 90*1.5
         N_effective = (T_total-T_search*(1/frac_hold-1)) / (T_total*frac_hold)
-        func_val = avg_profit_per_trade * N_effective
+        N_trade_avg = trade_count / N_days
+        N_trade_per_day = min(N_effective, N_trade_avg)
+        func_val = avg_profit_per_trade * N_trade_per_day
 
         print('='*50)
-        print(f'Total profit: {fval:.3f}')
-        print(f'Win:          {cnt_win}')
-        print(f'Loss:         {cnt_loss}')
-        print(f'Draw:         {cnt_draw}')
-        print(f'Profit:       {cnt_profit}')
         print(f'Trade Count:  {trade_count}')
+        print(f'Win Rate:     {cnt_win/trade_count:.3f}')
+        print(f'Loss Rate:    {cnt_loss/trade_count:.3f}')
+        print(f'Draw Rate:    {cnt_draw/trade_count:.3f}')
+        print(f'Profit Rate:  {cnt_profit/trade_count:.3f}')
+        print(f'Number of Trades per Day: {N_trade_per_day:.3f}')
+        print(f'Number of Effective Trades: {N_effective:.3f}')
+        print(f'Avg. Number of Trades: {N_trade_avg:.3f}')
+        print('-'*20 + 'Parameters' + '-'*20)
         print(f'Threshold:    {entry_thres:.3f}')
         print(f'Stop Loss:    {stop_loss:.3f}')
         print(f'Risk-Reward:  {risk_reward_ratio:.3f}')
         print(f'Frac. hold:   {frac_hold:.3f}')
-        print(f'Avg Profit per Duration:{avg_profit_per_duration:.5f}')
-        print(f'Avg Profit per Trade:   {avg_profit_per_trade:.5f}')
-        print(f'Function value:         {func_val:.5f}')
+        print(f'Avg Profit per Duration:{avg_profit_per_duration*100:.3f}%')
+        print(f'Avg Profit per Trade:   {avg_profit_per_trade*100:.3f}%/trade')
+        print(f'Function value:         {func_val*100:.3f}%')
         print('='*50)
 
         # return fval/frac_hold
