@@ -9,13 +9,13 @@ from pyswarm import pso
 import os
 
 # Configuration Variables
-train_hour = 120
-test_hour = 24
-total_hour = train_hour + test_hour
-train_ratio = train_hour / total_hour
-timeframe = '15m'
-days = 90
-trading_fee = 0.00045
+TRAIN_HOUR = 120
+TEST_HOUR = 24
+TOTAL_HOUR = TRAIN_HOUR + TEST_HOUR
+TRAIN_RATIO = TRAIN_HOUR / TOTAL_HOUR
+TIMEFRAME = '15m'
+DAYS = 90
+TRADING_FEE = 0.00045
 
 
 class PairTradingModel:
@@ -111,7 +111,7 @@ class PairTradingModel:
                     
                     if signal_0 == 1:
                         if current_z_spread < z_spread_0 - stop_loss or current_z_spread > z_spread_0 + risk_reward_ratio * stop_loss:
-                            profit = (current_spread - spread_0) - (2*trading_fee) - slippage
+                            profit = (current_spread - spread_0) - (2*TRADING_FEE) - slippage
                             total_profit += profit
                             if current_z_spread > z_spread_0 + risk_reward_ratio * stop_loss:
                                 cnt_win += 1
@@ -120,7 +120,7 @@ class PairTradingModel:
                             returns.append(profit)
                             break                        
                         if i == max_trading_time - 1:
-                            profit = (current_spread - spread_0) - (2*trading_fee) - slippage
+                            profit = (current_spread - spread_0) - (2*TRADING_FEE) - slippage
                             total_profit += profit
                             cnt_draw += 1
                             returns.append(profit)
@@ -128,7 +128,7 @@ class PairTradingModel:
 
                     elif signal_0 == -1:
                         if current_z_spread > z_spread_0 + stop_loss or current_z_spread < z_spread_0 - risk_reward_ratio * stop_loss:
-                            profit = (spread_0 - current_spread) - (2*trading_fee) - slippage
+                            profit = (spread_0 - current_spread) - (2*TRADING_FEE) - slippage
                             total_profit += profit
                             if current_z_spread < z_spread_0 - risk_reward_ratio * stop_loss:
                                 cnt_win += 1
@@ -137,7 +137,7 @@ class PairTradingModel:
                             returns.append(profit)
                             break
                         if i == max_trading_time - 1:
-                            profit = (spread_0 - current_spread) - (2*trading_fee) - slippage
+                            profit = (spread_0 - current_spread) - (2*TRADING_FEE) - slippage
                             total_profit += profit
                             cnt_draw += 1
                             returns.append(profit)
@@ -166,12 +166,12 @@ class PairTradingModel:
         avg_profit_per_duration = total_profit_per_duration / trade_count if trade_count > 0 else 0
         avg_profit_per_trade = total_profit / trade_count if trade_count > 0 else 0
 
-        T_total = 24
-        T_search = 1
-        N_days = 90*1.5
-        N_effective = (T_total-T_search*(1/frac_hold-1)) / (T_total*frac_hold)
-        N_trade_avg = trade_count / N_days
-        N_trade_per_day = min(N_effective, N_trade_avg)
+        T_TOTAL = 24
+        T_SEARCH = 1
+        N_DAYS = 90*1.5
+        N_effective = (T_TOTAL-T_SEARCH*(1/frac_hold-1)) / (T_TOTAL*frac_hold)
+        N_avg_trade = trade_count / N_DAYS
+        N_trade_per_day = min(N_effective, N_avg_trade)
         func_val = avg_profit_per_trade * N_trade_per_day
 
         print('='*50)
@@ -182,7 +182,7 @@ class PairTradingModel:
         print(f'Profit Rate:  {cnt_profit/trade_count:.3f}')
         print(f'Number of Trades per Day: {N_trade_per_day:.3f}')
         print(f'Number of Effective Trades: {N_effective:.3f}')
-        print(f'Avg. Number of Trades: {N_trade_avg:.3f}')
+        print(f'Avg. Number of Trades: {N_avg_trade:.3f}')
         print('-'*20 + 'Parameters' + '-'*20)
         print(f'Threshold:    {entry_thres:.3f}')
         print(f'Stop Loss:    {stop_loss:.3f}')
@@ -194,7 +194,7 @@ class PairTradingModel:
         print('='*50)
 
         # return fval/frac_hold
-        return func_val
+        return func_val*100
 
     def objective(self, params):
         entry_thres, risk_reward_ratio, stop_loss, frac_hold = params
@@ -225,20 +225,20 @@ class PairTradingModel:
 
 # Running the Process
 if __name__ == "__main__":
-    model = PairTradingModel(train_hour, timeframe, days, train_ratio)
+    model = PairTradingModel(TRAIN_HOUR, TIMEFRAME, DAYS, TRAIN_RATIO)
     
     # Load training data
-    filepath = f'./training_data/pair_data_{train_hour}_{test_hour}_{timeframe}_{days}.npy'
+    filepath = f'./training_data/pair_data_{TRAIN_HOUR}_{TEST_HOUR}_{TIMEFRAME}_{DAYS}.npy'
     train_pair_data = model.load_data(filepath)
     
     # Precompute values and save
-    pkl_filepath = f'./training_data/precomputed_{train_hour}_{timeframe}_{days}.pkl'
+    pkl_filepath = f'./training_data/precomputed_{TRAIN_HOUR}_{TIMEFRAME}_{DAYS}.pkl'
     if not os.path.exists(pkl_filepath):
         model.precompute_hedge_ratios(train_pair_data)
-        model.save_precomputed_values(f'./training_data/precomputed_{train_hour}_{timeframe}_{days}.pkl')
+        model.save_precomputed_values(f'./training_data/precomputed_{TRAIN_HOUR}_{TIMEFRAME}_{DAYS}.pkl')
 
     # Load precomputed values
-    with open(f'./training_data/precomputed_{train_hour}_{timeframe}_{days}.pkl', 'rb') as f:
+    with open(f'./training_data/precomputed_{TRAIN_HOUR}_{TIMEFRAME}_{DAYS}.pkl', 'rb') as f:
         print('Loading precomputed values...')
         model.precomputed_values = pickle.load(f)
         print(f'Length of precomputed values: {len(model.precomputed_values)}')
