@@ -1,27 +1,46 @@
 import numpy as np
 import math
 import time
+from datetime import datetime, timedelta
 from binance_downloader import BinanceDownloader
 from pair_selector import CryptoPairSelector
+import logging
+import sys
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,  # Set to DEBUG for more detailed output
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # Log to stdout
+        logging.FileHandler("crypto_trader.log")  # Log to a file
+    ]
+)
 
 class CryptoTrader:
     def __init__(self, client, config, enable_plot=0):
         self.client = client
         self.config = config
         self.enable_plot = enable_plot
-
-    def find_cointegrated_pairs(self): 
-        print("Finding cointegrated pairs...")
+        logging.info("CryptoTrader initialized with config: %s", config)
         
-        selector = CryptoPairSelector(self.client, self.config)
+    def find_cointegrated_pairs(self): 
+        logging.info("Finding cointegrated pairs...")
+        
+        selector = CryptoPairSelector(self.config)
         coint_pairs, data = selector.select_trading_pairs()
-        best_pair, best_sharpe_ratio, info_pair = selector.select_best_pair(data, coint_pairs, self.enable_plot)
-        return best_pair, best_sharpe_ratio, info_pair
+        best_pair, info_pair = selector.select_best_pair(data, coint_pairs, self.enable_plot)
+        if best_pair:
+            logging.debug("Best pair found: %s with info: %s", best_pair, info_pair)
+        else:
+            logging.warning("No cointegrated pairs found.")
+        return best_pair, info_pair
 
     def download_data(self):
-        print("Downloading data...")
+        logging.info("Downloading data...")
         downloader = BinanceDownloader(self.config, self.client)
         downloader.download_data()
+        logging.debug("Data downloaded successfully.")
 
     def get_symbol_info(self, symbol):
         try:
@@ -41,66 +60,93 @@ class CryptoTrader:
                                 tick_size = float(f['tickSize'])
                             elif f['filterType'] == 'MIN_NOTIONAL':
                                 min_notional = float(f['notional'])
+                        logging.debug("Symbol info for %s: step_size=%s, tick_size=%s, min_notional=%s, quantity_precision=%s",
+                                      symbol, step_size, tick_size, min_notional, quantity_precision)
                         return step_size, tick_size, min_notional, quantity_precision
-            else:
-                print(f"No symbol info found for {symbol}")
-                return None, None, None, None
+            logging.error("No symbol info found for %s", symbol)
+            return None, None, None, None
         except Exception as e:
-            print(f"An exception occurred: {e}")
+            logging.error("An exception occurred while fetching symbol info for %s: %s", symbol, e)
             return None, None, None, None
 
     def round_step_size(self, quantity, step_size):
-        return math.floor(quantity / step_size) * step_size
+        rounded = math.floor(quantity / step_size) * step_size
+        logging.debug("Rounded quantity: original=%s, step_size=%s, rounded=%s", quantity, step_size, rounded)
+        return rounded
 
     def validate_order(self, symbol, side, quantity):
         try:
             step_size, tick_size, min_notional, quantity_precision = self.get_symbol_info(symbol)
+            if None in (step_size, tick_size, min_notional, quantity_precision):
+                logging.error("Symbol info incomplete for %s. Cannot validate order.", symbol)
+                return None, None
+
             rounded_quantity = self.round_step_size(quantity, step_size)
             rounded_quantity = round(rounded_quantity, quantity_precision)
             price = float(self.client.futures_symbol_ticker(symbol=symbol)['price'])
             notional = rounded_quantity * price
             
-            print("\n" + "="*60)
-            print(f"{'Validating Order':<30} | {symbol} | {side}")
-            print("="*60)
-            print(f"{'Initial Quantity':<30}: {quantity:.4f}")
-            print(f"{'Rounded Quantity':<30}: {rounded_quantity:.4f}")
-            print(f"{'Step Size':<30}: {step_size}")
-            print(f"{'Tick Size':<30}: {tick_size}")
-            print(f"{'Min Notional':<30}: {min_notional}")
-            print(f"{'Quantity Precision':<30}: {quantity_precision}")
-            print(f"{'Price':<30}: {price:.4f}")
-            print(f"{'Order Notional':<30}: {notional:.4f}")
-            print("="*60 + "\n")
+            logging.info("Validating Order for %s | Side: %s", symbol, side)
+            logging.debug("Initial Quantity: %.4f, Rounded Quantity: %.4f, Step Size: %s, Tick Size: %s, Min Notional: %s, Quantity Precision: %s, Price: %.4f, Order Notional: %.4f",
+                          quantity, rounded_quantity, step_size, tick_size, min_notional, quantity_precision, price, notional)
             
             if notional < min_notional:
+                logging.warning("Order notional %.4f is less than the minimum notional %.4f for %s", notional, min_notional, symbol)
                 raise ValueError(f"Order notional {notional:.4f} is less than the minimum notional {min_notional:.4f}")
             
             return rounded_quantity, notional
         except Exception as e:
-            print(f"An exception occurred during validation: {e}")
+            logging.error("An exception occurred during order validation for %s: %s", symbol, e)
             return None, None
 
     def place_order(self, symbol, side, rounded_quantity):
         try:
+            self.client.futures_change_leverage(symbol=symbol, leverage=self.config['LEVERAGE'])
             order = self.client.futures_create_order(
                 symbol=symbol,
                 side=side,
                 type='MARKET',
                 quantity=rounded_quantity,
             )
+            logging.info("Placed order for %s | Side: %s | Quantity: %s | Order ID: %s", symbol, side, rounded_quantity, order.get('orderId'))
             return order
         except Exception as e:
-            print(f"An exception occurred: {e}")
+            logging.error("An exception occurred while placing order for %s: %s", symbol, e)
             return None
+
+    def place_order_with_retry(self, symbol, side, quantity, max_retries=3, backoff_factor=2):
+        attempt = 0
+        while attempt < max_retries:
+            order = self.place_order(symbol, side, quantity)
+            if order is not None:
+                return order
+            attempt += 1
+            wait_time = backoff_factor ** attempt
+            logging.warning("Retrying to place order for %s in %s seconds... (Attempt %s/%s)", symbol, wait_time, attempt, max_retries)
+            time.sleep(wait_time)
+        logging.error("Failed to place order for %s after %s attempts.", symbol, max_retries)
+        return None
+
+    def is_order_filled(self, symbol, order_id):
+        try:
+            order = self.client.futures_get_order(symbol=symbol, orderId=order_id)
+            executed_qty = float(order['executedQty'])
+            original_qty = float(order['origQty'])
+            filled = executed_qty >= original_qty
+            logging.debug("Order %s for %s filled: %s (Executed: %s, Original: %s)", order_id, symbol, filled, executed_qty, original_qty)
+            return filled
+        except Exception as e:
+            logging.error("An exception occurred while checking order status for %s (Order ID: %s): %s", symbol, order_id, e)
+            return False
 
     def get_current_positions(self):
         try:
             positions = self.client.futures_account()['positions']
             current_positions = [position for position in positions if float(position['positionAmt']) != 0.0]
+            logging.debug("Current open positions: %s", current_positions)
             return current_positions
         except Exception as e:
-            print(f"An exception occurred while fetching positions: {e}")
+            logging.error("An exception occurred while fetching positions: %s", e)
             return []
 
     def close_position(self, symbol, quantity):
@@ -108,27 +154,37 @@ class CryptoTrader:
             side = 'SELL' if quantity > 0 else 'BUY'
             quantity = abs(quantity)
             step_size, tick_size, min_notional, quantity_precision = self.get_symbol_info(symbol)
+            if None in (step_size, tick_size, min_notional, quantity_precision):
+                logging.error("Symbol info incomplete for %s. Cannot close position.", symbol)
+                return
+            
             rounded_quantity = self.round_step_size(quantity, step_size)
             rounded_quantity = round(rounded_quantity, quantity_precision)
             if rounded_quantity == 0.0:
-                print(f"Rounded quantity is zero for {symbol}, unable to close position")
+                logging.warning("Rounded quantity is zero for %s, unable to close position", symbol)
                 return
+            
             order = self.client.futures_create_order(
                 symbol=symbol,
                 side=side,
                 type='MARKET',
                 quantity=rounded_quantity,
             )
-            print(f"Closed position for {symbol}: {order}")
+            logging.info("Closed position for %s | Side: %s | Quantity: %s | Order ID: %s", symbol, side, rounded_quantity, order.get('orderId'))
         except Exception as e:
-            print(f"An exception occurred while closing position: {e}")
+            logging.error("An exception occurred while closing position for %s: %s", symbol, e)
+
 
     def close_all_positions(self):
         current_positions = self.get_current_positions()
+        if not current_positions:
+            logging.info("No open positions to close.")
+            return
+        
         for position in current_positions:
             symbol = position['symbol']
             quantity = float(position['positionAmt'])
-            print(f"Closing position for {symbol}, Quantity: {quantity}")
+            logging.info("Closing position for %s, Quantity: %s", symbol, quantity)
             self.close_position(symbol, quantity)
 
     def print_futures_balance(self):
@@ -136,18 +192,18 @@ class CryptoTrader:
             balances = self.client.futures_account_balance()
             for balance in balances:
                 if balance['asset'] == 'USDT':
-                    print("="*50)
-                    print(f"{'Futures Account Balance':^50}")
-                    print("="*50)
-                    print(f"{'Asset':<25}: {balance['asset']}")
-                    print(f"{'Available Balance':<25}: {float(balance['availableBalance']):.2f} USDT")
-                    print(f"{'Cross Wallet Balance':<25}: {float(balance['crossWalletBalance']):.2f} USDT")
-                    print(f"{'Cross Unrealized PNL':<25}: {float(balance['crossUnPnl']):.2f} USDT")
-                    print(f"{'Total Wallet Balance':<25}: {float(balance['balance']):.2f} USDT")
-                    print("="*50)
+                    logging.info("Futures Account Balance:")
+                    logging.info("="*50)
+                    logging.info("Asset: %s", balance['asset'])
+                    logging.info("Available Balance: %.2f USDT", float(balance['availableBalance']))
+                    logging.info("Cross Wallet Balance: %.2f USDT", float(balance['crossWalletBalance']))
+                    logging.info("Cross Unrealized PNL: %.2f USDT", float(balance['crossUnPnl']))
+                    logging.info("Total Wallet Balance: %.2f USDT", float(balance['balance']))
+                    logging.info("="*50)
                     break
         except Exception as e:
-            print(f"An exception occurred while fetching futures account balance: {e}")
+            logging.error("An exception occurred while fetching futures account balance: %s", e)
+
 
     def get_available_balance(self, asset='USDT'):
         try:
@@ -155,144 +211,179 @@ class CryptoTrader:
             for balance in balances:
                 if balance['asset'] == asset:
                     available_balance = float(balance['availableBalance'])
-                    print(f"Available balance for {asset}: {available_balance}")
+                    logging.info("Available balance for %s: %.2f", asset, available_balance)
                     return available_balance
-        except Exception as e:
-            print(f"An exception occurred while fetching futures account balance: {e}")
+            logging.warning("Asset %s not found in futures account balance.", asset)
             return 0.0
+        except Exception as e:
+            logging.error("An exception occurred while fetching futures account balance for %s: %s", asset, e)
+            return 0.0
+        
 
     def run_trading_cycle(self):
+        logging.info("Starting trading cycle...")
         while True:
-            self.close_all_positions()
-            open_orders = self.client.futures_get_open_orders()
-            if open_orders:
-                print("There are open orders, exiting...")
-                break
-            
-            capital = self.get_available_balance()
-
-            self.download_data()
-            
-            best_pair, highest_probability, info_pair = self.find_cointegrated_pairs()
-            if best_pair is not None:
+            try:
+                open_positions = self.get_current_positions()
+                if open_positions:
+                    logging.info("Open positions detected. Closing all positions before proceeding.")
+                    self.close_all_positions()
                 
-                coin1, coin2 = best_pair
-                hedge_ratio = info_pair['hedge_ratio']
-                intercept = info_pair['intercept']
-                trading_charge = self.config['TRADING_CHARGE']
-                signal = info_pair['signal'].iloc[-1]
-                upper_bound = info_pair['upper_bound']
-                lower_bound = info_pair['lower_bound']
-                mean_spread = info_pair['mean_spread']
-                std_spread = info_pair['std_spread']
+                capital = self.get_available_balance()
 
-                E = capital * (1 - 2 * trading_charge)
-                S1 = E / (1 + hedge_ratio)
-                S2 = hedge_ratio * S1
-                qty1 = S1 / info_pair['price1']
-                qty2 = S2 / info_pair['price2']
-                coin1_trade = info_pair['trade_coin1']
-                coin2_trade = info_pair['trade_coin2']
-
-                print("\n" + "="*60)
-                print(f"{'Capital':<20}: {capital}")
-                print(f"{'Effective Capital':<20}: {E:.2f}")
-                print(f"{'Hedge Ratio':<20}: {hedge_ratio:.4f}")
-                print(f"{'Trading Pair':<20}: {coin1} / {coin2}")
-                print(f"{'Quantity 1':<20}: {qty1:.4f}")
-                print(f"{'Quantity 2':<20}: {qty2:.4f}")
-                print(f"{'Trade Coin 1':<20}: {coin1_trade}")
-                print(f"{'Trade Coin 2':<20}: {coin2_trade}")
-                print(f"{'Highest Probability':<20}: {highest_probability:.4f}")
-                print("="*60 + "\n")
+                self.download_data()
                 
-                rounded_qty1, cost1 = self.validate_order(coin1, coin1_trade, qty1)
-                rounded_qty2, cost2 = self.validate_order(coin2, coin2_trade, qty2)
-                spread_0, z_spread_0 = self.compute_spread(coin1, coin2, hedge_ratio, intercept, mean_spread, std_spread)
-                print(f"{'Spread':<30}: {spread_0:.4f}")
-                print(f"{'Z-spread':<30}: {z_spread_0:.4f}")
+                best_pair, info_pair = self.find_cointegrated_pairs()
+                if best_pair is not None:
+                    
+                    coin1, coin2 = best_pair
+                    hedge_ratio = info_pair['hedge_ratio']
+                    intercept = info_pair['intercept']
+                    signal = info_pair['signal']
+                    mean_spread = info_pair['mean_spread']
+                    std_spread = info_pair['std_spread']
 
-                if rounded_qty1 and rounded_qty2 and (z_spread_0 > upper_bound or z_spread_0 < lower_bound):
-                    capital_usage_percentage = (cost1 + cost2) / capital * 100
-                    print(f"{'Capital usage percentage':<40}: {capital_usage_percentage:.2f}%\n") 
+                    trading_charge = self.config['TRADING_CHARGE']
+                    stop_loss = self.config['STOP_LOSS']
+                    risk_reward_ratio = self.config['RISK_REWARD_RATIO']
+                    frac_hold = self.config['FRAC_HOLD']
 
-                    order1 = self.place_order(coin1, coin1_trade, rounded_qty1)
-                    order2 = self.place_order(coin2, coin2_trade, rounded_qty2)
+                    E = capital * (1 - 2 * trading_charge)
+                    S1 = E / (1 + hedge_ratio)
+                    S2 = hedge_ratio * S1
+                    qty1 = S1 / info_pair['price1']
+                    qty2 = S2 / info_pair['price2']
+                    coin1_trade = info_pair['trade_coin1']
+                    coin2_trade = info_pair['trade_coin2']
 
-                    if order1 is None or order2 is None:
-                        print("Error placing orders")
-                        self.close_all_positions()
-                        time.sleep(60)
-                        continue
+                    logging.info("Trading Parameters:")
+                    logging.debug("Capital: %s, Effective Capital: %.2f, Hedge Ratio: %.4f, Trading Pair: %s/%s, Quantity1: %.4f, Quantity2: %.4f, Trade Coin1: %s, Trade Coin2: %s",
+                                  capital, E, hedge_ratio, coin1, coin2, qty1, qty2, coin1_trade, coin2_trade)
+  
+                    
+                    rounded_qty1, cost1 = self.validate_order(coin1, coin1_trade, qty1)
+                    rounded_qty2, cost2 = self.validate_order(coin2, coin2_trade, qty2)
+                    spread_0, z_spread_0 = self.compute_spread(coin1, coin2, hedge_ratio, intercept, mean_spread, std_spread)
+                    logging.info("Initial Spread: %.4f, Z-Spread: %.4f", spread_0, z_spread_0)
 
-                    cnt = 0
+                    if rounded_qty1 and rounded_qty2:
+                        capital_usage_percentage = (cost1 + cost2) / capital * 100
+                        logging.info("Capital usage percentage: %.2f%%", capital_usage_percentage)
+    
+                        order1 = self.place_order_with_retry(coin1, coin1_trade, rounded_qty1)
+                        order2 = self.place_order_with_retry(coin2, coin2_trade, rounded_qty2)
 
-                    while True:
-
-                        if cnt == 0:
-                            spread_i, z_spread_i = spread_0, z_spread_0
-                        else:
-                            price1 = self.get_price(coin1)
-                            price2 = self.get_price(coin2)
-                            spread_i, z_spread_i = self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
-                            
-                        print(f"Iteration {cnt}, Spread: {spread_i:.4f}, Z-spread: {z_spread_i:.4f}, Signal: {signal}, Bounds: ({upper_bound:.2f}, {lower_bound:.2f})")
-
-                        if self.should_close_position(signal, z_spread_i, z_spread_0, upper_bound, lower_bound):
+                        if order1 is None or order2 is None:
+                            logging.error("Error placing orders. Closing all positions and retrying after delay.")
                             self.close_all_positions()
-                            break
-                        else:
-                            cnt += 1
-                            
-                        interval_seconds = self.convert_interval_to_seconds(self.config['INTERVAL'])
-                        time.sleep(interval_seconds)
+                            time.sleep(60)
+                            continue
+
+                        order1_filled = self.is_order_filled(coin1, order1['orderId'])
+                        order2_filled = self.is_order_filled(coin2, order2['orderId'])
+
+                        if not order1_filled or not order2_filled:
+                            logging.warning("One or both orders are not filled. Closing all positions and searching for new pairs.")
+                            self.close_all_positions()
+                            time.sleep(60)
+                            continue  # Restart the trading cycle
                         
+                        position_open_time = datetime.now()
+                        max_hold_seconds = frac_hold * 24 * 3600
+
+                        cnt = 0
+                        while True:
+                            if cnt == 0:
+                                spread_i, z_spread_i = spread_0, z_spread_0
+                            else:
+                                price1 = self.get_price(coin1)
+                                price2 = self.get_price(coin2)
+                                spread_i, z_spread_i = self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
+                                
+                            logging.info("Iteration %s, Spread: %.4f, Z-spread: %.4f, Signal: %s", cnt, spread_i, z_spread_i, signal)
+
+                            current_time = datetime.now()
+                            elapsed_time = (current_time - position_open_time).total_seconds()
+                            if elapsed_time > max_hold_seconds:
+                                logging.info("Maximum holding time of %.2f hours reached. Closing all positions.", frac_hold * 24)
+                                self.close_all_positions()
+                                break
+
+                            if self.should_close_position(signal, z_spread_i, z_spread_0, stop_loss, risk_reward_ratio, frac_hold):
+                                logging.info("Conditions met to close positions based on spread thresholds.")
+                                self.close_all_positions()
+                                break
+                            else:
+                                cnt += 1
+                                
+                            interval_seconds = self.convert_interval_to_seconds(self.config['INTERVAL'])
+                            logging.debug("Sleeping for %s seconds before next check.", interval_seconds)
+                            time.sleep(interval_seconds)
+                            
+                    else:
+                        logging.error("Error validating orders. Retrying after delay.")
+                        time.sleep(60)
                 else:
-                    print("Error placing orders")
+                    logging.info("No cointegrated pairs found. Retrying after delay.")
                     time.sleep(60)
-            else:
-                print("No cointegrated pairs found")
+            
+            except Exception as e:
+                logging.error("An exception occurred in trading cycle: %s", e)
+                self.close_all_positions()
                 time.sleep(60)
 
     def compute_spread(self, coin1, coin2, hedge_ratio, intercept, mean_spread, std_spread):
         price1 = float(self.client.futures_symbol_ticker(symbol=coin1)['price'])
         price2 = float(self.client.futures_symbol_ticker(symbol=coin2)['price'])
-        return self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
+        spread, z_spread = self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
+        logging.debug("Computed spread: %.4f, Z-spread: %.4f for %s/%s", spread, z_spread, coin1, coin2)
+        return spread, z_spread
     
     def compute_spread_from_prices(self, price1, price2, hedge_ratio, intercept, mean_spread, std_spread):
         spread = np.log(price1) - (hedge_ratio * np.log(price2) + intercept)
         z_spread = (spread - mean_spread) / std_spread
+        logging.debug("Spread calculation: spread=%.4f, z_spread=%.4f", spread, z_spread)
         return spread, z_spread
 
-    def should_close_position(self, signal, z_spread_i, init_z_spread, upper_bound, lower_bound):
-        if signal == 1 and z_spread_i > 0:
-            return True
-        elif signal == 1 and z_spread_i < (init_z_spread - 2):
-            return True
-        elif signal == -1 and z_spread_i < 0:
-            return True
-        elif signal == -1 and z_spread_i > (init_z_spread + 2):
-            return True
-        else:
-            return False
+    def should_close_position(self, signal, z_spread_i, init_z_spread, stop_loss, risk_reward_ratio, frac_hold):
+        close = False
+        if signal == 1:
+            if z_spread_i > init_z_spread + (risk_reward_ratio * stop_loss) or z_spread_i < init_z_spread - stop_loss:
+                close = True
+        elif signal == -1:
+            if z_spread_i < init_z_spread - (risk_reward_ratio * stop_loss) or z_spread_i > init_z_spread + stop_loss:
+                close = True
+        if close:
+            logging.info("Position closure condition met: z_spread_i=%.4f, init_z_spread=%.4f", z_spread_i, init_z_spread)
+        return close
 
     def get_price(self, coin):
-        return float(self.client.futures_symbol_ticker(symbol=coin)['price'])
+        try:
+            price = float(self.client.futures_symbol_ticker(symbol=coin)['price'])
+            logging.debug("Fetched price for %s: %.4f", coin, price)
+            return price
+        except Exception as e:
+            logging.error("An exception occurred while fetching price for %s: %s", coin, e)
+            return 0.0
 
     def convert_interval_to_seconds(self, interval):
-        unit = interval[-1]
-        amount = int(interval[:-1])
-        
-        if unit == 'm':
-            return amount * 60
-        elif unit == 'h':
-            return amount * 3600
-        elif unit == 'd':
-            return amount * 86400
-        elif unit == 'w':
-            return amount * 604800
-        elif unit == 'M':
-            # Rough approximation, as months can vary in length
-            return amount * 2592000
-        else:
-            raise ValueError("Invalid interval format")
+        try:
+            unit = interval[-1]
+            amount = int(interval[:-1])
+            
+            if unit == 'm':
+                return amount * 60
+            elif unit == 'h':
+                return amount * 3600
+            elif unit == 'd':
+                return amount * 86400
+            elif unit == 'w':
+                return amount * 604800
+            elif unit == 'M':
+                # Rough approximation, as months can vary in length
+                return amount * 2592000
+            else:
+                raise ValueError("Invalid interval format")
+        except Exception as e:
+            logging.error("Error converting interval '%s' to seconds: %s", interval, e)
+            raise

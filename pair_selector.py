@@ -20,10 +20,11 @@ from statsmodels.robust.robust_linear_model import RLM
 plt.style.use('dark_background')
 
 class CoinDataLoader:
-    def __init__(self, directory, csv_filename, n_coins):
-        self.directory = directory
-        self.csv_filename = csv_filename
-        self.n_coins = n_coins
+    def __init__(self, config):
+        self.config = config
+        self.directory = config['SAVING_DIR']
+        self.csv_filename = config['CSV_FILENAME']
+        self.n_coins = config['N_COINS']
     
     def load_selected_trading_coins(self):
         logging.info(f"Loading trading coins from {self.csv_filename}...")
@@ -38,16 +39,13 @@ class CoinDataLoader:
         return data
 
 class CoinAnalysis:
-    def __init__(self, train_ratio, coint_threshold, corr_threshold, normality_threshold=0.05):
-        if train_ratio < 1:
-            self.split = True
-        else:
-            self.split = False
-
-        self.train_ratio = train_ratio
-        self.coint_threshold = coint_threshold
-        self.corr_threshold = corr_threshold
-        self.normality_threshold = normality_threshold
+    def __init__(self, config):
+        self.config = config
+        self.train_ratio = config['TRAIN_RATIO']
+        self.coint_threshold = config['COINT_THRESHOLD']
+        self.corr_threshold = config['CORR_THRESHOLD']
+        self.normality_threshold = config.get('NORMALITY_THRESHOLD', 0.05)
+        self.split = self.train_ratio < 1
 
     def find_valid_coins(self, data):
         items = list(data.items())
@@ -151,32 +149,35 @@ class CoinAnalysis:
         return coint_pairs
 
 class PairSelector:
-    def __init__(self, analysis):
-        self.analysis = analysis
+    def __init__(self, config):
+        self.config = config
+        self.analysis = CoinAnalysis(config)
+        self.threshold = config['THRESHOLD']
 
     def select_trading_pairs(self, data):
-        logging.info(">>> Finding valid coins...")
+        logging.info(">>> Starting pair selection process...")
+        # Step 1: Find valid coins based on stationarity
         data = self.analysis.find_valid_coins(data)
-        
-        logging.info(">>> Calculating normalized prices...")
-        coins = list(data.keys())
-        all_pairs = list(itertools.combinations(coins, 2))
+
+        # Step 2: Calculate normalized close prices
         normalized_prices = self.analysis.calculate_normalized_close_prices(data)
 
-        logging.info(">>> Calculating correlation with train ratio...")  # 1차적인 필터링
+        # Step 3: Generate all possible pairs
+        coins = list(data.keys())
+        all_pairs = list(itertools.combinations(coins, 2))
+
+        # Step 4: Calculate correlation to filter pairs
         chosen_pairs = self.analysis.calculate_correlation(normalized_prices, all_pairs)
-        print(f"Number of pairs: {len(chosen_pairs)}")
+        logging.info(f"Number of pairs after correlation filtering: {len(chosen_pairs)}")
 
-        logging.info(">>> Coinegration and Normality test...")  # 2차적인 필터링
+        # Step 5: Identify cointegrated pairs with normal spread
         coint_pairs = self.analysis.identify_pairs_candidates(chosen_pairs, data)
-
-        logging.info(f"Number of all pairs before filtering: {len(all_pairs)}")
-        logging.info(f"Number of chosen pairs - correlation: {len(chosen_pairs)}")
         logging.info(f"Number of cointegrated pairs: {len(coint_pairs)} / {len(chosen_pairs)}")
 
         return coint_pairs, data
-    
+
     def save_pairs_and_data(self, cointegrated_pairs, data):
+        logging.info(">>> Saving pairs and their data...")
         pair_data = {}
         for pair in cointegrated_pairs:
             coin1, coin2 = pair
@@ -189,61 +190,11 @@ class PairSelector:
                     coin2: coin2_data[['Open', 'High', 'Low', 'Close', 'Volume']]
                 }
             else:
-                logging.info(f"Data for one of the coins in the pair {pair} is missing.")
-                
+                logging.warning(f"Data for one of the coins in the pair {pair} is missing. Skipping.")
+        logging.info(f"Saved data for {len(pair_data)} pairs.")
         return pair_data
 
-class Backtester:
-    def __init__(self, trading_charge, train_ratio):
-        self.trading_charge = trading_charge
-        self.train_ratio = train_ratio
-        self.stop_loss_ratio = 2
-
-    def generate_signal(self, z_spread, threshold_long, threshold_short):
-        signal = pd.Series(0, index=z_spread.index)
-
-        if z_spread.iloc[0] > threshold_long:
-            signal.iloc[0] = -1
-        elif z_spread.iloc[0] < threshold_short:
-            signal.iloc[0] = 1
-        
-        for t in range(1, len(z_spread)):
-            if signal.iloc[t - 1] == 0:
-                if z_spread.iloc[t] <= threshold_long:
-                    signal.iloc[t] = 1
-                elif z_spread.iloc[t] >= threshold_short:
-                    signal.iloc[t] = -1
-                else:
-                    signal.iloc[t] = 0
-            elif signal.iloc[t - 1] == 1:
-                if z_spread.iloc[t] >= 0:
-                    signal.iloc[t] = 0
-                else:
-                    signal.iloc[t] = signal.iloc[t - 1]
-            else:
-                if z_spread.iloc[t] <= 0:
-                    signal.iloc[t] = 0
-                else:
-                    signal.iloc[t] = signal.iloc[t - 1]
-        
-        return signal 
-
-    def calculate_optimal_thresholds(self, mean_spread, std_spread, T):
-        f = lambda s0: -(s0 - (self.trading_charge * 4)) * T * (1 - stats.norm.cdf(s0, mean_spread, std_spread))
-        x = np.linspace(0, 0.05, 100)
-        f_values = [f(s0) for s0 in x]
-        s0 = x[np.argmin(f_values)]
-        lower_bound = -(s0 - mean_spread) / std_spread
-        upper_bound = (s0 - mean_spread) / std_spread
-        return lower_bound, upper_bound, s0
-
-    def _calculate_sharpe_ratio(self, returns):
-        mean_returns = returns.mean()
-        std_returns = returns.std()
-        sharpes = mean_returns / std_returns
-        return sharpes
-    
-    def _calculate_half_life_ols(self, spread: pd.Series) -> float:
+    def _calculate_half_life(self, spread: pd.Series) -> float:
         spread_lagged = spread.shift(1)
         delta_spread = spread - spread_lagged
 
@@ -254,11 +205,11 @@ class Backtester:
         y = delta_spread.values.reshape(-1, 1)
         X = add_constant(X)
         model = OLS(y, X).fit()
-        
+
         beta = model.params[1]
         theta = -np.log(1 + beta)
-        half_life = np.log(2) / theta
-        
+        half_life = np.log(2) / theta if theta != 0 else np.inf
+
         return half_life
 
     def _calculate_hurst_exponent(self, ts):
@@ -267,235 +218,91 @@ class Backtester:
         poly = np.polyfit(np.log(lags), np.log(tau), 1)
         return poly[0] * 2.0
 
-    def backtest_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
-
-        data_samples = []
-        for coin1, coin2 in cointegrated_pairs:
-            common_indices = data[coin1].index.intersection(data[coin2].index)
-            log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
-            log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
-            
-            split_index = int(len(log_price_1) * self.train_ratio)
-            init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
-            spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
-
-            hurst = self._calculate_hurst_exponent(spread[:split_index])
-            print(f"Hurst Exponent: {hurst}")
-            half_life_methods = self.calculate_half_life_methods(spread[:split_index])
-            print(f"Half-life methods: {half_life_methods}")
-            correlation = np.corrcoef(log_price_1[:split_index], log_price_2[:split_index])[0, 1]
-
-            train_spread = spread[:split_index]
-            mean_spread = train_spread.mean()
-            std_spread = train_spread.std()
-            z_spread = (spread - mean_spread) / std_spread
-  
-            T = len(spread)
-            lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-            signal = self.generate_signal(z_spread, lower_bound, upper_bound)
-            print(f"Z-spread at split index: {z_spread.iloc[split_index]}")
-            print(f"Upper bound: {upper_bound}, Lower bound: {lower_bound}")
-
-            data_sample = self.collect_training_data(data, coin1, coin2, z_spread, signal, std_spread, half_life_methods, hurst, upper_bound, correlation, split_index)
-            condition1 = z_spread.iloc[split_index] > upper_bound
-            condition2 = z_spread.iloc[split_index] < lower_bound
-
-            if (condition1 or condition2) and (upper_bound * std_spread + mean_spread > 0.005):
-                data_samples.append(data_sample)
-
-                if ENABLE_PLOT:
-                    split_index = int(len(spread) * self.train_ratio)
-
-                    plt.figure(figsize=(20, 10))
-                    plt.subplot(2, 1, 1)
-                    plt.plot(z_spread)
-                    plt.axvline(z_spread.index[split_index], color='r', linestyle='--')
-                    plt.plot(z_spread.index, signal)
-                    plt.axhline(upper_bound, color='r', linestyle='--')
-                    plt.axhline(lower_bound, color='r', linestyle='--')
-                    plt.axhline((np.abs(z_spread.iloc[split_index]) * self.stop_loss_ratio), color='g', linestyle='--')
-                    plt.axhline(-(np.abs(z_spread.iloc[split_index]) * self.stop_loss_ratio), color='g', linestyle='--')
-                    plt.axhline(z_spread.iloc[split_index], color = 'y', linestyle='--')
-                    plt.axhline(0.0)
-                    plt.ylim(-4, 4)
-                    plt.ylabel('Z-score')
-                    plt.grid(True)
-
-                    plt.subplot(2, 1, 2)
-                    plt.plot(z_spread.index, spread)
-                    plt.axhline((upper_bound * std_spread) + mean_spread, color='r', linestyle='--')
-                    plt.axhline((lower_bound * std_spread) + mean_spread, color='r', linestyle='--')
-                    plt.axhline(0.0)
-                    plt.axhline(np.abs(spread.iloc[split_index])*self.stop_loss_ratio, color='g', linestyle='--')
-                    plt.axhline(-np.abs(spread.iloc[split_index])*self.stop_loss_ratio, color='g', linestyle='--')
-                    plt.axhline(spread.iloc[split_index], color='y', linestyle='--')
-                    plt.grid(True)
-
-                    plt.show()
-
-        return data_samples
-    
-    def optimize_filter_params(self, data):
-        coin1, coin2 = data.keys()
-
-        common_indices = data[coin1].index.intersection(data[coin2].index)
-        log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
-        log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
-        
-        split_index = int(len(log_price_1) * self.train_ratio)
-        init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
-        spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
-
-        train_spread = spread[:split_index]
-        mean_spread = train_spread.mean()
-        std_spread = train_spread.std()
-        z_spread = (spread - mean_spread) / std_spread
-
-        T = len(spread)
-        lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-
-        condition1 = z_spread.iloc[split_index] > upper_bound
-        condition2 = z_spread.iloc[split_index] < lower_bound
-
-        if (condition1 or condition2) and np.abs(spread.iloc[split_index]) > 0.005:
-
-            signal = self.generate_signal(z_spread, lower_bound, upper_bound)
-            
-            z_spread_i = z_spread.iloc[split_index]
-            signal_i = signal.iloc[split_index]
-
-            observe_z_spread = z_spread.iloc[split_index:]
-
-            open_position = 0 
-            stop_loss = z_spread_i*self.stop_loss_ratio
-
-            for i in range(1, len(observe_z_spread)): # check if it generates 2:1 win-loss ratio 
-                if signal_i == 1 and observe_z_spread.iloc[i] < stop_loss:
-                    open_position = 0
-                    break
-                elif signal_i == -1 and observe_z_spread.iloc[i] > stop_loss:
-                    open_position = 0
-                    break
-                elif signal_i == 1 and observe_z_spread.iloc[i] > 0:
-                    open_position = 1
-                    break
-                elif signal_i == -1 and observe_z_spread.iloc[i] < 0:
-                    open_position = 1
-                    break   
-            features.append(open_position)
-        else:
-            features = None
-
-        return features
-        
-    def select_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
-
+    def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT=False):
+        logging.info(">>> Selecting the best trading pair...")
         best_pair = None
+        best_half_life = np.inf
 
-        pair_info = {}
-        for coin1, coin2 in cointegrated_pairs:
+        for pair in tqdm.tqdm(cointegrated_pairs, desc="Selecting Best Pair"):
+            coin1, coin2 = pair
             common_indices = data[coin1].index.intersection(data[coin2].index)
             log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
             log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
-            
-            init_hedge_ratio, init_intercept = np.polyfit(log_price_2, log_price_1, 1)
-            hedge_ratio = pd.Series(init_hedge_ratio, index=log_price_1.index)
-            intercept = pd.Series(init_intercept, index=log_price_1.index)
 
-            spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
+            try:
+                # Compute hedge ratio and intercept
+                hedge_ratio, init_intercept = np.polyfit(log_price_2, log_price_1, 1)
+                hedge_ratio_series = pd.Series(hedge_ratio, index=log_price_1.index)
+                intercept_series = pd.Series(init_intercept, index=log_price_1.index)
 
-            mean_spread = spread.mean()
-            std_spread = spread.std()
-            z_spread = (spread - mean_spread) / std_spread
+                # Calculate spread and z-score
+                spread = log_price_1 - (hedge_ratio_series * log_price_2 + intercept_series)
+                mean_spread = spread.mean()
+                std_spread = spread.std()
+                z_spread = (spread - mean_spread) / std_spread
 
-            T = len(spread)
-            lower_bound, upper_bound, _ = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-            signal = self.generate_signal(z_spread, lower_bound, upper_bound)
-            cumulated_return, traded_return = self.backtest_pair(spread, signal)
-            half_life = self._calculate_half_life(spread)
-            hurst = self._calculate_hurst_exponent(spread)
+                if np.abs(z_spread.iloc[-1]) > self.threshold:
+                    signal = 1 if z_spread.iloc[-1] < 0 else -1
 
+                    # Calculate half-life and Hurst exponent
+                    half_life = self._calculate_half_life(spread)
+                    hurst = self._calculate_hurst_exponent(spread)
+                    trade_coin1 = 'BUY' if signal == 1 else 'SELL'
+                    trade_coin2 = 'SELL' if signal == 1 else 'BUY'
 
-            condition_3 = z_spread.iloc[-1] > upper_bound or z_spread.iloc[-1] < lower_bound
-            condition_4 = upper_bound * std_spread + mean_spread > 0.005
+                    pair_info = {
+                        'spread': spread,
+                        'signal': signal,
+                        'hedge_ratio': hedge_ratio,
+                        'intercept': init_intercept,
+                        'mean_spread': mean_spread,
+                        'std_spread': std_spread,
+                        'z_spread': z_spread,
+                        'half_life': half_life,
+                        'price1': data[coin1].loc[common_indices]['Close'].iloc[-1],
+                        'price2': data[coin2].loc[common_indices]['Close'].iloc[-1],
+                        'trade_coin1': trade_coin1,
+                        'trade_coin2': trade_coin2
+                    }
 
-            if condition_3 and condition_4:
-                best_pair = (coin1, coin2)
-                pair_info = {
-                    'cumulated_return': cumulated_return,
-                    'traded_return': traded_return,
-                    'spread': spread,
-                    'signal': signal,
-                    'hedge_ratio': hedge_ratio[-1],
-                    'intercept': intercept[-1],
-                    'mean_spread': mean_spread,
-                    'std_spread': std_spread,
-                    'lower_bound': lower_bound,
-                    'upper_bound': upper_bound,
-                    'z_spread': z_spread,
-                    'half_life': half_life,
-                    'instant_return': np.abs(spread.iloc[-1]) - (2 * self.trading_charge),
-                    'price1': data[coin1].loc[common_indices]['Close'].iloc[-1],
-                    'price2': data[coin2].loc[common_indices]['Close'].iloc[-1],
-                    'trade_coin1': 'BUY' if signal.iloc[-1] == 1 else 'SELL',
-                    'trade_coin2': 'SELL' if signal.iloc[-1] == 1 else 'BUY'
-                }
-        try:
-            if ENABLE_PLOT:
-                self.plot_best_pair(best_pair, pair_info)
-        except Exception as e:
-            logging.error(f"Error plotting best pair: {e}")
+                    # Update best pair based on some criteria, e.g., highest traded_return
+                    if half_life < best_half_life:
+                        best_pair = pair
+                        best_info = pair_info
+                        best_half_life = half_life
 
-        return best_pair, pair_info
+            except Exception as e:
+                logging.error(f"Error in processing pair {pair}: {e}")
+                
+        # Plotting (Optional)
+        if ENABLE_PLOT and best_pair == pair:
+            plt.figure(figsize=(14, 7))
+            plt.plot(spread, label='Spread')
+            plt.axhline(mean_spread, color='black', linestyle='--', label='Mean Spread')
+            plt.axhline(mean_spread + (self.risk_reward_ratio*self.stop_loss) * std_spread, color='green', linestyle='--', label='Upper Threshold')
+            plt.axhline(mean_spread + self.stop_loss * std_spread, color='red', linestyle='--', label='Lower Threshold')
+            plt.title(f"Spread for Pair: {pair}")
+            plt.legend()
+            plt.show()
 
-    def plot_best_pair(self, best_pair, info_pair):
-        plt.figure(figsize=(20, 10))
-        self.plot_z_score(info_pair, best_pair)
-        self.plot_spread(info_pair, best_pair)
-        self.plot_cumulated_return(info_pair, best_pair)
-        plt.tight_layout()
-        plt.show()
+        if best_pair:
+            logging.info(f"Best pair selected: {best_pair} with half-life: {best_half_life}")
+        else:
+            logging.warning("No suitable pair found based on the given criteria.")
 
-    def plot_z_score(self, info_pair, best_pair):
-        plt.subplot(3, 1, 1)
-        plt.plot(info_pair['z_spread'])
-        plt.plot(info_pair['z_spread'].index, info_pair['signal'])
-        plt.axhline(info_pair['upper_bound'], color='r', linestyle='--')
-        plt.axhline(info_pair['lower_bound'], color='r', linestyle='--')
-        plt.axhline(0.0)
-        plt.ylabel('Z-score')
-        plt.title(f'{best_pair[0]} and {best_pair[1]} Z-score')
-        plt.grid(True)
-
-    def plot_spread(self, info_pair, best_pair):
-        plt.subplot(3, 1, 2)
-        plt.plot(info_pair['spread'])
-        plt.axhline((info_pair['upper_bound'] * info_pair['std_spread']) + info_pair['mean_spread'], color='r', linestyle='--')
-        plt.axhline((info_pair['lower_bound'] * info_pair['std_spread']) + info_pair['mean_spread'], color='r', linestyle='--')
-        plt.axhline(0.0)
-        plt.ylabel('Spread')
-        plt.title(f'{best_pair[0]} and {best_pair[1]} Spread (stdev: {info_pair["std_spread"]:.4f})')
-        plt.grid(True)
-
-    def plot_cumulated_return(self, info_pair, best_pair):
-        plt.subplot(3, 1, 3)
-        plt.plot(info_pair['cumulated_return'])
-        plt.ylabel('Cumulated Return (%)')
-        plt.title(f'{best_pair[0]} and {best_pair[1]} Cumulated Return')
-        plt.grid(True)
+        return best_pair, best_info
 
 class CryptoPairSelector:
-    def __init__(self, client, config):
-        self.client = client
-        self.loader = CoinDataLoader(config['SAVING_DIR'], config['CSV_FILENAME'], config['N_COINS'])
-        self.analysis = CoinAnalysis(config['TRAIN_RATIO'], config['COINT_THRESHOLD'], config['CORR_THRESHOLD'])
-        self.selector = PairSelector(self.analysis)
-        self.backtester = Backtester(config['TRADING_CHARGE'], config['TRAIN_RATIO'])
+    def __init__(self, config):
+        self.config = config
+        self.loader = CoinDataLoader(config)
+        self.selector = PairSelector(config)
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
                             datefmt='%Y-%m-%d %H:%M:%S',  # Round to seconds
                             handlers=[logging.StreamHandler(),  # This will print to console
                                       logging.FileHandler('crypto_pair_selector.log')])  # This will write to a log file
-    
+
+
     def select_trading_pairs(self):
         try:
             logging.info(">>> Loading trading coins...")
@@ -507,26 +314,16 @@ class CryptoPairSelector:
             logging.error(f"Error in select_trading_pairs: {e}")
             raise
 
-    def save_pairs_and_data(self, cointegrated_pairs, data): # already filtered. we try to optimize the saving pairs
+    def save_pairs_and_data(self, cointegrated_pairs, data):
         try:
             return self.selector.save_pairs_and_data(cointegrated_pairs, data)
         except Exception as e:
             logging.error(f"Error in save_pairs_and_data: {e}")
             raise
-    
-    def optimize_filter_params(self, cointegrated_pairs, data):
-        pass
 
-    def backtest_pairs(self, data, cointegrated_pairs, ENABLE_PLOT):
+    def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT=False):
         try:
-            return self.backtester.backtest_pairs(data, cointegrated_pairs, ENABLE_PLOT)
-        except Exception as e:
-            logging.error(f"Error in backtest_pairs: {e}")
-            raise
-
-    def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT):
-        try:
-            return self.backtester.select_pair(data, cointegrated_pairs, ENABLE_PLOT)
+            return self.selector.select_best_pair(data, cointegrated_pairs, ENABLE_PLOT)
         except Exception as e:
             logging.error(f"Error in select_best_pair: {e}")
             raise

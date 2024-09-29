@@ -4,46 +4,30 @@ import tqdm
 import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.optimize import differential_evolution
+import logging
 import pickle
-from pyswarm import pso
 import os
 
 # Configuration Variables
-TRAIN_HOUR = 120
-TEST_HOUR = 24
-TOTAL_HOUR = TRAIN_HOUR + TEST_HOUR
-TRAIN_RATIO = TRAIN_HOUR / TOTAL_HOUR
+FORMATION_WINDOW = 120
+TRADING_WINDOW = 24
+TOTAL_WINDOW = FORMATION_WINDOW + TRADING_WINDOW
+WINDOW_RATIO = FORMATION_WINDOW / TOTAL_WINDOW
 TIMEFRAME = '15m'
 DAYS = 90
 TRADING_FEE = 0.00045
 
 
 class PairTradingModel:
-    def __init__(self, train_hour, timeframe, days, train_ratio):
-        self.train_hour = train_hour
+    def __init__(self, formation_window, timeframe, days, window_ratio):
+        self.formation_window = formation_window
         self.timeframe = timeframe
         self.days = days
-        self.train_ratio = train_ratio
+        self.window_ratio = window_ratio
         self.precomputed_values = None
 
     def load_data(self, filepath):
         return np.load(filepath, allow_pickle=True)
-
-    def calculate_optimal_thresholds(self, mean_spread, std_spread, T):
-        f = lambda s0: -(s0 - (0.0005 * 4)) * T * (1 - stats.norm.cdf(s0, mean_spread, std_spread))
-        x = np.linspace(0, 0.05, 100)
-        f_values = [f(s0) for s0 in x]
-        s0 = x[np.argmin(f_values)]
-        lower_bound = -(s0 - mean_spread) / std_spread
-        upper_bound = (s0 - mean_spread) / std_spread
-        return lower_bound, upper_bound, s0
-
-    def generate_signal_t(self, z_spread, split_index, threshold_long, threshold_short):
-        if z_spread.iloc[split_index] <= threshold_long:
-            return 1
-        elif z_spread.iloc[split_index] >= threshold_short:
-            return -1
-        return 0
 
     def precompute_hedge_ratios(self, train_pair_data):
         precomputed_values = []
@@ -54,16 +38,13 @@ class PairTradingModel:
                 log_price_1 = np.log(pair_price[pair_name[0]].loc[common_indices]['Close'])
                 log_price_2 = np.log(pair_price[pair_name[1]].loc[common_indices]['Close'])
                 
-                split_index = int(len(log_price_1) * self.train_ratio)
+                split_index = int(len(log_price_1) * self.window_ratio)
                 init_hedge_ratio, init_intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
                 spread = log_price_1 - (init_hedge_ratio * log_price_2 + init_intercept)
                 train_spread = spread[:split_index]
                 mean_spread = train_spread.mean()
                 std_spread = train_spread.std()
                 z_spread = (spread - mean_spread) / std_spread
-                # T = len(spread)
-                # lower_bound, upper_bound, s0 = self.calculate_optimal_thresholds(mean_spread, std_spread, T)
-                # signal_t = self.generate_signal_t(z_spread, split_index, lower_bound, upper_bound)
 
                 precomputed_values.append((spread, z_spread, split_index))
 
@@ -73,21 +54,14 @@ class PairTradingModel:
         with open(filepath, 'wb') as f:
             pickle.dump(self.precomputed_values, f)
 
-    @staticmethod
-    def calculate_sharpe_ratio(returns):
-        mean_return = np.mean(returns)
-        std_return = np.std(returns)
-        return mean_return / std_return
-
-    def cost_function(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, slippage=0.006):
+    def simulate_trading(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, slippage=0.006):
         total_profit, cnt_win, cnt_loss, cnt_draw, cnt_profit = 0, 0, 0, 0, 0
-        
         total_trade_duration = 0
         total_profit_per_duration = 0
         trade_count = 0
         returns = []
+
         for spread, z_spread, split_index in self.precomputed_values:
-            std_spread = spread[:split_index].std()
             
             if np.abs(z_spread.iloc[split_index]) > entry_thres:
                 trade_count += 1
@@ -98,9 +72,7 @@ class PairTradingModel:
                 observe_z_spread = z_spread.iloc[split_index:]
 
                 signal_0 = -1 if z_spread_0 > 0 else 1
-
-                profit = 0
-                trade_duration = 0
+                profit, trade_duration = 0, 0
                 testing_time = len(observe_z_spread)
                 max_trading_time = int(frac_hold * testing_time)
 
@@ -150,25 +122,12 @@ class PairTradingModel:
                 profit_per_duration = profit / trade_duration if trade_duration > 0 else 0
                 total_profit_per_duration += profit_per_duration
                 
-                # print(signal_0)
-                # print(profit)
-                # plt.plot(z_spread)
-                # plt.axhline(0, color='black', linestyle='--')
-                # plt.axvline(z_spread.index[split_index], color='red', linestyle='--')
-                # if signal_0 == 1:
-                #     plt.axhline(z_spread_0 - stop_loss, color='green', linestyle='--')
-                #     plt.axhline(z_spread_0 + risk_reward_ratio * stop_loss, color='blue', linestyle='--')
-                # elif signal_0 == -1:
-                #     plt.axhline(z_spread_0 + stop_loss, color='green', linestyle='--')
-                #     plt.axhline(z_spread_0 - risk_reward_ratio * stop_loss, color='blue', linestyle='--')
-                # plt.show()
-
         avg_profit_per_duration = total_profit_per_duration / trade_count if trade_count > 0 else 0
         avg_profit_per_trade = total_profit / trade_count if trade_count > 0 else 0
 
         T_TOTAL = 24
         T_SEARCH = 1
-        N_DAYS = 90*1.5
+        N_DAYS = DAYS*2
         N_effective = (T_TOTAL-T_SEARCH*(1/frac_hold-1)) / (T_TOTAL*frac_hold)
         N_avg_trade = trade_count / N_DAYS
         N_trade_per_day = min(N_effective, N_avg_trade)
@@ -198,7 +157,7 @@ class PairTradingModel:
 
     def objective(self, params):
         entry_thres, risk_reward_ratio, stop_loss, frac_hold = params
-        return -self.cost_function(entry_thres, risk_reward_ratio, stop_loss, frac_hold)
+        return -self.simulate_trading(entry_thres, risk_reward_ratio, stop_loss, frac_hold)
 
     def optimize_parameters(self):
         # Define bounds for each parameter
@@ -207,10 +166,7 @@ class PairTradingModel:
                 (0.5, 2), # stop_loss
                 (0.2, 0.9)]   # frac_hold
 
-        # Call the differential_evolution optimizer
         result = differential_evolution(self.objective, bounds, strategy='best1bin', maxiter=30, popsize=20, tol=0.001)
-
-        # Unpack the optimized parameters
         entry_thres, risk_reward_ratio, stop_loss, frac_hold = result.x
 
         # Print the results
@@ -225,23 +181,24 @@ class PairTradingModel:
 
 # Running the Process
 if __name__ == "__main__":
-    model = PairTradingModel(TRAIN_HOUR, TIMEFRAME, DAYS, TRAIN_RATIO)
+    model = PairTradingModel(FORMATION_WINDOW, TIMEFRAME, DAYS, WINDOW_RATIO)
     
     # Load training data
-    filepath = f'./training_data/pair_data_{TRAIN_HOUR}_{TEST_HOUR}_{TIMEFRAME}_{DAYS}.npy'
+    filepath = f'./training_data/pair_data_{FORMATION_WINDOW}_{TRADING_WINDOW}_{TIMEFRAME}_{DAYS}.npy'
     train_pair_data = model.load_data(filepath)
     
     # Precompute values and save
-    pkl_filepath = f'./training_data/precomputed_{TRAIN_HOUR}_{TIMEFRAME}_{DAYS}.pkl'
+    pkl_filepath = f'./training_data/precomputed_{FORMATION_WINDOW}_{TIMEFRAME}_{DAYS}.pkl'
     if not os.path.exists(pkl_filepath):
         model.precompute_hedge_ratios(train_pair_data)
-        model.save_precomputed_values(f'./training_data/precomputed_{TRAIN_HOUR}_{TIMEFRAME}_{DAYS}.pkl')
+        model.save_precomputed_values(pkl_filepath)
 
     # Load precomputed values
-    with open(f'./training_data/precomputed_{TRAIN_HOUR}_{TIMEFRAME}_{DAYS}.pkl', 'rb') as f:
+    with open(pkl_filepath, 'rb') as f:
         print('Loading precomputed values...')
         model.precomputed_values = pickle.load(f)
         print(f'Length of precomputed values: {len(model.precomputed_values)}')
+
     # Optimize the parameters
     best_params, max_fval = model.optimize_parameters()
     print(f'Best parameters: {best_params} with max function value: {max_fval}')
