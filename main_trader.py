@@ -3,8 +3,28 @@ from binance.client import Client
 import json
 import datetime as dt
 import os
+import logging
+from logging.handlers import RotatingFileHandler
+import sys
 
-ENABLE_PLOT = 0
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Set to DEBUG for detailed output
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # Log to stdout
+        RotatingFileHandler(
+            "crypto_trader.log", 
+            maxBytes=10 * 1024 * 1024,  # 10 MB max size
+            backupCount=3  # Keep up to 3 backup logs
+        )
+    ]
+)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
+logging.getLogger('binance').setLevel(logging.WARNING)
+
+ENABLE_PLOT = 1
 TESTNET = 0
 TRADE = 1
 
@@ -23,6 +43,7 @@ CONFIG = {
     "TRAIN_RATIO": 1.0,
     "QUOTE_COIN": 'USDT',
     "TRADING_CHARGE": 0.0005,
+    "SLIPPAGE": 0.005,
     "MAX_TRADE_PORTION": 0.02,
     "CORR_THRESHOLD": 0.5,
     "STOP_LOSS": 1.553,

@@ -6,6 +6,9 @@ from binance.enums import HistoricalKlinesType
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
+import logging
+
+logger = logging.getLogger('BinanceDownloader')
 
 class BinanceDownloader:
     def __init__(self, config, client):

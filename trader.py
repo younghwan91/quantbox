@@ -5,17 +5,8 @@ from datetime import datetime, timedelta
 from binance_downloader import BinanceDownloader
 from pair_selector import CryptoPairSelector
 import logging
-import sys
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,  # Set to DEBUG for more detailed output
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),  # Log to stdout
-        logging.FileHandler("crypto_trader.log")  # Log to a file
-    ]
-)
+logger = logging.getLogger('CryptoTrader')
 
 class CryptoTrader:
     def __init__(self, client, config, enable_plot=0):
@@ -29,12 +20,12 @@ class CryptoTrader:
         
         selector = CryptoPairSelector(self.config)
         coint_pairs, data = selector.select_trading_pairs()
-        best_pair, info_pair = selector.select_best_pair(data, coint_pairs, self.enable_plot)
-        if best_pair:
-            logging.debug("Best pair found: %s with info: %s", best_pair, info_pair)
+        suitable_pairs_sorted = selector.select_best_pair(data, coint_pairs, self.enable_plot)
+        if suitable_pairs_sorted:
+            logging.info("Suitable pairs found: %s", suitable_pairs_sorted)
         else:
             logging.warning("No cointegrated pairs found.")
-        return best_pair, info_pair
+        return suitable_pairs_sorted
 
     def download_data(self):
         logging.info("Downloading data...")
@@ -230,48 +221,72 @@ class CryptoTrader:
                     self.close_all_positions()
                 
                 capital = self.get_available_balance()
+                capital = capital * 1.0
 
                 self.download_data()
                 
-                best_pair, info_pair = self.find_cointegrated_pairs()
-                if best_pair is not None:
+                suitable_pairs_sorted = self.find_cointegrated_pairs()
+                if not suitable_pairs_sorted:
+                    logging.info("No suitable pairs found. Retrying after delay.")
+                    time.sleep(60)
+                    continue # Restart the trading cycle
+                
+                for pair, info_pair in suitable_pairs_sorted:
                     
-                    coin1, coin2 = best_pair
+                    coin1, coin2 = pair
                     hedge_ratio = info_pair['hedge_ratio']
                     intercept = info_pair['intercept']
-                    signal = info_pair['signal']
                     mean_spread = info_pair['mean_spread']
                     std_spread = info_pair['std_spread']
+                    half_life = info_pair['half_life']
 
-                    trading_charge = self.config['TRADING_CHARGE']
-                    stop_loss = self.config['STOP_LOSS']
-                    risk_reward_ratio = self.config['RISK_REWARD_RATIO']
-                    frac_hold = self.config['FRAC_HOLD']
+                    latest_price1 = self.get_price(coin1)
+                    latest_price2 = self.get_price(coin2)
+                    spread_0, z_spread_0 = self.compute_spread_from_prices(latest_price1, latest_price2, hedge_ratio, intercept, mean_spread, std_spread)
+                    logging.info(f"Latest Spread for Pair {pair}: Spread={spread_0:.4f}, Z-Spread={z_spread_0:.4f}, Half-Life={half_life:.2f}")
 
-                    E = capital * (1 - 2 * trading_charge)
-                    S1 = E / (1 + hedge_ratio)
-                    S2 = hedge_ratio * S1
-                    qty1 = S1 / info_pair['price1']
-                    qty2 = S2 / info_pair['price2']
-                    coin1_trade = info_pair['trade_coin1']
-                    coin2_trade = info_pair['trade_coin2']
-
-                    logging.info("Trading Parameters:")
-                    logging.debug("Capital: %s, Effective Capital: %.2f, Hedge Ratio: %.4f, Trading Pair: %s/%s, Quantity1: %.4f, Quantity2: %.4f, Trade Coin1: %s, Trade Coin2: %s",
-                                  capital, E, hedge_ratio, coin1, coin2, qty1, qty2, coin1_trade, coin2_trade)
-  
+                    if self.config['THRESHOLD'] < np.abs(z_spread_0) < 5.0:
+                        logging.info(f"Pair {pair} still meets z-score criteria with Z-Spread={z_spread_0:.4f}")
                     
-                    rounded_qty1, cost1 = self.validate_order(coin1, coin1_trade, qty1)
-                    rounded_qty2, cost2 = self.validate_order(coin2, coin2_trade, qty2)
-                    spread_0, z_spread_0 = self.compute_spread(coin1, coin2, hedge_ratio, intercept, mean_spread, std_spread)
-                    logging.info("Initial Spread: %.4f, Z-Spread: %.4f", spread_0, z_spread_0)
+                        # Allocate Signal Based on the Latest Z-Spread
+                        signal = 1 if z_spread_0 < 0 else -1
+                        trade_coin1 = 'BUY' if signal == 1 else 'SELL'
+                        trade_coin2 = 'SELL' if signal == 1 else 'BUY'
+                        logging.info(f"Allocated Signal for Pair {pair}: {trade_coin1}/{trade_coin2} based on Z-Spread: {z_spread_0:.4f}")
 
-                    if rounded_qty1 and rounded_qty2:
-                        capital_usage_percentage = (cost1 + cost2) / capital * 100
-                        logging.info("Capital usage percentage: %.2f%%", capital_usage_percentage)
-    
-                        order1 = self.place_order_with_retry(coin1, coin1_trade, rounded_qty1)
-                        order2 = self.place_order_with_retry(coin2, coin2_trade, rounded_qty2)
+                        trading_charge = self.config['TRADING_CHARGE'] + self.config['SLIPPAGE']
+                        stop_loss = self.config['STOP_LOSS']
+                        risk_reward_ratio = self.config['RISK_REWARD_RATIO']
+                        frac_hold = self.config['FRAC_HOLD']
+                        
+                        E = capital * (1 - 2 * trading_charge)
+                        S1 = E / (1 + hedge_ratio)
+                        S2 = hedge_ratio * S1
+
+                        qty1 = S1 / latest_price1
+                        qty2 = S2 / latest_price2
+
+                        logging.info("Trading Parameters for Pair %s/%s:", coin1, coin2)
+                        logging.debug("Capital: %s, Effective Capital: %.2f, Hedge Ratio: %.4f, Quantity1: %.4f, Quantity2: %.4f",
+                                capital, E, hedge_ratio, qty1, qty2)
+  
+                        rounded_qty1, cost1 = self.validate_order(coin1, trade_coin1, qty1)
+                        rounded_qty2, cost2 = self.validate_order(coin2, trade_coin2, qty2)
+
+                        if rounded_qty1 is None or rounded_qty2 is None:
+                            logging.error(f"Order validation failed for pair {pair}. Skipping to next pair.")
+                            continue  # Skip to the next pair
+                        else:
+                            capital_usage_percentage = (cost1 + cost2) / capital * 100
+                            logging.info("Capital usage percentage: %.2f%%", capital_usage_percentage)
+
+                        # Log Validated Order Details
+                        logging.info("Validated Orders:")
+                        logging.debug("Coin1: %s, Action: %s, Quantity: %.4f, Cost: %.4f", coin1, trade_coin1, rounded_qty1, cost1)
+                        logging.debug("Coin2: %s, Action: %s, Quantity: %.4f, Cost: %.4f", coin2, trade_coin2, rounded_qty2, cost2)
+
+                        order1 = self.place_order_with_retry(coin1, trade_coin1, rounded_qty1)
+                        order2 = self.place_order_with_retry(coin2, trade_coin2, rounded_qty2)
 
                         if order1 is None or order2 is None:
                             logging.error("Error placing orders. Closing all positions and retrying after delay.")
@@ -319,25 +334,17 @@ class CryptoTrader:
                             interval_seconds = self.convert_interval_to_seconds(self.config['INTERVAL'])
                             logging.debug("Sleeping for %s seconds before next check.", interval_seconds)
                             time.sleep(interval_seconds)
+                        
+                        break # Exit the for-loop and restart the while-loop
                             
                     else:
-                        logging.error("Error validating orders. Retrying after delay.")
-                        time.sleep(60)
-                else:
-                    logging.info("No cointegrated pairs found. Retrying after delay.")
-                    time.sleep(60)
+                        logging.info(f"Trading signals not strong enough for pair {pair}. Trying next pair.")
+                        continue  # Try the next pair
             
             except Exception as e:
                 logging.error("An exception occurred in trading cycle: %s", e)
                 self.close_all_positions()
                 time.sleep(60)
-
-    def compute_spread(self, coin1, coin2, hedge_ratio, intercept, mean_spread, std_spread):
-        price1 = float(self.client.futures_symbol_ticker(symbol=coin1)['price'])
-        price2 = float(self.client.futures_symbol_ticker(symbol=coin2)['price'])
-        spread, z_spread = self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
-        logging.debug("Computed spread: %.4f, Z-spread: %.4f for %s/%s", spread, z_spread, coin1, coin2)
-        return spread, z_spread
     
     def compute_spread_from_prices(self, price1, price2, hedge_ratio, intercept, mean_spread, std_spread):
         spread = np.log(price1) - (hedge_ratio * np.log(price2) + intercept)

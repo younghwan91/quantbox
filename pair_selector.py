@@ -6,15 +6,14 @@ import pandas as pd
 from statsmodels.tsa.stattools import coint, adfuller
 import matplotlib.pyplot as plt
 import tqdm
-import scipy.stats as stats
 import logging
 from statsmodels.regression.linear_model import OLS
 from statsmodels.tools.tools import add_constant
 from scipy.stats import shapiro
-import ta
-from joblib import load
 from statsmodels.api import OLS, add_constant
-from statsmodels.robust.robust_linear_model import RLM
+from datetime import datetime
+
+logger = logging.getLogger('PairSelector')
 
 # dark background
 plt.style.use('dark_background')
@@ -153,6 +152,9 @@ class PairSelector:
         self.config = config
         self.analysis = CoinAnalysis(config)
         self.threshold = config['THRESHOLD']
+        self.save_plot_dir = './saved_plots' 
+        os.makedirs(self.save_plot_dir, exist_ok=True)
+        logging.info(f"Plot save directory set to: {self.save_plot_dir}")
 
     def select_trading_pairs(self, data):
         logging.info(">>> Starting pair selection process...")
@@ -220,12 +222,16 @@ class PairSelector:
 
     def select_best_pair(self, data, cointegrated_pairs, ENABLE_PLOT=False):
         logging.info(">>> Selecting the best trading pair...")
-        best_pair = None
-        best_half_life = np.inf
+        suitable_pairs = []
 
         for pair in tqdm.tqdm(cointegrated_pairs, desc="Selecting Best Pair"):
             coin1, coin2 = pair
             common_indices = data[coin1].index.intersection(data[coin2].index)
+
+            if len(common_indices) < 50:
+                logging.debug(f"Not enough data for pair {pair}. Skipping.")
+                continue    
+
             log_price_1 = np.log(data[coin1].loc[common_indices]['Close'])
             log_price_2 = np.log(data[coin2].loc[common_indices]['Close'])
 
@@ -241,56 +247,60 @@ class PairSelector:
                 std_spread = spread.std()
                 z_spread = (spread - mean_spread) / std_spread
 
-                if np.abs(z_spread.iloc[-1]) > self.threshold:
-                    signal = 1 if z_spread.iloc[-1] < 0 else -1
+                if self.threshold < np.abs(z_spread.iloc[-1]) < 5.0:
+                    logging.info(f"Pair: {pair}, Z-Spread: {z_spread.iloc[-1]:.4f} meets criteria.")
 
                     # Calculate half-life and Hurst exponent
                     half_life = self._calculate_half_life(spread)
                     hurst = self._calculate_hurst_exponent(spread)
-                    trade_coin1 = 'BUY' if signal == 1 else 'SELL'
-                    trade_coin2 = 'SELL' if signal == 1 else 'BUY'
 
                     pair_info = {
-                        'spread': spread,
-                        'signal': signal,
                         'hedge_ratio': hedge_ratio,
                         'intercept': init_intercept,
                         'mean_spread': mean_spread,
                         'std_spread': std_spread,
-                        'z_spread': z_spread,
                         'half_life': half_life,
-                        'price1': data[coin1].loc[common_indices]['Close'].iloc[-1],
-                        'price2': data[coin2].loc[common_indices]['Close'].iloc[-1],
-                        'trade_coin1': trade_coin1,
-                        'trade_coin2': trade_coin2
+                        'z_spread': z_spread.iloc[-1],
                     }
 
-                    # Update best pair based on some criteria, e.g., highest traded_return
-                    if half_life < best_half_life:
-                        best_pair = pair
-                        best_info = pair_info
-                        best_half_life = half_life
+                    suitable_pairs.append((pair, pair_info))
 
+                    # Plotting and Saving the Spread as PNG
+                    if ENABLE_PLOT:
+                        try:
+                            plt.figure(figsize=(14, 7))
+                            plt.plot(spread, label='Spread')
+                            plt.axhline(mean_spread, color='black', linestyle='--', label='Mean Spread')
+                            plt.title(f"Spread for Pair: {coin1}/{coin2}")
+                            plt.legend()
+                            
+                            # Create a filename with pair name and current timestamp
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            filename = f"{coin1}_{coin2}_{timestamp}.png"
+                            filepath = os.path.join(self.save_plot_dir, filename)
+                            
+                            plt.savefig(filepath)
+                            logging.info(f"Saved spread plot for pair {pair} as {filepath}")
+                            plt.close()
+                        except Exception as e:
+                            logging.error(f"Failed to save plot for pair {pair}: {e}")
+
+            except np.linalg.LinAlgError as e:
+                logging.warning(f"LinAlgError in processing pair {pair}: {e}")
             except Exception as e:
                 logging.error(f"Error in processing pair {pair}: {e}")
-                
-        # Plotting (Optional)
-        if ENABLE_PLOT and best_pair == pair:
-            plt.figure(figsize=(14, 7))
-            plt.plot(spread, label='Spread')
-            plt.axhline(mean_spread, color='black', linestyle='--', label='Mean Spread')
-            plt.axhline(mean_spread + (self.risk_reward_ratio*self.stop_loss) * std_spread, color='green', linestyle='--', label='Upper Threshold')
-            plt.axhline(mean_spread + self.stop_loss * std_spread, color='red', linestyle='--', label='Lower Threshold')
-            plt.title(f"Spread for Pair: {pair}")
-            plt.legend()
-            plt.show()
+    
+        if not suitable_pairs:
+            logging.warning("No suitable pairs found based on the given criteria.")
+            return []
 
-        if best_pair:
-            logging.info(f"Best pair selected: {best_pair} with half-life: {best_half_life}")
-        else:
-            logging.warning("No suitable pair found based on the given criteria.")
+        # Sort suitable_pairs by half-life in ascending order
+        suitable_pairs_sorted = sorted(suitable_pairs, key=lambda x: x[1]['half_life'])
 
-        return best_pair, best_info
+        for idx, (pair, info) in enumerate(suitable_pairs_sorted, start=1):
+            logging.info(f"{idx}. Pair: {pair}, Z-Spread: {info['z_spread']:.4f}, Half-Life: {info['half_life']:.4f}")    
+
+        return suitable_pairs_sorted
 
 class CryptoPairSelector:
     def __init__(self, config):

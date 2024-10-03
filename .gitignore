@@ -2,7 +2,7 @@
 
 /data/*
 /training_data/*
-
+/saved_plots/*
 /temp
 *.log
 *.json
