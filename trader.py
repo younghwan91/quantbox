@@ -178,7 +178,7 @@ class CryptoTrader:
             logging.info("Closing position for %s, Quantity: %s", symbol, quantity)
             self.close_position(symbol, quantity)
 
-        time.sleep(2)  # Wait for positions to close
+        time.sleep(5)  # Wait for positions to close
         remaining_positions = self.get_current_positions()
         if remaining_positions:
             logging.error("Some positions are still open after attempting to close all. Remaining positions: %s", remaining_positions)
