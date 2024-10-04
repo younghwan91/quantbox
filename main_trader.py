@@ -27,9 +27,10 @@ logging.getLogger('binance').setLevel(logging.WARNING)
 ENABLE_PLOT = 1
 TESTNET = 0
 TRADE = 1
+HOURS_IN_DAY = 24
 
-hour_per_day = 24
-total_hours = hour_per_day*3
+FORMATION_DAYS = 3
+FORMATION_WINDOW = HOURS_IN_DAY*FORMATION_DAYS
 
 CONFIG = {
     "FOLDER_NAME": 'futures',
@@ -37,7 +38,7 @@ CONFIG = {
     "CSV_FILENAME": "pairs_list.csv",
     "N_COINS": 200,
     "INTERVAL": '15m',
-    "START_STR": f'{total_hours} hour ago',
+    "START_STR": f'{FORMATION_WINDOW} hour ago',
     "END_STR": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "COINT_THRESHOLD": 0.05,
     "TRAIN_RATIO": 1.0,

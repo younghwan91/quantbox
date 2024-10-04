@@ -4,12 +4,11 @@ import tqdm
 import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.optimize import differential_evolution
-import logging
 import pickle
 import os
 
 # Configuration Variables
-FORMATION_WINDOW = 120
+FORMATION_WINDOW = 96
 TRADING_WINDOW = 24
 TOTAL_WINDOW = FORMATION_WINDOW + TRADING_WINDOW
 WINDOW_RATIO = FORMATION_WINDOW / TOTAL_WINDOW

@@ -315,16 +315,16 @@ class CryptoTrader:
                                 price2 = self.get_price(coin2)
                                 spread_i, z_spread_i = self.compute_spread_from_prices(price1, price2, hedge_ratio, intercept, mean_spread, std_spread)
                                 
-                            logging.info("Iteration %s, Spread: %.4f, Z-spread: %.4f, Signal: %s", cnt, spread_i, z_spread_i, signal)
-
                             current_time = datetime.now()
                             elapsed_time = (current_time - position_open_time).total_seconds()
+                            logging.info(">> Iter. %s, Time: %s, Spread: %.4f, Z-spread: %.4f, Signal: %s", cnt, current_time.strftime("%H:%M:%S"), spread_i, z_spread_i, signal)
+                            
                             if elapsed_time > max_hold_seconds:
                                 logging.info("Maximum holding time of %.2f hours reached. Closing all positions.", frac_hold * 24)
                                 self.close_all_positions()
                                 break
 
-                            if self.should_close_position(signal, z_spread_i, z_spread_0, stop_loss, risk_reward_ratio, frac_hold):
+                            if self.should_close_position(signal, z_spread_i, z_spread_0, stop_loss, risk_reward_ratio):
                                 logging.info("Conditions met to close positions based on spread thresholds.")
                                 self.close_all_positions()
                                 break
@@ -352,7 +352,7 @@ class CryptoTrader:
         logging.debug("Spread calculation: spread=%.4f, z_spread=%.4f", spread, z_spread)
         return spread, z_spread
 
-    def should_close_position(self, signal, z_spread_i, init_z_spread, stop_loss, risk_reward_ratio, frac_hold):
+    def should_close_position(self, signal, z_spread_i, init_z_spread, stop_loss, risk_reward_ratio):
         close = False
         if signal == 1:
             if z_spread_i > init_z_spread + (risk_reward_ratio * stop_loss) or z_spread_i < init_z_spread - stop_loss:

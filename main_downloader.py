@@ -5,35 +5,36 @@ from binance_downloader import BinanceDownloader
 import datetime as dt
 from datetime import timedelta
 import numpy as np
+import logging
+from logging.handlers import RotatingFileHandler
+import sys
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Set to DEBUG for detailed output
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # Log to stdout
+        RotatingFileHandler(
+            "crypto_downloader.log", 
+            maxBytes=10 * 1024 * 1024,  # 10 MB max size
+            backupCount=3  # Keep up to 3 backup logs
+        )
+    ]
+)
 
 """
 Fetch and save klines for a given coin and interval.
-
-Interval options:
-- '1m': 1 minute
-- '3m': 3 minutes
-- '5m': 5 minutes
-- '15m': 15 minutes
-- '30m': 30 minutes
-- '1h': 1 hour
-- '2h': 2 hours
-- '4h': 4 hours
-- '6h': 6 hours
-- '8h': 8 hours
-- '12h': 12 hours
-- '1d': 1 day
-- '3d': 3 days
-- '1w': 1 week
-- '1M': 1 month
+1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
 """
 
 # Configurations
 TESTNET = 0
 PLOT_DATA = 0
 DAYS = 90
+HOURS_IN_DAY = 24
 FORMATION_DAYS = 4
 TRADING_WINDOW = 24
-HOURS_IN_DAY = 24
 FORMATION_WINDOW = int(HOURS_IN_DAY * FORMATION_DAYS)
 TOTAL_WINDOW_LENGTH = FORMATION_WINDOW + TRADING_WINDOW
 WINDOW_RATIO = FORMATION_WINDOW / TOTAL_WINDOW_LENGTH
@@ -58,14 +59,16 @@ config = {
     'COINT_THRESHOLD': 0.05,
     'TRADING_CHARGE': 0.0005,
     'CORR_THRESHOLD': 0.5,
+    'THRESHOLD': 2.5,
 }
 
 train_data, train_pair_data = [], []
-for hour_diff in range(0, HOURS_IN_DAY * DAYS, TRADING_WINDOW):
+for hour_diff in range(0, HOURS_IN_DAY * DAYS, TRADING_WINDOW): # in hours
 
     # Set start and end time for data download
     config['START_STR'] = f'{TOTAL_WINDOW_LENGTH + hour_diff} hours ago'
     config['END_STR'] = (dt.datetime.now() - timedelta(hours=hour_diff)).strftime("%Y-%m-%d %H:%M:%S")
+    logging.info(f"Downloading data from {config['START_STR']} to {config['END_STR']}")
 
     # Download data using BinanceDownloader
     downloader = BinanceDownloader(config, client)
