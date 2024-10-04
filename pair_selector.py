@@ -252,7 +252,8 @@ class PairSelector:
 
                     # Calculate half-life and Hurst exponent
                     half_life = self._calculate_half_life(spread)
-                    hurst = self._calculate_hurst_exponent(spread)
+                    # hurst = self._calculate_hurst_exponent(spread)
+                    p_shapiro = shapiro(spread)[1]
 
                     pair_info = {
                         'hedge_ratio': hedge_ratio,
@@ -260,7 +261,7 @@ class PairSelector:
                         'mean_spread': mean_spread,
                         'std_spread': std_spread,
                         'half_life': half_life,
-                        'hurst': hurst,
+                        'p_shapiro': p_shapiro,
                         'z_spread': z_spread.iloc[-1],
                     }
 
@@ -296,11 +297,10 @@ class PairSelector:
             return []
 
         # Sort suitable_pairs by half-life in ascending order
-        suitable_pairs_sorted = sorted(suitable_pairs, key=lambda x: x[1]['half_life'] * x[1]['hurst'])
+        suitable_pairs_sorted = sorted(suitable_pairs, key=lambda x: x[1]['half_life'] * (1-x[1]['p_shapiro']))
 
         for idx, (pair, info) in enumerate(suitable_pairs_sorted, start=1):
-            logging.info(f"{idx}. Pair: {pair}, Z-Spread: {info['z_spread']:.4f}, 
-                         Half-Life: {info['half_life']:.4f}, Hurst: {info['hurst']:.4f}")    
+            logging.info(f"{idx}. Pair: {pair}, Z-Spread: {info['z_spread']:.4f}, Half-Life: {info['half_life']:.4f}, Shapiro: {info['p_shapiro']:.4f}")    
 
         return suitable_pairs_sorted
 

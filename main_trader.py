@@ -23,13 +23,14 @@ logging.basicConfig(
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('requests').setLevel(logging.WARNING)
 logging.getLogger('binance').setLevel(logging.WARNING)
+logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
 
 ENABLE_PLOT = 1
 TESTNET = 0
 TRADE = 1
 HOURS_IN_DAY = 24
 
-FORMATION_DAYS = 3
+FORMATION_DAYS = 4
 FORMATION_WINDOW = HOURS_IN_DAY*FORMATION_DAYS
 
 CONFIG = {
@@ -47,6 +48,7 @@ CONFIG = {
     "SLIPPAGE": 0.005,
     "MAX_TRADE_PORTION": 0.02,
     "CORR_THRESHOLD": 0.5,
+    "NORMALITY_THRESHOLD": 0.05,
     "STOP_LOSS": 1.553,
     "RISK_REWARD_RATIO": 1.763,
     "THRESHOLD": 2.5,

@@ -224,6 +224,8 @@ class CryptoTrader:
         try:
             while True:
                 try:
+                    logging.info("-"*50)
+                    logging.info("Starting new trading cycle...")
                     open_positions = self.get_current_positions()
                     if open_positions:
                         logging.info("Open positions detected. Closing all positions before proceeding.")
