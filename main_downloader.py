@@ -65,9 +65,11 @@ config = {
 train_data, train_pair_data = [], []
 for hour_diff in range(0, HOURS_IN_DAY * DAYS, TRADING_WINDOW): # in hours
 
+    end_time = dt.datetime.now(dt.timezone.utc) - timedelta(hours=hour_diff)
+    start_time = end_time - timedelta(hours=TOTAL_WINDOW_LENGTH)
     # Set start and end time for data download
-    config['START_STR'] = f'{TOTAL_WINDOW_LENGTH + hour_diff} hours ago'
-    config['END_STR'] = (dt.datetime.now() - timedelta(hours=hour_diff)).strftime("%Y-%m-%d %H:%M:%S")
+    config['START_STR'] = start_time.strftime("%Y-%m-%d %H:%M:%S")
+    config['END_STR'] = end_time.strftime("%Y-%m-%d %H:%M:%S")
     logging.info(f"Downloading data from {config['START_STR']} to {config['END_STR']}")
 
     # Download data using BinanceDownloader

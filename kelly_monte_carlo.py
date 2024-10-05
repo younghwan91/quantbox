@@ -2,12 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Parameters
-p = 0.40  # Probability of winning
-b = 2.0   # Win-loss ratio
+p = 0.60  # Probability of winning
+b = 1.4  # Win-loss ratio
 initial_capital = 1  # Initial capital
 num_bets = 100  # Number of bets
 num_simulations = 1000  # Number of Monte Carlo simulations
-bets_per_day = 3  # Number of bets per day
+bets_per_day = 2  # Number of bets per day
 
 # Kelly Criterion Calculation
 def kelly_criterion(p, b):
@@ -76,4 +76,3 @@ mean_final_capital = np.mean(final_capitals)
 std_final_capital = np.std(final_capitals)
 print(f"Mean final capital: ${mean_final_capital:.2f}")
 print(f"Standard deviation of final capital: ${std_final_capital:.2f}")
-

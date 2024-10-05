@@ -309,11 +309,6 @@ class CryptoPairSelector:
         self.config = config
         self.loader = CoinDataLoader(config)
         self.selector = PairSelector(config)
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
-                            datefmt='%Y-%m-%d %H:%M:%S',  # Round to seconds
-                            handlers=[logging.StreamHandler(),  # This will print to console
-                                      logging.FileHandler('crypto_pair_selector.log')])  # This will write to a log file
-
 
     def select_trading_pairs(self):
         try:

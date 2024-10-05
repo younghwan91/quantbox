@@ -33,14 +33,17 @@ HOURS_IN_DAY = 24
 FORMATION_DAYS = 4
 FORMATION_WINDOW = HOURS_IN_DAY*FORMATION_DAYS
 
+utc_now = dt.datetime.now(dt.timezone.utc)
+start_time = utc_now - dt.timedelta(hours=FORMATION_WINDOW)
+
 CONFIG = {
     "FOLDER_NAME": 'futures',
     "SAVING_DIR": 'data',
     "CSV_FILENAME": "pairs_list.csv",
     "N_COINS": 200,
     "INTERVAL": '15m',
-    "START_STR": f'{FORMATION_WINDOW} hour ago',
-    "END_STR": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "START_STR": start_time.strftime("%Y-%m-%d %H:%M:%S"),
+    "END_STR": utc_now.strftime("%Y-%m-%d %H:%M:%S"),
     "COINT_THRESHOLD": 0.05,
     "TRAIN_RATIO": 1.0,
     "QUOTE_COIN": 'USDT',

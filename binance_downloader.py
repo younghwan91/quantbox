@@ -59,25 +59,9 @@ class BinanceDownloader:
         
         """
         Fetch and save klines for a given coin and interval.
-
-        Interval options:
-        - '1m': 1 minute
-        - '3m': 3 minutes
-        - '5m': 5 minutes
-        - '15m': 15 minutes
-        - '30m': 30 minutes
-        - '1h': 1 hour
-        - '2h': 2 hours
-        - '4h': 4 hours
-        - '6h': 6 hours
-        - '8h': 8 hours
-        - '12h': 12 hours
-        - '1d': 1 day
-        - '3d': 3 days
-        - '1w': 1 week
-        - '1M': 1 month
+        1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
         """
-
+        
         klines = self.client.get_historical_klines(
             symbol=coin,
             interval=interval,
