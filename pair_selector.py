@@ -271,8 +271,8 @@ class PairSelector:
                     if ENABLE_PLOT:
                         try:
                             plt.figure(figsize=(14, 7))
-                            plt.plot(spread, label='Spread')
-                            plt.axhline(mean_spread, color='black', linestyle='--', label='Mean Spread')
+                            plt.plot(spread, label='Spread', color='green')
+                            plt.axhline(mean_spread, color='red', linestyle='--', label='Mean Spread')
                             plt.title(f"Spread for Pair: {coin1}/{coin2}")
                             plt.legend()
                             
