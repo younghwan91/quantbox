@@ -318,6 +318,7 @@ class CryptoTrader:
 
                     if elapsed_time > max_hold_seconds:
                         logging.info(f"[PAIR: {pair}] - Maximum holding time reached. Closing positions.")
+                        
                         self.close_all_positions()
                         break
 
@@ -328,7 +329,7 @@ class CryptoTrader:
                     else:
                         cnt += 1
 
-                    interval_seconds = self.convert_interval_to_seconds(self.config['INTERVAL'])
+                    interval_seconds = 60
                     logging.debug(f"Sleeping for {interval_seconds} seconds before next check.")
                     time.sleep(interval_seconds)
 
