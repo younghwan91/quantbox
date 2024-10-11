@@ -18,7 +18,7 @@ class BinanceDownloader:
         self.trading_coins = self.get_trading_coins(self.client, config["QUOTE_COIN"], config["N_COINS"])
         self.config = config
 
-    def get_trading_coins(self, client, quote_coin, n_coins, sort_by_volume=False):
+    def get_trading_coins(self, client, quote_coin, n_coins, sort_by_volume=True):
         futures_exchange_info = client.futures_exchange_info()
         trading_coins = [info['symbol'] for info in futures_exchange_info['symbols'] if info['symbol'].endswith(quote_coin) and info['status'] == 'TRADING']
 
@@ -26,25 +26,25 @@ class BinanceDownloader:
         assert n_coins <= len(trading_coins), "N_COINS is greater than the number of trading coins"
 
         if sort_by_volume:
-            # Fetch 24-hour trading volume for each coin
+            logger.info("Fetching 24-hour trading volume for each coin")
             volume_dict = {}
             for coin in trading_coins:
                 try:
                     ticker = client.get_ticker(symbol=coin)
                     volume_dict[coin] = float(ticker['volume'])
                 except Exception as e:
-                    print(f"Error fetching ticker for {coin}: {e}")
+                    logger.error(f"Error fetching ticker for {coin}: {e}")
                     continue
 
             # Sort coins based on trading volume in descending order
             sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1], reverse=True)
             num_coins = len(sorted_coins)
-            print(f"Number of trading pairs: {num_coins}")
+            logger.info(f"Number of trading pairs: {num_coins}")
 
-            # Select the top n_coins based on liquidity
+            logger.info(f"Selecting top {n_coins} coins based on trading volume")
             top_coins = [coin for coin, volume in sorted_coins[:n_coins]]
         else:
-            # If not sorting by volume, just select the first n_coins
+            logger.info(f"Selecting first {n_coins} coins")
             top_coins = trading_coins[:n_coins]
 
         return top_coins
