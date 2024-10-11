@@ -12,6 +12,7 @@ from statsmodels.tools.tools import add_constant
 from scipy.stats import shapiro
 from statsmodels.api import OLS, add_constant
 from datetime import datetime
+import pytz
 
 logger = logging.getLogger('PairSelector')
 
@@ -277,7 +278,8 @@ class PairSelector:
                             plt.legend()
                             
                             # Create a filename with pair name and current timestamp
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            kst = pytz.timezone('Asia/Seoul')
+                            timestamp = datetime.now(kst).strftime("%Y%m%d_%H%M%S")
                             filename = f"{coin1}_{coin2}_{timestamp}.png"
                             filepath = os.path.join(self.save_plot_dir, filename)
                             

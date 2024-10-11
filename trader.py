@@ -14,6 +14,7 @@ class CryptoTrader:
         self.client = client
         self.config = config
         self.enable_plot = enable_plot
+        self.prev_prices = {}
         logging.info("CryptoTrader initialized with config: %s", config)
         
     def find_cointegrated_pairs(self): 
@@ -244,6 +245,9 @@ class CryptoTrader:
             spread_0, z_spread_0 = self.compute_spread_from_prices(
                 latest_price1, latest_price2, hedge_ratio, intercept, mean_spread, std_spread
             )
+
+
+
             logging.info(f"[PAIR: {pair}] - Spread: {spread_0:.4f}, Z-Spread: {z_spread_0:.4f}, Half-Life: {half_life:.2f}")
 
             if self.config['THRESHOLD'] < np.abs(z_spread_0) < 5.0:
@@ -311,6 +315,14 @@ class CryptoTrader:
                         spread_i, z_spread_i = self.compute_spread_from_prices(
                             price1, price2, hedge_ratio, intercept, mean_spread, std_spread
                         )
+
+                        if math.isinf(spread_0): # Safety check
+                            spread_i = prev_spread
+                            z_spread_i = prev_z_spread
+                            logger.warning(f"Spread is infinite. Using previous spread: {spread_i:.4f}, Z-spread: {z_spread_i:.4f}")
+                        else:
+                            prev_spread = spread_i
+                            prev_z_spread = z_spread_i
 
                     current_time = datetime.now()
                     elapsed_time = (current_time - position_open_time).total_seconds()
@@ -412,10 +424,15 @@ class CryptoTrader:
         try:
             price = float(self.client.futures_symbol_ticker(symbol=coin)['price'])
             logging.debug("Fetched price for %s: %.4f", coin, price)
+            self.prev_prices[coin] = price
             return price
         except Exception as e:
             logging.error("An exception occurred while fetching price for %s: %s", coin, e)
-            return 0.0
+            if coin in self.prev_prices:
+                return self.prev_prices[coin]
+            else:
+                logging.error("No previous price found for %s", coin)
+                return 0.0
 
     def convert_interval_to_seconds(self, interval):
         try:
