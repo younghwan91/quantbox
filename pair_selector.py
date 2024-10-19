@@ -41,11 +41,9 @@ class CoinDataLoader:
 class CoinAnalysis:
     def __init__(self, config):
         self.config = config
-        self.train_ratio = config['TRAIN_RATIO']
         self.coint_threshold = config['COINT_THRESHOLD']
         self.corr_threshold = config['CORR_THRESHOLD']
         self.normality_threshold = config.get('NORMALITY_THRESHOLD', 0.05)
-        self.split = self.train_ratio < 1
 
     def find_valid_coins(self, data):
         items = list(data.items())
@@ -84,11 +82,7 @@ class CoinAnalysis:
             prices1 = normalized_prices[coin1].loc[common_indices]
             prices2 = normalized_prices[coin2].loc[common_indices]
 
-            if self.split:
-                split_index = int(len(prices1) * self.train_ratio)
-                npd = np.sum((prices1[:split_index] - prices2[:split_index]) ** 2)
-            else:
-                npd = np.sum((prices1 - prices2) ** 2)
+            npd = np.sum((prices1 - prices2) ** 2)
             pairs_npd.append((coin1, coin2, npd))
         return pairs_npd
     
@@ -104,11 +98,7 @@ class CoinAnalysis:
             if np.isinf(prices1).any() or np.isinf(prices2).any():
                 continue
 
-            if self.split:
-                split_index = int(len(prices1) * self.train_ratio)
-                corr = np.corrcoef(prices1[:split_index], prices2[:split_index])[0, 1]
-            else:
-                corr = np.corrcoef(prices1, prices2)[0, 1]
+            corr = np.corrcoef(prices1, prices2)[0, 1]
 
             if corr > self.corr_threshold:
                 pairs_corr.append((coin1, coin2))
@@ -122,7 +112,6 @@ class CoinAnalysis:
                 common_indices = data[coin1].index.intersection(data[coin2].index)
                 prices1 = np.log(data[coin1].loc[common_indices]['Close'])
                 prices2 = np.log(data[coin2].loc[common_indices]['Close'])
-                split_index = int(len(prices1) * self.train_ratio)
 
                 # Filter 1: Hedge ratio
                 hedge_ratio = np.polyfit(prices2, prices1, 1)[0]
@@ -135,10 +124,7 @@ class CoinAnalysis:
                     if shapiro_result.pvalue > self.normality_threshold:  
                         
                         # Filter 3: Cointegration test
-                        if self.split:
-                            result = coint(prices1[:split_index], prices2[:split_index])
-                        else:
-                            result = coint(prices1, prices2)
+                        result = coint(prices1, prices2)
 
                         if result[1] < self.coint_threshold:
                             coint_pairs.append((coin1, coin2))

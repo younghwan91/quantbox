@@ -1,9 +1,8 @@
 /__pycache__
-
 /data/*
 /training_data/*
 /saved_plots/*
-/temp
+temp
 *.log
 *.json
 config.py

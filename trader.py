@@ -246,8 +246,6 @@ class CryptoTrader:
                 latest_price1, latest_price2, hedge_ratio, intercept, mean_spread, std_spread
             )
 
-
-
             logging.info(f"[PAIR: {pair}] - Spread: {spread_0:.4f}, Z-Spread: {z_spread_0:.4f}, Half-Life: {half_life:.2f}")
 
             if self.config['THRESHOLD'] < np.abs(z_spread_0) < 5.0:

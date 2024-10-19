@@ -23,6 +23,10 @@ logging.basicConfig(
     ]
 )
 
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
+logging.getLogger('binance').setLevel(logging.WARNING)
+
 """
 Fetch and save klines for a given coin and interval.
 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
@@ -62,24 +66,25 @@ config = {
     'THRESHOLD': 2.5,
 }
 
-train_data, train_pair_data = [], []
-for hour_diff in range(0, HOURS_IN_DAY * DAYS, TRADING_WINDOW): # in hours
+# train_data, train_pair_data = [], []
+# for hour_diff in range(0, HOURS_IN_DAY * DAYS, TRADING_WINDOW): # in hours
 
-    end_time = dt.datetime.now(dt.timezone.utc) - timedelta(hours=hour_diff)
-    start_time = end_time - timedelta(hours=TOTAL_WINDOW_LENGTH)
-    # Set start and end time for data download
-    config['START_STR'] = start_time.strftime("%Y-%m-%d %H:%M:%S")
-    config['END_STR'] = end_time.strftime("%Y-%m-%d %H:%M:%S")
-    logging.info(f"Downloading data from {config['START_STR']} to {config['END_STR']}")
+end_time = dt.datetime.now(dt.timezone.utc)
+start_time = end_time - timedelta(hours=DAYS * HOURS_IN_DAY)
+# Set start and end time for data download
+config['START_STR'] = start_time.strftime("%Y-%m-%d %H:%M:%S")
+config['END_STR'] = end_time.strftime("%Y-%m-%d %H:%M:%S")
+logging.info(f"Downloading data from {config['START_STR']} to {config['END_STR']}")
 
-    # Download data using BinanceDownloader
-    downloader = BinanceDownloader(config, client)
-    downloader.download_data()
+# Download data using BinanceDownloader
+downloader = BinanceDownloader(config, client)
+# downloader.download_data_for_backtest()
+downloader.prepare_pairs_for_backtest(window_size='2D', overlap='4h')
+exit()
+# Select trading pairs using the refactored CryptoPairSelector
+selector = CryptoPairSelector(config)
+coint_pairs, data = selector.select_trading_pairs()
+pair_data = selector.save_pairs_and_data(coint_pairs, data)
 
-    # Select trading pairs using the refactored CryptoPairSelector
-    selector = CryptoPairSelector(config)
-    coint_pairs, data = selector.select_trading_pairs()
-    pair_data = selector.save_pairs_and_data(coint_pairs, data)
-    
-    train_pair_data.append(pair_data)
-    np.save(f'./training_data/pair_data_{FORMATION_WINDOW}_{TRADING_WINDOW}_{config["INTERVAL"]}_{DAYS}.npy', train_pair_data)
+# train_pair_data.append(pair_data)
+# np.save(f'./training_data/pair_data_{FORMATION_WINDOW}_{TRADING_WINDOW}_{config["INTERVAL"]}_{DAYS}.npy', train_pair_data)
