@@ -1,21 +1,16 @@
+# pair_trading_model.py
+
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-from scipy import stats
+import logging
+from scipy.stats import shapiro
 from scipy.optimize import differential_evolution
 import pickle
 import os
 import csv
-import logging
 
-# Configure logging
 logger = logging.getLogger('PairTradingModel')
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
 
 class PairTradingModel:
     def __init__(self, config):
@@ -23,7 +18,7 @@ class PairTradingModel:
         self.timeframe = config['TIMEFRAME']
         self.days = config['DAYS']
         self.window_ratio = config['WINDOW_RATIO']
-        self.trading_fee = config.get('TRADING_FEE', 0.00045)
+        self.trading_fee = config.get('TRADING_FEE', 0.0005)
         self.precomputed_values = None
 
     def load_pairs_info(self, pairs_csv_path):
@@ -132,7 +127,11 @@ class PairTradingModel:
         trade_count = 0
         returns = []
 
-        for spread, z_spread, split_index in tqdm(self.precomputed_values, desc="Simulating Trades"):
+        for record in tqdm(self.precomputed_values, desc="Simulating Trades"):
+            spread = record['spread']
+            z_spread = record['z_spread']
+            split_index = record['split_index']
+
             if np.abs(z_spread.iloc[split_index]) > entry_thres:
                 trade_count += 1
                 z_spread_0 = z_spread.iloc[split_index]
@@ -183,7 +182,7 @@ class PairTradingModel:
                             total_profit += profit
                             cnt_draw += 1
                             returns.append(profit)
-                            break
+                            break                
 
                 if profit > 0:
                     cnt_profit += 1
@@ -240,7 +239,7 @@ class PairTradingModel:
         Optimize trading parameters using differential evolution.
         """
         bounds = [
-            (1, 2.5),    # entry_thres
+            (2, 3),    # entry_thres
             (1, 3),      # risk_reward_ratio
             (0.5, 2),    # stop_loss
             (0.2, 0.9)    # frac_hold
@@ -267,47 +266,3 @@ class PairTradingModel:
         logger.info(f"Optimal Cost Function Value: {-result.fun:.5f}")  # Return positive value
 
         return result.x, -result.fun  # Return the best params and the corresponding profit
-
-# Running the Process
-if __name__ == "__main__":
-    import json
-    import sys
-
-    # Load configuration
-    config = {
-        'FORMATION_WINDOW': 96,  # e.g., 4 days * 24 hours / 15m intervals
-        'TRADING_WINDOW': 24,
-        'TOTAL_WINDOW': 120,     # FORMATION_WINDOW + TRADING_WINDOW
-        'WINDOW_RATIO': 96 / 120, # 0.8
-        'TIMEFRAME': '15m',
-        'DAYS': 90,
-        'TRADING_FEE': 0.00045,
-        'DATA_DIR': './data/backtest',
-        'PAIRS_CSV': 'pairs_for_backtest.csv',
-        'PRECOMPUTED_FILE': 'precomputed_values.pkl'
-    }
-
-    # Initialize the PairTradingModel
-    model = PairTradingModel(config)
-
-    # Paths
-    pairs_csv_path = os.path.join(config['DATA_DIR'], config['PAIRS_CSV'])
-    precomputed_filepath = os.path.join(config['DATA_DIR'], config['PRECOMPUTED_FILE'])
-
-    # Check if precomputed values exist
-    if not os.path.exists(precomputed_filepath):
-        # Load pairs information
-        pairs_info = model.load_pairs_info(pairs_csv_path)
-
-        # Precompute hedge ratios and z-scores
-        model.precompute_hedge_ratios(pairs_info)
-
-        # Save precomputed values
-        model.save_precomputed_values(precomputed_filepath)
-    else:
-        # Load precomputed values
-        model.load_precomputed_values(precomputed_filepath)
-
-    # Optimize the parameters
-    best_params, max_fval = model.optimize_parameters()
-    logger.info(f'Best parameters: {best_params} with max function value: {max_fval}')
