@@ -9,10 +9,12 @@ import numpy as np
 import logging
 from statsmodels.tsa.stattools import coint
 from scipy.stats import shapiro
+import matplotlib.pyplot as plt
+import shutil
+import pickle
 
 # Configure logging (if not already configured in main application)
 logger = logging.getLogger('BacktestPreprocessor')
-
 
 class BacktestPreprocessor:
     def __init__(self, config):
@@ -23,9 +25,19 @@ class BacktestPreprocessor:
         self.trading_coins = self._load_trading_coins()
         self.ensure_directories()
 
+        self.pairs_csv_path = os.path.join(self.backtest_dir, config["PAIRS_CSV"])
+        self.precomputed_path = os.path.join(self.backtest_dir, config["PRECOMPUTED_FILE"])
+
     def ensure_directories(self):
-        # Ensure the 'pairs' subdirectory exists
-        os.makedirs(self.pairs_dir, exist_ok=True)
+        try:
+            if os.path.exists(self.pairs_dir):
+                shutil.rmtree(self.pairs_dir)
+                logger.debug(f"Deleted entire directory: {self.pairs_dir}")
+            os.makedirs(self.pairs_dir, exist_ok=True)
+            logger.info(f"Created directory: {self.pairs_dir}")
+        except Exception as e:
+            logger.error(f"Failed to reset {self.pairs_dir}. Reason: {e}") 
+
 
     def _load_trading_coins(self):
         csv_path = os.path.join(self.saving_dir, self.config["CSV_FILENAME"])
@@ -46,7 +58,6 @@ class BacktestPreprocessor:
         self, 
         window_size: str, 
         overlap: str, 
-        output_filename: str = "pairs_for_backtest.csv"
     ):
         """
         Prepares pair trading data by aligning all coin data to a common end time,
@@ -88,7 +99,7 @@ class BacktestPreprocessor:
             return
 
         # Step 6: Filter pairs based on correlation and cointegration
-        window_ratio = self.config.get('WINDOW_RATIO', 0.8)  # Default to 80% if not set
+        window_ratio = self.config.get('WINDOW_RATIO') 
         correlation_threshold = self.config.get('CORR_THRESHOLD', 0.5)
         pvalue_threshold = self.config.get('COINT_THRESHOLD', 0.05)
 
@@ -100,8 +111,8 @@ class BacktestPreprocessor:
             return
 
         # Step 7: Save the filtered pairs data
-        self._save_pairs(filtered_pairs, output_filename)
-        logger.info(f"Saved filtered pairs data to {output_filename}")
+        self._save_pairs_info(filtered_pairs)
+        logger.info(f"Saved filtered pairs data to {self.pairs_csv_path}")
 
     def _filter_pairs(self, all_pairs, corr_threshold, pvalue_threshold, window_ratio):
         """
@@ -162,6 +173,13 @@ class BacktestPreprocessor:
             except Exception as e:
                 logger.warning(f"Cointegration test failed for pair {pair['pair']}: {e}")
                 continue
+            
+            # uncut_spread = np.log(pair['data1']['Close']) - hedge_ratio * np.log(pair['data2']['Close'])
+            # plt.plot(uncut_spread-spread.mean())
+            # plt.axvline(x=uncut_spread.index[split_idx] , color='r', linestyle='--')
+            # plt.axhline(y=0, color='k', linestyle='--')
+            # plt.ylim(-0.04, 0.04)
+            # plt.show()
 
             filtered.append(pair)
 
@@ -266,12 +284,11 @@ class BacktestPreprocessor:
 
         return all_pairs
 
-    def _save_pairs(self, all_pairs, output_filename):
+    def _save_pairs_info(self, all_pairs):
         """
         Saves the pairs data to a CSV file with references to pickle files.
         """
-        output_path = os.path.join(self.backtest_dir, output_filename)
-        with open(output_path, mode='w', newline='') as file:
+        with open(self.pairs_csv_path, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(['window_start', 'window_end', 'pair', 'data1_path', 'data2_path'])
 
@@ -299,4 +316,87 @@ class BacktestPreprocessor:
                     data1_path, 
                     data2_path
                 ])
-        logger.info(f"Saved pairs information to {output_filename}")
+        logger.info(f"Saved pairs information to {self.pairs_csv_path}")
+
+####################################################################################################
+
+    def load_pairs_info(self):
+        """
+        Load pairs information from the CSV file.
+        Each row contains window_start, window_end, pair, data1_path, data2_path
+        """
+        self.pairs_info = []
+        with open(self.pairs_csv_path, mode='r') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                self.pairs_info.append(row)
+        logger.info(f"Loaded {len(self.pairs_info)} pairs from {self.pairs_csv_path}")
+
+    def load_pair_data(self, data1_path, data2_path):
+        """
+        Load pair data from pickle files.
+        Returns two DataFrames: df1 and df2
+        """
+        try:
+            df1 = pd.read_pickle(data1_path)
+            df2 = pd.read_pickle(data2_path)
+            return df1, df2
+        except Exception as e:
+            logger.error(f"Error loading pair data: {e}")
+            return None, None
+
+    def precompute_hedge_ratios(self):
+        """
+        Precompute hedge ratios and z-scores for all pairs.
+        """
+        precomputed_values = []
+        logger.info("Precomputing hedge ratios and z-scores for all pairs...")
+        for pair in tqdm(self.pairs_info, desc="Precomputing"):
+            window_start = pd.to_datetime(pair['window_start'])
+            window_end = pd.to_datetime(pair['window_end'])
+            pair_name = tuple(pair['pair'].split('-'))
+            data1_path = pair['data1_path']
+            data2_path = pair['data2_path']
+
+            df1, df2 = self.load_pair_data(data1_path, data2_path)
+            if df1 is None or df2 is None:
+                continue
+
+            # Align the data on timestamps
+            common_indices = df1.index.intersection(df2.index)
+            log_price_1 = np.log(df1.loc[common_indices]['Close'])
+            log_price_2 = np.log(df2.loc[common_indices]['Close'])
+
+            window_ratio = self.config.get('WINDOW_RATIO') 
+            split_index = int(len(log_price_1) * window_ratio)
+            if split_index == 0 or split_index >= len(log_price_1):
+                logger.warning(f"Invalid split index for pair {pair_name}")
+                continue
+
+            # Compute hedge ratio using linear regression
+            hedge_ratio, intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
+            spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
+            train_spread = spread[:split_index]
+            mean_spread = train_spread.mean()
+            std_spread = train_spread.std()
+            z_spread = (spread - mean_spread) / std_spread
+
+            precomputed_values.append({
+                'spread': spread,
+                'z_spread': z_spread,
+                'split_index': split_index
+            })
+
+        self.precomputed_values = precomputed_values
+        logger.info(f"Precomputed values for {len(precomputed_values)} pairs.")
+
+    def save_precomputed_values(self):
+        """
+        Save the precomputed values to a pickle file.
+        """
+        try:
+            with open(self.precomputed_path, 'wb') as f:
+                pickle.dump(self.precomputed_values, f)
+            logger.info(f"Saved precomputed values to {self.precompute_path}")
+        except Exception as e:
+            logger.error(f"Error saving precomputed values: {e}")

@@ -42,17 +42,18 @@ def setup_logging():
     logging.getLogger('requests').setLevel(logging.WARNING)
     logging.getLogger('binance').setLevel(logging.WARNING)
     logging.getLogger('statsmodels').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
-def main(DOWNLOAD_DATA):
+def main(DOWNLOAD_DATA, PREPROCESS_DATA):
     # Setup logging
     setup_logging()
     logger = logging.getLogger('Main')
 
     # Configuration Variables
     TESTNET = False  
-    DAYS = 30
+    DAYS = 60
     HOURS_IN_DAY = 24
-    FORMATION_DAYS = 7
+    FORMATION_DAYS = 5
     TRADING_WINDOW = 24
     FORMATION_WINDOW = int(HOURS_IN_DAY * FORMATION_DAYS)
     TOTAL_WINDOW_LENGTH = FORMATION_WINDOW + TRADING_WINDOW
@@ -76,13 +77,27 @@ def main(DOWNLOAD_DATA):
     downloader_config = {
         'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
-        'N_COINS': 20,
+        'N_COINS': 100,
         'CSV_FILENAME': 'trading_coins.csv',
         'INTERVAL': INTERVAL,
         'WINDOW_RATIO': WINDOW_RATIO, 
         'COINT_THRESHOLD': 0.05,
         'CORR_THRESHOLD': 0.5,
+        'PAIRS_CSV': 'pairs_for_backtest.csv',
+        'PRECOMPUTED_FILE': 'precomputed_values.pkl'
     }
+
+    # Define configurations for PairTradingModel
+    model_config = {
+        'FORMATION_WINDOW': FORMATION_WINDOW,  
+        'TRADING_WINDOW': TRADING_WINDOW,      
+        'TOTAL_WINDOW': TOTAL_WINDOW_LENGTH,   
+        'WINDOW_RATIO': WINDOW_RATIO,          
+        'TIMEFRAME': INTERVAL,                 
+        'DAYS': DAYS,                           
+        'TRADING_FEE': 0.0005,                 
+        'DATA_DIR': 'data/backtest',
+    }    
 
     # Set start and end time for data download
     end_time = dt.datetime.now(dt.timezone.utc)
@@ -91,59 +106,35 @@ def main(DOWNLOAD_DATA):
     downloader_config['END_STR'] = end_time.strftime("%Y-%m-%d %H:%M:%S")
     logger.info(f"Downloading data from {downloader_config['START_STR']} to {downloader_config['END_STR']}")
     
-    if DOWNLOAD_DATA:
-        # Initialize BinanceDownloader
-        downloader = BinanceDownloader(downloader_config, client)
+    if PREPROCESS_DATA:
+        if DOWNLOAD_DATA:
+            # Initialize BinanceDownloader
+            downloader = BinanceDownloader(downloader_config, client)
 
-        # Step 1: Download data for backtesting
-        logger.info("Starting data download for backtesting...")
-        downloader.download_data_for_backtest()
+            # Step 1: Download data for backtesting
+            logger.info("Starting data download for backtesting...")
+            downloader.download_data_for_backtest()
 
-    # Step 2: Prepare pairs for backtesting using BacktestPreprocessor
-    logger.info("Preparing pairs for backtesting...")
-    preprocessor = BacktestPreprocessor(config=downloader_config)
-    preprocessor.prepare_pairs_for_backtest(
-        window_size=str(TOTAL_WINDOW_LENGTH)+'h', 
-        overlap=str(FORMATION_WINDOW)+'h',
-        output_filename="pairs_for_backtest.csv"  # Optional: specify if different
-    )
+        # Step 2: Prepare pairs for backtesting using BacktestPreprocessor
+        logger.info("Preparing pairs for backtesting...")
+        preprocessor = BacktestPreprocessor(config=downloader_config)
+        preprocessor.prepare_pairs_for_backtest(
+            window_size=str(TOTAL_WINDOW_LENGTH)+'h', 
+            overlap=str(FORMATION_WINDOW)+'h',
+        )
 
-    # Define configurations for PairTradingModel
-    model_config = {
-        'FORMATION_WINDOW': FORMATION_WINDOW,  # e.g., 7 days * 24 hours = 168
-        'TRADING_WINDOW': TRADING_WINDOW,      # e.g., 24 hours
-        'TOTAL_WINDOW': TOTAL_WINDOW_LENGTH,   # FORMATION_WINDOW + TRADING_WINDOW
-        'WINDOW_RATIO': WINDOW_RATIO,          # e.g., 168 / 192 = 0.875
-        'TIMEFRAME': INTERVAL,                 # e.g., '30m'
-        'DAYS': DAYS,                           # e.g., 30
-        'TRADING_FEE': 0.0005,                 # Example trading fee
-        'DATA_DIR': 'data/backtest',
-        'PAIRS_CSV': 'pairs_for_backtest.csv',
-        'PRECOMPUTED_FILE': 'precomputed_values.pkl'
-    }
+        # Paths
 
-    # Initialize PairTradingModel
-    model = PairTradingModel(model_config)
-
-    # Paths
-    pairs_csv_path = os.path.join(model_config['DATA_DIR'], model_config['PAIRS_CSV'])
-    precomputed_filepath = os.path.join(model_config['DATA_DIR'], model_config['PRECOMPUTED_FILE'])
-
-    # Step 3: Precompute hedge ratios and z-scores or load them if already computed
-    if not os.path.exists(precomputed_filepath):
         logger.info("Precomputed values not found. Starting precomputation...")
-        # Load pairs information
-        pairs_info = model.load_pairs_info(pairs_csv_path)
+        preprocessor.load_pairs_info()
+        preprocessor.precompute_hedge_ratios()
+        preprocessor.save_precomputed_values()
 
-        # Precompute hedge ratios and z-scores
-        model.precompute_hedge_ratios(pairs_info)
-
-        # Save precomputed values
-        model.save_precomputed_values(precomputed_filepath)
-    else:
-        logger.info("Precomputed values found. Loading them...")
-        # Load precomputed values
-        model.load_precomputed_values(precomputed_filepath)
+    model = PairTradingModel(model_config)
+    logger.info("Precomputed values found. Loading them...")
+    # Load precomputed values
+    precomputed_filepath = os.path.join(model_config['DATA_DIR'], 'precomputed_values.pkl')
+    model.load_precomputed_values(precomputed_filepath)
 
     # Step 4: Optimize trading parameters
     logger.info("Starting optimization of trading parameters...")
@@ -151,5 +142,7 @@ def main(DOWNLOAD_DATA):
     logger.info(f'Best parameters: {best_params} with max function value: {max_fval}')
 
 if __name__ == "__main__":
-    DOWNLOAD_DATA = False
-    main(DOWNLOAD_DATA)
+    DOWNLOAD_DATA = True
+    PREPROCESS_DATA = True
+    main(DOWNLOAD_DATA, 
+        PREPROCESS_DATA)

@@ -21,90 +21,6 @@ class PairTradingModel:
         self.trading_fee = config.get('TRADING_FEE', 0.0005)
         self.precomputed_values = None
 
-    def load_pairs_info(self, pairs_csv_path):
-        """
-        Load pairs information from the CSV file.
-        Each row contains window_start, window_end, pair, data1_path, data2_path
-        """
-        pairs_info = []
-        with open(pairs_csv_path, mode='r') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                pairs_info.append(row)
-        logger.info(f"Loaded {len(pairs_info)} pairs from {pairs_csv_path}")
-        return pairs_info
-
-    def load_pair_data(self, data1_path, data2_path):
-        """
-        Load pair data from pickle files.
-        Returns two DataFrames: df1 and df2
-        """
-        try:
-            df1 = pd.read_pickle(data1_path)
-            df2 = pd.read_pickle(data2_path)
-            return df1, df2
-        except Exception as e:
-            logger.error(f"Error loading pair data: {e}")
-            return None, None
-
-    def precompute_hedge_ratios(self, pairs_info):
-        """
-        Precompute hedge ratios and z-scores for all pairs.
-        """
-        precomputed_values = []
-        logger.info("Precomputing hedge ratios and z-scores for all pairs...")
-        for pair in tqdm(pairs_info, desc="Precomputing"):
-            window_start = pd.to_datetime(pair['window_start'])
-            window_end = pd.to_datetime(pair['window_end'])
-            pair_name = tuple(pair['pair'].split('-'))
-            data1_path = pair['data1_path']
-            data2_path = pair['data2_path']
-
-            df1, df2 = self.load_pair_data(data1_path, data2_path)
-            if df1 is None or df2 is None:
-                continue
-
-            # Align the data on timestamps
-            common_indices = df1.index.intersection(df2.index)
-            log_price_1 = np.log(df1.loc[common_indices]['Close'])
-            log_price_2 = np.log(df2.loc[common_indices]['Close'])
-
-            if len(log_price_1) < self.formation_window:
-                logger.warning(f"Not enough data for pair {pair_name} in window {window_start} to {window_end}")
-                continue
-
-            split_index = int(len(log_price_1) * self.window_ratio)
-            if split_index == 0 or split_index >= len(log_price_1):
-                logger.warning(f"Invalid split index for pair {pair_name}")
-                continue
-
-            # Compute hedge ratio using linear regression
-            hedge_ratio, intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
-            spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
-            train_spread = spread[:split_index]
-            mean_spread = train_spread.mean()
-            std_spread = train_spread.std()
-            z_spread = (spread - mean_spread) / std_spread
-
-            precomputed_values.append({
-                'spread': spread,
-                'z_spread': z_spread,
-                'split_index': split_index
-            })
-
-        self.precomputed_values = precomputed_values
-        logger.info(f"Precomputed values for {len(precomputed_values)} pairs.")
-
-    def save_precomputed_values(self, filepath):
-        """
-        Save the precomputed values to a pickle file.
-        """
-        try:
-            with open(filepath, 'wb') as f:
-                pickle.dump(self.precomputed_values, f)
-            logger.info(f"Saved precomputed values to {filepath}")
-        except Exception as e:
-            logger.error(f"Error saving precomputed values: {e}")
 
     def load_precomputed_values(self, filepath):
         """
@@ -127,7 +43,7 @@ class PairTradingModel:
         trade_count = 0
         returns = []
 
-        for record in tqdm(self.precomputed_values, desc="Simulating Trades"):
+        for record in self.precomputed_values:
             spread = record['spread']
             z_spread = record['z_spread']
             split_index = record['split_index']
@@ -199,33 +115,22 @@ class PairTradingModel:
         avg_profit_per_trade = total_profit / trade_count
 
         T_TOTAL = 24
-        T_SEARCH = 1
-        N_DAYS = self.days * 2
+        T_SEARCH = 0
+        N_DAYS = self.days
         N_effective = (T_TOTAL - T_SEARCH * (1 / frac_hold - 1)) / (T_TOTAL * frac_hold)
         N_avg_trade = trade_count / N_DAYS
         N_trade_per_day = min(N_effective, N_avg_trade)
-        func_val = avg_profit_per_trade * N_trade_per_day
+        func_val = avg_profit_per_trade * N_trade_per_day * 100
 
         logger.info('=' * 50)
-        logger.info(f'Trade Count:  {trade_count}')
-        logger.info(f'Win Rate:     {cnt_win / trade_count:.3f}')
-        logger.info(f'Loss Rate:    {cnt_loss / trade_count:.3f}')
-        logger.info(f'Draw Rate:    {cnt_draw / trade_count:.3f}')
-        logger.info(f'Profit Rate:  {cnt_profit / trade_count:.3f}')
-        logger.info(f'Number of Trades per Day: {N_trade_per_day:.3f}')
-        logger.info(f'Number of Effective Trades: {N_effective:.3f}')
-        logger.info(f'Avg. Number of Trades: {N_avg_trade:.3f}')
-        logger.info('-' * 20 + 'Parameters' + '-' * 20)
-        logger.info(f'Threshold:    {entry_thres:.3f}')
-        logger.info(f'Stop Loss:    {stop_loss:.3f}')
-        logger.info(f'Risk-Reward:  {risk_reward_ratio:.3f}')
-        logger.info(f'Frac. hold:   {frac_hold:.3f}')
-        logger.info(f'Avg Profit per Duration: {avg_profit_per_duration * 100:.3f}%')
-        logger.info(f'Avg Profit per Trade:      {avg_profit_per_trade * 100:.3f}%/trade')
-        logger.info(f'Function value:            {func_val * 100:.3f}%')
+        logger.info(f'Trade Count: {trade_count} | Effective Trades: {N_effective:.3f} | Avg. Number of Trades: {N_avg_trade:.3f} | Trades/Day: {N_trade_per_day:.3f}')
+        logger.info(f'Win Rate: {cnt_win / trade_count:.3f} | Loss Rate: {cnt_loss / trade_count:.3f} | Draw Rate: {cnt_draw / trade_count:.3f} | Profit Rate: {cnt_profit / trade_count:.3f}')
+        logger.info('-' * 20 + ' Parameters ' + '-' * 20)
+        logger.info(f'Threshold: {entry_thres:.3f} | Stop Loss: {stop_loss:.3f} | Risk-Reward: {risk_reward_ratio:.3f} | Frac. Hold: {frac_hold:.3f}')
+        logger.info(f'Avg Profit/Duration: {avg_profit_per_duration * 100:.3f}% | Avg Profit/Trade: {avg_profit_per_trade * 100:.3f}%/trade | Function Value: {func_val:.3f}%')
         logger.info('=' * 50)
 
-        return func_val * 100
+        return func_val
 
     def objective(self, params):
         """
