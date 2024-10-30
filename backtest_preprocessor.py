@@ -38,7 +38,6 @@ class BacktestPreprocessor:
         except Exception as e:
             logger.error(f"Failed to reset {self.pairs_dir}. Reason: {e}") 
 
-
     def _load_trading_coins(self):
         csv_path = os.path.join(self.saving_dir, self.config["CSV_FILENAME"])
         if not os.path.exists(csv_path):

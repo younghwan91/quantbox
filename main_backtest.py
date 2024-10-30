@@ -123,8 +123,6 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
             overlap=str(FORMATION_WINDOW)+'h',
         )
 
-        # Paths
-
         logger.info("Precomputed values not found. Starting precomputation...")
         preprocessor.load_pairs_info()
         preprocessor.precompute_hedge_ratios()

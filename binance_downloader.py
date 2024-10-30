@@ -8,32 +8,33 @@ from tqdm import tqdm
 import numpy as np
 import logging
 import time
-from datetime import datetime
-from binance.client import Client
+import shutil
 
 logger = logging.getLogger('BinanceDownloader')
 
 class BinanceDownloader:
     def __init__(self, config, client):
         self.client = client
-        self.saving_dir = config["SAVING_DIR"]
+        self.config = config
         self.trading_coins = self.get_trading_coins(
             self.client, config["QUOTE_COIN"], config["N_COINS"]
         )
-        self.config = config
+        self.saving_dir = config["SAVING_DIR"]
+        self.backtest_dir = os.path.join(self.saving_dir, 'backtest')
         self.ensure_directories()
 
     def ensure_directories(self):
         # Ensure the main saving directory exists
         os.makedirs(self.saving_dir, exist_ok=True)
-
-        # Ensure the 'backtest' subdirectory exists
-        self.backtest_dir = os.path.join(self.saving_dir, 'backtest')
-        os.makedirs(self.backtest_dir, exist_ok=True)
-
-        # Ensure the 'pairs' subdirectory within 'backtest' exists
-        self.pairs_dir = os.path.join(self.backtest_dir, 'pairs')
-        os.makedirs(self.pairs_dir, exist_ok=True)
+        
+        try:
+            if os.path.exists(self.backtest_dir):
+                shutil.rmtree(self.backtest_dir)
+                logger.debug(f"Deleted entire directory: {self.backtest_dir}")
+            os.makedirs(self.backtest_dir, exist_ok=True)
+            logger.info(f"Created directory: {self.backtest_dir}")
+        except Exception as e:
+            logger.error(f"Failed to reset {self.backtest_dir}. Reason: {e}") 
 
     def get_trading_coins(self, client, quote_coin, n_coins, sort_by_volume=True):
         futures_exchange_info = client.futures_exchange_info()

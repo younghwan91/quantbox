@@ -8,7 +8,6 @@ from scipy.stats import shapiro
 from scipy.optimize import differential_evolution
 import pickle
 import os
-import csv
 
 logger = logging.getLogger('PairTradingModel')
 
@@ -20,7 +19,6 @@ class PairTradingModel:
         self.window_ratio = config['WINDOW_RATIO']
         self.trading_fee = config.get('TRADING_FEE', 0.0005)
         self.precomputed_values = None
-
 
     def load_precomputed_values(self, filepath):
         """
