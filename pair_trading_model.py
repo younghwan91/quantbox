@@ -7,7 +7,6 @@ import logging
 from scipy.stats import shapiro
 from scipy.optimize import differential_evolution
 import pickle
-import os
 
 logger = logging.getLogger('PairTradingModel')
 
@@ -22,26 +21,37 @@ class PairTradingModel:
 
     def load_precomputed_values(self, filepath):
         """
-        Load precomputed values from a pickle file.
+        Load precomputed values from a pickle file and split into training and testing sets.
         """
         try:
             with open(filepath, 'rb') as f:
-                self.precomputed_values = pickle.load(f)
+                all_values = pickle.load(f)
             logger.info(f"Loaded precomputed values from {filepath}")
+            # sort the precomputed values by 'window_start' key
+            all_values = sorted(all_values, key=lambda x: x['window_start'])
+            
+            split_index = int(len(all_values) * 0.8)  # 80% for training
+            self.training_values = all_values[:split_index]
+            self.testing_values = all_values[split_index:]
+            logger.info(f"Split precomputed values into {len(self.training_values)} training and {len(self.testing_values)} testing records")
+
         except Exception as e:
             logger.error(f"Error loading precomputed values: {e}")
 
-    def simulate_trading(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, slippage=0.006):
+    def simulate_trading(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, dataset=None, slippage=0.006):
         """
         Simulate trading based on precomputed hedge ratios and z-scores.
         """
+        if dataset is None:
+            dataset = self.precomputed_values
+
         total_profit, cnt_win, cnt_loss, cnt_draw, cnt_profit = 0, 0, 0, 0, 0
         total_trade_duration = 0
         total_profit_per_duration = 0
         trade_count = 0
         returns = []
 
-        for record in self.precomputed_values:
+        for record in dataset:
             spread = record['spread']
             z_spread = record['z_spread']
             split_index = record['split_index']
@@ -120,7 +130,6 @@ class PairTradingModel:
         N_trade_per_day = min(N_effective, N_avg_trade)
         func_val = avg_profit_per_trade * N_trade_per_day * 100
 
-        logger.info('=' * 50)
         logger.info(f'Trade Count: {trade_count} | Effective Trades: {N_effective:.3f} | Avg. Number of Trades: {N_avg_trade:.3f} | Trades/Day: {N_trade_per_day:.3f}')
         logger.info(f'Win Rate: {cnt_win / trade_count:.3f} | Loss Rate: {cnt_loss / trade_count:.3f} | Draw Rate: {cnt_draw / trade_count:.3f} | Profit Rate: {cnt_profit / trade_count:.3f}')
         logger.info('-' * 20 + ' Parameters ' + '-' * 20)
@@ -135,15 +144,15 @@ class PairTradingModel:
         Objective function for optimization (to be minimized).
         """
         entry_thres, risk_reward_ratio, stop_loss, frac_hold = params
-        return -self.simulate_trading(entry_thres, risk_reward_ratio, stop_loss, frac_hold)
+        return -self.simulate_trading(entry_thres, risk_reward_ratio, stop_loss, frac_hold, dataset=self.training_values)
 
     def optimize_parameters(self):
         """
-        Optimize trading parameters using differential evolution.
+        Optimize trading parameters using differential evolution on training data.
         """
         bounds = [
             (2, 3),    # entry_thres
-            (1, 3),      # risk_reward_ratio
+            (1.5, 3),      # risk_reward_ratio
             (0.5, 2),    # stop_loss
             (0.2, 0.9)    # frac_hold
         ]
@@ -168,4 +177,11 @@ class PairTradingModel:
         logger.info(f"Fraction of Hold: {frac_hold:.3f}")
         logger.info(f"Optimal Cost Function Value: {-result.fun:.5f}")  # Return positive value
 
-        return result.x, -result.fun  # Return the best params and the corresponding profit
+        # Test on testing set
+        test_fval = self.simulate_trading(
+            entry_thres, risk_reward_ratio, stop_loss, frac_hold,
+            dataset=self.testing_values
+        )
+        logger.info(f"Test Function Value: {test_fval:.3f}%")
+
+        return result.x, -result.fun, test_fval

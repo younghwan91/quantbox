@@ -59,6 +59,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
     TOTAL_WINDOW_LENGTH = FORMATION_WINDOW + TRADING_WINDOW
     WINDOW_RATIO = FORMATION_WINDOW / TOTAL_WINDOW_LENGTH
     INTERVAL = '30m'
+    HOUR_SHIFT = 4
 
     # Load API credentials
     try:
@@ -78,7 +79,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
         'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
         'N_COINS': 100,
-        'CSV_FILENAME': 'trading_coins.csv',
+        'CSV_FILENAME': 'trading_coins_backtest.csv',
         'INTERVAL': INTERVAL,
         'WINDOW_RATIO': WINDOW_RATIO, 
         'COINT_THRESHOLD': 0.05,
@@ -120,24 +121,20 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
         preprocessor = BacktestPreprocessor(config=downloader_config)
         preprocessor.prepare_pairs_for_backtest(
             window_size=str(TOTAL_WINDOW_LENGTH)+'h', 
-            overlap=str(FORMATION_WINDOW)+'h',
+            overlap=str(TOTAL_WINDOW_LENGTH-HOUR_SHIFT)+'h',
         )
-
-        logger.info("Precomputed values not found. Starting precomputation...")
-        preprocessor.load_pairs_info()
-        preprocessor.precompute_hedge_ratios()
-        preprocessor.save_precomputed_values()
 
     model = PairTradingModel(model_config)
     logger.info("Precomputed values found. Loading them...")
-    # Load precomputed values
+    # Load and split precomputed values
     precomputed_filepath = os.path.join(model_config['DATA_DIR'], 'precomputed_values.pkl')
     model.load_precomputed_values(precomputed_filepath)
 
     # Step 4: Optimize trading parameters
     logger.info("Starting optimization of trading parameters...")
-    best_params, max_fval = model.optimize_parameters()
+    best_params, max_fval, test_fval = model.optimize_parameters()
     logger.info(f'Best parameters: {best_params} with max function value: {max_fval}')
+    logger.info(f'Test function value: {test_fval}')
 
 if __name__ == "__main__":
     DOWNLOAD_DATA = True

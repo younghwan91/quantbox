@@ -8,9 +8,8 @@ from tqdm import tqdm
 import numpy as np
 import logging
 from statsmodels.tsa.stattools import coint
-from scipy.stats import shapiro
+from scipy.stats import shapiro, skew, kurtosis
 import matplotlib.pyplot as plt
-import shutil
 import pickle
 
 # Configure logging (if not already configured in main application)
@@ -20,23 +19,11 @@ class BacktestPreprocessor:
     def __init__(self, config):
         self.saving_dir = config["SAVING_DIR"]
         self.backtest_dir = os.path.join(self.saving_dir, 'backtest')
-        self.pairs_dir = os.path.join(self.backtest_dir, 'pairs')
         self.config = config
         self.trading_coins = self._load_trading_coins()
-        self.ensure_directories()
 
         self.pairs_csv_path = os.path.join(self.backtest_dir, config["PAIRS_CSV"])
         self.precomputed_path = os.path.join(self.backtest_dir, config["PRECOMPUTED_FILE"])
-
-    def ensure_directories(self):
-        try:
-            if os.path.exists(self.pairs_dir):
-                shutil.rmtree(self.pairs_dir)
-                logger.debug(f"Deleted entire directory: {self.pairs_dir}")
-            os.makedirs(self.pairs_dir, exist_ok=True)
-            logger.info(f"Created directory: {self.pairs_dir}")
-        except Exception as e:
-            logger.error(f"Failed to reset {self.pairs_dir}. Reason: {e}") 
 
     def _load_trading_coins(self):
         csv_path = os.path.join(self.saving_dir, self.config["CSV_FILENAME"])
@@ -109,9 +96,9 @@ class BacktestPreprocessor:
             logger.warning("No pairs left after filtering. Consider lowering thresholds.")
             return
 
-        # Step 7: Save the filtered pairs data
+        # Step 7: Save the filtered and precomputed pairs data
         self._save_pairs_info(filtered_pairs)
-        logger.info(f"Saved filtered pairs data to {self.pairs_csv_path}")
+        logger.info(f"Saved precomputed pairs data to {self.precomputed_path}")
 
     def _filter_pairs(self, all_pairs, corr_threshold, pvalue_threshold, window_ratio):
         """
@@ -120,68 +107,58 @@ class BacktestPreprocessor:
         filtered = []
         for pair in tqdm(all_pairs, desc="Filtering pairs"):
             split_idx = int(window_ratio * len(pair['data1']))
-            data1 = pair['data1']['Close'][:split_idx]
-            data2 = pair['data2']['Close'][:split_idx]
-
+            train_data1 = pair['data1']['Close'][:split_idx]
+            train_data2 = pair['data2']['Close'][:split_idx]
+    
             # Ensure no division by zero or log of zero
-            if (data1 <= 0).any() or (data2 <= 0).any():
+            if (train_data1 <= 0).any() or (train_data2 <= 0).any():
                 logger.warning(f"Non-positive values encountered in pair {pair['pair']} during log transformation.")
                 continue
-
-            log_data1 = np.log(data1)
-            log_data2 = np.log(data2)
-
-            # Filter 1: Pearson correlation
-            correlation = data1.corr(data2)
+    
+            log_train_data1 = np.log(train_data1)
+            log_train_data2 = np.log(train_data2)
+    
+            # Filter 1: Pearson correlation on training data
+            correlation = train_data1.corr(train_data2)
             if np.abs(correlation) < corr_threshold:
                 continue 
-
-            # Filter 2: Hedge ratio
+    
+            # Filter 2: Hedge ratio using training data
             try:
-                hedge_ratio = np.polyfit(log_data2, log_data1, 1)[0]
+                hedge_ratio = np.polyfit(log_train_data2, log_train_data1, 1)[0]
             except np.RankWarning as e:
                 logger.warning(f"Polyfit failed for pair {pair['pair']}: {e}")
                 continue
             hedge_const = 3.0
             if (1 / hedge_const) > hedge_ratio or hedge_ratio > hedge_const:
                 continue
-
-            # Filter 3: Z-score normality test
-            spread = log_data1 - hedge_ratio * log_data2
+    
+            # Filter 3: Z-score normality test on training spread
+            spread = log_train_data1 - hedge_ratio * log_train_data2
             if spread.std() == 0:
                 logger.warning(f"Zero standard deviation in spread for pair {pair['pair']}.")
                 continue
             z_spread = (spread - spread.mean()) / spread.std()
             if np.abs(z_spread.iloc[-1]) < 2:
                 continue
-
-            # Filter 4: Shapiro-Wilk normality test
-            try:
-                shapiro_result = shapiro(spread)
-                if shapiro_result.pvalue < 0.05:
-                    continue
-            except Exception as e:
-                logger.warning(f"Shapiro-Wilk test failed for pair {pair['pair']}: {e}")
+    
+            # Filter 4: Skewness and Kurtosis check on training spread
+            spread_skewness = skew(spread)
+            spread_kurtosis = kurtosis(spread, fisher=False)  # `fisher=False` for population kurtosis
+            if abs(spread_skewness) >= 2 or abs(spread_kurtosis) >= 7:
                 continue
-
-            # Filter 5: Cointegration test
+    
+            # Filter 5: Cointegration test on training data
             try:
-                _, p_value, _ = coint(log_data1, log_data2)
+                _, p_value, _ = coint(log_train_data1, log_train_data2)
                 if p_value > pvalue_threshold:
                     continue
             except Exception as e:
                 logger.warning(f"Cointegration test failed for pair {pair['pair']}: {e}")
                 continue
-            
-            # uncut_spread = np.log(pair['data1']['Close']) - hedge_ratio * np.log(pair['data2']['Close'])
-            # plt.plot(uncut_spread-spread.mean())
-            # plt.axvline(x=uncut_spread.index[split_idx] , color='r', linestyle='--')
-            # plt.axhline(y=0, color='k', linestyle='--')
-            # plt.ylim(-0.04, 0.04)
-            # plt.show()
-
+    
             filtered.append(pair)
-
+        
         return filtered
 
     def _load_all_coin_data(self):
@@ -267,9 +244,9 @@ class BacktestPreprocessor:
                 df1 = coin_data[coin1].loc[window_start:window_end]
                 df2 = coin_data[coin2].loc[window_start:window_end]
 
-                # Additional check to ensure both DataFrames have data for the entire window
-                if df1.empty or df2.empty:
-                    logger.warning(f"No data for pair {pair} in window {window_start} to {window_end}")
+                # Additional check to ensure both DataFrames have identical indexes
+                if not df1.index.equals(df2.index):
+                    logger.warning(f"Time indexes do not match for pair {pair} in window {window_start} to {window_end}")
                     continue
 
                 pair_data = {
@@ -285,117 +262,40 @@ class BacktestPreprocessor:
 
     def _save_pairs_info(self, all_pairs):
         """
-        Saves the pairs data to a CSV file with references to pickle files.
+        Save precomputed hedge ratios and z-scores directly to a pickle file.
         """
-        with open(self.pairs_csv_path, mode='w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['window_start', 'window_end', 'pair', 'data1_path', 'data2_path'])
+        precomputed_data = []
+        for pair in tqdm(all_pairs, desc="Saving and Precomputing"):
+            window_start = pair['window_start'].strftime('%Y-%m-%d %H:%M:%S')
+            window_end = pair['window_end'].strftime('%Y-%m-%d %H:%M:%S')
+            pair_tuple = pair['pair']
 
-            for pair in tqdm(all_pairs, desc="Saving pairs"):
-                window_start = pair['window_start'].strftime('%Y-%m-%d %H:%M:%S')
-                window_end = pair['window_end'].strftime('%Y-%m-%d %H:%M:%S')
-                pair_tuple = pair['pair']
+            # Compute hedge ratio and z-score here
+            try:
+                data1 = pair['data1']['Close']
+                data2 = pair['data2']['Close']
+                split_idx = int(self.config['WINDOW_RATIO'] * len(data1))
+                train_data1 = data1[:split_idx]
+                train_data2 = data2[:split_idx]
 
-                # Define paths to the sliced data pickles
-                timestamp_str = pair['window_start'].strftime('%Y%m%d%H%M%S')
-                data1_filename = f"{pair_tuple[0]}_{timestamp_str}_window.pkl"
-                data2_filename = f"{pair_tuple[1]}_{timestamp_str}_window.pkl"
-                data1_path = os.path.join(self.pairs_dir, data1_filename)
-                data2_path = os.path.join(self.pairs_dir, data2_filename)
+                hedge_ratio = np.polyfit(np.log(train_data2), np.log(train_data1), 1)[0]
+                spread = np.log(data1) - hedge_ratio * np.log(data2)
+                z_spread = (spread - spread.mean()) / spread.std()
 
-                # Save the sliced DataFrames
-                pair['data1'].to_pickle(data1_path)
-                pair['data2'].to_pickle(data2_path)
-
-                # Write the row to CSV
-                writer.writerow([
-                    window_start, 
-                    window_end, 
-                    f"{pair_tuple[0]}-{pair_tuple[1]}", 
-                    data1_path, 
-                    data2_path
-                ])
-        logger.info(f"Saved pairs information to {self.pairs_csv_path}")
-
-####################################################################################################
-
-    def load_pairs_info(self):
-        """
-        Load pairs information from the CSV file.
-        Each row contains window_start, window_end, pair, data1_path, data2_path
-        """
-        self.pairs_info = []
-        with open(self.pairs_csv_path, mode='r') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                self.pairs_info.append(row)
-        logger.info(f"Loaded {len(self.pairs_info)} pairs from {self.pairs_csv_path}")
-
-    def load_pair_data(self, data1_path, data2_path):
-        """
-        Load pair data from pickle files.
-        Returns two DataFrames: df1 and df2
-        """
-        try:
-            df1 = pd.read_pickle(data1_path)
-            df2 = pd.read_pickle(data2_path)
-            return df1, df2
-        except Exception as e:
-            logger.error(f"Error loading pair data: {e}")
-            return None, None
-
-    def precompute_hedge_ratios(self):
-        """
-        Precompute hedge ratios and z-scores for all pairs.
-        """
-        precomputed_values = []
-        logger.info("Precomputing hedge ratios and z-scores for all pairs...")
-        for pair in tqdm(self.pairs_info, desc="Precomputing"):
-            window_start = pd.to_datetime(pair['window_start'])
-            window_end = pd.to_datetime(pair['window_end'])
-            pair_name = tuple(pair['pair'].split('-'))
-            data1_path = pair['data1_path']
-            data2_path = pair['data2_path']
-
-            df1, df2 = self.load_pair_data(data1_path, data2_path)
-            if df1 is None or df2 is None:
+                precomputed_data.append({
+                    'window_start': window_start,
+                    'window_end': window_end,
+                    'pair': pair_tuple,
+                    'hedge_ratio': hedge_ratio,
+                    'spread': spread,  # Added spread
+                    'z_spread': z_spread,
+                    'split_index': split_idx  # Added split_index
+                })
+            except Exception as e:
+                logger.error(f"Error precomputing pair {pair_tuple}: {e}")
                 continue
 
-            # Align the data on timestamps
-            common_indices = df1.index.intersection(df2.index)
-            log_price_1 = np.log(df1.loc[common_indices]['Close'])
-            log_price_2 = np.log(df2.loc[common_indices]['Close'])
-
-            window_ratio = self.config.get('WINDOW_RATIO') 
-            split_index = int(len(log_price_1) * window_ratio)
-            if split_index == 0 or split_index >= len(log_price_1):
-                logger.warning(f"Invalid split index for pair {pair_name}")
-                continue
-
-            # Compute hedge ratio using linear regression
-            hedge_ratio, intercept = np.polyfit(log_price_2[:split_index], log_price_1[:split_index], 1)
-            spread = log_price_1 - (hedge_ratio * log_price_2 + intercept)
-            train_spread = spread[:split_index]
-            mean_spread = train_spread.mean()
-            std_spread = train_spread.std()
-            z_spread = (spread - mean_spread) / std_spread
-
-            precomputed_values.append({
-                'spread': spread,
-                'z_spread': z_spread,
-                'split_index': split_index
-            })
-
-        self.precomputed_values = precomputed_values
-        logger.info(f"Precomputed values for {len(precomputed_values)} pairs.")
-
-    def save_precomputed_values(self):
-        """
-        Save the precomputed values to a pickle file.
-        """
-        try:
-            with open(self.precomputed_path, 'wb') as f:
-                pickle.dump(self.precomputed_values, f)
-            logger.info(f"Saved precomputed values to {self.precompute_path}")
-        except Exception as e:
-            logger.error(f"Error saving precomputed values: {e}")
+        # Save all precomputed data to a single pickle file
+        with open(self.precomputed_path, 'wb') as f:
+            pickle.dump(precomputed_data, f)
+        logger.info(f"Saved precomputed data to {self.precomputed_path}")
