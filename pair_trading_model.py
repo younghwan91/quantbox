@@ -30,7 +30,7 @@ class PairTradingModel:
             # sort the precomputed values by 'window_start' key
             all_values = sorted(all_values, key=lambda x: x['window_start'])
             
-            split_index = int(len(all_values) * 0.8)  # 80% for training
+            split_index = int(len(all_values) * 0.9)  # 80% for training
             self.training_values = all_values[:split_index]
             self.testing_values = all_values[split_index:]
             logger.info(f"Split precomputed values into {len(self.training_values)} training and {len(self.testing_values)} testing records")
@@ -38,13 +38,12 @@ class PairTradingModel:
         except Exception as e:
             logger.error(f"Error loading precomputed values: {e}")
 
-    def simulate_trading(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, dataset=None, slippage=0.006):
+    def simulate_trading(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, dataset=None, slippage=0.006, verbose=False):
         """
         Simulate trading based on precomputed hedge ratios and z-scores.
         """
-        if dataset is None:
-            dataset = self.precomputed_values
-
+        assert dataset is not None or self.precomputed_values is not None, "No dataset or precomputed values provided."
+        
         total_profit, cnt_win, cnt_loss, cnt_draw, cnt_profit = 0, 0, 0, 0, 0
         total_trade_duration = 0
         total_profit_per_duration = 0
@@ -56,10 +55,10 @@ class PairTradingModel:
             z_spread = record['z_spread']
             split_index = record['split_index']
 
-            if np.abs(z_spread.iloc[split_index]) > entry_thres:
+            if np.abs(z_spread.iloc[split_index-1]) > entry_thres:
                 trade_count += 1
-                z_spread_0 = z_spread.iloc[split_index]
-                spread_0 = spread.iloc[split_index]
+                z_spread_0 = z_spread.iloc[split_index-1]
+                spread_0 = spread.iloc[split_index-1]
 
                 observe_spread = spread.iloc[split_index:]
                 observe_z_spread = z_spread.iloc[split_index:]
@@ -69,7 +68,7 @@ class PairTradingModel:
                 testing_time = len(observe_z_spread)
                 max_trading_time = int(frac_hold * testing_time)
 
-                for i in range(1, max_trading_time):
+                for i in range(0, max_trading_time):
                     current_spread = observe_spread.iloc[i]
                     current_z_spread = observe_z_spread.iloc[i]
                     trade_duration += 1
@@ -130,12 +129,13 @@ class PairTradingModel:
         N_trade_per_day = min(N_effective, N_avg_trade)
         func_val = avg_profit_per_trade * N_trade_per_day * 100
 
-        logger.info(f'Trade Count: {trade_count} | Effective Trades: {N_effective:.3f} | Avg. Number of Trades: {N_avg_trade:.3f} | Trades/Day: {N_trade_per_day:.3f}')
-        logger.info(f'Win Rate: {cnt_win / trade_count:.3f} | Loss Rate: {cnt_loss / trade_count:.3f} | Draw Rate: {cnt_draw / trade_count:.3f} | Profit Rate: {cnt_profit / trade_count:.3f}')
-        logger.info('-' * 20 + ' Parameters ' + '-' * 20)
-        logger.info(f'Threshold: {entry_thres:.3f} | Stop Loss: {stop_loss:.3f} | Risk-Reward: {risk_reward_ratio:.3f} | Frac. Hold: {frac_hold:.3f}')
-        logger.info(f'Avg Profit/Duration: {avg_profit_per_duration * 100:.3f}% | Avg Profit/Trade: {avg_profit_per_trade * 100:.3f}%/trade | Function Value: {func_val:.3f}%')
-        logger.info('=' * 50)
+        if verbose:
+            logger.info(f'Trade Count: {trade_count} | Effective Trades: {N_effective:.3f} | Avg. Number of Trades: {N_avg_trade:.3f} | Trades/Day: {N_trade_per_day:.3f}')
+            logger.info(f'Win Rate: {cnt_win / trade_count:.3f} | Loss Rate: {cnt_loss / trade_count:.3f} | Draw Rate: {cnt_draw / trade_count:.3f} | Profit Rate: {cnt_profit / trade_count:.3f}')
+            logger.info('-' * 20 + ' Parameters ' + '-' * 20)
+            logger.info(f'Threshold: {entry_thres:.3f} | Stop Loss: {stop_loss:.3f} | Risk-Reward: {risk_reward_ratio:.3f} | Frac. Hold: {frac_hold:.3f}')
+            logger.info(f'Avg Profit/Duration: {avg_profit_per_duration * 100:.3f}% | Avg Profit/Trade: {avg_profit_per_trade * 100:.3f}%/trade | Function Value: {func_val:.3f}%')
+            logger.info('=' * 50)
 
         return func_val
 
@@ -180,7 +180,8 @@ class PairTradingModel:
         # Test on testing set
         test_fval = self.simulate_trading(
             entry_thres, risk_reward_ratio, stop_loss, frac_hold,
-            dataset=self.testing_values
+            dataset=self.testing_values,
+            verbose=True
         )
         logger.info(f"Test Function Value: {test_fval:.3f}%")
 

@@ -156,7 +156,7 @@ class BacktestPreprocessor:
             except Exception as e:
                 logger.warning(f"Cointegration test failed for pair {pair['pair']}: {e}")
                 continue
-    
+            
             filtered.append(pair)
         
         return filtered
@@ -280,7 +280,10 @@ class BacktestPreprocessor:
 
                 hedge_ratio = np.polyfit(np.log(train_data2), np.log(train_data1), 1)[0]
                 spread = np.log(data1) - hedge_ratio * np.log(data2)
-                z_spread = (spread - spread.mean()) / spread.std()
+                train_spread = spread[:split_idx]
+                train_mean = train_spread.mean()
+                train_std = train_spread.std()
+                z_spread = (spread - train_mean) / train_std
 
                 precomputed_data.append({
                     'window_start': window_start,

@@ -51,7 +51,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
 
     # Configuration Variables
     TESTNET = False  
-    DAYS = 60
+    DAYS = 30
     HOURS_IN_DAY = 24
     FORMATION_DAYS = 5
     TRADING_WINDOW = 24
@@ -78,7 +78,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
     downloader_config = {
         'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
-        'N_COINS': 100,
+        'N_COINS': 20,
         'CSV_FILENAME': 'trading_coins_backtest.csv',
         'INTERVAL': INTERVAL,
         'WINDOW_RATIO': WINDOW_RATIO, 
@@ -137,7 +137,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
     logger.info(f'Test function value: {test_fval}')
 
 if __name__ == "__main__":
-    DOWNLOAD_DATA = True
+    DOWNLOAD_DATA = False
     PREPROCESS_DATA = True
     main(DOWNLOAD_DATA, 
         PREPROCESS_DATA)
