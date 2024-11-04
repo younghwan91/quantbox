@@ -7,6 +7,8 @@ import logging
 from scipy.stats import shapiro
 from scipy.optimize import differential_evolution
 import pickle
+import matplotlib.pyplot as plt
+from statsmodels.tsa.stattools import adfuller
 
 logger = logging.getLogger('PairTradingModel')
 
@@ -30,7 +32,7 @@ class PairTradingModel:
             # sort the precomputed values by 'window_start' key
             all_values = sorted(all_values, key=lambda x: x['window_start'])
             
-            split_index = int(len(all_values) * 0.9)  # 80% for training
+            split_index = int(len(all_values) * 0.8)  # 80% for training
             self.training_values = all_values[:split_index]
             self.testing_values = all_values[split_index:]
             logger.info(f"Split precomputed values into {len(self.training_values)} training and {len(self.testing_values)} testing records")
@@ -38,7 +40,7 @@ class PairTradingModel:
         except Exception as e:
             logger.error(f"Error loading precomputed values: {e}")
 
-    def simulate_trading(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, dataset=None, slippage=0.006, verbose=False):
+    def simulate_trading(self, entry_thres, risk_reward_ratio, stop_loss, frac_hold, dataset=None, slippage=0.006, verbose=False, test_plot=False):
         """
         Simulate trading based on precomputed hedge ratios and z-scores.
         """
@@ -66,7 +68,18 @@ class PairTradingModel:
                 signal_0 = -1 if z_spread_0 > 0 else 1
                 profit, trade_duration = 0, 0
                 testing_time = len(observe_z_spread)
+
                 max_trading_time = int(frac_hold * testing_time)
+
+                if test_plot:
+                    # adfuller test
+                    result = adfuller(spread.iloc[:split_index])
+                    print(result)
+                    plt.plot(z_spread)
+                    plt.axvline(x=spread.index[split_index], color='r', linestyle='--')
+                    plt.axhline(y=0, color='k', linestyle='--')
+                    plt.axhline(y=z_spread_0, color='g', linestyle='--')
+                    plt.show()
 
                 for i in range(0, max_trading_time):
                     current_spread = observe_spread.iloc[i]
@@ -144,7 +157,7 @@ class PairTradingModel:
         Objective function for optimization (to be minimized).
         """
         entry_thres, risk_reward_ratio, stop_loss, frac_hold = params
-        return -self.simulate_trading(entry_thres, risk_reward_ratio, stop_loss, frac_hold, dataset=self.training_values)
+        return -self.simulate_trading(entry_thres, risk_reward_ratio, stop_loss, frac_hold, dataset=self.training_values, verbose=False, test_plot=False)
 
     def optimize_parameters(self):
         """
@@ -152,9 +165,9 @@ class PairTradingModel:
         """
         bounds = [
             (2, 3),    # entry_thres
-            (1.5, 3),      # risk_reward_ratio
-            (0.5, 2),    # stop_loss
-            (0.2, 0.9)    # frac_hold
+            (1.0, 4),      # risk_reward_ratio
+            (1, 3),    # stop_loss
+            (0.1, 0.9)    # frac_hold
         ]
 
         logger.info("Starting parameter optimization using differential evolution...")
@@ -163,7 +176,7 @@ class PairTradingModel:
             bounds,
             strategy='best1bin',
             maxiter=30,
-            popsize=20,
+            popsize=50,
             tol=0.001,
             disp=True
         )

@@ -7,7 +7,7 @@ from itertools import combinations
 from tqdm import tqdm
 import numpy as np
 import logging
-from statsmodels.tsa.stattools import coint
+from statsmodels.tsa.stattools import coint, adfuller
 from scipy.stats import shapiro, skew, kurtosis
 import matplotlib.pyplot as plt
 import pickle
@@ -107,8 +107,8 @@ class BacktestPreprocessor:
         filtered = []
         for pair in tqdm(all_pairs, desc="Filtering pairs"):
             split_idx = int(window_ratio * len(pair['data1']))
-            train_data1 = pair['data1']['Close'][:split_idx]
-            train_data2 = pair['data2']['Close'][:split_idx]
+            train_data1 = pair['data1'][:split_idx]
+            train_data2 = pair['data2'][:split_idx]
     
             # Ensure no division by zero or log of zero
             if (train_data1 <= 0).any() or (train_data2 <= 0).any():
@@ -150,7 +150,9 @@ class BacktestPreprocessor:
     
             # Filter 5: Cointegration test on training data
             try:
-                _, p_value, _ = coint(log_train_data1, log_train_data2)
+                # _, p_value, _ = coint(log_train_data1, log_train_data2)
+                adfuller_result = adfuller(spread)
+                p_value = adfuller_result[1]
                 if p_value > pvalue_threshold:
                     continue
             except Exception as e:
@@ -253,8 +255,8 @@ class BacktestPreprocessor:
                     'window_start': window_start,
                     'window_end': window_end,
                     'pair': pair,
-                    'data1': df1,
-                    'data2': df2
+                    'data1': df1['Close'],
+                    'data2': df2['Close']
                 }
                 all_pairs.append(pair_data)
 
@@ -272,8 +274,8 @@ class BacktestPreprocessor:
 
             # Compute hedge ratio and z-score here
             try:
-                data1 = pair['data1']['Close']
-                data2 = pair['data2']['Close']
+                data1 = pair['data1']
+                data2 = pair['data2']
                 split_idx = int(self.config['WINDOW_RATIO'] * len(data1))
                 train_data1 = data1[:split_idx]
                 train_data2 = data2[:split_idx]

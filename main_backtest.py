@@ -9,6 +9,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import sys
 import os
+import argparse  # Add argparse import
 
 from binance_downloader import BinanceDownloader
 from backtest_preprocessor import BacktestPreprocessor
@@ -44,22 +45,18 @@ def setup_logging():
     logging.getLogger('statsmodels').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
-def main(DOWNLOAD_DATA, PREPROCESS_DATA):
+def main(DOWNLOAD_DATA, PREPROCESS_DATA, DAYS, FORMATION_DAYS, TRADING_WINDOW, INTERVAL, HOUR_SHIFT, N_COINS):
     # Setup logging
     setup_logging()
     logger = logging.getLogger('Main')
 
     # Configuration Variables
     TESTNET = False  
-    DAYS = 30
     HOURS_IN_DAY = 24
-    FORMATION_DAYS = 5
-    TRADING_WINDOW = 24
     FORMATION_WINDOW = int(HOURS_IN_DAY * FORMATION_DAYS)
     TOTAL_WINDOW_LENGTH = FORMATION_WINDOW + TRADING_WINDOW
     WINDOW_RATIO = FORMATION_WINDOW / TOTAL_WINDOW_LENGTH
-    INTERVAL = '30m'
-    HOUR_SHIFT = 4
+    # INTERVAL and HOUR_SHIFT are now passed as arguments
 
     # Load API credentials
     try:
@@ -78,14 +75,16 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
     downloader_config = {
         'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
-        'N_COINS': 20,
+        'N_COINS': N_COINS,  # Use parsed n_coins
         'CSV_FILENAME': 'trading_coins_backtest.csv',
-        'INTERVAL': INTERVAL,
+        'INTERVAL': INTERVAL,  # Use parsed interval
         'WINDOW_RATIO': WINDOW_RATIO, 
         'COINT_THRESHOLD': 0.05,
         'CORR_THRESHOLD': 0.5,
         'PAIRS_CSV': 'pairs_for_backtest.csv',
-        'PRECOMPUTED_FILE': 'precomputed_values.pkl'
+        'PRECOMPUTED_FILE': 'precomputed_values.pkl',
+        'START_STR': None,  # Will be set below
+        'END_STR': None     # Will be set below
     }
 
     # Define configurations for PairTradingModel
@@ -98,6 +97,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
         'DAYS': DAYS,                           
         'TRADING_FEE': 0.0005,                 
         'DATA_DIR': 'data/backtest',
+        'HOUR_SHIFT': HOUR_SHIFT  # Use parsed hour_shift
     }    
 
     # Set start and end time for data download
@@ -137,7 +137,63 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA):
     logger.info(f'Test function value: {test_fval}')
 
 if __name__ == "__main__":
-    DOWNLOAD_DATA = False
-    PREPROCESS_DATA = True
-    main(DOWNLOAD_DATA, 
-        PREPROCESS_DATA)
+    # Add command-line argument parsing
+    parser = argparse.ArgumentParser(description="Run backtest with optional data download and preprocessing.")
+    parser.add_argument(
+        '--download-data',
+        action='store_true',
+        help='Flag to download data before preprocessing.'
+    )
+    parser.add_argument(
+        '--preprocess-data',
+        action='store_true',
+        help='Flag to preprocess data for backtesting.'
+    )
+    parser.add_argument(
+        '--days',
+        type=int,
+        default=30,
+        help='Number of days of data to use.'
+    )
+    parser.add_argument(
+        '--formation-days',
+        type=int,
+        default=3,
+        help='Number of formation days.'
+    )
+    parser.add_argument(
+        '--trading-window',
+        type=int,
+        default=24,
+        help='Trading window in hours.'
+    )
+    parser.add_argument(
+        '--interval',
+        type=str,
+        default='30m',
+        help='Data interval.'
+    )
+    parser.add_argument(
+        '--hour-shift',
+        type=int,
+        default=4,
+        help='Number of hours to shift the window.'
+    )
+    parser.add_argument(
+        '--n-coins',
+        type=int,
+        default=50,
+        help='Number of coins to consider.'
+    )
+    args = parser.parse_args()
+    
+    main(
+        DOWNLOAD_DATA=args.download_data, 
+        PREPROCESS_DATA=args.preprocess_data,
+        DAYS=args.days,
+        FORMATION_DAYS=args.formation_days,
+        TRADING_WINDOW=args.trading_window,
+        INTERVAL=args.interval,
+        HOUR_SHIFT=args.hour_shift,
+        N_COINS=args.n_coins
+    )
