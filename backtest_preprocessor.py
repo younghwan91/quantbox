@@ -11,6 +11,7 @@ from statsmodels.tsa.stattools import coint, adfuller
 from scipy.stats import shapiro, skew, kurtosis
 import matplotlib.pyplot as plt
 import pickle
+from ta.momentum import RSIIndicator
 
 # Configure logging (if not already configured in main application)
 logger = logging.getLogger('BacktestPreprocessor')
@@ -117,7 +118,7 @@ class BacktestPreprocessor:
     
             log_train_data1 = np.log(train_data1)
             log_train_data2 = np.log(train_data2)
-    
+
             # Filter 1: Pearson correlation on training data
             correlation = train_data1.corr(train_data2)
             if np.abs(correlation) < corr_threshold:
@@ -141,7 +142,25 @@ class BacktestPreprocessor:
             z_spread = (spread - spread.mean()) / spread.std()
             if np.abs(z_spread.iloc[-1]) < 2:
                 continue
-    
+
+            # Filter 3.5: RSI of Z-spread
+            
+            rsi_indicator_long = RSIIndicator(close=z_spread, window=20)
+            rsi5 = rsi_indicator_long.rsi()
+
+            rsi_indicator_short = RSIIndicator(close=z_spread, window=10)
+            rsi4 = rsi_indicator_short.rsi()
+
+            # Get the last value of RSI difference
+            rsi_diff = rsi5 - rsi4
+            rsi_diff_last = rsi_diff.iloc[-1]
+
+            # Apply your filtering logic
+            if z_spread.iloc[-1] > 0 and rsi_diff_last < 0:
+                continue
+            if z_spread.iloc[-1] < 0 and rsi_diff_last > 0:
+                continue
+
             # Filter 4: Skewness and Kurtosis check on training spread
             spread_skewness = skew(spread)
             spread_kurtosis = kurtosis(spread, fisher=False)  # `fisher=False` for population kurtosis

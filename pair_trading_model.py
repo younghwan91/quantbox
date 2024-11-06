@@ -21,6 +21,9 @@ class PairTradingModel:
         self.trading_fee = config.get('TRADING_FEE', 0.0005)
         self.precomputed_values = None
 
+        self.empty_list = []
+        self.counter = 0
+
     def load_precomputed_values(self, filepath):
         """
         Load precomputed values from a pickle file and split into training and testing sets.
@@ -73,13 +76,30 @@ class PairTradingModel:
 
                 if test_plot:
                     # adfuller test
-                    result = adfuller(spread.iloc[:split_index])
-                    print(result)
-                    plt.plot(z_spread)
+                    plt.figure(figsize=(20, 5))
+                    plt.plot(z_spread, '.-')
                     plt.axvline(x=spread.index[split_index], color='r', linestyle='--')
                     plt.axhline(y=0, color='k', linestyle='--')
                     plt.axhline(y=z_spread_0, color='g', linestyle='--')
-                    plt.show()
+                    plt.axhline(y=np.min(observe_z_spread), color='b', linestyle='--')
+                    plt.axhline(y=np.max(observe_z_spread), color='b', linestyle='--')
+                    # ratio of z spread0 between min and max
+                    plt.show()        
+
+                # if z_spread_0 > 0:
+                #     dist_max = np.max(observe_z_spread) - z_spread_0
+                #     dist_min = z_spread_0 - np.min(observe_z_spread)
+                #     ratio = dist_min - (dist_max)
+                # else:
+                #     dist_max = z_spread_0 - np.min(observe_z_spread)
+                #     dist_min = np.max(observe_z_spread) - z_spread_0
+                #     ratio = dist_min - (dist_max)
+
+                # self.empty_list.append(ratio)
+                # self.counter += 1
+                # if self.counter%300 == 0:
+                #     plt.hist(self.empty_list, bins=50)
+                #     plt.show()
 
                 for i in range(0, max_trading_time):
                     current_spread = observe_spread.iloc[i]
@@ -165,8 +185,8 @@ class PairTradingModel:
         """
         bounds = [
             (2, 3),    # entry_thres
-            (1.0, 4),      # risk_reward_ratio
-            (1, 3),    # stop_loss
+            (1.0, 2.5),      # risk_reward_ratio
+            (0.5, 2),    # stop_loss
             (0.1, 0.9)    # frac_hold
         ]
 
