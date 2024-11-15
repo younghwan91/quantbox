@@ -59,18 +59,18 @@ class BinanceDownloader:
                     logger.error(f"Error fetching ticker for {coin}: {e}")
                     continue
 
-            # Sort coins based on trading volume in descending order
-            sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1], reverse=True)
+            # Sort coins based on trading volume in ascending order
+            sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1])  # Remove reverse=True
             num_coins = len(sorted_coins)
             logger.info(f"Number of trading pairs after sorting by volume: {num_coins}")
 
-            logger.info(f"Selecting top {n_coins} coins based on trading volume")
-            top_coins = [coin for coin, volume in sorted_coins[:n_coins]]
+            logger.info(f"Selecting bottom {n_coins} coins based on trading volume")
+            selected_coins = [coin for coin, volume in sorted_coins[:n_coins]]
         else:
             logger.info(f"Selecting first {n_coins} coins")
-            top_coins = trading_coins[:n_coins]
+            selected_coins = trading_coins[:n_coins]
 
-        return top_coins
+        return selected_coins
 
     def save_trading_coins(self):
         csv_path = os.path.join(self.saving_dir, self.config["CSV_FILENAME"])
@@ -237,5 +237,6 @@ class BinanceDownloader:
             '30m': 30 * 60 * 1000,
             '1h': 60 * 60 * 1000,
             '2h': 2 * 60 * 60 * 1000,
+            '4h': 4 * 60 * 60 * 1000,
         }
         return ms.get(interval, None)

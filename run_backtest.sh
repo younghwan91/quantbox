@@ -9,11 +9,11 @@ cd "$(dirname "$0")"
 # Run the main_backtest.py script with desired arguments
 python main_backtest.py \
    --preprocess-data \
-    --days 60 \
+    --days 30 \
     --formation-days 10 \
     --trading-window 48 \
     --interval 30m \
-    --hour-shift 6 \
+    --hour-shift 11 \
     --n-coins 50 \
    # --download-data \
 

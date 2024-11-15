@@ -9,12 +9,12 @@ import logging
 from logging.handlers import RotatingFileHandler
 import sys
 import os
-import argparse  # Add argparse import
+import argparse
 
 from binance_downloader import BinanceDownloader
 from backtest_preprocessor import BacktestPreprocessor
 from pair_trading_model import PairTradingModel  # Ensure this is correctly refactored if needed
-
+from pair_trading_model_drl_cnn import PairTradingModelDRL
 def setup_logging():
     """
     Configures logging to output to both stdout and a rotating log file.
@@ -31,7 +31,7 @@ def setup_logging():
 
     # Rotating File Handler for log files
     file_handler = RotatingFileHandler(
-        "crypto_downloader.log", 
+        "crypto_downloader.log",
         maxBytes=10 * 1024 * 1024,  # 10 MB
         backupCount=3
     )
@@ -44,19 +44,19 @@ def setup_logging():
     logging.getLogger('binance').setLevel(logging.WARNING)
     logging.getLogger('statsmodels').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('stable_baselines3').setLevel(logging.WARNING)
 
-def main(DOWNLOAD_DATA, PREPROCESS_DATA, DAYS, FORMATION_DAYS, TRADING_WINDOW, INTERVAL, HOUR_SHIFT, N_COINS):
+def main(DOWNLOAD_DATA, PREPROCESS_DATA, DAYS, FORMATION_DAYS, TRADING_WINDOW, INTERVAL, HOUR_SHIFT, N_COINS, MODE):
     # Setup logging
     setup_logging()
     logger = logging.getLogger('Main')
 
     # Configuration Variables
-    TESTNET = False  
+    TESTNET = False
     HOURS_IN_DAY = 24
     FORMATION_WINDOW = int(HOURS_IN_DAY * FORMATION_DAYS)
     TOTAL_WINDOW_LENGTH = FORMATION_WINDOW + TRADING_WINDOW
     WINDOW_RATIO = FORMATION_WINDOW / TOTAL_WINDOW_LENGTH
-    # INTERVAL and HOUR_SHIFT are now passed as arguments
 
     # Load API credentials
     try:
@@ -75,30 +75,31 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DAYS, FORMATION_DAYS, TRADING_WINDOW, I
     downloader_config = {
         'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
-        'N_COINS': N_COINS,  # Use parsed n_coins
+        'N_COINS': N_COINS,
         'CSV_FILENAME': 'trading_coins_backtest.csv',
-        'INTERVAL': INTERVAL,  # Use parsed interval
-        'WINDOW_RATIO': WINDOW_RATIO, 
+        'INTERVAL': INTERVAL,
+        'WINDOW_RATIO': WINDOW_RATIO,
         'COINT_THRESHOLD': 0.05,
         'CORR_THRESHOLD': 0.5,
         'PAIRS_CSV': 'pairs_for_backtest.csv',
         'PRECOMPUTED_FILE': 'precomputed_values.pkl',
-        'START_STR': None,  # Will be set below
-        'END_STR': None     # Will be set below
+        'START_STR': None,
+        'END_STR': None
     }
 
     # Define configurations for PairTradingModel
     model_config = {
-        'FORMATION_WINDOW': FORMATION_WINDOW,  
-        'TRADING_WINDOW': TRADING_WINDOW,      
-        'TOTAL_WINDOW': TOTAL_WINDOW_LENGTH,   
-        'WINDOW_RATIO': WINDOW_RATIO,          
-        'TIMEFRAME': INTERVAL,                 
-        'DAYS': DAYS,                           
-        'TRADING_FEE': 0.0005,                 
+        'FORMATION_WINDOW': FORMATION_WINDOW,
+        'TRADING_WINDOW': TRADING_WINDOW,
+        'TOTAL_WINDOW': TOTAL_WINDOW_LENGTH,
+        'WINDOW_RATIO': WINDOW_RATIO,
+        'TIMEFRAME': INTERVAL,
+        'DAYS': DAYS,
+        'TRADING_FEE': 0.0005,
         'DATA_DIR': 'data/backtest',
-        'HOUR_SHIFT': HOUR_SHIFT  # Use parsed hour_shift
-    }    
+        'HOUR_SHIFT': HOUR_SHIFT,
+        'WINDOW_SIZE': 20  # For DRL CNN window size
+    }
 
     # Set start and end time for data download
     end_time = dt.datetime.now(dt.timezone.utc)
@@ -106,7 +107,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DAYS, FORMATION_DAYS, TRADING_WINDOW, I
     downloader_config['START_STR'] = start_time.strftime("%Y-%m-%d %H:%M:%S")
     downloader_config['END_STR'] = end_time.strftime("%Y-%m-%d %H:%M:%S")
     logger.info(f"Downloading data from {downloader_config['START_STR']} to {downloader_config['END_STR']}")
-    
+
     if PREPROCESS_DATA:
         if DOWNLOAD_DATA:
             # Initialize BinanceDownloader
@@ -120,21 +121,42 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DAYS, FORMATION_DAYS, TRADING_WINDOW, I
         logger.info("Preparing pairs for backtesting...")
         preprocessor = BacktestPreprocessor(config=downloader_config)
         preprocessor.prepare_pairs_for_backtest(
-            window_size=str(TOTAL_WINDOW_LENGTH)+'h', 
+            window_size=str(TOTAL_WINDOW_LENGTH)+'h',
             overlap=str(TOTAL_WINDOW_LENGTH-HOUR_SHIFT)+'h',
         )
 
-    model = PairTradingModel(model_config)
-    logger.info("Precomputed values found. Loading them...")
-    # Load and split precomputed values
-    precomputed_filepath = os.path.join(model_config['DATA_DIR'], 'precomputed_values.pkl')
-    model.load_precomputed_values(precomputed_filepath)
 
-    # Step 4: Optimize trading parameters
-    logger.info("Starting optimization of trading parameters...")
-    best_params, max_fval, test_fval = model.optimize_parameters()
-    logger.info(f'Best parameters: {best_params} with max function value: {max_fval}')
-    logger.info(f'Test function value: {test_fval}')
+
+    # Step 4: Perform action based on selected mode
+    if MODE == 'optimize':    
+        # Step 3: Initialize PairTradingModel
+        model = PairTradingModel(model_config)
+        logger.info("Loading precomputed values...")
+        # Load and split precomputed values
+        precomputed_filepath = os.path.join(model_config['DATA_DIR'], 'precomputed_values.pkl')
+        model.load_precomputed_values(precomputed_filepath)
+        # Optimize trading parameters
+        logger.info("Starting optimization of trading parameters...")
+        best_params, max_fval, test_fval = model.optimize_parameters()
+        logger.info(f'Best parameters: {best_params} with max function value: {max_fval}')
+        logger.info(f'Test function value: {test_fval}')
+        
+    elif MODE == 'drl':
+        # Step 3: Initialize PairTradingModelDRL
+        model = PairTradingModelDRL(model_config)
+        logger.info("Loading precomputed values...")
+        # Load and split precomputed values
+        precomputed_filepath = os.path.join(model_config['DATA_DIR'], 'precomputed_values.pkl')
+        model.load_precomputed_values(precomputed_filepath)
+        # Train and test DRL agent
+        logger.info("Starting DRL training...")
+        model.train_agent(total_timesteps=100000)
+        logger.info("Testing DRL agent...")
+        model.test_agent()
+        logger.info("Simulating trading with DRL agent...")
+        model.simulate_trading()
+    else:
+        logger.error(f"Invalid mode selected: {MODE}. Choose 'optimize' or 'drl'.")
 
 if __name__ == "__main__":
     # Add command-line argument parsing
@@ -152,19 +174,19 @@ if __name__ == "__main__":
     parser.add_argument(
         '--days',
         type=int,
-        default=30,
+        default=150,
         help='Number of days of data to use.'
     )
     parser.add_argument(
         '--formation-days',
         type=int,
-        default=3,
+        default=5,
         help='Number of formation days.'
     )
     parser.add_argument(
         '--trading-window',
         type=int,
-        default=24,
+        default=48,
         help='Trading window in hours.'
     )
     parser.add_argument(
@@ -176,24 +198,32 @@ if __name__ == "__main__":
     parser.add_argument(
         '--hour-shift',
         type=int,
-        default=4,
+        default=11,
         help='Number of hours to shift the window.'
     )
     parser.add_argument(
         '--n-coins',
         type=int,
-        default=50,
+        default=100,
         help='Number of coins to consider.'
     )
+    parser.add_argument(
+        '--mode',
+        type=str,
+        default='optimize',
+        choices=['optimize', 'drl'],
+        help="Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning."
+    )
     args = parser.parse_args()
-    
+
     main(
-        DOWNLOAD_DATA=args.download_data, 
-        PREPROCESS_DATA=args.preprocess_data,
+        DOWNLOAD_DATA=False,
+        PREPROCESS_DATA=False,
         DAYS=args.days,
         FORMATION_DAYS=args.formation_days,
         TRADING_WINDOW=args.trading_window,
         INTERVAL=args.interval,
         HOUR_SHIFT=args.hour_shift,
-        N_COINS=args.n_coins
+        N_COINS=args.n_coins,
+        MODE='drl'
     )

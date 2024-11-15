@@ -8,10 +8,10 @@ from tqdm import tqdm
 import numpy as np
 import logging
 from statsmodels.tsa.stattools import coint, adfuller
-from scipy.stats import shapiro, skew, kurtosis
+from scipy.stats import shapiro, skew, kurtosis, jarque_bera
 import matplotlib.pyplot as plt
 import pickle
-from ta.momentum import RSIIndicator
+import statsmodels.api as sm  # Added import for half-life calculation
 
 # Configure logging (if not already configured in main application)
 logger = logging.getLogger('BacktestPreprocessor')
@@ -70,27 +70,21 @@ class BacktestPreprocessor:
         coin_data = {coin: df[:common_end_time] for coin, df in coin_data.items()}
 
         # Step 4: Slice data into windows from end to start
-        windows = self._generate_time_windows_reverse(coin_data, window_size, overlap)
+        windows = self._generate_time_windows(coin_data, window_size, overlap)
         logger.info(f"Generated {len(windows)} windows")
 
         if not windows:
             logger.error("No windows generated. Check window size and overlap.")
             return
 
-        # Step 5: Generate all possible unique pairs within each window
-        all_pairs = self._generate_all_pairs_reverse(coin_data, windows)
-        logger.info(f"Generated {len(all_pairs)} coin pairs for backtest")
-
-        if not all_pairs:
-            logger.warning("No pairs generated. Check if window sizes are appropriate.")
-            return
-
-        # Step 6: Filter pairs based on correlation and cointegration
-        window_ratio = self.config.get('WINDOW_RATIO') 
+        # Step 5 & 6: Generate and filter pairs on the fly
         correlation_threshold = self.config.get('CORR_THRESHOLD', 0.5)
         pvalue_threshold = self.config.get('COINT_THRESHOLD', 0.05)
+        window_ratio = self.config.get('WINDOW_RATIO') 
 
-        filtered_pairs = self._filter_pairs(all_pairs, correlation_threshold, pvalue_threshold, window_ratio)
+        filtered_pairs = []
+        for pair in self._generate_all_pairs(coin_data, windows, correlation_threshold, pvalue_threshold, window_ratio):
+            filtered_pairs.append(pair)
         logger.info(f"Filtered down to {len(filtered_pairs)} coin pairs after applying thresholds")
 
         if not filtered_pairs:
@@ -100,87 +94,6 @@ class BacktestPreprocessor:
         # Step 7: Save the filtered and precomputed pairs data
         self._save_pairs_info(filtered_pairs)
         logger.info(f"Saved precomputed pairs data to {self.precomputed_path}")
-
-    def _filter_pairs(self, all_pairs, corr_threshold, pvalue_threshold, window_ratio):
-        """
-        Filters pairs based on Pearson correlation and cointegration test.
-        """
-        filtered = []
-        for pair in tqdm(all_pairs, desc="Filtering pairs"):
-            split_idx = int(window_ratio * len(pair['data1']))
-            train_data1 = pair['data1'][:split_idx]
-            train_data2 = pair['data2'][:split_idx]
-    
-            # Ensure no division by zero or log of zero
-            if (train_data1 <= 0).any() or (train_data2 <= 0).any():
-                logger.warning(f"Non-positive values encountered in pair {pair['pair']} during log transformation.")
-                continue
-    
-            log_train_data1 = np.log(train_data1)
-            log_train_data2 = np.log(train_data2)
-
-            # Filter 1: Pearson correlation on training data
-            correlation = train_data1.corr(train_data2)
-            if np.abs(correlation) < corr_threshold:
-                continue 
-    
-            # Filter 2: Hedge ratio using training data
-            try:
-                hedge_ratio = np.polyfit(log_train_data2, log_train_data1, 1)[0]
-            except np.RankWarning as e:
-                logger.warning(f"Polyfit failed for pair {pair['pair']}: {e}")
-                continue
-            hedge_const = 3.0
-            if (1 / hedge_const) > hedge_ratio or hedge_ratio > hedge_const:
-                continue
-    
-            # Filter 3: Z-score normality test on training spread
-            spread = log_train_data1 - hedge_ratio * log_train_data2
-            if spread.std() == 0:
-                logger.warning(f"Zero standard deviation in spread for pair {pair['pair']}.")
-                continue
-            z_spread = (spread - spread.mean()) / spread.std()
-            if np.abs(z_spread.iloc[-1]) < 2:
-                continue
-
-            # Filter 3.5: RSI of Z-spread
-            
-            rsi_indicator_long = RSIIndicator(close=z_spread, window=20)
-            rsi5 = rsi_indicator_long.rsi()
-
-            rsi_indicator_short = RSIIndicator(close=z_spread, window=10)
-            rsi4 = rsi_indicator_short.rsi()
-
-            # Get the last value of RSI difference
-            rsi_diff = rsi5 - rsi4
-            rsi_diff_last = rsi_diff.iloc[-1]
-
-            # Apply your filtering logic
-            if z_spread.iloc[-1] > 0 and rsi_diff_last < 0:
-                continue
-            if z_spread.iloc[-1] < 0 and rsi_diff_last > 0:
-                continue
-
-            # Filter 4: Skewness and Kurtosis check on training spread
-            spread_skewness = skew(spread)
-            spread_kurtosis = kurtosis(spread, fisher=False)  # `fisher=False` for population kurtosis
-            if abs(spread_skewness) >= 2 or abs(spread_kurtosis) >= 7:
-                continue
-    
-            # Filter 5: Cointegration test on training data
-            try:
-                # _, p_value, _ = coint(log_train_data1, log_train_data2)
-                adfuller_result = adfuller(spread)
-                p_value = adfuller_result[1]
-                if p_value > pvalue_threshold:
-                    continue
-            except Exception as e:
-                logger.warning(f"Cointegration test failed for pair {pair['pair']}: {e}")
-                continue
-            
-            filtered.append(pair)
-        
-        return filtered
 
     def _load_all_coin_data(self):
         """
@@ -208,7 +121,7 @@ class BacktestPreprocessor:
         common_end_time = min(end_times)
         return common_end_time
 
-    def _generate_time_windows_reverse(self, coin_data, window_size: str, overlap: str):
+    def _generate_time_windows(self, coin_data, window_size: str, overlap: str):
         """
         Generates a list of (start, end) tuples representing each window, 
         slicing from end to start.
@@ -231,7 +144,7 @@ class BacktestPreprocessor:
 
         return windows
 
-    def _generate_all_pairs_reverse(self, coin_data, windows):
+    def _generate_all_pairs(self, coin_data, windows, corr_threshold, pvalue_threshold, window_ratio):
         """
         Generates all possible unique coin pairs within each window, 
         considering only coins with complete data in the window.
@@ -239,7 +152,7 @@ class BacktestPreprocessor:
         all_pairs = []
         coins = list(coin_data.keys())
 
-        for window_start, window_end in tqdm(windows, desc="Generating pairs"):
+        for window_start, window_end in tqdm(windows, desc="Generating pairs and filtering"):
             # Determine which coins have complete data for the window
             available_coins = []
             for coin in coins:
@@ -274,12 +187,81 @@ class BacktestPreprocessor:
                     'window_start': window_start,
                     'window_end': window_end,
                     'pair': pair,
-                    'data1': df1['Close'],
-                    'data2': df2['Close']
+                    'data1': df1[['Close', 'Volume']],
+                    'data2': df2[['Close', 'Volume']]
                 }
-                all_pairs.append(pair_data)
+                # Apply filtering here
+                if self._filter_pair(pair_data, corr_threshold, pvalue_threshold, window_ratio):
+                    all_pairs.append(pair_data)
 
         return all_pairs
+
+    def _filter_pair(self, pair, corr_threshold, pvalue_threshold, window_ratio):
+        """
+        Filters a single pair based on hedge ratio and half-life criteria.
+        """
+        try:
+            split_idx = int(window_ratio * len(pair['data1']['Close']))
+            train_data1 = pair['data1']['Close'][:split_idx]
+            train_data2 = pair['data2']['Close'][:split_idx]
+
+            if (train_data1 <= 0).any() or (train_data2 <= 0).any():
+                logger.warning(f"Non-positive values in pair {pair['pair']}.")
+                return False
+
+            log_train_data1 = np.log(train_data1)
+            log_train_data2 = np.log(train_data2)
+            
+            # Check for correlation
+            corr = np.corrcoef(log_train_data1, log_train_data2)[0, 1]
+            if np.abs(corr) < 0.5:
+                return False
+            
+            hedge_ratio = np.polyfit(log_train_data2, log_train_data1, 1)[0]
+            hedge_const = 3.0
+            if not (1 / hedge_const) < hedge_ratio < hedge_const:
+                return False
+
+            spread = log_train_data1 - hedge_ratio * log_train_data2
+            spread_std = spread.std()
+            spread_mean = spread.mean()
+            if spread_std < 0.01:
+                return False
+
+            z_spread = (spread - spread_mean) / spread_std
+            if np.abs(z_spread.iloc[-1]) < 2:
+                return False
+            
+            # Jarque-Bera test for normality
+            jb_pvalue = jarque_bera(spread)[1]
+            if jb_pvalue < 0.05:
+                return False            
+
+            adf_pvalue = adfuller(spread)[1]
+            if adf_pvalue > pvalue_threshold:
+                return False
+
+            return True
+        except Exception as e:
+            logger.warning(f"Filtering failed for pair {pair['pair']}: {e}")
+            return False
+
+    def _calculate_half_life(self, spread):
+        """
+        Calculates the half-life of the spread.
+        """
+        spread_lag = spread.shift(1)
+        spread_ret = spread - spread_lag
+        spread_lag = spread_lag.iloc[1:]
+        spread_ret = spread_ret.iloc[1:]
+        
+        model = sm.OLS(spread_ret, sm.add_constant(spread_lag))
+        result = model.fit()
+        lambda_param = result.params.iloc[1]
+        if lambda_param >= 0:
+            return None
+        half_life = -np.log(2) / lambda_param
+        return half_life
 
     def _save_pairs_info(self, all_pairs):
         """
@@ -293,8 +275,8 @@ class BacktestPreprocessor:
 
             # Compute hedge ratio and z-score here
             try:
-                data1 = pair['data1']
-                data2 = pair['data2']
+                data1 = pair['data1']['Close']
+                data2 = pair['data2']['Close']
                 split_idx = int(self.config['WINDOW_RATIO'] * len(data1))
                 train_data1 = data1[:split_idx]
                 train_data2 = data2[:split_idx]
