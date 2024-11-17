@@ -269,7 +269,8 @@ class PairTradingModelDRL:
             logger.error("Training data not loaded.")
             return
 
-        batch_size = 2  # Number of parallel environments
+        self.training_episodes = self.training_episodes[:10]  # Limit training episodes for faster training
+        batch_size = 1  # Number of parallel environments
         total_episodes = len(self.training_episodes)
         batches = [self.training_episodes[i:i + batch_size] for i in range(0, total_episodes, batch_size)]
 

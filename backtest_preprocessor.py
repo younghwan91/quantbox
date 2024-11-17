@@ -228,14 +228,13 @@ class BacktestPreprocessor:
             if spread_std < 0.01:
                 return False
 
-            z_spread = (spread - spread_mean) / spread_std
-            if np.abs(z_spread.iloc[-1]) < 2:
-                return False
+            # z_spread = (spread - spread_mean) / spread_std 
+            # if np.abs(z_spread.iloc[-1]) < 2:
+                # return False
             
-            # Jarque-Bera test for normality
-            jb_pvalue = jarque_bera(spread)[1]
-            if jb_pvalue < 0.05:
-                return False            
+            # jb_pvalue = jarque_bera(spread)[1] # financial data is often not normally distributed
+            # if jb_pvalue < 0.05:
+            #     return False            
 
             adf_pvalue = adfuller(spread)[1]
             if adf_pvalue > pvalue_threshold:
@@ -295,7 +294,9 @@ class BacktestPreprocessor:
                     'hedge_ratio': hedge_ratio,
                     'spread': spread,  # Added spread
                     'z_spread': z_spread,
-                    'split_index': split_idx  # Added split_index
+                    'split_index': split_idx,  # Added split_index
+                    'vol1': pair['data1']['Volume'],
+                    'vol2': pair['data2']['Volume']
                 })
             except Exception as e:
                 logger.error(f"Error precomputing pair {pair_tuple}: {e}")
