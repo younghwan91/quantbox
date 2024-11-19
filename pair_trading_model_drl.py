@@ -12,6 +12,7 @@ from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv  # Added DummyVecEnv
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from stable_baselines3.common.callbacks import BaseCallback
 
 import torch
 import torch.nn as nn
@@ -35,9 +36,10 @@ class PairTradingEnv(gym.Env):
         # Define action space: 0 = Hold, 1 = Buy (Long), 2 = Sell (Short), 3 = Close Position
         self.action_space = spaces.Discrete(4)
 
-        # Define observation space: Moving window of spread values
+        # Define observation space: Moving window of spread, vol1, and vol2 values
+        # Updated to have 3 channels instead of 1
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.window_size, 1), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.window_size, 3), dtype=np.float32
         )
 
         # Initialize environment variables
@@ -56,7 +58,6 @@ class PairTradingEnv(gym.Env):
         self.position = 0  # 0: no position, 1: long, -1: short
         self.entry_price = 0.0
         self.total_profit = 0.0
-
         # Return initial observation and info
         return self._next_observation(), {}
 
@@ -67,9 +68,22 @@ class PairTradingEnv(gym.Env):
         window_start = self.current_step - self.window_size
         window_end = self.current_step
         
+        # Extract spread, vol1, and vol2
         spread_window = self.data['spread'].iloc[window_start:window_end].values
-        obs = spread_window.reshape(-1, 1).astype(np.float32)
+        vol1_window = self.data['vol1'].iloc[window_start:window_end].values
+        vol2_window = self.data['vol2'].iloc[window_start:window_end].values
+        
+        vol1_window = (vol1_window - np.mean(vol1_window)) / np.std(vol1_window)
+        vol2_window = (vol2_window - np.mean(vol2_window)) / np.std(vol2_window)
+
+        # Stack the features to create a multi-channel observation
+        obs = np.stack([spread_window, vol1_window, vol2_window], axis=1).astype(np.float32)
         return obs
+
+    def update_data(self, trading_data, window_split_index):
+        self.data = trading_data.reset_index(drop=True)
+        self.window_split_index = window_split_index
+        self.reset()
 
     def step(self, action):
         """
@@ -85,9 +99,11 @@ class PairTradingEnv(gym.Env):
         # Implement action logic
         if action == 0:
             # Hold
+            reward -= 0.001
             pass
         elif action == 1:
             # Buy (Long)
+            reward += 0.001
             if self.position == 0:
                 self.position = 1
                 self.entry_price = spread
@@ -100,6 +116,7 @@ class PairTradingEnv(gym.Env):
                 self.entry_price = spread
         elif action == 2:
             # Sell (Short)
+            reward += 0.001
             if self.position == 0:
                 self.position = -1
                 self.entry_price = spread
@@ -112,6 +129,7 @@ class PairTradingEnv(gym.Env):
                 self.entry_price = spread
         elif action == 3:
             # Close Position
+            reward += 0.001
             if self.position == 1:
                 profit = spread - self.entry_price - (2 * self.trading_fee)
                 reward += profit
@@ -123,7 +141,6 @@ class PairTradingEnv(gym.Env):
             self.position = 0
             self.entry_price = 0.0
 
-            # 포지션이 종료되었으므로 에피소드 종료
             terminated = True
 
         # Move to the next step
@@ -147,7 +164,7 @@ class PairTradingEnv(gym.Env):
         if not terminated and not truncated:
             obs = self._next_observation()
         else:
-            obs = np.zeros((self.window_size, 1), dtype=np.float32)
+            obs = np.zeros((self.window_size, 3), dtype=np.float32)  # Updated shape
 
         info = {}
         return obs, reward, terminated, truncated, info
@@ -173,7 +190,7 @@ class CustomCNN(BaseFeaturesExtractor):
     def __init__(self, observation_space: spaces.Box, features_dim: int = 64):
         super(CustomCNN, self).__init__(observation_space, features_dim)
 
-        n_input_channels = observation_space.shape[1]  # Should be 1
+        n_input_channels = observation_space.shape[1]  # Updated to 3
 
         self.cnn = nn.Sequential(
             nn.Conv1d(in_channels=n_input_channels, out_channels=16, kernel_size=3, stride=1),
@@ -194,7 +211,7 @@ class CustomCNN(BaseFeaturesExtractor):
         )
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        # observations shape: (batch_size, window_size, 1)
+        # observations shape: (batch_size, window_size, 3)
         # Need to transpose to (batch_size, channels, window_size)
         x = observations.transpose(1, 2)
         x = self.cnn(x)
@@ -213,12 +230,38 @@ def make_pair_trading_env(trading_data, window_split_index, window_size, trading
         return env
     return _init
 
+class TrainingMonitorCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super(TrainingMonitorCallback, self).__init__(verbose)
+        self.episode_rewards = []
+        self.episode_profits = []
+        self.rewards = []
+
+    def _on_step(self) -> bool:
+        reward = self.locals['rewards'][0]
+        done = self.locals['dones'][0]
+        self.rewards.append(reward)
+
+        if done:
+            total_reward = sum(self.rewards)
+            # Access total_profit using get_attr
+            total_profit = self.training_env.get_attr('total_profit')[0]
+            self.episode_rewards.append(total_reward)
+            self.episode_profits.append(total_profit)
+
+            if self.verbose > 0:
+                print(f"Episode {len(self.episode_rewards)}: Reward = {total_reward:.3f}, Profit = {total_profit:.3f}")
+
+            self.rewards = []
+
+        return True
+    
 class PairTradingModelDRL:
     def __init__(self, config):
         self.timeframe = config['TIMEFRAME']
         self.days = config['DAYS']
         self.trading_fee = config.get('TRADING_FEE', 0.0005)
-        self.window_size = config.get('WINDOW_SIZE', 10)
+        self.window_size = config['WINDOW_SIZE']
         self.model = None  # DRL model
         self.episodes = []  # List to store each episode's trading window data
 
@@ -240,10 +283,16 @@ class PairTradingModelDRL:
             # Process each record
             for idx, record in enumerate(all_values):
                 spread = record['spread']
+                vol1 = record['vol1']  # Ensure vol1 is present
+                vol2 = record['vol2']  # Ensure vol2 is present
                 window_split_index = record['split_index']  # Use local variable
 
                 # Create DataFrame for the trading window
-                df = pd.DataFrame({'spread': spread})
+                df = pd.DataFrame({
+                    'spread': spread,
+                    'vol1': vol1,
+                    'vol2': vol2
+                })
 
                 # Store a tuple of (trading_data, window_split_index)
                 self.episodes.append((df, window_split_index))
@@ -269,45 +318,46 @@ class PairTradingModelDRL:
             logger.error("Training data not loaded.")
             return
 
-        self.training_episodes = self.training_episodes[:10]  # Limit training episodes for faster training
-        batch_size = 1  # Number of parallel environments
+        # Limit training episodes for faster training
+        self.training_episodes = self.training_episodes[:200]
         total_episodes = len(self.training_episodes)
-        batches = [self.training_episodes[i:i + batch_size] for i in range(0, total_episodes, batch_size)]
+        timesteps_per_episode = total_timesteps // total_episodes
 
         policy_kwargs = dict(
             features_extractor_class=CustomCNN,
             features_extractor_kwargs=dict(features_dim=64),
         )
 
-        # Initialize the DRL agent (PPO algorithm) with the custom CNN policy using the first batch
-        initial_env_fns = [
-            make_pair_trading_env(
-                trading_data=episode[0],
-                window_split_index=episode[1],
-                window_size=self.window_size,
-                trading_fee=self.trading_fee,
-                seed=i
-            ) for i, episode in enumerate(batches[0])
-        ]
-        self.model = PPO('CnnPolicy', SubprocVecEnv(initial_env_fns),
-                        policy_kwargs=policy_kwargs, verbose=1)
+        # Initialize the environment with the first episode
+        initial_episode = self.training_episodes[0]
+        env = PairTradingEnv(
+            trading_data=initial_episode[0],
+            window_split_index=initial_episode[1],
+            window_size=self.window_size,
+            trading_fee=self.trading_fee
+        )
+        self.model = PPO('CnnPolicy', 
+                        env, 
+                        policy_kwargs=policy_kwargs, 
+                        verbose=1,)
 
-        for epoch, batch in enumerate(batches):
-            logger.info(f"Training on batch {epoch + 1}/{len(batches)}")
-            env_fns = [
-                make_pair_trading_env(
-                    trading_data=episode[0],
-                    window_split_index=episode[1],
-                    window_size=self.window_size,
-                    trading_fee=self.trading_fee,
-                    seed=i
-                ) for i, episode in enumerate(batch)
-            ]
-            env = SubprocVecEnv(env_fns)
+        callback = TrainingMonitorCallback(verbose=1)
+
+        # Loop over each episode sequentially
+        for idx, episode in enumerate(self.training_episodes):
+            logger.info(f"Training on episode {idx + 1}/{total_episodes}")
+
+            # Update the environment with the new episode data
+            env.update_data(trading_data=episode[0], window_split_index=episode[1])
+
+            # Train the model on the current episode
             self.model.set_env(env)
-            self.model.learn(total_timesteps=total_timesteps // len(batches))
-            env.close()
+            self.model.learn(total_timesteps=timesteps_per_episode,
+                             callback=callback,
+                             reset_num_timesteps=False
+                             )
 
+        env.close()
         logger.info("Training completed.")
 
     def test_agent(self):

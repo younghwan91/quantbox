@@ -228,7 +228,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--mode',
         type=str,
-        default='optimize',
+        default='drl',
         choices=['optimize', 'drl'],
         help="Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning."
     )
@@ -252,11 +252,11 @@ if __name__ == "__main__":
 
     main(
         # DOWNLOAD_DATA=args.download_data,
-        DOWNLOAD_DATA=True,
+        DOWNLOAD_DATA=False,
         # PREPROCESS_DATA=args.preprocess_data,
-        PREPROCESS_DATA=True,
+        PREPROCESS_DATA=False,
         # DOWNLOAD_AND_PREPROCESS_DATA_ONLY=args.download_and_preprocess_data_only,
-        DOWNLOAD_AND_PREPROCESS_DATA_ONLY=True,
+        DOWNLOAD_AND_PREPROCESS_DATA_ONLY=False,
         DAYS=args.days,
         FORMATION_DAYS=args.formation_days,
         TRADING_WINDOW=args.trading_window,
