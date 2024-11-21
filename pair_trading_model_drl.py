@@ -39,7 +39,7 @@ class PairTradingEnv(gym.Env):
         # Define observation space: Moving window of spread, vol1, and vol2 values
         # Updated to have 3 channels instead of 1
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.window_size, 3), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.window_size * 3 + 2,), dtype=np.float32
         )
 
         # Initialize environment variables
@@ -73,11 +73,19 @@ class PairTradingEnv(gym.Env):
         vol1_window = self.data['vol1'].iloc[window_start:window_end].values
         vol2_window = self.data['vol2'].iloc[window_start:window_end].values
         
-        vol1_window = (vol1_window - np.mean(vol1_window)) / np.std(vol1_window)
-        vol2_window = (vol2_window - np.mean(vol2_window)) / np.std(vol2_window)
-
         # Stack the features to create a multi-channel observation
         obs = np.stack([spread_window, vol1_window, vol2_window], axis=1).astype(np.float32)
+        obs = obs.flatten()  # Flatten to a 1D array
+        # Calculate unrealized profit
+        spread = self.data['spread'].iloc[self.current_step - 1]
+        if self.position == 1:
+            unrealized_profit = spread - self.entry_price
+        elif self.position == -1:
+            unrealized_profit = self.entry_price - spread
+        else:
+            unrealized_profit = 0.0
+        # Append current position
+        obs = np.concatenate([obs, [self.position, unrealized_profit]], axis=0)
         return obs
 
     def update_data(self, trading_data, window_split_index):
@@ -92,56 +100,76 @@ class PairTradingEnv(gym.Env):
         reward = 0.0
         terminated = False
         truncated = False
+        info = {}
 
         # Get current spread
         spread = self.data['spread'].iloc[self.current_step]
+        
+        time_penalty = -0.00001 if self.position != 0 else 0.0
+        reward += time_penalty    
+
+        # Calculate Unrealized P&L before the action
+        if self.position == 1:
+            unrealized_pnl_before = spread - self.entry_price
+        elif self.position == -1:
+            unrealized_pnl_before = self.entry_price - spread
+        else:
+            unrealized_pnl_before = 0.0
 
         # Implement action logic
         if action == 0:
-            # Hold
-            reward -= 0.001
-            pass
+            # Hold position
+            pass  # No action needed
         elif action == 1:
             # Buy (Long)
-            reward += 0.001
             if self.position == 0:
+                # Open long position
                 self.position = 1
                 self.entry_price = spread
+                self.total_profit -= self.trading_fee  # Pay trading fee
+                info['position_change'] = 'long_open'
             elif self.position == -1:
-                # Close short position and open long
-                profit = self.entry_price - spread - (2 * self.trading_fee)
-                reward += profit
-                self.total_profit += profit
-                self.position = 1
-                self.entry_price = spread
+                pass
         elif action == 2:
             # Sell (Short)
-            reward += 0.001
             if self.position == 0:
+                # Open short position
                 self.position = -1
                 self.entry_price = spread
+                self.total_profit -= self.trading_fee  # Pay trading fee
+                info['position_change'] = 'short_open'
             elif self.position == 1:
-                # Close long position and open short
-                profit = spread - self.entry_price - (2 * self.trading_fee)
-                reward += profit
-                self.total_profit += profit
-                self.position = -1
-                self.entry_price = spread
+                pass
         elif action == 3:
             # Close Position
-            reward += 0.001
-            if self.position == 1:
-                profit = spread - self.entry_price - (2 * self.trading_fee)
-                reward += profit
+            if self.position != 0:
+                # Calculate realized P&L
+                if self.position == 1:
+                    profit = spread - self.entry_price - self.trading_fee
+                    info['position_change'] = 'long_close'
+                elif self.position == -1:
+                    profit = self.entry_price - spread - self.trading_fee
+                    info['position_change'] = 'short_close'
                 self.total_profit += profit
-            elif self.position == -1:
-                profit = self.entry_price - spread - (2 * self.trading_fee)
-                reward += profit
-                self.total_profit += profit
-            self.position = 0
-            self.entry_price = 0.0
+                reward += profit  # Reward is the realized profit
+                self.position = 0
+                self.entry_price = 0.0
+            else:
+                pass
 
-            terminated = True
+        # Calculate Unrealized P&L after the action
+        if self.position == 1:
+            unrealized_pnl_after = spread - self.entry_price
+        elif self.position == -1:
+            unrealized_pnl_after = self.entry_price - spread
+        else:
+            unrealized_pnl_after = 0.0
+
+        # Calculate change in unrealized P&L
+        delta_unrealized_pnl = unrealized_pnl_after - unrealized_pnl_before
+
+        # Total reward is realized P&L plus change in unrealized P&L
+        reward += delta_unrealized_pnl
 
         # Move to the next step
         self.current_step += 1
@@ -151,23 +179,26 @@ class PairTradingEnv(gym.Env):
             terminated = True
             # Close any open positions
             if self.position != 0:
+                # Calculate final realized P&L
                 if self.position == 1:
-                    profit = spread - self.entry_price - (2 * self.trading_fee)
+                    profit = spread - self.entry_price - self.trading_fee
                 elif self.position == -1:
-                    profit = self.entry_price - spread - (2 * self.trading_fee)
-                reward += profit
+                    profit = self.entry_price - spread - self.trading_fee
                 self.total_profit += profit
+                reward += profit  # Add final realized profit to reward
                 self.position = 0
                 self.entry_price = 0.0
-
+            info['total_profit'] = self.total_profit
+       
         # Get next observation
         if not terminated and not truncated:
             obs = self._next_observation()
         else:
-            obs = np.zeros((self.window_size, 3), dtype=np.float32)  # Updated shape
+            obs = []
 
-        info = {}
+        
         return obs, reward, terminated, truncated, info
+
 
     def render(self):
         """
@@ -184,14 +215,12 @@ class PairTradingEnv(gym.Env):
 
 
 class CustomCNN(BaseFeaturesExtractor):
-    """
-    Custom 1D CNN feature extractor for Stable Baselines3
-    """
     def __init__(self, observation_space: spaces.Box, features_dim: int = 64):
         super(CustomCNN, self).__init__(observation_space, features_dim)
+        self.window_size = (observation_space.shape[0] - 2) // 3  # Adjust for position
+        n_input_channels = 3  # spread, vol1, vol2
 
-        n_input_channels = observation_space.shape[1]  # Updated to 3
-
+        # CNN layers for time-series data
         self.cnn = nn.Sequential(
             nn.Conv1d(in_channels=n_input_channels, out_channels=16, kernel_size=3, stride=1),
             nn.ReLU(),
@@ -200,35 +229,37 @@ class CustomCNN(BaseFeaturesExtractor):
             nn.Flatten()
         )
 
-        # Compute the size of the output of the CNN to define the linear layer input size
+        # Compute CNN output size
         with torch.no_grad():
-            sample_input = torch.zeros(1, n_input_channels, observation_space.shape[0])
-            cnn_output_size = self.cnn(sample_input).shape[1]
+            sample_timeseries = torch.zeros(1, n_input_channels, self.window_size)
+            cnn_output_size = self.cnn(sample_timeseries).shape[1]
 
+        # Linear layer to combine CNN output and position
         self.linear = nn.Sequential(
-            nn.Linear(cnn_output_size, features_dim),
+            nn.Linear(cnn_output_size + 2, features_dim),  # +1 for position scalar
             nn.ReLU()
         )
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        # observations shape: (batch_size, window_size, 3)
-        # Need to transpose to (batch_size, channels, window_size)
-        x = observations.transpose(1, 2)
-        x = self.cnn(x)
+        # observations shape: (batch_size, window_size * 3 + 1)
+        # Separate time-series data and position
+        timeseries = observations[:, :-2]
+        scalars = observations[:, -2:]
+
+        # Reshape timeseries to (batch_size, channels, window_size)
+        timeseries = timeseries.view(observations.shape[0], self.window_size, 3)
+        timeseries = timeseries.permute(0, 2, 1)  # (batch_size, channels, window_size)
+
+        # Process timeseries through CNN
+        x = self.cnn(timeseries)
+
+        # Concatenate CNN output with position
+        x = torch.cat((x, scalars), dim=1)
+
+        # Process through linear layers
         x = self.linear(x)
         return x
 
-# Top-level environment creation function
-def make_pair_trading_env(trading_data, window_split_index, window_size, trading_fee, seed):
-    """
-    Top-level function to create a PairTradingEnv instance.
-    This function is picklable and can be used with SubprocVecEnv.
-    """
-    def _init():
-        env = PairTradingEnv(trading_data, window_split_index, window_size, trading_fee)
-        env.seed(seed)
-        return env
-    return _init
 
 class TrainingMonitorCallback(BaseCallback):
     def __init__(self, verbose=0):
@@ -236,25 +267,39 @@ class TrainingMonitorCallback(BaseCallback):
         self.episode_rewards = []
         self.episode_profits = []
         self.rewards = []
+        self.actions = []
+        self.positions = []
 
     def _on_step(self) -> bool:
         reward = self.locals['rewards'][0]
         done = self.locals['dones'][0]
+        action = self.locals['actions'][0]
+
         self.rewards.append(reward)
+        self.actions.append(action)
+
+        # Access the current position from the environment
+        position = self.training_env.envs[0].position
+        self.positions.append(position)
 
         if done:
             total_reward = sum(self.rewards)
-            # Access total_profit using get_attr
-            total_profit = self.training_env.get_attr('total_profit')[0]
+            total_profit = self.locals['infos'][0].get('total_profit', 0.0)
             self.episode_rewards.append(total_reward)
             self.episode_profits.append(total_profit)
 
             if self.verbose > 0:
-                print(f"Episode {len(self.episode_rewards)}: Reward = {total_reward:.3f}, Profit = {total_profit:.3f}")
+                print(f"Episode {len(self.episode_rewards)}: Reward = {total_reward:.5f}, Profit = {total_profit:.5f}")
+                # print(f"Actions taken: {self.actions}")
+                # print(f"Positions: {self.positions}")
 
+            # Reset for next episode
             self.rewards = []
+            self.actions = []
+            self.positions = []
 
         return True
+
     
 class PairTradingModelDRL:
     def __init__(self, config):
@@ -266,11 +311,7 @@ class PairTradingModelDRL:
         self.episodes = []  # List to store each episode's trading window data
 
     def load_precomputed_values(self, filepath):
-        """
-        Load precomputed values from a pickle file and prepare training and testing data.
-        Each record is split into a formation window and a trading window based on the window ratio.
-        Observations in the trading window use a sliding window approach.
-        """
+
         try:
             with open(filepath, 'rb') as f:
                 all_values = pickle.load(f)
@@ -286,12 +327,15 @@ class PairTradingModelDRL:
                 vol1 = record['vol1']  # Ensure vol1 is present
                 vol2 = record['vol2']  # Ensure vol2 is present
                 window_split_index = record['split_index']  # Use local variable
-
+                
+                zero_mean_spread = spread - np.mean(spread[:window_split_index])
+                normalized_vol1 = (vol1 - np.mean(vol1[:window_split_index])) / np.std(vol1[:window_split_index])
+                normalized_vol2 = (vol2 - np.mean(vol2[:window_split_index])) / np.std(vol2[:window_split_index])
                 # Create DataFrame for the trading window
                 df = pd.DataFrame({
-                    'spread': spread,
-                    'vol1': vol1,
-                    'vol2': vol2
+                    'spread': zero_mean_spread,
+                    'vol1': normalized_vol1,
+                    'vol2': normalized_vol2,
                 })
 
                 # Store a tuple of (trading_data, window_split_index)
@@ -310,16 +354,13 @@ class PairTradingModelDRL:
             logger.error(f"Error loading precomputed values: {e}")
 
     def train_agent(self, total_timesteps=100000):
-        """
-        Train the DRL agent using the training data.
-        Each training episode corresponds to a separate trading window.
-        """
+
         if not hasattr(self, 'training_episodes'):
             logger.error("Training data not loaded.")
             return
 
         # Limit training episodes for faster training
-        self.training_episodes = self.training_episodes[:200]
+        # self.training_episodes = self.training_episodes[:100]
         total_episodes = len(self.training_episodes)
         timesteps_per_episode = total_timesteps // total_episodes
 
@@ -328,18 +369,18 @@ class PairTradingModelDRL:
             features_extractor_kwargs=dict(features_dim=64),
         )
 
-        # Initialize the environment with the first episode
+        # Initialize the environment with the first episode and wrap it
         initial_episode = self.training_episodes[0]
-        env = PairTradingEnv(
+        env = DummyVecEnv([lambda: PairTradingEnv(
             trading_data=initial_episode[0],
             window_split_index=initial_episode[1],
             window_size=self.window_size,
             trading_fee=self.trading_fee
-        )
+        )])
         self.model = PPO('CnnPolicy', 
-                        env, 
-                        policy_kwargs=policy_kwargs, 
-                        verbose=1,)
+                         env, 
+                         policy_kwargs=policy_kwargs, 
+                         verbose=1,)
 
         callback = TrainingMonitorCallback(verbose=1)
 
@@ -348,7 +389,7 @@ class PairTradingModelDRL:
             logger.info(f"Training on episode {idx + 1}/{total_episodes}")
 
             # Update the environment with the new episode data
-            env.update_data(trading_data=episode[0], window_split_index=episode[1])
+            env.envs[0].update_data(trading_data=episode[0], window_split_index=episode[1])
 
             # Train the model on the current episode
             self.model.set_env(env)
@@ -358,7 +399,7 @@ class PairTradingModelDRL:
                              )
 
         env.close()
-        logger.info("Training completed.")
+        logger.info("Training completed.")    
 
     def test_agent(self):
         """
@@ -381,11 +422,31 @@ class PairTradingModelDRL:
             obs, _ = env.reset()
             episode_reward = 0.0
 
+            spreads = []
+            positions = []
+            actions = []
+            steps = []
+            position_changes = []
+
             while True:
                 # Get action from the trained model
                 action, _states = self.model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)
                 episode_reward += reward
+
+                current_step = env.current_step - 1
+                current_spread = env.data['spread'].iloc[current_step]
+                spreads.append(current_spread)
+                positions.append(env.position)
+                actions.append(action)
+                steps.append(current_step)
+
+                if 'position_change' in info:
+                    position_changes.append({
+                        'step': current_step,
+                        'type': info['position_change'],
+                        'price': current_spread
+                    })
 
                 if terminated or truncated:
                     break
@@ -394,8 +455,33 @@ class PairTradingModelDRL:
             total_profit += env.total_profit
             logger.info(f"Episode {idx + 1}: Reward = {episode_reward:.2f}, Profit = {env.total_profit:.2f}")
 
-        logger.info(f"Total reward on testing data: {total_reward}")
-        logger.info(f"Total profit on testing data: {total_profit}")
+            # Plotting the spread and positions
+            plt.figure(figsize=(14, 7))
+            plt.plot(steps, spreads, label='Spread')
+
+            markers = {
+                'long_open': {'color': 'green', 'marker': '^', 'label': 'Long Open'},
+                'short_open': {'color': 'red', 'marker': 'v', 'label': 'Short Open'},
+                'long_close': {'color': 'green', 'marker': 'x', 'label': 'Long Close'},
+                'short_close': {'color': 'red', 'marker': 'x', 'label': 'Short Close'},
+            }
+            handled_labels = set()
+            for change in position_changes:
+                step = change['step']
+                price = change['price']
+                change_type = change['type']
+                marker_info = markers[change_type]
+                label = marker_info['label'] if marker_info['label'] not in handled_labels else None
+                plt.scatter(step, price, color=marker_info['color'], marker=marker_info['marker'], label=label)
+                handled_labels.add(marker_info['label'])
+
+            plt.axhline(y=0, color='black', linewidth=2)
+            plt.title(f'Episode {idx + 1} Spread and Positions')
+            plt.xlabel('Steps')
+            plt.ylabel('Spread')
+            plt.legend(loc='best')
+            plt.show()
+
 
     def simulate_trading(self):
         """

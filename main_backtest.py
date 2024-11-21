@@ -99,7 +99,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS
         'TRADING_FEE': 0.0005,
         'DATA_DIR': 'data/backtest',
         'HOUR_SHIFT': HOUR_SHIFT,
-        'WINDOW_SIZE': 30  # For DRL CNN window size
+        'WINDOW_SIZE': 128  # For DRL CNN window size
     }
 
     # Set start and end time for data download

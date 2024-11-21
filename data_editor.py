@@ -1,9 +1,9 @@
 import pickle
-
-data = pickle.load(open('./data/backtest/precomputed_values.pkl', 'rb'))
-
-# cut the data to last 1000 rows
-data = data[-1000:]
+pkl_path = './data/backtest/precomputed_values.pkl'
+data = pickle.load(open(pkl_path, 'rb'))
+print(len(data))
+data = data[::30]
+print(len(data))
 
 # save
-pickle.dump(data, open('./data/backtest/precomputed_values.pkl', 'wb'))
+pickle.dump(data, open(pkl_path, 'wb'))
