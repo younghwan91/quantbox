@@ -229,9 +229,9 @@ class BacktestPreprocessor:
             if spread_std < 0.01:
                 return False
 
-            # z_spread = (spread - spread_mean) / spread_std 
-            # if np.abs(z_spread.iloc[-1]) < 2:
-                # return False
+            z_spread = (spread - spread_mean) / spread_std 
+            if np.abs(z_spread.iloc[-1]) < 2:
+                return False
             
             # jb_pvalue = jarque_bera(spread)[1] # financial data is often not normally distributed
             # if jb_pvalue < 0.05:
