@@ -12,6 +12,7 @@ from scipy.stats import shapiro, skew, kurtosis, jarque_bera
 import matplotlib.pyplot as plt
 import pickle
 import statsmodels.api as sm  # Added import for half-life calculation
+import ta
 
 # Configure logging (if not already configured in main application)
 logger = logging.getLogger('BacktestPreprocessor')
@@ -276,6 +277,7 @@ class BacktestPreprocessor:
             try:
                 data1 = pair['data1']['Close']
                 data2 = pair['data2']['Close']
+
                 split_idx = int(self.config['WINDOW_RATIO'] * len(data1))
                 train_data1 = data1[:split_idx]
                 train_data2 = data2[:split_idx]
@@ -287,6 +289,10 @@ class BacktestPreprocessor:
                 train_std = train_spread.std()
                 z_spread = (spread - train_mean) / train_std
 
+                # Calculate RSI for data1 and data2
+                rsi_1 = ta.momentum.RSIIndicator(data1).rsi()
+                rsi_2 = ta.momentum.RSIIndicator(data2).rsi()
+
                 precomputed_data.append({
                     'window_start': window_start,
                     'window_end': window_end,
@@ -296,7 +302,9 @@ class BacktestPreprocessor:
                     'z_spread': z_spread,
                     'split_index': split_idx,  # Added split_index
                     'vol1': pair['data1']['Volume'],
-                    'vol2': pair['data2']['Volume']
+                    'vol2': pair['data2']['Volume'],
+                    'rsi1': rsi_1,
+                    'rsi2': rsi_2
                 })
             except Exception as e:
                 logger.error(f"Error precomputing pair {pair_tuple}: {e}")

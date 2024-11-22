@@ -39,7 +39,7 @@ class PairTradingEnv(gym.Env):
         # Define observation space: Moving window of spread, vol1, and vol2 values
         # Updated to have 3 channels instead of 1
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.window_size * 3 + 2,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.window_size * 4 + 2,), dtype=np.float32
         )
 
         # Initialize environment variables
@@ -70,11 +70,12 @@ class PairTradingEnv(gym.Env):
         
         # Extract spread, vol1, and vol2
         spread_window = self.data['spread'].iloc[window_start:window_end].values
+        z_score_spread_window = self.data['z_score_spread'].iloc[window_start:window_end].values
         vol1_window = self.data['vol1'].iloc[window_start:window_end].values
         vol2_window = self.data['vol2'].iloc[window_start:window_end].values
         
         # Stack the features to create a multi-channel observation
-        obs = np.stack([spread_window, vol1_window, vol2_window], axis=1).astype(np.float32)
+        obs = np.stack([spread_window, z_score_spread_window, vol1_window, vol2_window], axis=1).astype(np.float32)
         obs = obs.flatten()  # Flatten to a 1D array
         # Calculate unrealized profit
         spread = self.data['spread'].iloc[self.current_step - 1]
@@ -95,20 +96,23 @@ class PairTradingEnv(gym.Env):
 
     def step(self, action):
         """
-        Execute one time step within the environment
+        Execute one time step within the environment.
         """
-        reward = 0.0
         terminated = False
         truncated = False
         info = {}
 
-        # Get current spread
+        # Get the current spread value
         spread = self.data['spread'].iloc[self.current_step]
-        
-        time_penalty = -0.00001 if self.position != 0 else 0.0
-        reward += time_penalty    
 
-        # Calculate Unrealized P&L before the action
+        # Initialize reward
+        reward = 0.0
+
+        # Apply a small time penalty if holding a position
+        if self.position != 0:
+            reward -= 0.00001  # Time penalty for holding a position
+
+        # Calculate unrealized P&L before taking the action
         if self.position == 1:
             unrealized_pnl_before = spread - self.entry_price
         elif self.position == -1:
@@ -116,48 +120,41 @@ class PairTradingEnv(gym.Env):
         else:
             unrealized_pnl_before = 0.0
 
-        # Implement action logic
+        # Process the action
         if action == 0:
-            # Hold position
-            pass  # No action needed
+            # Hold position (do nothing)
+            pass
         elif action == 1:
-            # Buy (Long)
+            # Buy (Long) if not already in a position
             if self.position == 0:
-                # Open long position
                 self.position = 1
                 self.entry_price = spread
-                self.total_profit -= self.trading_fee  # Pay trading fee
+                self.total_profit -= self.trading_fee  # Deduct trading fee
                 info['position_change'] = 'long_open'
-            elif self.position == -1:
-                pass
         elif action == 2:
-            # Sell (Short)
+            # Sell (Short) if not already in a position
             if self.position == 0:
-                # Open short position
                 self.position = -1
                 self.entry_price = spread
-                self.total_profit -= self.trading_fee  # Pay trading fee
+                self.total_profit -= self.trading_fee  # Deduct trading fee
                 info['position_change'] = 'short_open'
-            elif self.position == 1:
-                pass
         elif action == 3:
-            # Close Position
+            # Close existing position
             if self.position != 0:
-                # Calculate realized P&L
                 if self.position == 1:
+                    # Closing long position
                     profit = spread - self.entry_price - self.trading_fee
                     info['position_change'] = 'long_close'
                 elif self.position == -1:
+                    # Closing short position
                     profit = self.entry_price - spread - self.trading_fee
                     info['position_change'] = 'short_close'
                 self.total_profit += profit
-                reward += profit  # Reward is the realized profit
+                reward += profit  # Add realized profit to reward
                 self.position = 0
                 self.entry_price = 0.0
-            else:
-                pass
 
-        # Calculate Unrealized P&L after the action
+        # Calculate unrealized P&L after taking the action
         if self.position == 1:
             unrealized_pnl_after = spread - self.entry_price
         elif self.position == -1:
@@ -165,21 +162,17 @@ class PairTradingEnv(gym.Env):
         else:
             unrealized_pnl_after = 0.0
 
-        # Calculate change in unrealized P&L
-        delta_unrealized_pnl = unrealized_pnl_after - unrealized_pnl_before
+        # Update reward with the change in unrealized P&L
+        reward += (unrealized_pnl_after - unrealized_pnl_before)
 
-        # Total reward is realized P&L plus change in unrealized P&L
-        reward += delta_unrealized_pnl
-
-        # Move to the next step
+        # Move to the next time step
         self.current_step += 1
 
-        # Check if the end of data is reached
+        # Check if we've reached the end of the data
         if self.current_step >= len(self.data):
             terminated = True
-            # Close any open positions
+            # Close any open positions at the end
             if self.position != 0:
-                # Calculate final realized P&L
                 if self.position == 1:
                     profit = spread - self.entry_price - self.trading_fee
                 elif self.position == -1:
@@ -189,16 +182,14 @@ class PairTradingEnv(gym.Env):
                 self.position = 0
                 self.entry_price = 0.0
             info['total_profit'] = self.total_profit
-       
-        # Get next observation
+
+        # Get the next observation or an empty list if terminated
         if not terminated and not truncated:
             obs = self._next_observation()
         else:
             obs = []
 
-        
         return obs, reward, terminated, truncated, info
-
 
     def render(self):
         """
@@ -217,8 +208,8 @@ class PairTradingEnv(gym.Env):
 class CustomCNN(BaseFeaturesExtractor):
     def __init__(self, observation_space: spaces.Box, features_dim: int = 64):
         super(CustomCNN, self).__init__(observation_space, features_dim)
-        self.window_size = (observation_space.shape[0] - 2) // 3  # Adjust for position
-        n_input_channels = 3  # spread, vol1, vol2
+        self.window_size = (observation_space.shape[0] - 2) // 4  # Adjust for position
+        n_input_channels = 4
 
         # CNN layers for time-series data
         self.cnn = nn.Sequential(
@@ -247,7 +238,7 @@ class CustomCNN(BaseFeaturesExtractor):
         scalars = observations[:, -2:]
 
         # Reshape timeseries to (batch_size, channels, window_size)
-        timeseries = timeseries.view(observations.shape[0], self.window_size, 3)
+        timeseries = timeseries.view(observations.shape[0], self.window_size, 4)
         timeseries = timeseries.permute(0, 2, 1)  # (batch_size, channels, window_size)
 
         # Process timeseries through CNN
@@ -329,11 +320,13 @@ class PairTradingModelDRL:
                 window_split_index = record['split_index']  # Use local variable
                 
                 zero_mean_spread = spread - np.mean(spread[:window_split_index])
+                z_score_spread = zero_mean_spread / np.std(zero_mean_spread[:window_split_index])
                 normalized_vol1 = (vol1 - np.mean(vol1[:window_split_index])) / np.std(vol1[:window_split_index])
                 normalized_vol2 = (vol2 - np.mean(vol2[:window_split_index])) / np.std(vol2[:window_split_index])
                 # Create DataFrame for the trading window
                 df = pd.DataFrame({
                     'spread': zero_mean_spread,
+                    'z_score_spread': z_score_spread,
                     'vol1': normalized_vol1,
                     'vol2': normalized_vol2,
                 })
