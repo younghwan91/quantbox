@@ -304,7 +304,8 @@ class BacktestPreprocessor:
                     'vol1': pair['data1']['Volume'],
                     'vol2': pair['data2']['Volume'],
                     'rsi1': rsi_1,
-                    'rsi2': rsi_2
+                    'rsi2': rsi_2,
+
                 })
             except Exception as e:
                 logger.error(f"Error precomputing pair {pair_tuple}: {e}")
