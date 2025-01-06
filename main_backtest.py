@@ -192,19 +192,19 @@ if __name__ == "__main__":
     parser.add_argument(
         '--days',
         type=int,
-        default=100,
+        default=30,
         help='Number of days of data to use.'
     )
     parser.add_argument(
         '--formation-days',
         type=int,
-        default=5,
+        default=1,
         help='Number of formation days.'
     )
     parser.add_argument(
         '--trading-window',
         type=int,
-        default=48,
+        default=24,
         help='Trading window in hours.'
     )
     parser.add_argument(
@@ -216,19 +216,19 @@ if __name__ == "__main__":
     parser.add_argument(
         '--hour-shift',
         type=int,
-        default=11,
+        default=3,
         help='Number of hours to shift the window.'
     )
     parser.add_argument(
         '--n-coins',
         type=int,
-        default=100,
+        default=50,
         help='Number of coins to consider.'
     )
     parser.add_argument(
         '--mode',
         type=str,
-        default='drl',
+        default='optimize',
         choices=['optimize', 'drl'],
         help="Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning."
     )
@@ -252,9 +252,9 @@ if __name__ == "__main__":
 
     main(
         # DOWNLOAD_DATA=args.download_data,
-        DOWNLOAD_DATA=False,
+        DOWNLOAD_DATA=True,
         # PREPROCESS_DATA=args.preprocess_data,
-        PREPROCESS_DATA=False,
+        PREPROCESS_DATA = True,
         # DOWNLOAD_AND_PREPROCESS_DATA_ONLY=args.download_and_preprocess_data_only,
         DOWNLOAD_AND_PREPROCESS_DATA_ONLY=False,
         DAYS=args.days,
@@ -268,3 +268,8 @@ if __name__ == "__main__":
         LOAD_MODEL=args.load_model,
         MODEL_PATH=args.model_path
     )
+
+    '''
+    capturing price converging pattern
+    
+    '''

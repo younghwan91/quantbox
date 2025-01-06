@@ -7,12 +7,14 @@ from itertools import combinations
 from tqdm import tqdm
 import numpy as np
 import logging
-from statsmodels.tsa.stattools import coint, adfuller
+from statsmodels.tsa.stattools import coint, adfuller, kpss,  zivot_andrews
 from scipy.stats import shapiro, skew, kurtosis, jarque_bera
 import matplotlib.pyplot as plt
 import pickle
 import statsmodels.api as sm  # Added import for half-life calculation
 import ta
+# import matplotlib.dates as mdates
+import random
 
 # Configure logging (if not already configured in main application)
 logger = logging.getLogger('BacktestPreprocessor')
@@ -54,6 +56,7 @@ class BacktestPreprocessor:
         the pairs in chronological order.
         """
         logger.info("Preparing pairs for backtest")
+        
 
         # Step 1: Load all coin data
         coin_data = self._load_all_coin_data()
@@ -150,6 +153,10 @@ class BacktestPreprocessor:
         Generates all possible unique coin pairs within each window, 
         considering only coins with complete data in the window.
         """
+        max_pairs_per_window = 2
+        print(f"!!!!!!!!!!!!!!!!!!!!!!max_pairs_per_window: {max_pairs_per_window}!!!!!!!!!!!!!!!!!!!!!")
+
+
         all_pairs = []
         coins = list(coin_data.keys())
 
@@ -173,6 +180,9 @@ class BacktestPreprocessor:
 
             # Generate all unique pairs from the available coins
             coin_pairs = list(combinations(available_coins, 2))
+            random.shuffle(coin_pairs)  # Shuffle to avoid bias
+
+            filtered_pairs = []
 
             for pair in coin_pairs:
                 coin1, coin2 = pair
@@ -193,14 +203,21 @@ class BacktestPreprocessor:
                 }
                 # Apply filtering here
                 if self._filter_pair(pair_data, corr_threshold, pvalue_threshold, window_ratio):
-                    all_pairs.append(pair_data)
+                    filtered_pairs.append(pair_data)
+
+                if len(filtered_pairs) >= max_pairs_per_window:
+                    break
+
+            all_pairs.extend(filtered_pairs)
 
         return all_pairs
 
     def _filter_pair(self, pair, corr_threshold, pvalue_threshold, window_ratio):
+
         """
         Filters a single pair based on hedge ratio and half-life criteria.
         """
+
         try:
             split_idx = int(window_ratio * len(pair['data1']['Close']))
             train_data1 = pair['data1']['Close'][:split_idx]
@@ -210,16 +227,21 @@ class BacktestPreprocessor:
                 logger.warning(f"Non-positive values in pair {pair['pair']}.")
                 return False
 
+            # if differnce of rsi of two coins is less than 50 then return false
+            rsi_1 = ta.momentum.RSIIndicator(train_data1).rsi()
+            rsi_2 = ta.momentum.RSIIndicator(train_data2).rsi()
+            if np.abs(rsi_1.iloc[-1] - rsi_2.iloc[-1]) < 30:
+                return False
+
             log_train_data1 = np.log(train_data1)
             log_train_data2 = np.log(train_data2)
             
-            # Check for correlation
-            corr = np.corrcoef(log_train_data1, log_train_data2)[0, 1]
-            if np.abs(corr) < 0.5:
-                return False
-            
+            # corr = np.corrcoef(log_train_data1, log_train_data2)[0, 1]
+            # if np.abs(corr) < 0.50:
+            #     return False
+
             hedge_ratio = np.polyfit(log_train_data2, log_train_data1, 1)[0]
-            hedge_const = 3.0
+            hedge_const = 5.0
             if not (1 / hedge_const) < hedge_ratio < hedge_const:
                 return False
 
@@ -229,16 +251,17 @@ class BacktestPreprocessor:
             if spread_std < 0.01:
                 return False
 
-            z_spread = (spread - spread_mean) / spread_std 
-            if np.abs(z_spread.iloc[-1]) < 2:
-                return False
-            
-            # jb_pvalue = jarque_bera(spread)[1] # financial data is often not normally distributed
-            # if jb_pvalue < 0.05:
-            #     return False            
+            z_spread = (spread - spread_mean) / spread_std            
 
-            adf_pvalue = adfuller(spread)[1]
-            if adf_pvalue > pvalue_threshold:
+            if np.abs(z_spread.iloc[-1]) < 1.5:
+                return False
+
+            jarque_bera_pvalue = jarque_bera(z_spread)[1]
+            if jarque_bera_pvalue < 0.05:
+                return False
+
+            coint_pvalue = coint(log_train_data1, log_train_data2)[1]
+            if coint_pvalue > pvalue_threshold:
                 return False
 
             return True

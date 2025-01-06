@@ -3,7 +3,7 @@ import csv
 import itertools
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.stattools import coint, adfuller
+from statsmodels.tsa.stattools import coint, adfuller, kpss
 import matplotlib.pyplot as plt
 import tqdm
 import logging
@@ -127,6 +127,7 @@ class CoinAnalysis:
                         result = coint(prices1, prices2)
 
                         if result[1] < self.coint_threshold:
+
                             coint_pairs.append((coin1, coin2))
 
             except Exception as e:

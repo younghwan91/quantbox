@@ -10,6 +10,10 @@ import pickle
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 import matplotlib.dates as mdates
+from statsmodels.graphics.tsaplots import plot_pacf
+from scipy.optimize import curve_fit
+# jarque_bera_test
+from scipy.stats import jarque_bera
 
 logger = logging.getLogger('PairTradingModel')
 
@@ -60,7 +64,9 @@ class PairTradingModel:
             z_spread = record['z_spread']
             split_index = record['split_index']
 
-            if np.abs(z_spread.iloc[split_index-1]) > entry_thres:                    
+            # if np.abs(z_spread.iloc[split_index-1]) > entry_thres:   
+
+            if 1 ==1:                 
                 exit_condition = False
                 trade_count += 1
                 z_spread_0 = z_spread.iloc[split_index-1]
@@ -75,20 +81,58 @@ class PairTradingModel:
 
                 max_trading_time = int(testing_time)
 
-                if test_plot and 1==1:
-                    plt.figure(figsize=(20, 10))
-                    # Plot z-spread
-                    plt.plot(z_spread, '.-')
-                    plt.axvline(x=spread.index[split_index], color='r', linestyle='--')
-                    plt.axhline(y=0, color='k', linewidth=2)
-                    plt.axhline(y=z_spread_0, color='g', linestyle='-')
-                    plt.ylim(-6, 6)
-                    # Draw horizontal lines between 0 and z_spread_0
-                    plt.axhline(y=z_spread_0/2, color='y', linestyle='--')
-                    plt.axhline(y=z_spread_0/4, color='y', linestyle='--')
-                    plt.axhline(y=z_spread_0*3/4, color='y', linestyle='--')
+                if test_plot and 1 == 1:
+
+                    # Generate the numeric representation of dates for fitting
+                    dates_num = mdates.date2num(z_spread.index)
+                    dates_sub_num = mdates.date2num(z_spread.iloc[:split_index].index)
+
+                    # Linear fit
+                    linear_coeffs = np.polyfit(dates_sub_num, z_spread.iloc[:split_index].values, deg=1)
+                    linear_poly = np.poly1d(linear_coeffs)
+                    z_linear_fit = linear_poly(dates_num)
+
+                    # Quadratic fit
+                    quad_coeffs = np.polyfit(dates_sub_num, z_spread.iloc[:split_index].values, deg=2)
+                    quad_poly = np.poly1d(quad_coeffs)
+                    z_quad_fit = quad_poly(dates_num)
+
+                    # Create the subplots
+                    fig, axes = plt.subplots(2, 1, figsize=(20, 15))
+
+                    # Z-Spread Analysis (First subplot)
+                    axes[0].plot(z_spread, '.-', label="z-spread")
+                    axes[0].plot(z_spread.index, z_linear_fit, color='blue', linestyle='--', linewidth=2, label='Linear Regression')
+                    axes[0].plot(z_spread.index, z_quad_fit, color='magenta', linestyle='-.', linewidth=2, label='Quadratic Regression')
+                    axes[0].axvline(x=z_spread.index[split_index-1], color='r', linestyle='--', label='Split Index')
+                    axes[0].axhline(y=0, color='k', linewidth=2, label='Zero Line')
+                    axes[0].axhline(y=z_spread_0, color='g', linestyle='-', label='z_spread_0')
+                    axes[0].set_ylim(-6, 6)
+                    axes[0].legend()
+                    axes[0].set_title("Z-Spread Analysis")
+
+                    # PACF (Second subplot)
+
+                    adfuller_list = []
+                    for k in range(10):
+                        adfuller_test = adfuller(z_spread.iloc[:split_index+k].values)
+                        adfuller_list.append(adfuller_test[1])
+                    adfuller_list = np.array(adfuller_list)
+                    jarque_bera_list = []
+                    for k in range(10):
+                        jarque_bera_test = jarque_bera(z_spread.iloc[:split_index+k].values)
+                        jarque_bera_list.append(jarque_bera_test[1])
+
+                    axes[1].plot(jarque_bera_list, '.-', label="Jarque Bera Test")
+                    axes[1].plot(adfuller_list, '.-', label="ADF Test")
+                    axes[1].axvline(x=0, color='r', linestyle='--', label='Split Index')
+                    axes[1].axhline(y=0.05, color='k', linestyle='-', label='Threshold')
+                    axes[1].set_ylim(0, 1)
+                    axes[1].legend()
+
+                    # Display the plots
+                    plt.tight_layout()
                     plt.show()
-                    plt.close()
 
                 # Open initial 0.25 position immediately
                 position_size = 1
@@ -138,6 +182,7 @@ class PairTradingModel:
                         plt.figure(figsize=(20, 10))
                         # Plot z-spread
                         plt.plot(z_spread, '.-')
+
                         plt.axvline(x=spread.index[split_index], color='r', linestyle='--')
                         plt.axhline(y=0, color='k', linewidth=4)
                         plt.axhline(y=z_spread_0, color='g', linestyle='-')
@@ -151,8 +196,6 @@ class PairTradingModel:
                         plt.show()
                         plt.close()
                     
-
-
                     # Exit trade if exit condition met
                     if exit_condition or i == max_trading_time - 1:
                         # Calculate profit based on all opened positions
