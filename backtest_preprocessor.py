@@ -7,17 +7,42 @@ from itertools import combinations
 from tqdm import tqdm
 import numpy as np
 import logging
-from statsmodels.tsa.stattools import coint, adfuller, kpss,  zivot_andrews
-from scipy.stats import shapiro, skew, kurtosis, jarque_bera
+from statsmodels.tsa.stattools import coint 
+from scipy.stats import jarque_bera
 import matplotlib.pyplot as plt
 import pickle
-import statsmodels.api as sm  # Added import for half-life calculation
+import statsmodels.api as sm  
 import ta
 # import matplotlib.dates as mdates
 import random
-
-# Configure logging (if not already configured in main application)
+from numba import njit
 logger = logging.getLogger('BacktestPreprocessor')
+
+@njit
+def correlation_numba(x, y):
+    n = len(x)
+    
+    x_mean = np.sum(x) / n
+    y_mean = np.sum(y) / n
+    
+    numerator = 0.0
+    denominator_x = 0.0
+    denominator_y = 0.0
+    
+    for i in range(n):
+        numerator += (x[i] - x_mean) * (y[i] - y_mean)
+        denominator_x += (x[i] - x_mean) ** 2
+        denominator_y += (y[i] - y_mean) ** 2
+    
+    return numerator / np.sqrt(denominator_x * denominator_y)
+
+@njit
+def log_returns_numba(prices):
+    n = len(prices)
+    returns = np.empty(n - 1)
+    for i in range(n - 1):
+        returns[i] = np.log(prices[i + 1]) - np.log(prices[i])
+    return returns
 
 class BacktestPreprocessor:
     def __init__(self, config):
@@ -28,6 +53,16 @@ class BacktestPreprocessor:
 
         self.pairs_csv_path = os.path.join(self.backtest_dir, config["PAIRS_CSV"])
         self.precomputed_path = os.path.join(self.backtest_dir, config["PRECOMPUTED_FILE"])
+        self.filter_counts = {
+            "non_positive_values": 0,
+            "rsi_trend_difference": 0,
+            "hedge_ratio_range": 0,
+            "spread_std_low": 0,
+            "z_spread_threshold": 0,
+            "jarque_bera_test": 0,
+            "cointegration_pvalue": 0,
+            "exception": 0
+        }
 
     def _load_trading_coins(self):
         csv_path = os.path.join(self.saving_dir, self.config["CSV_FILENAME"])
@@ -153,7 +188,7 @@ class BacktestPreprocessor:
         Generates all possible unique coin pairs within each window, 
         considering only coins with complete data in the window.
         """
-        max_pairs_per_window = 2
+        max_pairs_per_window = 3
         print(f"!!!!!!!!!!!!!!!!!!!!!!max_pairs_per_window: {max_pairs_per_window}!!!!!!!!!!!!!!!!!!!!!")
 
 
@@ -201,6 +236,7 @@ class BacktestPreprocessor:
                     'data1': df1[['Close', 'Volume']],
                     'data2': df2[['Close', 'Volume']]
                 }
+                
                 # Apply filtering here
                 if self._filter_pair(pair_data, corr_threshold, pvalue_threshold, window_ratio):
                     filtered_pairs.append(pair_data)
@@ -210,6 +246,10 @@ class BacktestPreprocessor:
 
             all_pairs.extend(filtered_pairs)
 
+        logger.info("Filter Counts:")
+        for filter_name, count in self.filter_counts.items():
+            logger.info(f"  {filter_name}: {count}")        
+        
         return all_pairs
 
     def _filter_pair(self, pair, corr_threshold, pvalue_threshold, window_ratio):
@@ -224,48 +264,54 @@ class BacktestPreprocessor:
             train_data2 = pair['data2']['Close'][:split_idx]
 
             if (train_data1 <= 0).any() or (train_data2 <= 0).any():
-                logger.warning(f"Non-positive values in pair {pair['pair']}.")
-                return False
-
-            # if differnce of rsi of two coins is less than 50 then return false
-            rsi_1 = ta.momentum.RSIIndicator(train_data1).rsi()
-            rsi_2 = ta.momentum.RSIIndicator(train_data2).rsi()
-            if np.abs(rsi_1.iloc[-1] - rsi_2.iloc[-1]) < 30:
+                self.filter_counts["non_positive_values"] += 1
                 return False
 
             log_train_data1 = np.log(train_data1)
             log_train_data2 = np.log(train_data2)
-            
-            # corr = np.corrcoef(log_train_data1, log_train_data2)[0, 1]
-            # if np.abs(corr) < 0.50:
-            #     return False
+
+            log_returns1 = log_returns_numba(train_data1)
+            log_returns2 = log_returns_numba(train_data2)
+
+            corr = correlation_numba(log_returns1, log_returns2)
+            if corr < 0.9:
+                return False
 
             hedge_ratio = np.polyfit(log_train_data2, log_train_data1, 1)[0]
             hedge_const = 5.0
             if not (1 / hedge_const) < hedge_ratio < hedge_const:
+                self.filter_counts["hedge_ratio_range"] += 1
                 return False
 
             spread = log_train_data1 - hedge_ratio * log_train_data2
+
             spread_std = spread.std()
             spread_mean = spread.mean()
             if spread_std < 0.01:
+                self.filter_counts["spread_std_low"] += 1
                 return False
 
             z_spread = (spread - spread_mean) / spread_std            
 
-            if np.abs(z_spread.iloc[-1]) < 1.5:
-                return False
-
+            # if np.abs(z_spread.iloc[-1]) < 2:
+            #     self.filter_counts["z_spread_threshold"] += 1
+            #     return False
+            
+            # subtract linear trend from z_spread before testing for stationarity
+            z_spread = z_spread - np.polyval(np.polyfit(np.arange(len(z_spread)), z_spread, 1), np.arange(len(z_spread)))
             jarque_bera_pvalue = jarque_bera(z_spread)[1]
             if jarque_bera_pvalue < 0.05:
+                self.filter_counts["jarque_bera_test"] += 1
                 return False
 
-            coint_pvalue = coint(log_train_data1, log_train_data2)[1]
+            coint_pvalue = coint(log_train_data1, log_train_data2, trend = 'c')[1]
             if coint_pvalue > pvalue_threshold:
+                self.filter_counts["cointegration_pvalue"] += 1
                 return False
 
             return True
         except Exception as e:
+            self.filter_counts["exception"] += 1
             logger.warning(f"Filtering failed for pair {pair['pair']}: {e}")
             return False
 

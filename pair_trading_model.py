@@ -97,10 +97,16 @@ class PairTradingModel:
                     quad_poly = np.poly1d(quad_coeffs)
                     z_quad_fit = quad_poly(dates_num)
 
-                    # Create the subplots
+                    # Calculate residuals
+                    linear_residual = -z_linear_fit + z_spread
+                    quadratic_residual = -z_quad_fit + z_spread
+
+                    # Create three subplots vertically stacked
                     fig, axes = plt.subplots(2, 1, figsize=(20, 15))
 
-                    # Z-Spread Analysis (First subplot)
+                    # -------------------------------
+                    # First Subplot: Z-Spread Analysis
+                    # -------------------------------
                     axes[0].plot(z_spread, '.-', label="z-spread")
                     axes[0].plot(z_spread.index, z_linear_fit, color='blue', linestyle='--', linewidth=2, label='Linear Regression')
                     axes[0].plot(z_spread.index, z_quad_fit, color='magenta', linestyle='-.', linewidth=2, label='Quadratic Regression')
@@ -111,26 +117,20 @@ class PairTradingModel:
                     axes[0].legend()
                     axes[0].set_title("Z-Spread Analysis")
 
-                    # PACF (Second subplot)
-
-                    adfuller_list = []
-                    for k in range(10):
-                        adfuller_test = adfuller(z_spread.iloc[:split_index+k].values)
-                        adfuller_list.append(adfuller_test[1])
-                    adfuller_list = np.array(adfuller_list)
-                    jarque_bera_list = []
-                    for k in range(10):
-                        jarque_bera_test = jarque_bera(z_spread.iloc[:split_index+k].values)
-                        jarque_bera_list.append(jarque_bera_test[1])
-
-                    axes[1].plot(jarque_bera_list, '.-', label="Jarque Bera Test")
-                    axes[1].plot(adfuller_list, '.-', label="ADF Test")
-                    axes[1].axvline(x=0, color='r', linestyle='--', label='Split Index')
-                    axes[1].axhline(y=0.05, color='k', linestyle='-', label='Threshold')
-                    axes[1].set_ylim(0, 1)
+                    # ----------------------------------------
+                    # Third Subplot: Residuals of Polynomial Fits
+                    # ----------------------------------------
+                    axes[1].plot(linear_residual, '.-', color='blue', label='Linear Residual (Linear Fit - z_spread)')
+                    axes[1].plot(quadratic_residual, '.-', color='magenta', label='Quadratic Residual (Quad Fit - z_spread)')
+                    axes[1].axhline(y=0, color='k', linewidth=2, linestyle='--', label='Zero Line')
+                    axes[1].axvline(x=z_spread.index[split_index-1], color='r', linestyle='--', label='Split Index')
+                    axes[1].set_ylim(-3, 3)  # Adjust y-limits as needed based on residuals
                     axes[1].legend()
+                    axes[1].set_title("Residuals of Polynomial Fits")
 
-                    # Display the plots
+                    # -------------------------------
+                    # Finalize and Display the Plots
+                    # -------------------------------
                     plt.tight_layout()
                     plt.show()
 

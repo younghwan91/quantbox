@@ -59,8 +59,7 @@ class BinanceDownloader:
                     logger.error(f"Error fetching ticker for {coin}: {e}")
                     continue
 
-            # Sort coins based on trading volume in ascending order
-            sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1])  # Remove reverse=True
+            sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1], reverse = True) 
             num_coins = len(sorted_coins)
             logger.info(f"Number of trading pairs after sorting by volume: {num_coins}")
 

@@ -192,7 +192,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--days',
         type=int,
-        default=30,
+        default=60,
         help='Number of days of data to use.'
     )
     parser.add_argument(
@@ -216,7 +216,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--hour-shift',
         type=int,
-        default=3,
+        default=11,
         help='Number of hours to shift the window.'
     )
     parser.add_argument(
@@ -252,7 +252,7 @@ if __name__ == "__main__":
 
     main(
         # DOWNLOAD_DATA=args.download_data,
-        DOWNLOAD_DATA=True,
+        DOWNLOAD_DATA = False,
         # PREPROCESS_DATA=args.preprocess_data,
         PREPROCESS_DATA = True,
         # DOWNLOAD_AND_PREPROCESS_DATA_ONLY=args.download_and_preprocess_data_only,
