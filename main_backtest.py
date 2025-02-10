@@ -9,12 +9,13 @@ import logging
 from logging.handlers import RotatingFileHandler
 import sys
 import os
-import argparse
 
 from binance_downloader import BinanceDownloader
 from backtest_preprocessor import BacktestPreprocessor
 from pair_trading_model import PairTradingModel  # Ensure this is correctly refactored if needed
 from pair_trading_model_drl import PairTradingModelDRL
+
+
 def setup_logging():
     """
     Configures logging to output to both stdout and a rotating log file.
@@ -45,6 +46,8 @@ def setup_logging():
     logging.getLogger('statsmodels').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
     logging.getLogger('stable_baselines3').setLevel(logging.WARNING)
+    logging.getLogger('numba').setLevel(logging.WARNING)
+
 
 def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS, FORMATION_DAYS, TRADING_WINDOW, INTERVAL, 
          HOUR_SHIFT, N_COINS, MODE, SAVE_MODEL, LOAD_MODEL, MODEL_PATH):
@@ -169,107 +172,22 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS
     else:
         logger.error(f"Invalid mode selected: {MODE}. Choose 'optimize' or 'drl'.")
 
+
 if __name__ == "__main__":
-    # Add command-line argument parsing
-    parser = argparse.ArgumentParser(description="Run backtest with optional data download and preprocessing.")
-    parser.add_argument(
-        '--download-data',
-        action='store_true',
-        help='Flag to download data before preprocessing.'
-    )
-    parser.add_argument(
-        '--preprocess-data',
-        action='store_true',
-        help='Flag to preprocess data for backtesting.'
-    )
-
-    parser.add_argument(
-        '--download-and-preprocess-data-only',
-        action='store_true',
-        help='Flag to only download and preprocess data.'
-    )
-
-    parser.add_argument(
-        '--days',
-        type=int,
-        default=60,
-        help='Number of days of data to use.'
-    )
-    parser.add_argument(
-        '--formation-days',
-        type=int,
-        default=1,
-        help='Number of formation days.'
-    )
-    parser.add_argument(
-        '--trading-window',
-        type=int,
-        default=24,
-        help='Trading window in hours.'
-    )
-    parser.add_argument(
-        '--interval',
-        type=str,
-        default='30m',
-        help='Data interval.'
-    )
-    parser.add_argument(
-        '--hour-shift',
-        type=int,
-        default=11,
-        help='Number of hours to shift the window.'
-    )
-    parser.add_argument(
-        '--n-coins',
-        type=int,
-        default=50,
-        help='Number of coins to consider.'
-    )
-    parser.add_argument(
-        '--mode',
-        type=str,
-        default='optimize',
-        choices=['optimize', 'drl'],
-        help="Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning."
-    )
-    parser.add_argument(
-        '--save-model',
-        action='store_true',
-        help='Flag to save the trained model.'
-    )
-    parser.add_argument(
-        '--load-model',
-        action='store_true',
-        help='Flag to load a pre-trained model.'
-    )
-    parser.add_argument(
-        '--model-path',
-        type=str,
-        default='pair_trading_model.zip',
-        help='Path to save or load the model.'
-    )
-    args = parser.parse_args()
-
+    # Call main() with hard-coded default values
     main(
-        # DOWNLOAD_DATA=args.download_data,
-        DOWNLOAD_DATA = False,
-        # PREPROCESS_DATA=args.preprocess_data,
-        PREPROCESS_DATA = True,
-        # DOWNLOAD_AND_PREPROCESS_DATA_ONLY=args.download_and_preprocess_data_only,
-        DOWNLOAD_AND_PREPROCESS_DATA_ONLY=False,
-        DAYS=args.days,
-        FORMATION_DAYS=args.formation_days,
-        TRADING_WINDOW=args.trading_window,
-        INTERVAL=args.interval,
-        HOUR_SHIFT=args.hour_shift,
-        N_COINS=args.n_coins,
-        MODE=args.mode,
-        SAVE_MODEL=args.save_model,
-        LOAD_MODEL=args.load_model,
-        MODEL_PATH=args.model_path
+        DOWNLOAD_DATA=False,                     # Flag to download data before preprocessing.
+        PREPROCESS_DATA=True,                   # Flag to preprocess data for backtesting.
+        DOWNLOAD_AND_PREPROCESS_DATA_ONLY=False,  # If True, the script will only download and preprocess data and then exit.
+        DAYS=50,                                # Number of days of data to use.
+        FORMATION_DAYS=0.75,                       # Number of formation days.
+        TRADING_WINDOW=12,                      # Trading window in hours.
+        INTERVAL='15m',                          # Data interval (e.g., '5m' for 5 minutes).
+        HOUR_SHIFT=5,                          # Number of hours to shift the window.
+        N_COINS=50,                             # Number of coins to consider.
+        MODE='optimize',                        # Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning.
+        SAVE_MODEL=False,                       # Flag to save the trained model.
+        LOAD_MODEL=False,                       # Flag to load a pre-trained model.
+        MODEL_PATH='pair_trading_model.zip'     # Path to save or load the model.
     )
 
-    '''
-    capturing price converging pattern
-    
-    '''

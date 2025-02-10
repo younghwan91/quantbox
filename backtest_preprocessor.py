@@ -15,35 +15,11 @@ import statsmodels.api as sm
 import ta
 # import matplotlib.dates as mdates
 import random
-from numba import njit
+from numba_utils import (
+    filter_pair_numba,
+)
 logger = logging.getLogger('BacktestPreprocessor')
-
-@njit
-def correlation_numba(x, y):
-    n = len(x)
     
-    x_mean = np.sum(x) / n
-    y_mean = np.sum(y) / n
-    
-    numerator = 0.0
-    denominator_x = 0.0
-    denominator_y = 0.0
-    
-    for i in range(n):
-        numerator += (x[i] - x_mean) * (y[i] - y_mean)
-        denominator_x += (x[i] - x_mean) ** 2
-        denominator_y += (y[i] - y_mean) ** 2
-    
-    return numerator / np.sqrt(denominator_x * denominator_y)
-
-@njit
-def log_returns_numba(prices):
-    n = len(prices)
-    returns = np.empty(n - 1)
-    for i in range(n - 1):
-        returns[i] = np.log(prices[i + 1]) - np.log(prices[i])
-    return returns
-
 class BacktestPreprocessor:
     def __init__(self, config):
         self.saving_dir = config["SAVING_DIR"]
@@ -53,16 +29,6 @@ class BacktestPreprocessor:
 
         self.pairs_csv_path = os.path.join(self.backtest_dir, config["PAIRS_CSV"])
         self.precomputed_path = os.path.join(self.backtest_dir, config["PRECOMPUTED_FILE"])
-        self.filter_counts = {
-            "non_positive_values": 0,
-            "rsi_trend_difference": 0,
-            "hedge_ratio_range": 0,
-            "spread_std_low": 0,
-            "z_spread_threshold": 0,
-            "jarque_bera_test": 0,
-            "cointegration_pvalue": 0,
-            "exception": 0
-        }
 
     def _load_trading_coins(self):
         csv_path = os.path.join(self.saving_dir, self.config["CSV_FILENAME"])
@@ -191,7 +157,6 @@ class BacktestPreprocessor:
         max_pairs_per_window = 3
         print(f"!!!!!!!!!!!!!!!!!!!!!!max_pairs_per_window: {max_pairs_per_window}!!!!!!!!!!!!!!!!!!!!!")
 
-
         all_pairs = []
         coins = list(coin_data.keys())
 
@@ -237,8 +202,9 @@ class BacktestPreprocessor:
                     'data2': df2[['Close', 'Volume']]
                 }
                 
-                # Apply filtering here
-                if self._filter_pair(pair_data, corr_threshold, pvalue_threshold, window_ratio):
+                close1 = pair_data['data1']['Close'].values.astype(np.float64)
+                close2 = pair_data['data2']['Close'].values.astype(np.float64)
+                if filter_pair_numba(close1, close2, corr_threshold, window_ratio):
                     filtered_pairs.append(pair_data)
 
                 if len(filtered_pairs) >= max_pairs_per_window:
@@ -358,10 +324,6 @@ class BacktestPreprocessor:
                 train_std = train_spread.std()
                 z_spread = (spread - train_mean) / train_std
 
-                # Calculate RSI for data1 and data2
-                rsi_1 = ta.momentum.RSIIndicator(data1).rsi()
-                rsi_2 = ta.momentum.RSIIndicator(data2).rsi()
-
                 precomputed_data.append({
                     'window_start': window_start,
                     'window_end': window_end,
@@ -372,9 +334,8 @@ class BacktestPreprocessor:
                     'split_index': split_idx,  # Added split_index
                     'vol1': pair['data1']['Volume'],
                     'vol2': pair['data2']['Volume'],
-                    'rsi1': rsi_1,
-                    'rsi2': rsi_2,
-
+                    'close1': data1,
+                    'close2': data2,
                 })
             except Exception as e:
                 logger.error(f"Error precomputing pair {pair_tuple}: {e}")

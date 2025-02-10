@@ -8,12 +8,9 @@ from scipy.stats import shapiro
 from scipy.optimize import differential_evolution
 import pickle
 import matplotlib.pyplot as plt
-from statsmodels.tsa.stattools import adfuller
 import matplotlib.dates as mdates
-from statsmodels.graphics.tsaplots import plot_pacf
-from scipy.optimize import curve_fit
-# jarque_bera_test
-from scipy.stats import jarque_bera
+from sklearn.linear_model import LinearRegression
+from scipy.optimize import minimize
 
 logger = logging.getLogger('PairTradingModel')
 
@@ -63,181 +60,97 @@ class PairTradingModel:
             spread = record['spread']
             z_spread = record['z_spread']
             split_index = record['split_index']
+            close1 = record['close1']
+            close2 = record['close2']
+            vol1 = record['vol1']
+            vol2 = record['vol2']
 
             # if np.abs(z_spread.iloc[split_index-1]) > entry_thres:   
 
-            if 1 ==1:                 
-                exit_condition = False
-                trade_count += 1
-                z_spread_0 = z_spread.iloc[split_index-1]
-                spread_0 = spread.iloc[split_index-1]
+            trade_count += 1
+            z_spread_0 = z_spread.iloc[split_index-1]
+            spread_0 = spread.iloc[split_index-1]
 
-                observe_spread = spread.iloc[split_index:]
-                observe_z_spread = z_spread.iloc[split_index:]
+            observe_spread = spread.iloc[split_index:]
+            observe_z_spread = z_spread.iloc[split_index:]
 
-                signal_0 = -1 if z_spread_0 > 0 else 1
-                profit, trade_duration = 0, 0
-                testing_time = len(observe_z_spread)
+            signal_0 = -1 if z_spread_0 > 0 else 1
+            profit, trade_duration = 0, 0
+            testing_time = len(observe_z_spread)
 
-                max_trading_time = int(testing_time)
-
-                if test_plot and 1 == 1:
-
-                    # Generate the numeric representation of dates for fitting
-                    dates_num = mdates.date2num(z_spread.index)
-                    dates_sub_num = mdates.date2num(z_spread.iloc[:split_index].index)
-
-                    # Linear fit
-                    linear_coeffs = np.polyfit(dates_sub_num, z_spread.iloc[:split_index].values, deg=1)
-                    linear_poly = np.poly1d(linear_coeffs)
-                    z_linear_fit = linear_poly(dates_num)
-
-                    # Quadratic fit
-                    quad_coeffs = np.polyfit(dates_sub_num, z_spread.iloc[:split_index].values, deg=2)
-                    quad_poly = np.poly1d(quad_coeffs)
-                    z_quad_fit = quad_poly(dates_num)
-
-                    # Calculate residuals
-                    linear_residual = -z_linear_fit + z_spread
-                    quadratic_residual = -z_quad_fit + z_spread
-
-                    # Create three subplots vertically stacked
-                    fig, axes = plt.subplots(2, 1, figsize=(20, 15))
-
-                    # -------------------------------
-                    # First Subplot: Z-Spread Analysis
-                    # -------------------------------
-                    axes[0].plot(z_spread, '.-', label="z-spread")
-                    axes[0].plot(z_spread.index, z_linear_fit, color='blue', linestyle='--', linewidth=2, label='Linear Regression')
-                    axes[0].plot(z_spread.index, z_quad_fit, color='magenta', linestyle='-.', linewidth=2, label='Quadratic Regression')
-                    axes[0].axvline(x=z_spread.index[split_index-1], color='r', linestyle='--', label='Split Index')
-                    axes[0].axhline(y=0, color='k', linewidth=2, label='Zero Line')
-                    axes[0].axhline(y=z_spread_0, color='g', linestyle='-', label='z_spread_0')
-                    axes[0].set_ylim(-6, 6)
-                    axes[0].legend()
-                    axes[0].set_title("Z-Spread Analysis")
-
-                    # ----------------------------------------
-                    # Third Subplot: Residuals of Polynomial Fits
-                    # ----------------------------------------
-                    axes[1].plot(linear_residual, '.-', color='blue', label='Linear Residual (Linear Fit - z_spread)')
-                    axes[1].plot(quadratic_residual, '.-', color='magenta', label='Quadratic Residual (Quad Fit - z_spread)')
-                    axes[1].axhline(y=0, color='k', linewidth=2, linestyle='--', label='Zero Line')
-                    axes[1].axvline(x=z_spread.index[split_index-1], color='r', linestyle='--', label='Split Index')
-                    axes[1].set_ylim(-3, 3)  # Adjust y-limits as needed based on residuals
-                    axes[1].legend()
-                    axes[1].set_title("Residuals of Polynomial Fits")
-
-                    # -------------------------------
-                    # Finalize and Display the Plots
-                    # -------------------------------
-                    plt.tight_layout()
-                    plt.show()
-
-                # Open initial 0.25 position immediately
-                position_size = 1
-                cumulative_position = position_size * signal_0
-                opened_positions = [{
-                    'position_size': position_size,
-                    'entry_price': spread_0
-                }]
-
-                # Define remaining z-score levels and position sizes
-                z_levels = np.linspace(z_spread_0, 0, num=4)[1:]
-                position_sizes = [0.0, 0.0, 0]
-
-                for i in range(0, max_trading_time):
-                    current_spread = observe_spread.iloc[i]
-                    current_z_spread = observe_z_spread.iloc[i]
-                    trade_duration += 1
-
-                    # Calculate current profit based on opened positions
-                    current_profit = 0
-                    for pos in opened_positions:
-                        pos_profit = (current_spread - pos['entry_price']) * pos['position_size'] * signal_0
-                        current_profit += pos_profit
-                    current_profit -= (2 * self.trading_fee) + slippage
-
-                    # Check for trailing stop loss hit
-                    if (signal_0 == 1 and current_z_spread > 0) or (signal_0 == -1 and current_z_spread < 0):
-                        exit_condition = True
-                    if (signal_0 == 1 and current_z_spread < -stop_loss+ z_spread_0) or (signal_0 == -1 and current_z_spread > stop_loss + z_spread_0):
-                        exit_condition = True
-
-                    # Open positions as z-score reaches the levels
-                    while len(z_levels) > 0 and (
-                        (signal_0 == 1 and current_z_spread >= z_levels[0]) or 
-                        (signal_0 == -1 and current_z_spread <= z_levels[0])
-                    ):
-                        position_size = position_sizes.pop(0)
-                        cumulative_position += position_size * signal_0
-                        opened_positions.append({
-                            'entrty_z_spread': z_levels[0],
-                            'position_size': position_size,
-                            'entry_price': current_spread
-                        })
-                        z_levels = z_levels[1:]
-
-                    if not test_plot:
-                        plt.figure(figsize=(20, 10))
-                        # Plot z-spread
-                        plt.plot(z_spread, '.-')
-
-                        plt.axvline(x=spread.index[split_index], color='r', linestyle='--')
-                        plt.axhline(y=0, color='k', linewidth=4)
-                        plt.axhline(y=z_spread_0, color='g', linestyle='-')
-                        plt.ylim(-6, 6)
-                        # Draw horizontal lines between 0 and z_spread_0
-                        plt.axhline(y=z_spread_0/2, color='y', linestyle='--')
-                        plt.axhline(y=z_spread_0/4, color='y', linestyle='--')
-                        plt.axhline(y=z_spread_0*3/4, color='y', linestyle='--')
-                        plt.title(f'Profit: {current_profit:.4f} ')
-                        plt.plot(spread.index[split_index+i], current_z_spread, 'ro')
-                        plt.show()
-                        plt.close()
-                    
-                    # Exit trade if exit condition met
-                    if exit_condition or i == max_trading_time - 1:
-                        # Calculate profit based on all opened positions
-                        profit = current_profit
-                        total_profit += profit
-                        # Update counters (cnt_win, cnt_loss, etc.)
-                        if profit > 0:
-                            cnt_win += 1
-                            cnt_profit += 1
-                        elif profit < 0:
-                            cnt_loss += 1
-                        else:
-                            cnt_draw += 1
-
-                        break
-
-                total_trade_duration += trade_duration
-                profit_per_duration = profit / trade_duration if trade_duration > 0 else 0
-                total_profit_per_duration += profit_per_duration
-
-        if trade_count == 0:
-            logger.warning("No trades were made during simulation.")
-            return 0
-
-        avg_profit_per_duration = total_profit_per_duration / trade_count
-        avg_profit_per_trade = total_profit / trade_count
+            max_trading_time = int(testing_time)
 
 
-        N_DAYS = self.days
-        N_avg_trade = trade_count / N_DAYS
-        N_trade_per_day = N_avg_trade
-        func_val = avg_profit_per_trade * N_trade_per_day * 100
+            # Create three subplots vertically stacked
+            fig, axes = plt.subplots(3, 1, figsize=(20, 15))
 
-        if verbose:
-            logger.info(f'Trade Count: {trade_count} | Avg. Number of Trades: {N_avg_trade:.3f} | Trades/Day: {N_trade_per_day:.3f}')
-            logger.info(f'Win Rate: {cnt_win / trade_count:.3f} | Loss Rate: {cnt_loss / trade_count:.3f} | Draw Rate: {cnt_draw / trade_count:.3f} | Profit Rate: {cnt_profit / trade_count:.3f}')
-            logger.info('-' * 20 + ' Parameters ' + '-' * 20)
-            logger.info(f'Threshold: {entry_thres:.3f} | Stop Loss: {stop_loss:.3f}')
-            logger.info(f'Avg Profit/Duration: {avg_profit_per_duration * 100:.3f}% | Avg Profit/Trade: {avg_profit_per_trade * 100:.3f}%/trade | Function Value: {func_val:.3f}%')
-            logger.info('=' * 50)
+            log_close1 = np.log(close1)
+            log_close2 = np.log(close2)                   
+            beta = np.polyfit(log_close1[:split_index], log_close2[:split_index], 1)[0] # reverse the order of the two assets
+            print(beta)
+            spread_ = log_close1 - beta * log_close2  
 
-        return func_val
+            x = mdates.date2num(log_close1.index)
+            # x = np.linspace(0,1,len(log_close1))
+            x = x - x[0]
+            x = x.reshape(-1, 1)
+            y = spread_
+            model = LinearRegression()
+            model.fit(x[:split_index], y[:split_index])
+            # print slope and intercept
+            print(model.coef_, model.intercept_)
+            # compute R^2
+            r_sq = model.score(x[:split_index], y[:split_index])
+            print('coefficient of determination:', r_sq)
+            y_pred = model.predict(x)
+            axes[0].plot(log_close1.index, spread_, label="Spread")
+            axes[0].plot(log_close1.index, y_pred, label="Spread Regression", linestyle='--')
+            axes[0].axhline(y=spread_[:split_index].mean(), color='r', linestyle='--')
+            axes[0].axvline(x=log_close1.index[split_index], color='g', linestyle='-')
+            axes[0].set_title(f"R2 = {r_sq:.3f} and slope = {model.coef_[0]:.3f}")
+            axes[0].set_xlabel("Time")
+            # grid on
+            axes[0].grid(True)
+
+            log_vol1 = np.log(vol1)
+            log_vol2 = np.log(vol2)
+            epsilon = y_pred - spread_
+            div_log_vol = log_vol1 / log_vol2
+            # scatter plot of delta_epsilon and delta_sum_log_vol
+            axes[1].scatter(div_log_vol, epsilon, label="Epsilon vs Sum Log Volume")
+            axes[1].set_title("Epsilon vs Sum Log Volume")
+            axes[1].set_xlabel("Sum Log Volume")
+            axes[1].set_ylabel("Epsilon")
+            # grid on
+            axes[1].grid(True)
+            axes[1].legend()
+
+            # volume analysis log differenc3 between the two assets
+            log_diff_vol = log_vol1 - log_vol2
+            # plot moving average of log difference volume
+            ma10 = log_diff_vol.rolling(window=10).mean()
+            ma20 = log_diff_vol.rolling(window=20).mean()
+            ma40 = log_diff_vol.rolling(window=40).mean()
+            axes[2].plot(log_close1.index, ma10, label="MA5")
+            axes[2].plot(log_close1.index, ma20, label="MA20")
+            axes[2].plot(log_close1.index, ma40, label="MA40")
+            axes[2].plot(log_close1.index, log_diff_vol, label="Log Difference Volume")
+            axes[2].axhline(y=log_diff_vol[:split_index].mean(), color='r', linestyle='--')
+            axes[2].axvline(x=log_close1.index[split_index], color='g', linestyle='-')
+            axes[2].set_title("Log Difference Volume")
+            axes[2].set_xlabel("Time")
+            axes[2].set_ylabel("Log Difference Volume")
+            # grid on
+            axes[2].grid(True)
+            axes[2].legend()
+
+
+
+
+            plt.tight_layout()
+            plt.show()
+
+        return 0
 
     def objective(self, params):
         """
