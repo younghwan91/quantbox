@@ -15,9 +15,7 @@ import statsmodels.api as sm
 import ta
 # import matplotlib.dates as mdates
 import random
-from numba_utils import (
-    filter_pair_numba,
-)
+import numba_utils as nu
 logger = logging.getLogger('BacktestPreprocessor')
     
 class BacktestPreprocessor:
@@ -204,7 +202,7 @@ class BacktestPreprocessor:
                 
                 close1 = pair_data['data1']['Close'].values.astype(np.float64)
                 close2 = pair_data['data2']['Close'].values.astype(np.float64)
-                if filter_pair_numba(close1, close2, corr_threshold, window_ratio):
+                if self._filter_pair(close1, close2, corr_threshold, pvalue_threshold, window_ratio):
                     filtered_pairs.append(pair_data)
 
                 if len(filtered_pairs) >= max_pairs_per_window:
@@ -212,73 +210,60 @@ class BacktestPreprocessor:
 
             all_pairs.extend(filtered_pairs)
 
-        logger.info("Filter Counts:")
-        for filter_name, count in self.filter_counts.items():
-            logger.info(f"  {filter_name}: {count}")        
-        
         return all_pairs
 
-    def _filter_pair(self, pair, corr_threshold, pvalue_threshold, window_ratio):
+    def _filter_pair(self, close1, close2, corr_threshold, pvalue_threshold, window_ratio):
 
-        """
-        Filters a single pair based on hedge ratio and half-life criteria.
-        """
 
         try:
-            split_idx = int(window_ratio * len(pair['data1']['Close']))
-            train_data1 = pair['data1']['Close'][:split_idx]
-            train_data2 = pair['data2']['Close'][:split_idx]
+
+            split_idx = int(window_ratio * len(close1))
+            train_data1 = close1[:split_idx]
+            train_data2 = close2[:split_idx]
 
             if (train_data1 <= 0).any() or (train_data2 <= 0).any():
-                self.filter_counts["non_positive_values"] += 1
                 return False
 
             log_train_data1 = np.log(train_data1)
             log_train_data2 = np.log(train_data2)
 
-            log_returns1 = log_returns_numba(train_data1)
-            log_returns2 = log_returns_numba(train_data2)
+            log_returns1 = nu.log_returns_numba(train_data1)
+            log_returns2 = nu.log_returns_numba(train_data2)
 
-            corr = correlation_numba(log_returns1, log_returns2)
-            if corr < 0.9:
+            corr = nu.correlation_numba(log_returns1, log_returns2)
+            if corr < 0.5:
                 return False
 
-            hedge_ratio = np.polyfit(log_train_data2, log_train_data1, 1)[0]
+            hedge_ratio = nu.compute_slope(log_train_data2, log_train_data1)
             hedge_const = 5.0
             if not (1 / hedge_const) < hedge_ratio < hedge_const:
-                self.filter_counts["hedge_ratio_range"] += 1
                 return False
 
             spread = log_train_data1 - hedge_ratio * log_train_data2
 
             spread_std = spread.std()
             spread_mean = spread.mean()
-            if spread_std < 0.01:
-                self.filter_counts["spread_std_low"] += 1
-                return False
+            # if spread_std < 0.01:
+                # return False
 
             z_spread = (spread - spread_mean) / spread_std            
 
-            # if np.abs(z_spread.iloc[-1]) < 2:
-            #     self.filter_counts["z_spread_threshold"] += 1
-            #     return False
+            if np.abs(z_spread[-1])*spread_std < 0.02:
+                return False
             
             # subtract linear trend from z_spread before testing for stationarity
-            z_spread = z_spread - np.polyval(np.polyfit(np.arange(len(z_spread)), z_spread, 1), np.arange(len(z_spread)))
+            # z_spread = z_spread - np.polyval(np.polyfit(np.arange(len(z_spread)), z_spread, 1), np.arange(len(z_spread)))
             jarque_bera_pvalue = jarque_bera(z_spread)[1]
             if jarque_bera_pvalue < 0.05:
-                self.filter_counts["jarque_bera_test"] += 1
                 return False
 
             coint_pvalue = coint(log_train_data1, log_train_data2, trend = 'c')[1]
             if coint_pvalue > pvalue_threshold:
-                self.filter_counts["cointegration_pvalue"] += 1
                 return False
 
             return True
         except Exception as e:
-            self.filter_counts["exception"] += 1
-            logger.warning(f"Filtering failed for pair {pair['pair']}: {e}")
+            logger.error(f"Error filtering pair: {e}")
             return False
 
     def _calculate_half_life(self, spread):

@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from sklearn.linear_model import LinearRegression
 from scipy.optimize import minimize
+import ta
 
 logger = logging.getLogger('PairTradingModel')
 
@@ -83,11 +84,12 @@ class PairTradingModel:
 
             # Create three subplots vertically stacked
             fig, axes = plt.subplots(3, 1, figsize=(20, 15))
-
+            
+            rsi1 = ta.momentum.RSIIndicator(close1, window=3)
+            rsi2 = ta.momentum.RSIIndicator(close2, window=3)
             log_close1 = np.log(close1)
             log_close2 = np.log(close2)                   
-            beta = np.polyfit(log_close1[:split_index], log_close2[:split_index], 1)[0] # reverse the order of the two assets
-            print(beta)
+            beta = np.polyfit(log_close2[:split_index], log_close1[:split_index], 1)[0] # reverse the order of the two assets
             spread_ = log_close1 - beta * log_close2  
 
             x = mdates.date2num(log_close1.index)
@@ -106,7 +108,7 @@ class PairTradingModel:
             axes[0].plot(log_close1.index, spread_, label="Spread")
             axes[0].plot(log_close1.index, y_pred, label="Spread Regression", linestyle='--')
             axes[0].axhline(y=spread_[:split_index].mean(), color='r', linestyle='--')
-            axes[0].axvline(x=log_close1.index[split_index], color='g', linestyle='-')
+            axes[0].axvline(x=log_close1.index[split_index-1], color='g', linestyle='-')
             axes[0].set_title(f"R2 = {r_sq:.3f} and slope = {model.coef_[0]:.3f}")
             axes[0].set_xlabel("Time")
             # grid on
@@ -114,16 +116,21 @@ class PairTradingModel:
 
             log_vol1 = np.log(vol1)
             log_vol2 = np.log(vol2)
-            epsilon = y_pred - spread_
-            div_log_vol = log_vol1 / log_vol2
-            # scatter plot of delta_epsilon and delta_sum_log_vol
-            axes[1].scatter(div_log_vol, epsilon, label="Epsilon vs Sum Log Volume")
-            axes[1].set_title("Epsilon vs Sum Log Volume")
-            axes[1].set_xlabel("Sum Log Volume")
-            axes[1].set_ylabel("Epsilon")
+            axes[1].plot(rsi1.rsi(), label="RSI1")
+            axes[1].plot(rsi2.rsi(), label="RSI2")
+            axes[1].plot(rsi1.rsi() - rsi2.rsi(), label="RSI Spread")
+            axes[1].axvline(x=log_close1.index[split_index-1], color='g', linestyle='-')
+            # horizontal line at 30 and 70 and 50
+            axes[1].axhline(y=30, color='r', linestyle='--')
+            axes[1].axhline(y=70, color='r', linestyle='--')
+            axes[1].axhline(y=50, color='r', linestyle='--')
+
+            axes[1].set_title("RSI")
+            axes[1].set_xlabel("Time")
             # grid on
             axes[1].grid(True)
             axes[1].legend()
+
 
             # volume analysis log differenc3 between the two assets
             log_diff_vol = log_vol1 - log_vol2
@@ -136,7 +143,7 @@ class PairTradingModel:
             axes[2].plot(log_close1.index, ma40, label="MA40")
             axes[2].plot(log_close1.index, log_diff_vol, label="Log Difference Volume")
             axes[2].axhline(y=log_diff_vol[:split_index].mean(), color='r', linestyle='--')
-            axes[2].axvline(x=log_close1.index[split_index], color='g', linestyle='-')
+            axes[2].axvline(x=log_close1.index[split_index-1], color='g', linestyle='-')
             axes[2].set_title("Log Difference Volume")
             axes[2].set_xlabel("Time")
             axes[2].set_ylabel("Log Difference Volume")

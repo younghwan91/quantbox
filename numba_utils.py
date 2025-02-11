@@ -1,7 +1,6 @@
 # numba_utils.py
 import numpy as np
 from numba import njit
-from math import erf
 
 @njit
 def correlation_numba(x, y):

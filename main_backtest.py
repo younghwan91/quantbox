@@ -177,13 +177,13 @@ if __name__ == "__main__":
     # Call main() with hard-coded default values
     main(
         DOWNLOAD_DATA=False,                     # Flag to download data before preprocessing.
-        PREPROCESS_DATA=True,                   # Flag to preprocess data for backtesting.
+        PREPROCESS_DATA=False,                   # Flag to preprocess data for backtesting.
         DOWNLOAD_AND_PREPROCESS_DATA_ONLY=False,  # If True, the script will only download and preprocess data and then exit.
-        DAYS=50,                                # Number of days of data to use.
-        FORMATION_DAYS=0.75,                       # Number of formation days.
-        TRADING_WINDOW=12,                      # Trading window in hours.
-        INTERVAL='15m',                          # Data interval (e.g., '5m' for 5 minutes).
-        HOUR_SHIFT=5,                          # Number of hours to shift the window.
+        DAYS=30,                                # Number of days of data to use.
+        FORMATION_DAYS=5,                       # Number of formation days.
+        TRADING_WINDOW=24,                      # Trading window in hours.
+        INTERVAL='30m',                          # Data interval (e.g., '5m' for 5 minutes).
+        HOUR_SHIFT=11,                          # Number of hours to shift the window.
         N_COINS=50,                             # Number of coins to consider.
         MODE='optimize',                        # Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning.
         SAVE_MODEL=False,                       # Flag to save the trained model.
