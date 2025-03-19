@@ -7,7 +7,6 @@ from logging.handlers import RotatingFileHandler
 from binance_downloader import BinanceDownloader
 from backtest_preprocessor import BacktestPreprocessor
 from pair_trading_model import PairTradingModel  
-from pair_trading_model_drl import PairTradingModelDRL
 import sys
 import json
 import logging
@@ -129,7 +128,9 @@ def main(download_data, preprocess_data, download_and_preprocess_data_only, days
         sys.exit(0)
 
     # Step 4: Perform action based on selected mode
-    if mode == 'optimize':    
+    if mode == 'eda' # Exploratory Data Analysis
+        pass
+    elif mode == 'optimize':    
         # Step 3: Initialize PairTradingModel
         model = PairTradingModel(model_config)
         logger.info("Loading precomputed values...")
@@ -143,27 +144,7 @@ def main(download_data, preprocess_data, download_and_preprocess_data_only, days
         logger.info(f'Test function value: {test_fval}')
         
     elif mode == 'drl':
-        # Step 3: Initialize PairTradingModelDRL
-        model = PairTradingModelDRL(model_config)
-        logger.info("Loading precomputed values...")
-        # Load and split precomputed values
-        precomputed_filepath = os.path.join(model_config['DATA_DIR'], 'precomputed_values.pkl')
-        model.load_precomputed_values(precomputed_filepath)
-        
-        if load_model:
-            model.load_model(model_path)
-        else:
-            # Train and test DRL agent
-            logger.info("Starting DRL training...")
-            model.train_agent(total_timesteps=100000)
-        
-        logger.info("Testing DRL agent...")
-        model.test_agent()
-        logger.info("Simulating trading with DRL agent...")
-        model.simulate_trading()
-        
-        if save_model:
-            model.save_model(model_path)
+        pass
     else:
         logger.error(f"Invalid mode selected: {mode}. Choose 'optimize' or 'drl'.")
 
@@ -180,7 +161,7 @@ if __name__ == "__main__":
         interval='5m',                          # Data interval (e.g., '5m' for 5 minutes).
         hour_shift=11,                          # Number of hours to shift the window.
         n_coins=50,                             # Number of coins to consider.
-        mode='optimize',                        # Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning.
+        mode='eda',                        # Mode to run: 'eda', 'optimize', or 'drl'.
         save_model=False,                       # Flag to save the trained model.
         load_model=False,                       # Flag to load a pre-trained model.
         model_path='pair_trading_model.zip'     # Path to save or load the model.
