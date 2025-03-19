@@ -1,28 +1,23 @@
 # main_backtest.py
 
-import json
 from binance.client import Client
 import datetime as dt
 from datetime import timedelta
-import numpy as np
-import logging
 from logging.handlers import RotatingFileHandler
-import sys
-import os
-
 from binance_downloader import BinanceDownloader
 from backtest_preprocessor import BacktestPreprocessor
-from pair_trading_model import PairTradingModel  # Ensure this is correctly refactored if needed
+from pair_trading_model import PairTradingModel  
 from pair_trading_model_drl import PairTradingModelDRL
-
+import sys
+import json
+import logging
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=all, 1=INFO, 2=WARNING, 3=ERROR
 
 def setup_logging():
-    """
-    Configures logging to output to both stdout and a rotating log file.
-    """
+
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
-
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 
     # Stream Handler for console output
@@ -32,7 +27,7 @@ def setup_logging():
 
     # Rotating File Handler for log files
     file_handler = RotatingFileHandler(
-        "crypto_downloader.log",
+        "crypto_backtest.log",
         maxBytes=10 * 1024 * 1024,  # 10 MB
         backupCount=3
     )
@@ -49,18 +44,18 @@ def setup_logging():
     logging.getLogger('numba').setLevel(logging.WARNING)
 
 
-def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS, FORMATION_DAYS, TRADING_WINDOW, INTERVAL, 
-         HOUR_SHIFT, N_COINS, MODE, SAVE_MODEL, LOAD_MODEL, MODEL_PATH):
+def main(download_data, preprocess_data, download_and_preprocess_data_only, days, formation_days, trading_window, interval, 
+         hour_shift, n_coins, mode, save_model, load_model, model_path):
     # Setup logging
     setup_logging()
     logger = logging.getLogger('Main')
 
     # Configuration Variables
-    TESTNET = False
-    HOURS_IN_DAY = 24
-    FORMATION_WINDOW = int(HOURS_IN_DAY * FORMATION_DAYS)
-    TOTAL_WINDOW_LENGTH = FORMATION_WINDOW + TRADING_WINDOW
-    WINDOW_RATIO = FORMATION_WINDOW / TOTAL_WINDOW_LENGTH
+    testnet = False
+    hour_per_day = 24
+    formation_window = int(hour_per_day * formation_days)
+    total_window_length = formation_window + trading_window
+    window_ratio = formation_window / total_window_length
 
     # Load API credentials
     try:
@@ -73,16 +68,16 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS
         sys.exit(1)
 
     # Initialize Binance Client
-    client = Client(api_key=api_key, api_secret=api_secret, testnet=TESTNET)
+    client = Client(api_key=api_key, api_secret=api_secret, testnet=testnet)
 
     # Define configurations for BinanceDownloader
     downloader_config = {
         'SAVING_DIR': 'data',
         'QUOTE_COIN': 'USDT',
-        'N_COINS': N_COINS,
+        'N_COINS': n_coins,
         'CSV_FILENAME': 'trading_coins_backtest.csv',
-        'INTERVAL': INTERVAL,
-        'WINDOW_RATIO': WINDOW_RATIO,
+        'INTERVAL': interval,
+        'WINDOW_RATIO': window_ratio,
         'COINT_THRESHOLD': 0.05,
         'CORR_THRESHOLD': 0.5,
         'PAIRS_CSV': 'pairs_for_backtest.csv',
@@ -93,27 +88,27 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS
 
     # Define configurations for PairTradingModel
     model_config = {
-        'FORMATION_WINDOW': FORMATION_WINDOW,
-        'TRADING_WINDOW': TRADING_WINDOW,
-        'TOTAL_WINDOW': TOTAL_WINDOW_LENGTH,
-        'WINDOW_RATIO': WINDOW_RATIO,
-        'TIMEFRAME': INTERVAL,
-        'DAYS': DAYS,
+        'FORMATION_WINDOW': formation_window,
+        'TRADING_WINDOW': trading_window,
+        'TOTAL_WINDOW': total_window_length,
+        'WINDOW_RATIO': window_ratio,
+        'TIMEFRAME': interval,
+        'DAYS': days,
         'TRADING_FEE': 0.0005,
         'DATA_DIR': 'data/backtest',
-        'HOUR_SHIFT': HOUR_SHIFT,
+        'HOUR_SHIFT': hour_shift,
         'WINDOW_SIZE': 128  # For DRL CNN window size
     }
 
     # Set start and end time for data download
     end_time = dt.datetime.now(dt.timezone.utc)
-    start_time = end_time - timedelta(hours=DAYS * HOURS_IN_DAY)
+    start_time = end_time - timedelta(hours=days * hour_per_day)
     downloader_config['START_STR'] = start_time.strftime("%Y-%m-%d %H:%M:%S")
     downloader_config['END_STR'] = end_time.strftime("%Y-%m-%d %H:%M:%S")
     logger.info(f"Downloading data from {downloader_config['START_STR']} to {downloader_config['END_STR']}")
 
-    if PREPROCESS_DATA:
-        if DOWNLOAD_DATA:
+    if preprocess_data:
+        if download_data:
             # Initialize BinanceDownloader
             downloader = BinanceDownloader(downloader_config, client)
 
@@ -125,16 +120,16 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS
         logger.info("Preparing pairs for backtesting...")
         preprocessor = BacktestPreprocessor(config=downloader_config)
         preprocessor.prepare_pairs_for_backtest(
-            window_size=str(TOTAL_WINDOW_LENGTH)+'h',
-            overlap=str(TOTAL_WINDOW_LENGTH-HOUR_SHIFT)+'h',
+            window_size=str(total_window_length)+'h',
+            overlap=str(total_window_length-hour_shift)+'h',
         )
 
-    if DOWNLOAD_AND_PREPROCESS_DATA_ONLY:
+    if download_and_preprocess_data_only:
         logger.info("Data download and preprocessing complete. Exiting...")
         sys.exit(0)
 
     # Step 4: Perform action based on selected mode
-    if MODE == 'optimize':    
+    if mode == 'optimize':    
         # Step 3: Initialize PairTradingModel
         model = PairTradingModel(model_config)
         logger.info("Loading precomputed values...")
@@ -147,7 +142,7 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS
         logger.info(f'Best parameters: {best_params} with max function value: {max_fval}')
         logger.info(f'Test function value: {test_fval}')
         
-    elif MODE == 'drl':
+    elif mode == 'drl':
         # Step 3: Initialize PairTradingModelDRL
         model = PairTradingModelDRL(model_config)
         logger.info("Loading precomputed values...")
@@ -155,8 +150,8 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS
         precomputed_filepath = os.path.join(model_config['DATA_DIR'], 'precomputed_values.pkl')
         model.load_precomputed_values(precomputed_filepath)
         
-        if LOAD_MODEL:
-            model.load_model(MODEL_PATH)
+        if load_model:
+            model.load_model(model_path)
         else:
             # Train and test DRL agent
             logger.info("Starting DRL training...")
@@ -167,27 +162,27 @@ def main(DOWNLOAD_DATA, PREPROCESS_DATA, DOWNLOAD_AND_PREPROCESS_DATA_ONLY, DAYS
         logger.info("Simulating trading with DRL agent...")
         model.simulate_trading()
         
-        if SAVE_MODEL:
-            model.save_model(MODEL_PATH)
+        if save_model:
+            model.save_model(model_path)
     else:
-        logger.error(f"Invalid mode selected: {MODE}. Choose 'optimize' or 'drl'.")
+        logger.error(f"Invalid mode selected: {mode}. Choose 'optimize' or 'drl'.")
 
 
 if __name__ == "__main__":
     # Call main() with hard-coded default values
     main(
-        DOWNLOAD_DATA=False,                     # Flag to download data before preprocessing.
-        PREPROCESS_DATA=False,                   # Flag to preprocess data for backtesting.
-        DOWNLOAD_AND_PREPROCESS_DATA_ONLY=False,  # If True, the script will only download and preprocess data and then exit.
-        DAYS=30,                                # Number of days of data to use.
-        FORMATION_DAYS=5,                       # Number of formation days.
-        TRADING_WINDOW=24,                      # Trading window in hours.
-        INTERVAL='30m',                          # Data interval (e.g., '5m' for 5 minutes).
-        HOUR_SHIFT=11,                          # Number of hours to shift the window.
-        N_COINS=50,                             # Number of coins to consider.
-        MODE='optimize',                        # Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning.
-        SAVE_MODEL=False,                       # Flag to save the trained model.
-        LOAD_MODEL=False,                       # Flag to load a pre-trained model.
-        MODEL_PATH='pair_trading_model.zip'     # Path to save or load the model.
+        download_data= False,                     # Flag to download data before preprocessing.
+        preprocess_data = True,                   # Flag to preprocess data for backtesting.
+        download_and_preprocess_data_only=False,  # If True, the script will only download and preprocess data and then exit.
+        days=10,                                # Number of days of data to use.
+        formation_days=2,                       # Number of formation days.
+        trading_window=24,                      # Trading window in hours.
+        interval='5m',                          # Data interval (e.g., '5m' for 5 minutes).
+        hour_shift=11,                          # Number of hours to shift the window.
+        n_coins=50,                             # Number of coins to consider.
+        mode='optimize',                        # Mode to run: 'optimize' for parameter optimization, 'drl' for deep reinforcement learning.
+        save_model=False,                       # Flag to save the trained model.
+        load_model=False,                       # Flag to load a pre-trained model.
+        model_path='pair_trading_model.zip'     # Path to save or load the model.
     )
 

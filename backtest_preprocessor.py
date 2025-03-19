@@ -2,20 +2,18 @@
 
 import os
 import csv
+import pickle
+import logging
+import random
+import numpy as np
 import pandas as pd
 from itertools import combinations
 from tqdm import tqdm
-import numpy as np
-import logging
-from statsmodels.tsa.stattools import coint 
+from statsmodels.tsa.stattools import coint, adfuller
 from scipy.stats import jarque_bera
-import matplotlib.pyplot as plt
-import pickle
 import statsmodels.api as sm  
-import ta
-# import matplotlib.dates as mdates
-import random
 import numba_utils as nu
+
 logger = logging.getLogger('BacktestPreprocessor')
     
 class BacktestPreprocessor:
@@ -152,13 +150,13 @@ class BacktestPreprocessor:
         Generates all possible unique coin pairs within each window, 
         considering only coins with complete data in the window.
         """
-        max_pairs_per_window = 3
+        max_pairs_per_window = 1
         print(f"!!!!!!!!!!!!!!!!!!!!!!max_pairs_per_window: {max_pairs_per_window}!!!!!!!!!!!!!!!!!!!!!")
 
         all_pairs = []
         coins = list(coin_data.keys())
 
-        for window_start, window_end in tqdm(windows, desc="Generating pairs and filtering"):
+        for window_start, window_end in tqdm(windows, position=0, leave=True):
             # Determine which coins have complete data for the window
             available_coins = []
             for coin in coins:
@@ -180,6 +178,24 @@ class BacktestPreprocessor:
             coin_pairs = list(combinations(available_coins, 2))
             random.shuffle(coin_pairs)  # Shuffle to avoid bias
 
+            n = np.min([500, len(coin_pairs)])
+            n_min_npd_pairs = []
+            for pair in coin_pairs:
+                coin1, coin2 = pair
+                df1 = coin_data[coin1].loc[window_start:window_end]
+                df2 = coin_data[coin2].loc[window_start:window_end]
+                price1 = df1['Close'].values
+                price2 = df2['Close'].values
+                price1 = price1/price1[0]
+                price2 = price2/price2[0]
+                # normalized price difference
+                split_idx = int(window_ratio * len(price1))
+                npd =  np.sum((price1[:split_idx]-price2[:split_idx])**2) / len(price1)
+                n_min_npd_pairs.append((pair, npd))
+
+            n_min_npd_pairs = sorted(n_min_npd_pairs, key=lambda x: x[1])
+            coin_pairs = [pair for pair, npd in n_min_npd_pairs[:n]]
+    
             filtered_pairs = []
 
             for pair in coin_pairs:
@@ -231,15 +247,16 @@ class BacktestPreprocessor:
             log_returns2 = nu.log_returns_numba(train_data2)
 
             corr = nu.correlation_numba(log_returns1, log_returns2)
-            if corr < 0.5:
+            if corr < 0.6:
                 return False
 
-            hedge_ratio = nu.compute_slope(log_train_data2, log_train_data1)
-            hedge_const = 5.0
-            if not (1 / hedge_const) < hedge_ratio < hedge_const:
+            # hedge_ratio = nu.compute_slope(log_train_data2, log_train_data1)
+            intercept, beta = nu.ols_regression(log_train_data2, log_train_data1)
+            hedge_const = 3.0
+            if not (1 / hedge_const) < beta < hedge_const:
                 return False
 
-            spread = log_train_data1 - hedge_ratio * log_train_data2
+            spread = log_train_data1 - beta * log_train_data2
 
             spread_std = spread.std()
             spread_mean = spread.mean()
@@ -247,18 +264,30 @@ class BacktestPreprocessor:
                 # return False
 
             z_spread = (spread - spread_mean) / spread_std            
-
-            if np.abs(z_spread[-1])*spread_std < 0.02:
+            if spread_std < 0.01:
                 return False
             
-            # subtract linear trend from z_spread before testing for stationarity
-            # z_spread = z_spread - np.polyval(np.polyfit(np.arange(len(z_spread)), z_spread, 1), np.arange(len(z_spread)))
-            jarque_bera_pvalue = jarque_bera(z_spread)[1]
+            if np.abs(spread[-1]-spread_mean) < 0.02:
+                return False
+            
+            # jarque_bera_pvalue = jarque_bera(z_spread)[1]
+            # if jarque_bera_pvalue < 0.05:
+            #     return False
+
+            jarque_bera_pvalue = nu.jarque_bera_numba(z_spread)
             if jarque_bera_pvalue < 0.05:
                 return False
 
-            coint_pvalue = coint(log_train_data1, log_train_data2, trend = 'c')[1]
-            if coint_pvalue > pvalue_threshold:
+            # results= coint(log_train_data1, log_train_data2)    
+            # if results[1] > 0.05:
+            #     return False
+
+            # coint_pvalue = nu.cointegration_adf_pvalue(log_train_data1, log_train_data2, hedge_ratio)
+            # if coint_pvalue > pvalue_threshold:
+            #     return False
+
+            t_stat = nu.cointegration_test(log_train_data2, log_train_data1, intercept, beta)
+            if t_stat < -4: # 3.7
                 return False
 
             return True

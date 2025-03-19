@@ -63,7 +63,7 @@ class BinanceDownloader:
             num_coins = len(sorted_coins)
             logger.info(f"Number of trading pairs after sorting by volume: {num_coins}")
 
-            logger.info(f"Selecting bottom {n_coins} coins based on trading volume")
+            logger.info(f"Selecting top {n_coins} coins based on trading volume")
             selected_coins = [coin for coin, volume in sorted_coins[:n_coins]]
         else:
             logger.info(f"Selecting first {n_coins} coins")
