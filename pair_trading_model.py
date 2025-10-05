@@ -1,20 +1,12 @@
 # pair_trading_model.py
 
 import numpy as np
-import pandas as pd
-from tqdm import tqdm
 import logging
-from scipy.stats import shapiro
 from scipy.optimize import differential_evolution
 import pickle
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from sklearn.linear_model import LinearRegression
-from scipy.optimize import minimize
 import ta
 from numba import njit
-from pykalman import KalmanFilter
-import mykalman as mk
 import statsmodels.api as sm
 from mykalman import KalmanModel
 plt.style.use('ggplot')

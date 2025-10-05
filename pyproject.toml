@@ -1,0 +1,18 @@
+[project]
+name = "trading-code"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=46.0.1",
+    "matplotlib>=3.10.6",
+    "numba>=0.62.0",
+    "pandas>=2.3.2",
+    "pykalman>=0.10.2",
+    "python-binance>=1.0.29",
+    "requests>=2.32.5",
+    "statsmodels>=0.14.5",
+    "ta>=0.11.0",
+    "tqdm>=4.67.1",
+]

@@ -5,10 +5,10 @@ import csv
 import pandas as pd
 from binance.enums import HistoricalKlinesType
 from tqdm import tqdm
-import numpy as np
 import logging
 import time
 import shutil
+from backtest_utils import convert_to_timestamp, convert_to_str, interval_to_milliseconds
 
 logger = logging.getLogger('BinanceDownloader')
 
@@ -45,24 +45,25 @@ class BinanceDownloader:
             if info['symbol'].endswith(quote_coin) and info['status'] == 'TRADING'
         ]
 
-        logger.info(f"Number of trading pairs: {len(trading_coins)}")
+        logger.info(f"Found {len(trading_coins)} tradable pairs in Binance Futures for quote coin '{quote_coin}'")
         assert n_coins <= len(trading_coins), "N_COINS is greater than the number of trading coins"
 
         if sort_by_volume:
-            logger.info("Fetching 24-hour trading volume for each coin")
             volume_dict = {}
-            for coin in trading_coins:
+            failed_fetches = 0
+            total_pairs = len(trading_coins)
+            for coin in tqdm(trading_coins, desc="Fetching 24h quote volume"):
                 try:
                     ticker = client.get_ticker(symbol=coin)
                     volume_dict[coin] = float(ticker['quoteVolume'])
-                except Exception as e:
-                    logger.error(f"Error fetching ticker for {coin}: {e}")
+                except Exception:
+                    failed_fetches += 1
                     continue
+            
+            num_successful = len(volume_dict)
+            logger.info(f"Fetched volume for {num_successful}/{total_pairs} pairs ({failed_fetches} failed).")
 
             sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1], reverse = True) 
-            num_coins = len(sorted_coins)
-            logger.info(f"Number of trading pairs after sorting by volume: {num_coins}")
-
             logger.info(f"Selecting top {n_coins} coins based on trading volume")
             selected_coins = [coin for coin, volume in sorted_coins[:n_coins]]
         else:
@@ -115,10 +116,10 @@ class BinanceDownloader:
         due to the 1000 kline limit per request.
         Combines all batches into a single DataFrame and saves as one pickle file.
         """
-        start_ts = self._convert_to_timestamp(start_str)
-        end_ts = self._convert_to_timestamp(end_str)
+        start_ts = convert_to_timestamp(start_str)
+        end_ts = convert_to_timestamp(end_str)
         limit = 1000
-        step = self._interval_to_milliseconds(interval)
+        step = interval_to_milliseconds(interval)
 
         logger.info(f"Starting download for {coin} from {start_str} to {end_str} with interval {interval}")
 
@@ -130,8 +131,8 @@ class BinanceDownloader:
             batch_end = min(current_ts + limit * step, end_ts)
 
             # Convert timestamps back to string format required by Binance
-            batch_start_str = self._convert_to_str(batch_start)
-            batch_end_str = self._convert_to_str(batch_end)
+            batch_start_str = convert_to_str(batch_start)
+            batch_end_str = convert_to_str(batch_end)
 
             try:
                 klines = self.client.get_historical_klines(
@@ -211,31 +212,3 @@ class BinanceDownloader:
                 self.config["START_STR"],
                 self.config["END_STR"]
             )
-
-    def _convert_to_timestamp(self, date_str):
-        """
-        Convert a date string to a Unix timestamp in milliseconds.
-        """
-        return int(pd.to_datetime(date_str).timestamp() * 1000)
-
-    def _convert_to_str(self, timestamp):
-        """
-        Convert a Unix timestamp in milliseconds to a date string.
-        """
-        return pd.to_datetime(timestamp, unit='ms').strftime('%Y-%m-%d %H:%M:%S')
-
-    def _interval_to_milliseconds(self, interval):
-        """
-        Convert Binance interval string to milliseconds.
-        """
-        ms = {
-            '1m': 60 * 1000,
-            '3m': 3 * 60 * 1000,
-            '5m': 5 * 60 * 1000,
-            '15m': 15 * 60 * 1000,
-            '30m': 30 * 60 * 1000,
-            '1h': 60 * 60 * 1000,
-            '2h': 2 * 60 * 60 * 1000,
-            '4h': 4 * 60 * 60 * 1000,
-        }
-        return ms.get(interval, None)

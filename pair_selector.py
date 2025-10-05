@@ -3,7 +3,7 @@ import csv
 import itertools
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.stattools import coint, adfuller, kpss
+from statsmodels.tsa.stattools import coint, adfuller
 import matplotlib.pyplot as plt
 import tqdm
 import logging

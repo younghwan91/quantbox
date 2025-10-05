@@ -5,6 +5,3 @@
 temp
 *.log
 *.json
-config.py
-*.npy
-*.pkl

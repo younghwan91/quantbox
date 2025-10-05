@@ -9,10 +9,10 @@ import numpy as np
 import pandas as pd
 from itertools import combinations
 from tqdm import tqdm
-from statsmodels.tsa.stattools import coint, adfuller
-from scipy.stats import jarque_bera
 import statsmodels.api as sm  
 import numba_utils as nu
+from backtest_utils import calculate_half_life
+from statsmodels.tsa.stattools import coint
 
 logger = logging.getLogger('BacktestPreprocessor')
     
@@ -40,11 +40,57 @@ class BacktestPreprocessor:
                 trading_coins = []
         logger.info(f"Loaded {len(trading_coins)} trading coins from CSV")
         return trading_coins
+    
+    def _filter_top_coins_by_volume(self, coin_data, windows, top_n=50):
+        """
+        Filters the top N coins by 24-hour rolling quote volume for each time window.
+
+        Args:
+            coin_data (dict): Dictionary of coin DataFrames.
+            windows (list): List of (start, end) tuples representing time windows.
+            top_n (int): Number of top coins to select based on 24-hour rolling volume.
+
+        Returns:
+            list: A list where each element is a list of top N coin names for a specific window.
+        """
+        logger.info("Filtering top coins by 24-hour rolling quote volume")
+        top_coins_per_window = []
+
+        for window_start, window_end in windows:
+            # Calculate the total 24-hour volume for each coin at the end of the window
+            volumes = {}
+            for coin, df in coin_data.items():
+                if window_end in df.index:
+                    # Ensure the 24-hour rolling volume column exists
+                    if '24h_Quote_Volume' not in df.columns:
+                        inferred_freq = pd.infer_freq(df.index)
+                        if inferred_freq is None:
+                            time_diffs = df.index.to_series().diff().dropna()
+                            median_delta = time_diffs.median()
+                            inferred_freq_minutes = median_delta.total_seconds() / 60
+                        else:
+                            inferred_freq_minutes = pd.Timedelta(inferred_freq).total_seconds() / 60
+                        rows_per_24h = int(round((24 * 60) / inferred_freq_minutes))
+                        df['24h_Quote_Volume'] = df['Quote Asset Volume'].rolling(window=rows_per_24h, min_periods=1).sum()
+
+                    # Get the 24-hour rolling volume at the end of the window
+                    volumes[coin] = df.loc[window_end, '24h_Quote_Volume']
+
+            # Sort coins by volume and select the top N
+            # warning if number of coins are less than top_n
+            if len(volumes) < top_n:
+                logger.warning(f"Only {len(volumes)} coins available for window ending at {window_end}, which is less than the requested top_n={top_n}. Selecting all available coins.")
+                top_n = len(volumes)
+
+            top_coins = sorted(volumes, key=volumes.get, reverse=True)[:top_n]
+            top_coins_per_window.append(top_coins)
+
+        return top_coins_per_window
 
     def prepare_pairs_for_backtest(
         self, 
         window_size: str, 
-        overlap: str, 
+        hour_shift: int, 
     ):
         """
         Prepares pair trading data by aligning all coin data to a common end time,
@@ -69,22 +115,26 @@ class BacktestPreprocessor:
 
         # Step 3: Truncate all DataFrames to the common end time
         coin_data = {coin: df[:common_end_time] for coin, df in coin_data.items()}
-
+        
         # Step 4: Slice data into windows from end to start
-        windows = self._generate_time_windows(coin_data, window_size, overlap)
+        windows = self._generate_time_windows(coin_data, window_size, hour_shift)
         logger.info(f"Generated {len(windows)} windows")
 
         if not windows:
             logger.error("No windows generated. Check window size and overlap.")
             return
+        
+        # Step 5: Filter top 50 coins by 24-hour rolling quote volume
+        top_coins_per_window = self._filter_top_coins_by_volume(coin_data, windows)
+        logger.info(f"Allocated top {len(top_coins_per_window)} coins for each of the {len(windows)} windows")
 
-        # Step 5 & 6: Generate and filter pairs on the fly
+        # Step 6 & 7: Generate and filter pairs on the fly
         correlation_threshold = self.config.get('CORR_THRESHOLD', 0.5)
         pvalue_threshold = self.config.get('COINT_THRESHOLD', 0.05)
         window_ratio = self.config.get('WINDOW_RATIO') 
 
         filtered_pairs = []
-        for pair in self._generate_all_pairs(coin_data, windows, correlation_threshold, pvalue_threshold, window_ratio):
+        for pair in self._generate_all_pairs(coin_data, windows, top_coins_per_window, correlation_threshold, pvalue_threshold, window_ratio):
             filtered_pairs.append(pair)
         logger.info(f"Filtered down to {len(filtered_pairs)} coin pairs after applying thresholds")
 
@@ -92,7 +142,7 @@ class BacktestPreprocessor:
             logger.warning("No pairs left after filtering. Consider lowering thresholds.")
             return
 
-        # Step 7: Save the filtered and precomputed pairs data
+        # Step 8: Save the filtered and precomputed pairs data
         self._save_pairs_info(filtered_pairs)
         logger.info(f"Saved precomputed pairs data to {self.precomputed_path}")
 
@@ -122,7 +172,7 @@ class BacktestPreprocessor:
         common_end_time = min(end_times)
         return common_end_time
 
-    def _generate_time_windows(self, coin_data, window_size: str, overlap: str):
+    def _generate_time_windows(self, coin_data, window_size: str, hour_shift: int):
         """
         Generates a list of (start, end) tuples representing each window, 
         slicing from end to start.
@@ -133,8 +183,7 @@ class BacktestPreprocessor:
         end_time = first_coin.index[-1]
 
         window_delta = pd.to_timedelta(window_size)
-        overlap_delta = pd.to_timedelta(overlap)
-        step_delta = window_delta - overlap_delta
+        step_delta = pd.to_timedelta(hour_shift, unit='h')
 
         windows = []
         current_end = end_time
@@ -145,20 +194,30 @@ class BacktestPreprocessor:
 
         return windows
 
-    def _generate_all_pairs(self, coin_data, windows, corr_threshold, pvalue_threshold, window_ratio):
+    def _generate_all_pairs(self, coin_data, windows, top_coins_per_window, corr_threshold, pvalue_threshold, window_ratio):
         """
         Generates all possible unique coin pairs within each window, 
         considering only coins with complete data in the window.
+
+        Args:
+            coin_data (dict): Dictionary of coin DataFrames.
+            windows (list): List of (start, end) tuples representing time windows.
+            top_coins_per_window (list): List of top coins for each window.
+            corr_threshold (float): Correlation threshold for filtering pairs.
+            pvalue_threshold (float): P-value threshold for filtering pairs.
+            window_ratio (float): Ratio of training to total window size.
+
+        Returns:
+            list: Filtered pairs with precomputed data for each window.
         """
-        max_pairs_per_window = 1
-        print(f"!!!!!!!!!!!!!!!!!!!!!!max_pairs_per_window: {max_pairs_per_window}!!!!!!!!!!!!!!!!!!!!!")
+        max_pairs_per_window = 50
+        logger.info(f"Generating pairs with max {max_pairs_per_window} pairs per window")
 
         all_pairs = []
-        coins = list(coin_data.keys())
 
-        for window_start, window_end in tqdm(windows, position=0, leave=True):
-            # Determine which coins have complete data for the window
-            available_coins = []
+        for i, (window_start, window_end) in enumerate(tqdm(windows, position=0, leave=True)):
+            coins = top_coins_per_window[i]
+            available_coins = []   
             for coin in coins:
                 df = coin_data[coin]
                 if window_start in df.index and window_end in df.index:
@@ -212,8 +271,8 @@ class BacktestPreprocessor:
                     'window_start': window_start,
                     'window_end': window_end,
                     'pair': pair,
-                    'data1': df1[['Close', 'Volume']],
-                    'data2': df2[['Close', 'Volume']]
+                    'data1': df1[['High', 'Low', 'Close', 'Volume']],
+                    'data2': df2[['High', 'Low', 'Close', 'Volume']]
                 }
                 
                 close1 = pair_data['data1']['Close'].values.astype(np.float64)
@@ -252,7 +311,7 @@ class BacktestPreprocessor:
 
             # hedge_ratio = nu.compute_slope(log_train_data2, log_train_data1)
             intercept, beta = nu.ols_regression(log_train_data2, log_train_data1)
-            hedge_const = 3.0
+            hedge_const = 4.0
             if not (1 / hedge_const) < beta < hedge_const:
                 return False
 
@@ -260,8 +319,6 @@ class BacktestPreprocessor:
 
             spread_std = spread.std()
             spread_mean = spread.mean()
-            # if spread_std < 0.01:
-                # return False
 
             z_spread = (spread - spread_mean) / spread_std            
             if spread_std < 0.01:
@@ -269,48 +326,32 @@ class BacktestPreprocessor:
             
             if np.abs(spread[-1]-spread_mean) < 0.02:
                 return False
-            
-            # jarque_bera_pvalue = jarque_bera(z_spread)[1]
-            # if jarque_bera_pvalue < 0.05:
-            #     return False
 
             jarque_bera_pvalue = nu.jarque_bera_numba(z_spread)
             if jarque_bera_pvalue < 0.05:
                 return False
 
-            # results= coint(log_train_data1, log_train_data2)    
-            # if results[1] > 0.05:
-            #     return False
+            results= coint(log_train_data1, log_train_data2)    
+            if results[1] > 0.05:
+                return False
 
             # coint_pvalue = nu.cointegration_adf_pvalue(log_train_data1, log_train_data2, hedge_ratio)
             # if coint_pvalue > pvalue_threshold:
             #     return False
 
-            t_stat = nu.cointegration_test(log_train_data2, log_train_data1, intercept, beta)
-            if t_stat < -4: # 3.7
-                return False
-
+            # t_stat = nu.cointegration_test(log_train_data2, log_train_data1, intercept, beta)
+            # if t_stat < -4: # 3.7
+            #     return False
+            
+            # hurst_exponent = nu.hurst(spread)
+            # print(f"Hurst Exponent: {hurst_exponent}")
+            # if hurst_exponent > 0.45:
+            #     return False
+            
             return True
         except Exception as e:
             logger.error(f"Error filtering pair: {e}")
             return False
-
-    def _calculate_half_life(self, spread):
-        """
-        Calculates the half-life of the spread.
-        """
-        spread_lag = spread.shift(1)
-        spread_ret = spread - spread_lag
-        spread_lag = spread_lag.iloc[1:]
-        spread_ret = spread_ret.iloc[1:]
-        
-        model = sm.OLS(spread_ret, sm.add_constant(spread_lag))
-        result = model.fit()
-        lambda_param = result.params.iloc[1]
-        if lambda_param >= 0:
-            return None
-        half_life = -np.log(2) / lambda_param
-        return half_life
 
     def _save_pairs_info(self, all_pairs):
         """
@@ -330,13 +371,14 @@ class BacktestPreprocessor:
                 split_idx = int(self.config['WINDOW_RATIO'] * len(data1))
                 train_data1 = data1[:split_idx]
                 train_data2 = data2[:split_idx]
-
+                corr_coef = np.corrcoef(train_data1, train_data2)[0, 1]
                 hedge_ratio = np.polyfit(np.log(train_data2), np.log(train_data1), 1)[0]
                 spread = np.log(data1) - hedge_ratio * np.log(data2)
                 train_spread = spread[:split_idx]
                 train_mean = train_spread.mean()
                 train_std = train_spread.std()
                 z_spread = (spread - train_mean) / train_std
+                half_life = calculate_half_life(train_spread)
 
                 precomputed_data.append({
                     'window_start': window_start,
@@ -346,10 +388,16 @@ class BacktestPreprocessor:
                     'spread': spread,  # Added spread
                     'z_spread': z_spread,
                     'split_index': split_idx,  # Added split_index
+                    'high1': pair['data1']['High'],
+                    'high2': pair['data2']['High'],
+                    'low1': pair['data1']['Low'],
+                    'low2': pair['data2']['Low'],
                     'vol1': pair['data1']['Volume'],
                     'vol2': pair['data2']['Volume'],
                     'close1': data1,
                     'close2': data2,
+                    'corr_coef': corr_coef,
+                    'half_life': half_life,
                 })
             except Exception as e:
                 logger.error(f"Error precomputing pair {pair_tuple}: {e}")
