@@ -1,0 +1,95 @@
+아래 내용을 위 코드를 중심으로 살펴보면, **현재 필터가 “단 하루의 24시간 거래대금(quoteVolume)”만으로 상위 N개 종목을 골라내는 것**이 사실상 전부라는 점을 알 수 있습니다. 이는 단기적인 거래량 급등에 의해 왜곡될 수 있으므로, **“꾸준히 안정적인 유동성을 확보한 코인만 선별”**한다는 취지에는 부족합니다.  
+
+페어트레이딩에 적합한 필터로 개선하려면, **최근 일정 기간(예: 2주~1개월) 거래대금**을 기준으로 삼고, 그중 **평균·중간값·표준편차(변동성) 등에 대한 추가 조건**을 걸어주는 방법이 있습니다.
+
+---
+
+## 1. 현재 필터 로직의 한계
+```python
+def get_trading_coins(self, client, quote_coin, n_coins, sort_by_volume=True):
+    ...
+    ticker = client.get_ticker(symbol=coin)
+    volume_dict[coin] = float(ticker['quoteVolume'])
+    ...
+    sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1], reverse=True)
+    ...
+    # -> 결국 "24시간 거래대금 상위 n_coins" 선별
+```
+- **단점**: “지속적으로 거래대금이 높다”가 아니라, **현재 시점 24시간** 동안 펌핑으로 우연히 높아졌을 가능성을 배제하기 어렵습니다.  
+- 따라서, “꾸준히 높은 유동성”을 중시하는 페어트레이딩에는 다소 맞지 않을 수 있습니다.
+
+---
+
+## 2. 안정적 거래대금 필터를 위한 방법
+
+### (a) 일정 기간 평균 거래대금(또는 거래량) 적용
+1. **일정 기간(예: 14일, 30일) 동안의 일별 거래대금/거래량**을 가져와서,  
+2. **평균(또는 중간값) 기준 상위 N개**를 뽑는다.  
+3. 추가로, **표준편차 등으로 변동성**을 측정하여, 변동폭이 지나치게 큰 종목은 제외할 수도 있음.
+
+#### 예시 절차
+1. `client.get_historical_klines(...)` 또는 `client.get_klines(...)` 로 원하는 기간만큼의 일봉 데이터를 가져온다.  
+2. 각 일봉의 `Quote Asset Volume`(혹은 일반 `Volume`)을 합산해 일별 거래대금을 구한다.  
+3. 14일치(또는 30일치)를 모아 `mean_volume = (하루 거래대금 합계의 평균)`을 구한다.  
+4. `mean_volume`가 큰 순서대로 정렬 → 상위 N개 선별.  
+5. `std`(표준편차)가 지나치게 큰 경우(= 거래량 변동성이 심한 경우)는 제외.
+
+코드 레벨 예시(개념적 pseudo-code):
+```python
+# 예: 하루 간격의 klines(1d)를 14일 치 받아 평균 거래대금 계산
+import numpy as np
+
+def get_stable_volume_coins(client, symbols, days=14):
+    symbol_volume_map = {}
+    for sym in symbols:
+        klines = client.get_historical_klines(
+            sym, "1d", f"{days} days ago UTC", limit=days
+        )
+        if len(klines) < days:
+            continue  # 데이터가 부족하면 제외
+
+        daily_volumes = [float(k[7]) for k in klines]  # k[7] = Quote Asset Volume
+        avg_vol = np.mean(daily_volumes)
+        std_vol = np.std(daily_volumes)
+        symbol_volume_map[sym] = (avg_vol, std_vol)
+
+    # 이제 (avg_vol - std_vol 등 원하는 기준)으로 필터링
+    # 예: avg_vol 기준 정렬 후 상위, std_vol이 너무 큰 코인은 제외
+    sorted_by_avg = sorted(symbol_volume_map.items(), key=lambda x: x[1][0], reverse=True)
+    return sorted_by_avg
+```
+이렇게 얻은 `sorted_by_avg` 중 상위 N개를 최종 선택하되, 필요하다면 `(avg / std)` 등 변동성도 고려해 추가 필터링을 적용할 수 있습니다.
+
+### (b) 시가총액 대비 거래대금 비율(Volume/Market Cap Ratio) 체크 (선택적)
+- 시가총액 대비 거래대금 비율이 지나치게 높은 코인은 “단기 투기”로 급등 중일 가능성이 큼.  
+- 반면, 이 비율이 너무 낮다면 유동성이 부족하다고 볼 수도 있음.  
+- 다만 Binance API만으로는 시가총액(Market Cap)을 직접 구하기가 번거로울 수 있어, 코인마켓캡 등 다른 API를 활용하거나, 대략적인 유통량*가격 정도로 추정할 수 있습니다.
+
+---
+
+## 3. 코드 구조에 적용 아이디어
+
+1. **1단계**: `futures_exchange_info()`로 ‘TRADING’ 상태인 선물 종목 리스트 확보.  
+2. **2단계**: 단기(24h) Volume이 일정 수준 이하인 종목은 **바로 제외** → 미달 종목은 어차피 유동성이 너무 낮음.  
+3. **3단계**: (옵션) “최근 14~30일 평균 거래대금”을 구하는 함수(`get_stable_volume_coins`)를 만들어 2단계 통과한 종목에만 적용.  
+4. **4단계**: 평균 거래대금 상위 N개 선별.  
+5. **5단계**: 필요하면 표준편차 필터(`avg_vol / std_vol` 등)도 적용.  
+6. **최종**: 필터 통과한 종목을 `self.trading_coins`에 저장.
+
+> **주의**: 2단계부터 3단계를 수행하려면, **일일봉 다운로드**를 여러 종목에 대해 수행해야 하므로 API 요청이 늘어날 수 있음. Rate limit과 실행 시간을 고려해야 합니다.
+
+---
+
+## 4. 결론
+
+- 현재 코드는 **‘24시간 거래대금 상위 N개 선별’**이 전부라, 단기 급등 종목이 걸러지지 않는 단점이 있습니다.  
+- **페어트레이딩에서 중요한 ‘안정적 유동성’**을 확보하려면,  
+  1) **며칠~몇 주간 거래량/거래대금 평균**을 살펴보고,  
+  2) **변동성(표준편차 등) 필터**를 추가해 ‘꾸준히’ 높은 종목을 선별  
+  하는 방식으로 개선하는 것이 좋습니다.  
+- 시가총액 대비 거래대금 비율 등 추가 지표도 고려하면 더 정교하게 필터링할 수 있으나, 구현 복잡도가 높아집니다.  
+- 구현 시에는 **API 요청 수 증가**와 **실행 시간**을 감안해, 배치(batch)로 처리하거나 캐싱하는 방법을 병행해야 할 수 있습니다.
+
+이 과정을 통해 일시적 펌핑·테마성 이슈에 휩쓸린 종목을 걸러내고, **장기적으로도 안정적으로 거래되는 코인**만 페어 구성 대상으로 선별할 수 있을 것입니다.
+
+vwap100과 ma200이 스프레드와 같은 방향에 있지만 둘의 이격이 적은 것이 더 점프할 경우 크다.
