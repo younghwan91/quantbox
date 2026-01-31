@@ -5,3 +5,8 @@
 temp
 *.log
 *.json
+# Python cache
+__pycache__/
+*.pyc
+.venv/
+
