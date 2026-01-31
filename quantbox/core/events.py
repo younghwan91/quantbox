@@ -6,7 +6,7 @@ to work identically in both backtesting and live trading modes.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from queue import Queue
@@ -51,7 +51,7 @@ class OrderSide(Enum):
 class Event:
     """Base event class."""
     type: EventType
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     
     def __post_init__(self):
@@ -144,7 +144,7 @@ class FillEvent(Event):
     
     # Execution metadata
     exchange_order_id: str = ""
-    execution_time: datetime = field(default_factory=datetime.utcnow)
+    execution_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     @property
     def total_cost(self) -> float:

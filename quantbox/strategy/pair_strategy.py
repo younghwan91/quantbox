@@ -9,7 +9,7 @@ Implements a complete pair trading strategy with:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 import pandas as pd
@@ -107,7 +107,7 @@ class PairTradingStrategy(StatefulStrategy):
             'spread_mean': pair_data.spread_mean,
             'spread_std': pair_data.spread_std,
             'half_life': pair_data.half_life,
-            'last_updated': datetime.utcnow()
+            'last_updated': datetime.now(timezone.utc)
         }
         
         logger.info(
@@ -178,7 +178,7 @@ class PairTradingStrategy(StatefulStrategy):
             'intercept': intercept,
             'spread_mean': spread.mean(),
             'spread_std': spread.std(),
-            'last_updated': datetime.utcnow()
+            'last_updated': datetime.now(timezone.utc)
         }
     
     def should_enter_long(
@@ -432,7 +432,7 @@ class PairTradingStrategy(StatefulStrategy):
             symbol1, symbol2,
             price1, price2,
             params,
-            datetime.utcnow()
+            datetime.now(timezone.utc)
         )
     
     def add_pair(

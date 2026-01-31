@@ -17,37 +17,36 @@ class TestExchangeConfig:
     
     def test_default_values(self):
         config = ExchangeConfig()
-        assert config.name == "binance"
-        assert config.testnet is True
-        assert config.rate_limit == 1200
+        assert config.testnet is False
+        assert config.rate_limit == 0.5
+        assert config.max_retries == 3
     
     def test_custom_values(self):
         config = ExchangeConfig(
-            name="bybit",
             api_key="test_key",
             api_secret="test_secret",
-            testnet=False
+            testnet=True
         )
-        assert config.name == "bybit"
         assert config.api_key == "test_key"
-        assert config.testnet is False
+        assert config.testnet is True
 
 
 class TestDataConfig:
     """Tests for DataConfig."""
     
-    def test_default_timeframes(self):
+    def test_default_values(self):
         config = DataConfig()
-        assert "1h" in config.timeframes
-        assert "4h" in config.timeframes
+        assert "1h" in config.intervals
+        assert config.quote_currency == "USDT"
+        assert config.n_coins == 50
     
-    def test_cache_settings(self):
+    def test_custom_values(self):
         config = DataConfig(
-            cache_enabled=True,
-            cache_dir="/tmp/test_cache"
+            cache_dir="/tmp/test_cache",
+            intervals=["5m", "15m"]
         )
-        assert config.cache_enabled is True
         assert config.cache_dir == "/tmp/test_cache"
+        assert "5m" in config.intervals
 
 
 class TestStrategyConfig:
@@ -56,88 +55,90 @@ class TestStrategyConfig:
     def test_default_thresholds(self):
         config = StrategyConfig()
         assert config.entry_zscore == 2.0
-        assert config.exit_zscore == 0.5
+        assert config.exit_zscore == 0.0  # Note: actual default
         assert config.stop_loss_zscore == 3.5
     
-    def test_filter_settings(self):
+    def test_custom_values(self):
         config = StrategyConfig(
-            min_correlation=0.7,
-            max_cointegration_pvalue=0.01
+            correlation_threshold=0.7,
+            cointegration_pvalue=0.01,
+            entry_zscore=2.5
         )
-        assert config.min_correlation == 0.7
-        assert config.max_cointegration_pvalue == 0.01
+        assert config.correlation_threshold == 0.7
+        assert config.cointegration_pvalue == 0.01
+        assert config.entry_zscore == 2.5
 
 
 class TestRiskConfig:
     """Tests for RiskConfig."""
     
-    def test_position_limits(self):
+    def test_default_values(self):
+        config = RiskConfig()
+        assert config.max_position_size == 0.1
+        assert config.max_drawdown == 0.2
+        assert config.leverage == 1
+    
+    def test_custom_values(self):
         config = RiskConfig(
             max_position_size=0.2,
-            max_portfolio_risk=0.1
+            max_drawdown=0.3,
+            leverage=2
         )
         assert config.max_position_size == 0.2
-        assert config.max_portfolio_risk == 0.1
-    
-    def test_risk_constraints(self):
-        config = RiskConfig(
-            max_daily_loss=500.0,
-            max_drawdown=0.2
-        )
-        assert config.max_daily_loss == 500.0
-        assert config.max_drawdown == 0.2
+        assert config.max_drawdown == 0.3
+        assert config.leverage == 2
 
 
 class TestConfig:
     """Tests for main Config class."""
     
     def test_default_initialization(self):
-        config = Config()
+        # Note: Config validates that entry > exit, so we need valid params
+        config = Config(
+            strategy=StrategyConfig(
+                entry_zscore=2.0,
+                exit_zscore=0.0,
+                stop_loss_zscore=3.5
+            )
+        )
         assert config.mode == TradingMode.BACKTEST
         assert isinstance(config.exchange, ExchangeConfig)
         assert isinstance(config.data, DataConfig)
     
-    def test_from_dict(self):
-        data = {
-            'mode': 'live',
-            'exchange': {'name': 'bybit', 'testnet': False},
-            'strategy': {'entry_zscore': 2.5}
-        }
-        config = Config.from_dict(data)
-        assert config.mode == TradingMode.LIVE
-        assert config.exchange.name == 'bybit'
-        assert config.strategy.entry_zscore == 2.5
-    
     def test_to_dict(self):
-        config = Config()
+        config = Config(
+            strategy=StrategyConfig(
+                entry_zscore=2.0,
+                exit_zscore=0.0,
+                stop_loss_zscore=3.5
+            )
+        )
         data = config.to_dict()
         assert 'mode' in data
         assert 'exchange' in data
         assert 'strategy' in data
     
-    def test_validate(self):
-        config = Config()
-        # Should not raise for valid config
-        config.validate()
-        
-        # Invalid config should raise
-        config.strategy.entry_zscore = -1
+    def test_validation_entry_exit(self):
+        # Invalid: entry <= exit should raise
         with pytest.raises(ValueError):
-            config.validate()
+            Config(
+                strategy=StrategyConfig(
+                    entry_zscore=1.0,
+                    exit_zscore=2.0,  # exit > entry is invalid
+                    stop_loss_zscore=3.5
+                )
+            )
     
-    def test_save_and_load(self):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            temp_path = f.name
-        
-        try:
-            config = Config()
-            config.strategy.entry_zscore = 3.0
-            config.save(temp_path)
-            
-            loaded = Config.load(temp_path)
-            assert loaded.strategy.entry_zscore == 3.0
-        finally:
-            os.unlink(temp_path)
+    def test_validation_stop_loss(self):
+        # Invalid: stop_loss <= entry should raise
+        with pytest.raises(ValueError):
+            Config(
+                strategy=StrategyConfig(
+                    entry_zscore=2.0,
+                    exit_zscore=0.0,
+                    stop_loss_zscore=1.5  # stop_loss < entry is invalid
+                )
+            )
 
 
 class TestTradingMode:

@@ -7,7 +7,7 @@ in both backtest and live trading modes.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 import logging
 import time
@@ -67,7 +67,7 @@ class BacktestExecutionHandler(ExecutionHandler):
     def __init__(self, config: Config):
         super().__init__(config)
         self.current_prices: Dict[str, float] = {}
-        self.current_time: datetime = datetime.utcnow()
+        self.current_time: datetime = datetime.now(timezone.utc)
         self.order_history: List[OrderEvent] = []
         self.fill_history: List[FillEvent] = []
         
@@ -311,7 +311,7 @@ class LiveExecutionHandler(ExecutionHandler):
                     fill_price=float(result.get('avgPrice', result.get('price', 0))),
                     commission=0.0,  # Will be calculated from trades
                     exchange_order_id=str(result['orderId']),
-                    execution_time=datetime.utcnow()
+                    execution_time=datetime.now(timezone.utc)
                 )
                 
                 logger.info(

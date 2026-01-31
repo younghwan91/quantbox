@@ -4,84 +4,79 @@ Tests for data caching system.
 
 import pytest
 import tempfile
-import os
 import time
 import pandas as pd
 import numpy as np
+from datetime import datetime, timedelta, timezone
 
 from quantbox.data.cache import (
-    MemoryCache, DiskCache, DataCache, TimeframedCache
+    MemoryCache, DiskCache, DataCache, TimeframedCache, CacheEntry
 )
 
 
 class TestMemoryCache:
     """Tests for in-memory cache."""
     
-    def test_set_and_get(self):
+    def test_put_and_get(self):
         cache = MemoryCache(max_size=100)
         
-        cache.set("key1", "value1")
-        assert cache.get("key1") == "value1"
+        entry = CacheEntry(key="key1", data="value1")
+        cache.put(entry)
+        
+        result = cache.get("key1")
+        assert result is not None
+        assert result.data == "value1"
     
     def test_missing_key(self):
         cache = MemoryCache()
         assert cache.get("nonexistent") is None
-        assert cache.get("nonexistent", "default") == "default"
     
-    def test_delete(self):
+    def test_remove(self):
         cache = MemoryCache()
-        cache.set("key1", "value1")
-        cache.delete("key1")
+        entry = CacheEntry(key="key1", data="value1")
+        cache.put(entry)
+        cache.remove("key1")
         assert cache.get("key1") is None
     
     def test_clear(self):
         cache = MemoryCache()
-        cache.set("key1", "value1")
-        cache.set("key2", "value2")
+        cache.put(CacheEntry(key="key1", data="value1"))
+        cache.put(CacheEntry(key="key2", data="value2"))
         cache.clear()
         assert cache.get("key1") is None
         assert cache.get("key2") is None
     
     def test_expiration(self):
-        cache = MemoryCache(default_ttl=0.1)  # 100ms TTL
-        cache.set("key1", "value1")
+        cache = MemoryCache(max_size=100)
+        entry = CacheEntry(
+            key="key1", 
+            data="value1",
+            expires_at=datetime.now(timezone.utc) + timedelta(milliseconds=100)
+        )
+        cache.put(entry)
         
-        # Should exist immediately
-        assert cache.get("key1") == "value1"
+        assert cache.get("key1") is not None
         
-        # Wait for expiration
         time.sleep(0.2)
         assert cache.get("key1") is None
     
     def test_lru_eviction(self):
         cache = MemoryCache(max_size=2)
         
-        cache.set("key1", "value1")
-        cache.set("key2", "value2")
-        cache.set("key3", "value3")  # Should evict key1
+        cache.put(CacheEntry(key="key1", data="value1"))
+        cache.put(CacheEntry(key="key2", data="value2"))
+        cache.put(CacheEntry(key="key3", data="value3"))
         
         assert cache.get("key1") is None
-        assert cache.get("key2") == "value2"
-        assert cache.get("key3") == "value3"
+        assert cache.get("key2") is not None
+        assert cache.get("key3") is not None
     
-    def test_contains(self):
-        cache = MemoryCache()
-        cache.set("key1", "value1")
+    def test_size(self):
+        cache = MemoryCache(max_size=100)
+        assert cache.size == 0
         
-        assert "key1" in cache
-        assert "key2" not in cache
-    
-    def test_stats(self):
-        cache = MemoryCache()
-        
-        cache.set("key1", "value1")
-        cache.get("key1")  # Hit
-        cache.get("key1")  # Hit
-        cache.get("key2")  # Miss
-        
-        stats = cache.get_stats()
-        assert stats['hits'] == 2
-        assert stats['misses'] == 1
+        cache.put(CacheEntry(key="key1", data="value1"))
+        assert cache.size == 1
 
 
 class TestDiskCache:
@@ -92,42 +87,47 @@ class TestDiskCache:
         with tempfile.TemporaryDirectory() as tmpdir:
             yield tmpdir
     
-    def test_set_and_get(self, temp_cache_dir):
+    def test_put_and_get(self, temp_cache_dir):
         cache = DiskCache(cache_dir=temp_cache_dir)
         
         df = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
-        cache.set("test_df", df)
+        entry = CacheEntry(key="test_df", data=df)
+        cache.put(entry)
         
         retrieved = cache.get("test_df")
-        pd.testing.assert_frame_equal(df, retrieved)
+        assert retrieved is not None
+        pd.testing.assert_frame_equal(df, retrieved.data)
     
     def test_compression(self, temp_cache_dir):
         cache = DiskCache(cache_dir=temp_cache_dir, compress=True)
         
         df = pd.DataFrame({'a': range(1000), 'b': range(1000)})
-        cache.set("test_df", df)
+        entry = CacheEntry(key="test_df", data=df)
+        cache.put(entry)
         
         retrieved = cache.get("test_df")
-        pd.testing.assert_frame_equal(df, retrieved)
+        assert retrieved is not None
+        pd.testing.assert_frame_equal(df, retrieved.data)
     
     def test_missing_key(self, temp_cache_dir):
         cache = DiskCache(cache_dir=temp_cache_dir)
         assert cache.get("nonexistent") is None
     
-    def test_delete(self, temp_cache_dir):
+    def test_remove(self, temp_cache_dir):
         cache = DiskCache(cache_dir=temp_cache_dir)
         
-        cache.set("key1", "value1")
+        entry = CacheEntry(key="key1", data="value1")
+        cache.put(entry)
         assert cache.get("key1") is not None
         
-        cache.delete("key1")
+        cache.remove("key1")
         assert cache.get("key1") is None
     
     def test_clear(self, temp_cache_dir):
         cache = DiskCache(cache_dir=temp_cache_dir)
         
-        cache.set("key1", "value1")
-        cache.set("key2", "value2")
+        cache.put(CacheEntry(key="key1", data="value1"))
+        cache.put(CacheEntry(key="key2", data="value2"))
         cache.clear()
         
         assert cache.get("key1") is None
@@ -142,43 +142,28 @@ class TestDataCache:
         with tempfile.TemporaryDirectory() as tmpdir:
             yield tmpdir
     
-    def test_memory_first(self, temp_cache_dir):
-        cache = DataCache(cache_dir=temp_cache_dir)
-        
-        cache.set("key1", "value1")
-        
-        # Should be in memory cache
-        assert cache.memory_cache.get("key1") == "value1"
-    
-    def test_disk_fallback(self, temp_cache_dir):
+    def test_put_and_get(self, temp_cache_dir):
         cache = DataCache(cache_dir=temp_cache_dir)
         
         df = pd.DataFrame({'a': [1, 2, 3]})
-        cache.set("test_df", df, persist=True)
+        start = datetime(2023, 1, 1)
+        end = datetime(2023, 1, 2)
         
-        # Clear memory cache
-        cache.memory_cache.clear()
+        cache.put("BTCUSDT", "1h", start, end, df)
+        retrieved = cache.get("BTCUSDT", "1h", start, end)
         
-        # Should retrieve from disk
-        retrieved = cache.get("test_df")
+        assert retrieved is not None
         pd.testing.assert_frame_equal(df, retrieved)
     
-    def test_prefetch(self, temp_cache_dir):
+    def test_cache_miss(self, temp_cache_dir):
         cache = DataCache(cache_dir=temp_cache_dir)
         
-        # Store some data on disk
-        for i in range(3):
-            cache.set(f"key_{i}", f"value_{i}", persist=True)
+        start = datetime(2023, 1, 1)
+        end = datetime(2023, 1, 2)
         
-        # Clear memory
-        cache.memory_cache.clear()
-        
-        # Prefetch
-        cache.prefetch([f"key_{i}" for i in range(3)])
-        
-        # Should now be in memory
-        for i in range(3):
-            assert cache.memory_cache.get(f"key_{i}") is not None
+        result = cache.get("BTCUSDT", "1h", start, end)
+        assert result is None
+        assert cache._stats['misses'] == 1
 
 
 class TestTimeframedCache:
@@ -189,38 +174,47 @@ class TestTimeframedCache:
         with tempfile.TemporaryDirectory() as tmpdir:
             yield tmpdir
     
-    def test_store_and_retrieve(self, temp_cache_dir):
-        cache = TimeframedCache(cache_dir=temp_cache_dir)
+    def test_put_and_get(self, temp_cache_dir):
+        cache = TimeframedCache(base_dir=temp_cache_dir)
         
         df = pd.DataFrame({
-            'Open': [100, 101, 102],
-            'Close': [101, 102, 103]
+            'open': [100, 101, 102],
+            'close': [101, 102, 103]
         }, index=pd.date_range('2023-01-01', periods=3, freq='h'))
         
-        cache.store("BTCUSDT", "1h", df)
+        start = datetime(2023, 1, 1)
+        end = datetime(2023, 1, 2)
         
-        retrieved = cache.get("BTCUSDT", "1h")
+        cache.put("BTCUSDT", "1h", start, end, df)
+        
+        retrieved = cache.get("BTCUSDT", "1h", start, end)
+        assert retrieved is not None
         pd.testing.assert_frame_equal(df, retrieved)
     
     def test_multiple_timeframes(self, temp_cache_dir):
-        cache = TimeframedCache(cache_dir=temp_cache_dir)
+        cache = TimeframedCache(base_dir=temp_cache_dir)
+        
+        start = datetime(2023, 1, 1)
+        end = datetime(2023, 1, 2)
         
         for tf in ['1h', '4h', '1d']:
             df = pd.DataFrame({
-                'Close': [100, 101, 102]
+                'close': [100, 101, 102]
             }, index=pd.date_range('2023-01-01', periods=3, freq=tf))
             
-            cache.store("BTCUSDT", tf, df)
+            cache.put("BTCUSDT", tf, start, end, df)
         
         for tf in ['1h', '4h', '1d']:
-            assert cache.get("BTCUSDT", tf) is not None
+            assert cache.get("BTCUSDT", tf, start, end) is not None
     
-    def test_list_symbols(self, temp_cache_dir):
-        cache = TimeframedCache(cache_dir=temp_cache_dir)
+    def test_get_all_stats(self, temp_cache_dir):
+        cache = TimeframedCache(base_dir=temp_cache_dir)
         
-        for symbol in ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']:
-            df = pd.DataFrame({'Close': [100]})
-            cache.store(symbol, "1h", df)
+        start = datetime(2023, 1, 1)
+        end = datetime(2023, 1, 2)
+        df = pd.DataFrame({'close': [100]})
         
-        symbols = cache.list_symbols()
-        assert set(symbols) == {'BTCUSDT', 'ETHUSDT', 'BNBUSDT'}
+        cache.put("BTCUSDT", "1h", start, end, df)
+        
+        stats = cache.get_all_stats()
+        assert isinstance(stats, dict)

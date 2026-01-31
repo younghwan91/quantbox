@@ -6,7 +6,7 @@ to ensure compatibility with the trading engine.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 import pandas as pd
 import logging
@@ -93,7 +93,7 @@ class Strategy(ABC):
     def log_signal(self, signal: Dict):
         """Log a generated signal."""
         self._signals.append({
-            'timestamp': datetime.utcnow(),
+            'timestamp': datetime.now(timezone.utc),
             **signal
         })
         logger.info(f"[{self.name}] Signal: {signal}")

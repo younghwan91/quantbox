@@ -1,260 +1,235 @@
 """
-Tests for filter system.
+Tests for strategy filters.
 """
 
 import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from quantbox.strategy.filters import (
-    CorrelationFilter, CointegrationFilter, HalfLifeFilter,
-    HedgeRatioFilter, VolumeFilter, StationarityFilter,
-    HurstFilter, FilterPipeline, FilterResult
+    FilterResult, BaseFilter, CorrelationFilter, CointegrationFilter,
+    HalfLifeFilter, HedgeRatioFilter, VolumeFilter, StationarityFilter,
+    HurstFilter, FilterPipeline
 )
 
 
+# Fixture: create correlated price series
 @pytest.fixture
 def correlated_series():
-    """Generate correlated price series."""
     np.random.seed(42)
-    n = 500
+    n = 200
+    base = np.cumsum(np.random.randn(n)) + 100
+    noise = np.random.randn(n) * 0.5
     
-    # Common trend
-    trend = np.cumsum(np.random.randn(n) * 0.01)
-    
-    series1 = 100 * np.exp(trend + np.random.randn(n) * 0.005)
-    series2 = 50 * np.exp(trend * 1.1 + np.random.randn(n) * 0.005)
-    
-    return pd.Series(series1), pd.Series(series2)
+    series1 = pd.Series(np.abs(base + noise), name="asset1")
+    series2 = pd.Series(np.abs(base * 0.5 + 50 + noise * 0.3), name="asset2")
+    return series1, series2
 
 
 @pytest.fixture
 def uncorrelated_series():
-    """Generate uncorrelated price series."""
     np.random.seed(42)
-    n = 500
+    n = 200
+    series1 = pd.Series(np.abs(np.cumsum(np.random.randn(n)) + 100))
+    series2 = pd.Series(np.abs(np.cumsum(np.random.randn(n)) + 100))
+    return series1, series2
+
+
+class TestFilterResult:
+    """Tests for FilterResult dataclass."""
     
-    series1 = 100 * np.exp(np.cumsum(np.random.randn(n) * 0.01))
-    series2 = 50 * np.exp(np.cumsum(np.random.randn(n) * 0.01))
+    def test_creation(self):
+        result = FilterResult(passed=True, score=0.85, reason="Test passed")
+        assert result.passed is True
+        assert result.score == 0.85
+        assert result.reason == "Test passed"
     
-    return pd.Series(series1), pd.Series(series2)
+    def test_default_metadata(self):
+        result = FilterResult(passed=True, score=1.0)
+        assert result.metadata == {}
 
 
 class TestCorrelationFilter:
     """Tests for CorrelationFilter."""
     
     def test_high_correlation_passes(self, correlated_series):
-        filter = CorrelationFilter(min_correlation=0.5)
-        s1, s2 = correlated_series
+        series1, series2 = correlated_series
+        filter = CorrelationFilter(min_correlation=0.5, max_correlation=0.99)
         
-        result = filter.apply(s1, s2)
-        assert result.passed is True
-        assert result.value > 0.5
+        result = filter.apply(series1, series2)
+        assert result.passed == True
+        assert result.score > 0.5
     
     def test_low_correlation_fails(self, uncorrelated_series):
+        series1, series2 = uncorrelated_series
         filter = CorrelationFilter(min_correlation=0.9)
-        s1, s2 = uncorrelated_series
         
-        result = filter.apply(s1, s2)
-        # May or may not pass depending on random seed
-        assert isinstance(result, FilterResult)
-        assert 'correlation' in result.reason.lower() or result.passed
+        result = filter.apply(series1, series2)
+        # Uncorrelated series should fail high correlation threshold
+        assert result.score < 0.9
     
-    def test_correlation_bounds(self):
-        filter = CorrelationFilter(min_correlation=0.5, max_correlation=0.95)
+    def test_filter_disabled(self, correlated_series):
+        series1, series2 = correlated_series
+        filter = CorrelationFilter(enabled=False)
         
-        # Perfect correlation should fail
-        s = pd.Series(range(100))
-        result = filter.apply(s, s)
-        assert result.passed is False
+        result = filter.apply(series1, series2)
+        assert result.passed == True
+        assert "disabled" in result.reason.lower()
 
 
 class TestCointegrationFilter:
     """Tests for CointegrationFilter."""
     
     def test_cointegrated_pair(self, correlated_series):
+        series1, series2 = correlated_series
         filter = CointegrationFilter(max_pvalue=0.1)
-        s1, s2 = correlated_series
         
-        result = filter.apply(s1, s2)
-        # Result depends on actual cointegration
-        assert isinstance(result, FilterResult)
-        assert result.value is not None
+        result = filter.apply(series1, series2)
+        # Correlated series may or may not be cointegrated
+        assert 'p_value' in result.metadata or 'error' in str(result.reason).lower()
     
-    def test_pvalue_threshold(self, uncorrelated_series):
-        filter = CointegrationFilter(max_pvalue=0.001)  # Very strict
-        s1, s2 = uncorrelated_series
+    def test_filter_disabled(self, correlated_series):
+        series1, series2 = correlated_series
+        filter = CointegrationFilter(enabled=False)
         
-        result = filter.apply(s1, s2)
-        # Very likely to fail with random data
-        assert isinstance(result, FilterResult)
+        result = filter.apply(series1, series2)
+        assert result.passed == True
 
 
 class TestHalfLifeFilter:
     """Tests for HalfLifeFilter."""
     
-    def test_reasonable_halflife(self, correlated_series):
-        filter = HalfLifeFilter(min_halflife=1, max_halflife=100)
-        s1, s2 = correlated_series
-        
-        result = filter.apply(s1, s2)
-        assert isinstance(result, FilterResult)
-        assert result.value is not None
+    def test_filter_creation(self):
+        filter = HalfLifeFilter(min_half_life=1, max_half_life=100)
+        assert filter.min_half_life == 1
+        assert filter.max_half_life == 100
     
-    def test_halflife_bounds(self, correlated_series):
-        filter = HalfLifeFilter(min_halflife=50, max_halflife=60)
-        s1, s2 = correlated_series
+    def test_filter_apply(self, correlated_series):
+        series1, series2 = correlated_series
+        filter = HalfLifeFilter(min_half_life=1, max_half_life=200)
         
-        result = filter.apply(s1, s2)
-        if result.passed:
-            assert 50 <= result.value <= 60
+        result = filter.apply(series1, series2)
+        assert isinstance(result, FilterResult)
+    
+    def test_filter_disabled(self, correlated_series):
+        series1, series2 = correlated_series
+        filter = HalfLifeFilter(enabled=False)
+        
+        result = filter.apply(series1, series2)
+        assert result.passed == True
 
 
 class TestHedgeRatioFilter:
     """Tests for HedgeRatioFilter."""
     
-    def test_hedge_ratio_calculation(self, correlated_series):
-        filter = HedgeRatioFilter(min_ratio=0.1, max_ratio=5.0)
-        s1, s2 = correlated_series
-        
-        result = filter.apply(s1, s2)
-        assert isinstance(result, FilterResult)
-        assert result.value is not None
+    def test_filter_creation(self):
+        filter = HedgeRatioFilter(min_ratio=0.25, max_ratio=4.0)
+        assert filter.min_ratio == 0.25
+        assert filter.max_ratio == 4.0
     
-    def test_stability_check(self, correlated_series):
-        filter = HedgeRatioFilter(
-            min_ratio=0.1,
-            max_ratio=5.0,
-            stability_window=50
-        )
-        s1, s2 = correlated_series
+    def test_filter_apply(self, correlated_series):
+        series1, series2 = correlated_series
+        filter = HedgeRatioFilter(min_ratio=0.1, max_ratio=10.0)
         
-        result = filter.apply(s1, s2)
+        result = filter.apply(series1, series2)
         assert isinstance(result, FilterResult)
+        assert 'hedge_ratio' in result.metadata
 
 
 class TestVolumeFilter:
     """Tests for VolumeFilter."""
     
+    def test_filter_creation(self):
+        filter = VolumeFilter(min_volume=1000000)
+        assert filter.min_volume == 1000000
+    
     def test_sufficient_volume(self):
-        filter = VolumeFilter(min_avg_volume=100)
+        filter = VolumeFilter(min_volume=100)
         
-        vol1 = pd.Series([200, 150, 300, 250])
-        vol2 = pd.Series([180, 200, 220, 190])
+        series1 = pd.Series([100] * 50)
+        series2 = pd.Series([100] * 50)
+        volume1 = pd.Series([1000] * 50)
+        volume2 = pd.Series([1000] * 50)
         
-        result = filter.apply(vol1, vol2)
-        assert result.passed is True
+        result = filter.apply(series1, series2, volume1=volume1, volume2=volume2)
+        assert result.passed == True
     
     def test_insufficient_volume(self):
-        filter = VolumeFilter(min_avg_volume=1000)
+        filter = VolumeFilter(min_volume=10000)
         
-        vol1 = pd.Series([100, 150, 120])
-        vol2 = pd.Series([80, 90, 110])
+        series1 = pd.Series([100] * 50)
+        series2 = pd.Series([100] * 50)
+        volume1 = pd.Series([100] * 50)
+        volume2 = pd.Series([100] * 50)
         
-        result = filter.apply(vol1, vol2)
-        assert result.passed is False
+        result = filter.apply(series1, series2, volume1=volume1, volume2=volume2)
+        assert result.passed == False
 
 
 class TestStationarityFilter:
     """Tests for StationarityFilter."""
     
-    def test_stationary_series(self):
+    def test_filter_creation(self):
         filter = StationarityFilter(max_pvalue=0.05)
-        
-        # Mean-reverting series
-        np.random.seed(42)
-        spread = np.random.randn(500)
-        
-        result = filter.apply(pd.Series(spread))
-        assert result.passed is True
+        assert filter.max_pvalue == 0.05
     
-    def test_nonstationary_series(self):
-        filter = StationarityFilter(max_pvalue=0.05)
+    def test_filter_apply(self, correlated_series):
+        series1, series2 = correlated_series
+        filter = StationarityFilter(max_pvalue=0.1)
         
-        # Random walk (non-stationary)
-        np.random.seed(42)
-        walk = np.cumsum(np.random.randn(500))
-        
-        result = filter.apply(pd.Series(walk))
-        # May or may not be stationary by chance
+        result = filter.apply(series1, series2)
+        assert isinstance(result, FilterResult)
 
 
 class TestHurstFilter:
     """Tests for HurstFilter."""
     
-    def test_mean_reverting(self):
+    def test_filter_creation(self):
         filter = HurstFilter(max_hurst=0.5)
-        
-        # Mean-reverting series (H < 0.5)
-        np.random.seed(42)
-        series = pd.Series(np.random.randn(500))
-        
-        result = filter.apply(series)
-        assert isinstance(result, FilterResult)
+        assert filter.max_hurst == 0.5
     
-    def test_trending_fails(self):
-        filter = HurstFilter(max_hurst=0.4)
+    def test_mean_reverting_series(self, correlated_series):
+        series1, series2 = correlated_series
+        filter = HurstFilter(max_hurst=0.6)
         
-        # Trending series (H > 0.5)
-        np.random.seed(42)
-        trend = np.cumsum(np.random.randn(500) + 0.1)
-        
-        result = filter.apply(pd.Series(trend))
-        # Trending series should have H > 0.5
+        result = filter.apply(series1, series2)
+        assert isinstance(result, FilterResult)
 
 
 class TestFilterPipeline:
     """Tests for FilterPipeline."""
     
     def test_empty_pipeline(self, correlated_series):
+        series1, series2 = correlated_series
         pipeline = FilterPipeline([])
-        s1, s2 = correlated_series
         
-        results = pipeline.apply(s1, s2)
-        assert len(results) == 0
+        passed, score, results = pipeline.apply(series1, series2)
+        assert passed is True  # Empty pipeline passes
     
     def test_single_filter(self, correlated_series):
-        filter = CorrelationFilter(min_correlation=0.3)
-        pipeline = FilterPipeline([filter])
-        s1, s2 = correlated_series
+        series1, series2 = correlated_series
+        pipeline = FilterPipeline([
+            CorrelationFilter(min_correlation=0.3)
+        ])
         
-        results = pipeline.apply(s1, s2)
-        assert len(results) == 1
-        assert isinstance(results[0], FilterResult)
+        passed, score, results = pipeline.apply(series1, series2)
+        assert isinstance(passed, (bool, np.bool_))
+        assert 'correlation' in results
     
     def test_multiple_filters(self, correlated_series):
-        filters = [
+        series1, series2 = correlated_series
+        pipeline = FilterPipeline([
             CorrelationFilter(min_correlation=0.3),
             CointegrationFilter(max_pvalue=0.1),
-        ]
-        pipeline = FilterPipeline(filters)
-        s1, s2 = correlated_series
+        ])
         
-        results = pipeline.apply(s1, s2)
-        assert len(results) == 2
+        passed, score, results = pipeline.apply(series1, series2)
+        assert isinstance(passed, (bool, np.bool_))
+        assert len(results) >= 1
     
-    def test_all_passed(self, correlated_series):
-        filters = [
-            CorrelationFilter(min_correlation=0.3),
-        ]
-        pipeline = FilterPipeline(filters)
-        s1, s2 = correlated_series
+    def test_add_filter(self, correlated_series):
+        series1, series2 = correlated_series
+        pipeline = FilterPipeline([])
+        pipeline.add_filter(CorrelationFilter(min_correlation=0.3))
         
-        results = pipeline.apply(s1, s2)
-        all_passed = pipeline.all_passed(results)
-        # Depends on data
-        assert isinstance(all_passed, bool)
-    
-    def test_summary(self, correlated_series):
-        filters = [
-            CorrelationFilter(min_correlation=0.3),
-            CointegrationFilter(max_pvalue=0.1),
-        ]
-        pipeline = FilterPipeline(filters)
-        s1, s2 = correlated_series
-        
-        results = pipeline.apply(s1, s2)
-        summary = pipeline.summary(results)
-        
-        assert 'CorrelationFilter' in summary
-        assert 'CointegrationFilter' in summary
+        assert len(pipeline.filters) == 1

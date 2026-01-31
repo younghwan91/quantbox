@@ -5,7 +5,7 @@ Unified portfolio class that works identically in backtest and live modes.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
@@ -32,7 +32,7 @@ class Position:
     
     # Timestamps
     entry_time: Optional[datetime] = None
-    last_update: datetime = field(default_factory=datetime.utcnow)
+    last_update: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     @property
     def is_long(self) -> bool:
@@ -78,7 +78,7 @@ class Position:
     def update_price(self, price: float):
         """Update current market price."""
         self.current_price = price
-        self.last_update = datetime.utcnow()
+        self.last_update = datetime.now(timezone.utc)
     
     def update_from_fill(self, fill: FillEvent):
         """Update position from a fill event."""
@@ -119,7 +119,7 @@ class PairPosition:
     hedge_ratio: float
     entry_z_score: float = 0.0
     current_z_score: float = 0.0
-    entry_time: datetime = field(default_factory=datetime.utcnow)
+    entry_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     @property
     def symbol1(self) -> str:
@@ -196,7 +196,7 @@ class Portfolio:
         self.peak_equity = initial_capital
         
         # Timestamp
-        self.current_time = datetime.utcnow()
+        self.current_time = datetime.now(timezone.utc)
     
     @property
     def total_equity(self) -> float:
@@ -424,4 +424,4 @@ class Portfolio:
         self.equity_curve.clear()
         self.trades.clear()
         self.peak_equity = self.initial_capital
-        self.current_time = datetime.utcnow()
+        self.current_time = datetime.now(timezone.utc)

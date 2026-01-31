@@ -13,7 +13,7 @@ import pickle
 import gzip
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
@@ -31,7 +31,7 @@ class CacheEntry:
     """Represents a cached data entry."""
     key: str
     data: Any
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: Optional[datetime] = None
     metadata: Dict = field(default_factory=dict)
     
@@ -40,12 +40,12 @@ class CacheEntry:
         """Check if cache entry is expired."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     @property
     def age_hours(self) -> float:
         """Get age of cache entry in hours."""
-        delta = datetime.utcnow() - self.created_at
+        delta = datetime.now(timezone.utc) - self.created_at
         return delta.total_seconds() / 3600
 
 
@@ -155,7 +155,7 @@ class DiskCache:
             expires_at = self._index[key].get('expires_at')
             if expires_at:
                 expires_dt = datetime.fromisoformat(expires_at)
-                if datetime.utcnow() > expires_dt:
+                if datetime.now(timezone.utc) > expires_dt:
                     self.remove(key)
                     return None
         
@@ -220,7 +220,7 @@ class DiskCache:
     
     def cleanup_expired(self):
         """Remove expired entries."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_keys = []
         
         for key, info in self._index.items():
@@ -352,7 +352,7 @@ class DataCache:
         entry = CacheEntry(
             key=key,
             data=data,
-            expires_at=datetime.utcnow() + timedelta(hours=expiry),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expiry),
             metadata=metadata or {
                 'symbol': symbol,
                 'interval': interval,
@@ -500,7 +500,7 @@ class DataCache:
             logger.warning("No fetch function provided for preload")
             return
         
-        end = datetime.utcnow()
+        end = datetime.now(timezone.utc)
         start = end - timedelta(days=days)
         
         total = len(symbols) * len(intervals)

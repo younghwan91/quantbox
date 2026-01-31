@@ -5,7 +5,7 @@ Provides unified interface for both backtesting and live trading.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Callable, Any
 import pandas as pd
 import numpy as np
@@ -58,7 +58,7 @@ class TradingEngine:
         
         # Market data
         self.current_prices: Dict[str, float] = {}
-        self.current_time: datetime = datetime.utcnow()
+        self.current_time: datetime = datetime.now(timezone.utc)
         
         # Callbacks for custom event handling
         self._on_signal_callbacks: List[Callable] = []
@@ -381,10 +381,10 @@ class TradingEngine:
                     bar_data = self._fetch_current_data()
                     
                     # Update market data
-                    self.update_market_data(datetime.utcnow(), bar_data)
+                    self.update_market_data(datetime.now(timezone.utc), bar_data)
                     
                     # Run strategy
-                    strategy_func(self, datetime.utcnow(), bar_data)
+                    strategy_func(self, datetime.now(timezone.utc), bar_data)
                     
                     # Process events
                     self.process_events()

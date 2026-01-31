@@ -7,7 +7,8 @@ from datetime import datetime
 
 from quantbox.core.events import (
     Event, EventType, MarketEvent, SignalEvent, OrderEvent, FillEvent,
-    RiskEvent, PositionEvent, EventQueue, SignalType, OrderType, OrderSide
+    SignalType, OrderType, OrderSide, EventQueue, PositionEvent, RiskEvent,
+    create_pair_signal, create_pair_orders
 )
 
 
@@ -23,7 +24,8 @@ class TestEventTypes:
     def test_signal_types(self):
         assert SignalType.LONG.value == "LONG"
         assert SignalType.SHORT.value == "SHORT"
-        assert SignalType.CLOSE_ALL.value == "CLOSE_ALL"
+        assert SignalType.EXIT_LONG.value == "EXIT_LONG"
+        assert SignalType.EXIT_SHORT.value == "EXIT_SHORT"
 
 
 class TestMarketEvent:
@@ -31,23 +33,24 @@ class TestMarketEvent:
     
     def test_creation(self):
         event = MarketEvent(
-            timestamp=datetime.now(),
             symbol="BTCUSDT",
-            data={'close': 50000.0}
+            open=100.0,
+            high=105.0,
+            low=98.0,
+            close=102.0,
+            volume=1000.0
         )
+        
         assert event.type == EventType.MARKET
         assert event.symbol == "BTCUSDT"
-        assert event.data['close'] == 50000.0
+        assert event.close == 102.0
     
-    def test_str_representation(self):
+    def test_with_data_dict(self):
         event = MarketEvent(
-            timestamp=datetime.now(),
-            symbol="BTCUSDT",
-            data={}
+            symbol="ETHUSDT",
+            data={'extra_field': 'value'}
         )
-        str_rep = str(event)
-        assert "MARKET" in str_rep
-        assert "BTCUSDT" in str_rep
+        assert event.data['extra_field'] == 'value'
 
 
 class TestSignalEvent:
@@ -55,23 +58,30 @@ class TestSignalEvent:
     
     def test_long_signal(self):
         event = SignalEvent(
-            timestamp=datetime.now(),
-            symbol="BTCUSDT",
             signal_type=SignalType.LONG,
-            strength=0.8
+            symbol1="BTCUSDT",
+            symbol2="ETHUSDT",
+            z_score=2.5,
+            hedge_ratio=0.5
         )
+        
+        assert event.type == EventType.SIGNAL
         assert event.signal_type == SignalType.LONG
-        assert event.strength == 0.8
+        assert event.symbol1 == "BTCUSDT"
+        assert event.symbol2 == "ETHUSDT"
+        assert event.z_score == 2.5
     
     def test_with_metadata(self):
         event = SignalEvent(
-            timestamp=datetime.now(),
-            symbol="BTCUSDT",
             signal_type=SignalType.SHORT,
-            strength=0.5,
-            metadata={'z_score': -2.5}
+            symbol1="BTCUSDT",
+            symbol2="ETHUSDT",
+            z_score=-2.5,
+            hedge_ratio=0.5,
+            metadata={'strategy': 'pair_trading'}
         )
-        assert event.metadata['z_score'] == -2.5
+        
+        assert event.metadata['strategy'] == 'pair_trading'
 
 
 class TestOrderEvent:
@@ -79,27 +89,28 @@ class TestOrderEvent:
     
     def test_market_order(self):
         event = OrderEvent(
-            timestamp=datetime.now(),
             symbol="BTCUSDT",
             order_type=OrderType.MARKET,
             side=OrderSide.BUY,
-            quantity=0.1
+            quantity=1.0
         )
+        
+        assert event.type == EventType.ORDER
         assert event.order_type == OrderType.MARKET
         assert event.side == OrderSide.BUY
-        assert event.quantity == 0.1
+        assert event.quantity == 1.0
     
     def test_limit_order(self):
         event = OrderEvent(
-            timestamp=datetime.now(),
-            symbol="BTCUSDT",
+            symbol="ETHUSDT",
             order_type=OrderType.LIMIT,
             side=OrderSide.SELL,
-            quantity=0.1,
-            price=51000.0
+            quantity=2.0,
+            price=1800.0
         )
+        
         assert event.order_type == OrderType.LIMIT
-        assert event.price == 51000.0
+        assert event.price == 1800.0
 
 
 class TestFillEvent:
@@ -107,28 +118,33 @@ class TestFillEvent:
     
     def test_fill_creation(self):
         event = FillEvent(
-            timestamp=datetime.now(),
+            order_id="order123",
             symbol="BTCUSDT",
             side=OrderSide.BUY,
-            quantity=0.1,
-            price=50000.0,
-            commission=2.5
+            fill_quantity=1.0,
+            fill_price=50000.0,
+            commission=25.0
         )
-        assert event.price == 50000.0
-        assert event.commission == 2.5
+        
+        assert event.type == EventType.FILL
+        assert event.fill_quantity == 1.0
+        assert event.fill_price == 50000.0
+        assert event.commission == 25.0
     
-    def test_fill_value(self):
+    def test_total_cost(self):
         event = FillEvent(
-            timestamp=datetime.now(),
+            order_id="order456",
             symbol="BTCUSDT",
             side=OrderSide.BUY,
-            quantity=0.1,
-            price=50000.0,
-            commission=2.5
+            fill_quantity=2.0,
+            fill_price=50000.0,
+            commission=50.0,
+            slippage=10.0
         )
-        # Value = quantity * price
-        expected_value = 0.1 * 50000.0
-        assert event.quantity * event.price == expected_value
+        
+        # total_cost = qty * price + commission + slippage
+        expected = 2.0 * 50000.0 + 50.0 + 10.0
+        assert event.total_cost == expected
 
 
 class TestEventQueue:
@@ -136,53 +152,111 @@ class TestEventQueue:
     
     def test_empty_queue(self):
         queue = EventQueue()
-        assert queue.is_empty()
-        assert queue.get() is None
+        assert queue.empty() is True
     
     def test_put_and_get(self):
         queue = EventQueue()
-        event = MarketEvent(
-            timestamp=datetime.now(),
-            symbol="BTCUSDT",
-            data={}
-        )
+        event = MarketEvent(symbol="BTCUSDT")
         
         queue.put(event)
-        assert not queue.is_empty()
+        assert queue.empty() is False
         
-        retrieved = queue.get()
-        assert retrieved == event
-        assert queue.is_empty()
+        retrieved = queue.get(block=False)
+        assert retrieved.symbol == "BTCUSDT"
+        assert queue.empty() is True
     
     def test_fifo_order(self):
         queue = EventQueue()
         
         events = [
-            MarketEvent(datetime.now(), "BTC", {}),
-            MarketEvent(datetime.now(), "ETH", {}),
-            MarketEvent(datetime.now(), "BNB", {}),
+            MarketEvent(symbol="BTC"),
+            MarketEvent(symbol="ETH"),
+            MarketEvent(symbol="BNB"),
         ]
         
-        for e in events:
-            queue.put(e)
+        for event in events:
+            queue.put(event)
         
-        for expected in events:
-            assert queue.get().symbol == expected.symbol
+        assert queue.get(block=False).symbol == "BTC"
+        assert queue.get(block=False).symbol == "ETH"
+        assert queue.get(block=False).symbol == "BNB"
     
-    def test_clear(self):
+    def test_register_handler(self):
         queue = EventQueue()
-        queue.put(MarketEvent(datetime.now(), "BTC", {}))
-        queue.put(MarketEvent(datetime.now(), "ETH", {}))
+        results = []
         
-        queue.clear()
-        assert queue.is_empty()
+        def handler(event):
+            results.append(event.symbol)
+        
+        queue.register_handler(EventType.MARKET, handler)
+        
+        event = MarketEvent(symbol="BTCUSDT")
+        queue.process(event)
+        
+        assert "BTCUSDT" in results
+
+
+class TestPairSignalFactory:
+    """Tests for pair signal factory function."""
     
-    def test_size(self):
-        queue = EventQueue()
-        assert len(queue) == 0
+    def test_create_pair_signal(self):
+        signal = create_pair_signal(
+            symbol1="BTCUSDT",
+            symbol2="ETHUSDT",
+            signal_type=SignalType.LONG,
+            z_score=2.5,
+            hedge_ratio=0.5,
+            strategy_id="pair_v1"
+        )
         
-        queue.put(MarketEvent(datetime.now(), "BTC", {}))
-        assert len(queue) == 1
+        assert signal.symbol1 == "BTCUSDT"
+        assert signal.symbol2 == "ETHUSDT"
+        assert signal.signal_type == SignalType.LONG
+        assert signal.z_score == 2.5
+        assert signal.hedge_ratio == 0.5
+
+
+class TestPairOrders:
+    """Tests for pair order creation."""
+    
+    def test_create_pair_orders_long(self):
+        signal = SignalEvent(
+            signal_type=SignalType.LONG,
+            symbol1="BTCUSDT",
+            symbol2="ETHUSDT",
+            z_score=2.5,
+            hedge_ratio=0.5
+        )
         
-        queue.put(MarketEvent(datetime.now(), "ETH", {}))
-        assert len(queue) == 2
+        orders = create_pair_orders(
+            signal=signal,
+            capital=10000.0,
+            price1=50000.0,
+            price2=2000.0
+        )
+        
+        assert len(orders) == 2
+        assert orders[0].symbol == "BTCUSDT"
+        assert orders[0].side == OrderSide.BUY
+        assert orders[1].symbol == "ETHUSDT"
+        assert orders[1].side == OrderSide.SELL
+    
+    def test_create_pair_orders_short(self):
+        signal = SignalEvent(
+            signal_type=SignalType.SHORT,
+            symbol1="BTCUSDT",
+            symbol2="ETHUSDT",
+            z_score=-2.5,
+            hedge_ratio=0.5
+        )
+        
+        orders = create_pair_orders(
+            signal=signal,
+            capital=10000.0,
+            price1=50000.0,
+            price2=2000.0
+        )
+        
+        assert len(orders) == 2
+        assert orders[0].side == OrderSide.SELL  # Short spread
+        assert orders[1].side == OrderSide.BUY

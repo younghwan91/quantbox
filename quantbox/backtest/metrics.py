@@ -270,8 +270,8 @@ def calculate_monthly_returns(equity_curve: pd.DataFrame) -> pd.DataFrame:
     equity = equity_curve['equity'].copy()
     equity.index = pd.to_datetime(equity.index)
     
-    # Resample to monthly
-    monthly = equity.resample('M').last()
+    # Resample to monthly (ME = Month End for pandas >= 2.2)
+    monthly = equity.resample('ME').last()
     monthly_returns = monthly.pct_change()
     
     # Pivot to year x month format
