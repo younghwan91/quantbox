@@ -185,7 +185,7 @@ class LivePairTrader:
         return {
             # Data settings
             'quote_currency': 'USDT',
-            'n_coins': int(os.getenv('N_COINS', 20)),
+            'n_coins': int(os.getenv('N_COINS', 30)),  # 30 coins = 435 pairs
             'interval': '15m',
             'formation_hours': 168,  # 7 days
             
