@@ -62,6 +62,33 @@ QuantBox는 암호화폐 **페어 트레이딩(Pair Trading)** 을 위한 종합
 | Walk-Forward | Out-of-Sample 검증 |
 | Numba 가속 | 성능 핵심 계산 JIT 컴파일 |
 
+### 1.4 ⚠️ 중요: 데이터 정책
+
+> **모든 백테스팅과 분석은 반드시 실제 시장 데이터만 사용합니다.**
+> 
+> - ❌ 합성 데이터(synthetic data) 사용 금지
+> - ❌ 가짜 데이터(fake data) 생성 금지
+> - ❌ 더미 데이터(dummy data) 테스트 금지
+> - ✅ 바이낸스 선물 실제 가격 데이터만 사용
+
+**실제 데이터 로딩 방법:**
+```python
+from quantbox.data.real_data_loader import RealDataLoader
+
+# 실제 데이터만 로드하는 공식 방법
+loader = RealDataLoader()
+data = loader.load_data(
+    symbols=['BTCUSDT', 'ETHUSDT', 'SOLUSDT'],
+    min_bars=500,
+    align_data=True
+)
+
+# 사용 가능한 심볼 확인
+symbols = loader.get_available_symbols()
+```
+
+이 정책은 백테스트 결과의 신뢰성을 보장하기 위함입니다.
+
 ---
 
 ## 2. 설치 및 환경 설정
