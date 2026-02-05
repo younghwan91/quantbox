@@ -115,8 +115,8 @@ class LivePairTrader:
             'stop_loss_zscore': float(os.getenv('STOP_LOSS_ZSCORE', 3.5)),
             'max_holding_hours': 24,
             
-            # Risk parameters
-            'max_position_pct': 0.1,  # 10% of capital per trade
+            # Risk parameters (Half Kelly: 12.5%)
+            'max_position_pct': 0.125,  # Half Kelly criterion
             'trading_fee': float(os.getenv('TRADING_FEE', 0.0005)),
             'slippage': float(os.getenv('SLIPPAGE', 0.001)),
             'leverage': 1,
