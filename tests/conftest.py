@@ -1,94 +1,86 @@
 """
 Test fixtures and shared utilities for tests.
+
+IMPORTANT: All test data comes from REAL Binance Futures data cached locally.
+NO synthetic/fake data generation is allowed.
 """
 
 import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from pathlib import Path
+
+
+def _get_real_data_loader():
+    """Get the real data loader instance."""
+    from quantbox.data.real_data_loader import RealDataLoader
+    return RealDataLoader()
+
+
+@pytest.fixture(scope="session")
+def real_data_available():
+    """Check if real data is available in cache."""
+    loader = _get_real_data_loader()
+    symbols = loader.get_available_symbols()
+    return len(symbols) >= 2
 
 
 @pytest.fixture
-def sample_ohlcv():
-    """Generate sample OHLCV data."""
-    np.random.seed(42)
-    n = 500
+def sample_ohlcv(real_data_available):
+    """Load REAL OHLCV data from Binance cache."""
+    if not real_data_available:
+        pytest.skip("Real data not available - run data downloader first")
     
-    dates = pd.date_range(start='2023-01-01', periods=n, freq='h')
+    loader = _get_real_data_loader()
+    df = loader.load_symbol('BTCUSDT')
     
-    # Generate random walk
-    price = 100
-    prices = []
-    for _ in range(n):
-        price *= np.exp(np.random.randn() * 0.02)
-        prices.append(price)
+    if df is None:
+        # Try any available symbol
+        symbols = loader.get_available_symbols()
+        if symbols:
+            df = loader.load_symbol(symbols[0])
     
-    df = pd.DataFrame({
-        'Open': prices,
-        'High': [p * 1.01 for p in prices],
-        'Low': [p * 0.99 for p in prices],
-        'Close': [p * (1 + np.random.randn() * 0.005) for p in prices],
-        'Volume': np.random.randint(1000, 10000, n)
-    }, index=dates)
+    if df is None:
+        pytest.skip("No real data available - run data downloader first")
     
     return df
 
 
 @pytest.fixture
-def sample_pair_data():
-    """Generate correlated pair data for testing."""
-    np.random.seed(42)
-    n = 500
+def sample_pair_data(real_data_available):
+    """Load REAL correlated pair data from Binance cache."""
+    if not real_data_available:
+        pytest.skip("Real data not available - run data downloader first")
     
-    dates = pd.date_range(start='2023-01-01', periods=n, freq='h')
+    loader = _get_real_data_loader()
+    data = loader.load_data(
+        symbols=['BTCUSDT', 'ETHUSDT'],
+        min_bars=100,
+        align_data=True
+    )
     
-    # Generate correlated prices
-    common_factor = np.cumsum(np.random.randn(n) * 0.01)
-    noise1 = np.cumsum(np.random.randn(n) * 0.005)
-    noise2 = np.cumsum(np.random.randn(n) * 0.005)
+    if len(data) < 2:
+        pytest.skip("Insufficient real data - need BTCUSDT and ETHUSDT")
     
-    price1 = 100 * np.exp(common_factor + noise1)
-    price2 = 50 * np.exp(common_factor * 1.2 + noise2)
-    
-    df1 = pd.DataFrame({
-        'Open': price1,
-        'High': price1 * 1.01,
-        'Low': price1 * 0.99,
-        'Close': price1,
-        'Volume': np.random.randint(1000, 10000, n)
-    }, index=dates)
-    
-    df2 = pd.DataFrame({
-        'Open': price2,
-        'High': price2 * 1.01,
-        'Low': price2 * 0.99,
-        'Close': price2,
-        'Volume': np.random.randint(1000, 10000, n)
-    }, index=dates)
-    
-    return {'BTCUSDT': df1, 'ETHUSDT': df2}
+    return data
 
 
 @pytest.fixture
-def multi_symbol_data(sample_pair_data):
-    """Generate multi-symbol data."""
-    np.random.seed(43)
-    n = len(sample_pair_data['BTCUSDT'])
-    dates = sample_pair_data['BTCUSDT'].index
+def multi_symbol_data(real_data_available):
+    """Load REAL multi-symbol data from Binance cache."""
+    if not real_data_available:
+        pytest.skip("Real data not available - run data downloader first")
     
-    data = sample_pair_data.copy()
+    loader = _get_real_data_loader()
+    data = loader.load_data(
+        symbols=['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'],
+        min_bars=100,
+        align_data=True
+    )
     
-    # Add more symbols
-    for symbol, base_price in [('BNBUSDT', 300), ('SOLUSDT', 25), ('ADAUSDT', 0.5)]:
-        price = base_price * np.exp(np.cumsum(np.random.randn(n) * 0.015))
-        
-        data[symbol] = pd.DataFrame({
-            'Open': price,
-            'High': price * 1.01,
-            'Low': price * 0.99,
-            'Close': price,
-            'Volume': np.random.randint(1000, 10000, n)
-        }, index=dates)
+    if len(data) < 3:
+        pytest.skip("Insufficient real data - need at least 3 symbols")
     
     return data
 

@@ -2,18 +2,9 @@
 Analysis UI module - Streamlit-based dashboard for backtesting and analysis.
 """
 
-from quantbox.ui.dashboard import run_dashboard
-from quantbox.ui.components import (
-    plot_equity_curve,
-    plot_drawdown,
-    plot_trades,
-    metrics_card,
-)
+# Main dashboard app
+from quantbox.ui.app import main as run_app
 
 __all__ = [
-    "run_dashboard",
-    "plot_equity_curve",
-    "plot_drawdown",
-    "plot_trades",
-    "metrics_card",
+    "run_app",
 ]
