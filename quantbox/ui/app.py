@@ -5,11 +5,10 @@ Web-based UI for:
 1. Running and visualizing backtests
 2. Monitoring live trading
 3. Analyzing performance metrics
-4. Comparing strategies
 
 Built with Streamlit for easy deployment.
 
-Run: streamlit run quantbox/ui/dashboard.py
+Run: streamlit run quantbox/ui/app.py
 """
 
 import streamlit as st
