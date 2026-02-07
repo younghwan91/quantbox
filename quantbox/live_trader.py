@@ -80,80 +80,7 @@ for log_name in ['urllib3', 'requests', 'binance']:
     logging.getLogger(log_name).setLevel(logging.WARNING)
 
 
-class DiscordNotifier:
-    """Discord 웹훅 알림 전송"""
-    
-    def __init__(self, webhook_url: Optional[str] = None):
-        self.webhook_url = webhook_url or os.getenv('DISCORD_WEBHOOK_URL')
-        self.enabled = bool(self.webhook_url)
-        if self.enabled:
-            logger.info("Discord notifications enabled")
-    
-    def send(self, content: str = None, embed: Dict = None) -> bool:
-        """메시지 전송"""
-        if not self.enabled:
-            return False
-        
-        try:
-            data = {}
-            if content:
-                data['content'] = content
-            if embed:
-                data['embeds'] = [embed]
-            
-            r = requests.post(self.webhook_url, json=data, timeout=5)
-            return r.status_code == 204
-        except Exception as e:
-            logger.warning(f"Discord notification failed: {e}")
-            return False
-    
-    def notify_start(self, mode: str, balance: float):
-        """봇 시작 알림"""
-        self.send(embed={
-            'title': '🚀 QuantBox 트레이딩 시작',
-            'color': 0x00ff00,
-            'fields': [
-                {'name': '모드', 'value': mode, 'inline': True},
-                {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
-                {'name': '시작 시간', 'value': datetime.now().strftime('%Y-%m-%d %H:%M'), 'inline': True}
-            ]
-        })
-    
-    def notify_open(self, symbol1: str, symbol2: str, direction: str, zscore: float, capital: float):
-        """포지션 오픈 알림"""
-        color = 0x00ff00 if direction == 'LONG' else 0xff0000
-        self.send(embed={
-            'title': f'📈 포지션 오픈',
-            'color': color,
-            'fields': [
-                {'name': '페어', 'value': f'{symbol1}/{symbol2}', 'inline': True},
-                {'name': '방향', 'value': direction, 'inline': True},
-                {'name': 'Z-Score', 'value': f'{zscore:.2f}', 'inline': True},
-                {'name': '투자금', 'value': f'${capital:,.2f}', 'inline': True}
-            ]
-        })
-    
-    def notify_close(self, symbol1: str, symbol2: str, pnl: float, pnl_pct: float, reason: str):
-        """포지션 청산 알림"""
-        color = 0x00ff00 if pnl >= 0 else 0xff0000
-        emoji = '✅' if pnl >= 0 else '❌'
-        self.send(embed={
-            'title': f'{emoji} 포지션 청산',
-            'color': color,
-            'fields': [
-                {'name': '페어', 'value': f'{symbol1}/{symbol2}', 'inline': True},
-                {'name': 'PnL', 'value': f'${pnl:+,.2f} ({pnl_pct:+.2f}%)', 'inline': True},
-                {'name': '청산 사유', 'value': reason, 'inline': True}
-            ]
-        })
-    
-    def notify_error(self, error: str):
-        """에러 알림"""
-        self.send(embed={
-            'title': '⚠️ 에러 발생',
-            'color': 0xff9900,
-            'description': error[:500]
-        })
+from quantbox.notifications.discord import DiscordNotifier
 
 
 class LivePairTrader:
@@ -810,7 +737,11 @@ class LivePairTrader:
         # Discord 알림
         self.discord.notify_open(
             symbol1, symbol2, f"[S{slot_id}] {direction}",
-            z_score, notional1 + notional2
+            z_score, capital,
+            slot_id=slot_id,
+            leverage=leverage,
+            margin=margin,
+            available_after=self.get_available_balance(),
         )
         
         return True
@@ -908,14 +839,71 @@ class LivePairTrader:
             logger.info(f"Slot {slot_id}: Trade closed: PnL=${total_pnl:.2f} ({pnl_pct:+.2f}%), Reason={close_reason}")
             
             # Discord 알림
+            elapsed_hours = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
+            cumulative = sum(t['pnl'] for t in self.trade_history)
             self.discord.notify_close(
-                pos['symbol1'], pos['symbol2'], total_pnl, pnl_pct, close_reason
+                pos['symbol1'], pos['symbol2'], total_pnl, pnl_pct, close_reason,
+                slot_id=slot_id,
+                holding_time=f'{elapsed_hours:.1f}h',
+                cumulative_pnl=cumulative,
+                balance_after=self.get_available_balance(),
             )
             
             return False
         
         return True  # Keep position
     
+    # ==================== Helpers ====================
+
+    def _build_slots_info(self) -> list[dict]:
+        """슬롯 상태 정보 리스트 생성 (Discord 알림용).
+
+        Returns:
+            슬롯별 상태 딕셔너리 리스트.
+        """
+        info: list[dict] = []
+        for slot in self.slots:
+            if slot.position_open and slot.slot_id in self.slot_positions:
+                pos = self.slot_positions[slot.slot_id]
+                entry_time = self.slot_entry_times.get(slot.slot_id)
+                hours = 0.0
+                if entry_time:
+                    hours = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
+
+                # Unrealized PnL
+                try:
+                    p1 = self.get_price(pos['symbol1'])
+                    p2 = self.get_price(pos['symbol2'])
+                    pnl = (p1 - pos['entry_price1']) * pos['qty1'] + \
+                          (p2 - pos['entry_price2']) * pos['qty2']
+                except Exception:
+                    pnl = 0.0
+
+                # Current z-score
+                try:
+                    current_z = self.calculate_zscore(
+                        p1, p2, pos['hedge_ratio'],
+                        pos['spread_mean'], pos['spread_std'],
+                    )
+                except Exception:
+                    current_z = 0.0
+
+                info.append({
+                    'slot_id': slot.slot_id,
+                    'status': 'active',
+                    'pair': f"{pos['symbol1']}/{pos['symbol2']}",
+                    'unrealized_pnl': pnl,
+                    'holding_hours': hours,
+                    'entry_z': pos.get('entry_zscore', 0.0),
+                    'current_z': current_z,
+                })
+            else:
+                info.append({
+                    'slot_id': slot.slot_id,
+                    'status': 'idle',
+                })
+        return info
+
     # ==================== Main Loop ====================
     
     def run_cycle(self):
@@ -943,6 +931,7 @@ class LivePairTrader:
         idle = get_idle_slots(self.slots)
         if not idle:
             logger.info("All slots occupied, waiting...")
+            self.discord.notify_all_slots_occupied(self._build_slots_info())
             return True
 
         # 3. Get capital info (matches backtest pool model)
@@ -952,6 +941,7 @@ class LivePairTrader:
 
         if available < 100:
             logger.warning("Insufficient balance for new trades")
+            self.discord.notify_insufficient_balance(available, required=100.0)
             return True
 
         # 4. Get trading coins and download data
@@ -996,6 +986,44 @@ class LivePairTrader:
                 time.sleep(2)
 
         logger.info("Cycle completed")
+
+        # ── Cycle Summary ──
+        slots_info = self._build_slots_info()
+        available = self.get_available_balance()
+        total = self.get_total_balance()
+        total_unrealized = sum(
+            s.get('unrealized_pnl', 0.0) for s in slots_info if s['status'] == 'active'
+        )
+        session_pnl = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
+        self.discord.notify_cycle_summary(
+            slots_info=slots_info,
+            available_capital=available,
+            total_capital=total,
+            total_unrealized_pnl=total_unrealized,
+            session_pnl=session_pnl,
+            n_trades_session=len(self.trade_history),
+        )
+
+        # ── Daily Report (24h 주기) ──
+        if self.discord.should_send_daily_report():
+            wins = [t for t in self.trade_history if t['pnl'] > 0]
+            win_rate = (len(wins) / len(self.trade_history) * 100) if self.trade_history else 0.0
+            active_count = len(get_active_slots(self.slots))
+            self.discord.notify_daily_report(
+                total_balance=total,
+                daily_pnl=session_pnl,
+                daily_return_pct=(session_pnl / total * 100) if total > 0 else 0.0,
+                cumulative_pnl=session_pnl,
+                cumulative_return_pct=(session_pnl / total * 100) if total > 0 else 0.0,
+                n_trades_today=len(self.trade_history),
+                n_trades_total=len(self.trade_history),
+                win_rate=win_rate,
+                max_drawdown_pct=0.0,  # 라이브에선 별도 DD 트래킹 필요
+                active_slots=active_count,
+                max_slots=self.max_traders,
+                leverage=self.config['leverage'],
+            )
+
         return True
 
     def run_once(self):
@@ -1015,7 +1043,11 @@ class LivePairTrader:
         # Discord 시작 알림
         balance = self.get_available_balance()
         mode = "PAPER" if self.paper_mode else "LIVE"
-        self.discord.notify_start(mode, balance)
+        self.discord.notify_start(
+            mode, balance,
+            leverage=self.config['leverage'],
+            max_traders=self.max_traders,
+        )
         
         try:
             while True:
@@ -1032,6 +1064,12 @@ class LivePairTrader:
                     
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
+            total_pnl = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
+            self.discord.notify_stop(
+                reason='사용자 종료',
+                total_pnl=total_pnl,
+                n_trades=len(self.trade_history),
+            )
             self.close_all_positions()
             self.print_summary()
     
