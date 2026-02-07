@@ -30,6 +30,13 @@ import requests
 
 # QuantBox imports
 from quantbox.core.config import Config, TradingMode
+from quantbox.core.trader_slot import (
+    TraderSlotState,
+    get_occupied_symbols,
+    get_idle_slots,
+    get_active_slots,
+    is_pair_available,
+)
 from quantbox.strategy.pair_selector import PairSelector, PairCandidate
 from quantbox.strategy.filters import (
     FilterPipeline, CorrelationFilter, CointegrationFilter,
@@ -133,7 +140,12 @@ class DiscordNotifier:
 
 
 class LivePairTrader:
-    """실시간 페어 트레이딩 시스템"""
+    """실시간 페어 트레이딩 시스템 - 멀티 트레이더 지원
+
+    최대 max_traders명의 독립적인 트레이더 슬롯이 동시에 운영되며,
+    각 슬롯은 독립적으로 페어를 탐색하고 포지션을 관리한다.
+    심볼 중복은 슬롯 간 방지된다.
+    """
     
     def __init__(
         self,
@@ -161,14 +173,20 @@ class LivePairTrader:
             max_pairs=20
         )
         
-        # State
-        self.current_position: Optional[Dict] = None
-        self.position_entry_time: Optional[datetime] = None
+        # Multi-trader state
+        self.max_traders: int = self.config.get('max_traders', 5)
+        self.slots: list[TraderSlotState] = [
+            TraderSlotState(slot_id=i) for i in range(self.max_traders)
+        ]
+        # slot_id -> position dict
+        self.slot_positions: dict[int, Dict] = {}
+        # slot_id -> entry time
+        self.slot_entry_times: dict[int, datetime] = {}
         self.trade_history: List[Dict] = []
         self.prev_prices: Dict[str, float] = {}
         
         # Paper trading state
-        self.paper_balance = float(os.getenv('PAPER_BALANCE', 1000.0))  # Default 1000 USDT
+        self.paper_balance = float(os.getenv('PAPER_BALANCE', 1000.0))
         self.paper_positions: List[Dict] = []
         
         # Discord notifications
@@ -176,6 +194,7 @@ class LivePairTrader:
         
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
+        logger.info(f"Max concurrent traders: {self.max_traders}")
         logger.info(f"Testnet: {testnet}")
         if paper_mode:
             logger.info(f"Paper Balance: ${self.paper_balance:.2f} USDT")
@@ -200,6 +219,9 @@ class LivePairTrader:
             'trading_fee': float(os.getenv('TRADING_FEE', 0.0005)),
             'slippage': float(os.getenv('SLIPPAGE', 0.001)),
             'leverage': 1,
+            
+            # Multi-trader
+            'max_traders': int(os.getenv('MAX_TRADERS', 5)),
             
             # Filter parameters
             'min_correlation': 0.5,
@@ -462,29 +484,86 @@ class LivePairTrader:
         positions = self.get_current_positions()
         if not positions:
             logger.info("No positions to close")
-            return
-        
-        for pos in positions:
-            symbol = pos['symbol']
-            quantity = float(pos['positionAmt'])
-            logger.info(f"Closing position: {symbol} qty={quantity}")
-            self.close_position(symbol, quantity)
-        
-        time.sleep(2)
-        remaining = self.get_current_positions()
-        if remaining:
-            logger.warning(f"Some positions still open: {remaining}")
         else:
-            logger.info("All positions closed successfully")
-        
-        self.current_position = None
-        self.position_entry_time = None
+            for pos in positions:
+                symbol = pos['symbol']
+                quantity = float(pos['positionAmt'])
+                logger.info(f"Closing position: {symbol} qty={quantity}")
+                self.close_position(symbol, quantity)
+
+            time.sleep(2)
+            remaining = self.get_current_positions()
+            if remaining:
+                logger.warning(f"Some positions still open: {remaining}")
+            else:
+                logger.info("All positions closed successfully")
+
+        # Reset all slots regardless of exchange positions
+        for slot in self.slots:
+            slot.reset()
+        self.slot_positions.clear()
+        self.slot_entry_times.clear()
+
+    def close_slot_positions(self, slot_id: int):
+        """특정 슬롯의 포지션만 청산.
+
+        Args:
+            slot_id: 청산할 슬롯 ID.
+        """
+        if slot_id not in self.slot_positions:
+            return
+
+        pos = self.slot_positions[slot_id]
+        symbol1, symbol2 = pos['symbol1'], pos['symbol2']
+
+        # Close both legs
+        qty1 = pos.get('qty1', 0)
+        qty2 = pos.get('qty2', 0)
+
+        if abs(qty1) > 0:
+            self.close_position(symbol1, qty1)
+        if abs(qty2) > 0:
+            self.close_position(symbol2, qty2)
+
+        # Reset slot
+        self.slots[slot_id].reset()
+        del self.slot_positions[slot_id]
+        if slot_id in self.slot_entry_times:
+            del self.slot_entry_times[slot_id]
+
+    @property
+    def occupied_symbols(self) -> set[str]:
+        """현재 모든 활성 슬롯에서 사용 중인 심볼."""
+        return get_occupied_symbols(self.slots)
+
+    @property
+    def active_slot_count(self) -> int:
+        """현재 포지션을 보유 중인 슬롯 수."""
+        return len(get_active_slots(self.slots))
+
+    @property
+    def idle_slot_ids(self) -> list[int]:
+        """포지션이 없는 슬롯 ID 목록."""
+        return [s.slot_id for s in get_idle_slots(self.slots)]
     
     # ==================== Strategy Methods ====================
     
-    def find_best_pair(self, data: Dict[str, pd.DataFrame]) -> Optional[Tuple[PairCandidate, Dict]]:
-        """최적 페어 선택"""
-        logger.info("Searching for cointegrated pairs...")
+    def find_best_pair(
+        self,
+        data: Dict[str, pd.DataFrame],
+        excluded_symbols: set[str] = None,
+    ) -> Optional[Tuple[PairCandidate, Dict]]:
+        """최적 페어 선택 (이미 사용 중인 심볼 제외).
+
+        Args:
+            data: 심볼별 OHLCV 데이터.
+            excluded_symbols: 제외할 심볼 집합 (다른 슬롯이 사용 중).
+
+        Returns:
+            (PairCandidate, pair_info) 또는 None.
+        """
+        excluded_symbols = excluded_symbols or set()
+        logger.info(f"Searching for cointegrated pairs (excluded: {excluded_symbols or 'none'})...")
         
         candidates = self.pair_selector.select_pairs(data, progress=False)
         
@@ -502,8 +581,20 @@ class LivePairTrader:
         if not tradeable:
             logger.info("No pairs meet entry criteria")
             return None
+
+        # Find best pair that doesn't overlap with excluded symbols
+        best = None
+        for candidate in tradeable:
+            if is_pair_available(
+                (candidate.symbol1, candidate.symbol2), excluded_symbols
+            ):
+                best = candidate
+                break
+
+        if best is None:
+            logger.info("No pairs available (all overlap with active positions)")
+            return None
         
-        best = tradeable[0]
         logger.info(
             f"Best pair: {best.symbol1}/{best.symbol2} | "
             f"Z-Score: {best.current_z_score:.2f} | "
@@ -544,11 +635,22 @@ class LivePairTrader:
     
     def execute_pair_trade(
         self,
+        slot_id: int,
         pair: PairCandidate,
         pair_info: Dict,
         capital: float
     ) -> bool:
-        """페어 트레이드 실행"""
+        """특정 슬롯에서 페어 트레이드 실행.
+
+        Args:
+            slot_id: 트레이드를 실행할 슬롯 ID.
+            pair: 선택된 페어 후보.
+            pair_info: 헤지 비율, 스프레드 통계 등.
+            capital: 사용 가능한 자본.
+
+        Returns:
+            True if 포지션 진입 성공.
+        """
         symbol1, symbol2 = pair.symbol1, pair.symbol2
         hedge_ratio = pair_info['hedge_ratio']
         
@@ -557,7 +659,7 @@ class LivePairTrader:
         price2 = self.get_price(symbol2)
         
         if price1 <= 0 or price2 <= 0:
-            logger.error("Invalid prices")
+            logger.error(f"Slot {slot_id}: Invalid prices")
             return False
         
         # Calculate z-score
@@ -566,10 +668,10 @@ class LivePairTrader:
             pair_info['spread_mean'], pair_info['spread_std']
         )
         
-        logger.info(f"Current Z-Score: {z_score:.4f}")
+        logger.info(f"Slot {slot_id}: Current Z-Score: {z_score:.4f}")
         
         if abs(z_score) < self.config['entry_zscore']:
-            logger.info("Z-Score below entry threshold")
+            logger.info(f"Slot {slot_id}: Z-Score below entry threshold")
             return False
         
         # Determine signal: z < 0 -> Long spread, z > 0 -> Short spread
@@ -613,20 +715,20 @@ class LivePairTrader:
             logger.warning(f"Notional too small: {notional1:.2f}, {notional2:.2f}")
             return False
         
-        logger.info(f"Opening position: {symbol1} {side1} {qty1:.6f}, {symbol2} {side2} {qty2:.6f}")
-        logger.info(f"Capital usage: ${notional1 + notional2:.2f} ({(notional1 + notional2) / capital * 100:.1f}%)")
+        logger.info(f"Slot {slot_id}: Opening position: {symbol1} {side1} {qty1:.6f}, {symbol2} {side2} {qty2:.6f}")
+        logger.info(f"Slot {slot_id}: Capital usage: ${notional1 + notional2:.2f} ({(notional1 + notional2) / capital * 100:.1f}%)")
         
         # Place orders
         order1 = self.place_order(symbol1, side1, qty1)
         order2 = self.place_order(symbol2, side2, qty2)
         
         if not order1 or not order2:
-            logger.error("Order failed, closing positions")
-            self.close_all_positions()
+            logger.error(f"Slot {slot_id}: Order failed, closing slot positions")
+            self.close_slot_positions(slot_id)
             return False
         
-        # Record position
-        self.current_position = {
+        # Record position in slot
+        position_data = {
             'symbol1': symbol1,
             'symbol2': symbol2,
             'signal': signal,
@@ -639,31 +741,46 @@ class LivePairTrader:
             'spread_mean': pair_info['spread_mean'],
             'spread_std': pair_info['spread_std'],
         }
-        self.position_entry_time = datetime.now(timezone.utc)
+
+        # Update slot state
+        slot = self.slots[slot_id]
+        slot.position_open = True
+        slot.current_pair = (symbol1, symbol2)
+        slot.position_info = position_data
+        self.slot_positions[slot_id] = position_data
+        self.slot_entry_times[slot_id] = datetime.now(timezone.utc)
         
         direction = "LONG Spread" if signal == 1 else "SHORT Spread"
-        logger.info(f"Position opened: signal={signal}, z-score={z_score:.4f}")
+        logger.info(f"Slot {slot_id}: Position opened: signal={signal}, z-score={z_score:.4f}")
         
         # Discord 알림
         self.discord.notify_open(
-            symbol1, symbol2, direction, z_score, notional1 + notional2
+            symbol1, symbol2, f"[S{slot_id}] {direction}",
+            z_score, notional1 + notional2
         )
         
         return True
     
-    def monitor_position(self) -> bool:
-        """포지션 모니터링 및 청산 조건 확인"""
-        if not self.current_position:
+    def monitor_slot(self, slot_id: int) -> bool:
+        """특정 슬롯의 포지션 모니터링 및 청산 조건 확인.
+
+        Args:
+            slot_id: 모니터링할 슬롯 ID.
+
+        Returns:
+            True if 포지션 유지, False if 청산됨.
+        """
+        if slot_id not in self.slot_positions:
             return False
         
-        pos = self.current_position
+        pos = self.slot_positions[slot_id]
         
         # Get current prices
         price1 = self.get_price(pos['symbol1'])
         price2 = self.get_price(pos['symbol2'])
         
         if price1 <= 0 or price2 <= 0:
-            return True  # Keep position
+            return True  # Keep position (price fetch error)
         
         # Calculate current z-score
         z_score = self.calculate_zscore(
@@ -673,11 +790,13 @@ class LivePairTrader:
         
         signal = pos['signal']
         entry_z = pos['entry_zscore']
-        elapsed = (datetime.now(timezone.utc) - self.position_entry_time).total_seconds() / 3600
+        entry_time = self.slot_entry_times[slot_id]
+        elapsed = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
         
         logger.info(
-            f"Monitor: Z-Score={z_score:.4f} (entry={entry_z:.4f}), "
-            f"Elapsed={elapsed:.1f}h, Signal={signal}"
+            f"Slot {slot_id}: Monitor {pos['symbol1']}/{pos['symbol2']}: "
+            f"Z={z_score:.4f} (entry={entry_z:.4f}), "
+            f"Elapsed={elapsed:.1f}h"
         )
         
         should_close = False
@@ -705,7 +824,7 @@ class LivePairTrader:
             close_reason = "max_holding_time"
         
         if should_close:
-            logger.info(f"Closing position: {close_reason}")
+            logger.info(f"Slot {slot_id}: Closing position: {close_reason}")
             
             # Calculate PnL
             pnl1 = (price1 - pos['entry_price1']) * pos['qty1']
@@ -716,21 +835,23 @@ class LivePairTrader:
             entry_value = abs(pos['qty1'] * pos['entry_price1']) + abs(pos['qty2'] * pos['entry_price2'])
             pnl_pct = (total_pnl / entry_value * 100) if entry_value > 0 else 0
             
-            self.close_all_positions()
+            self.close_slot_positions(slot_id)
             
             # Record trade
             self.trade_history.append({
+                'slot_id': slot_id,
                 'symbol1': pos['symbol1'],
                 'symbol2': pos['symbol2'],
-                'entry_time': self.position_entry_time,
+                'entry_time': entry_time,
                 'exit_time': datetime.now(timezone.utc),
                 'entry_zscore': entry_z,
                 'exit_zscore': z_score,
                 'pnl': total_pnl,
+                'pnl_pct': pnl_pct,
                 'reason': close_reason,
             })
             
-            logger.info(f"Trade closed: PnL=${total_pnl:.2f}, Reason={close_reason}")
+            logger.info(f"Slot {slot_id}: Trade closed: PnL=${total_pnl:.2f} ({pnl_pct:+.2f}%), Reason={close_reason}")
             
             # Discord 알림
             self.discord.notify_close(
@@ -743,60 +864,83 @@ class LivePairTrader:
     
     # ==================== Main Loop ====================
     
-    def run_once(self):
-        """단일 트레이딩 사이클 실행"""
+    def run_cycle(self):
+        """단일 트레이딩 사이클: 모든 슬롯 모니터링 + 빈 슬롯에 새 트레이드 탐색.
+
+        비차단(non-blocking) 방식으로 모든 활성 슬롯을 순회하여 청산 조건을 확인하고,
+        유휴 슬롯이 있으면 새로운 페어를 탐색하여 진입한다.
+
+        Returns:
+            True if 사이클이 정상 완료됨.
+        """
         logger.info("=" * 60)
-        logger.info("Starting trading cycle...")
-        
-        # Check and close existing positions
-        positions = self.get_current_positions()
-        if positions:
-            logger.info(f"Found {len(positions)} existing positions, closing...")
-            self.close_all_positions()
-        
-        # Get available capital
+        active = get_active_slots(self.slots)
+        idle = get_idle_slots(self.slots)
+        logger.info(
+            f"Cycle: {len(active)} active, {len(idle)} idle "
+            f"(occupied: {self.occupied_symbols or 'none'})"
+        )
+
+        # 1. Monitor all active slots
+        for slot in active:
+            self.monitor_slot(slot.slot_id)
+
+        # 2. Refresh idle slot list (some may have closed above)
+        idle = get_idle_slots(self.slots)
+        if not idle:
+            logger.info("All slots occupied, waiting...")
+            return True
+
+        # 3. Get available capital
         capital = self.get_available_balance()
         logger.info(f"Available balance: ${capital:.2f}")
-        
+
         if capital < 100:
-            logger.warning("Insufficient balance")
-            return False
-        
-        # Get trading coins and download data
+            logger.warning("Insufficient balance for new trades")
+            return True
+
+        # 4. Get trading coins and download data
         coins = self.get_trading_coins()
         if not coins:
             logger.error("Failed to get trading coins")
-            return False
-        
+            return True
+
         data = self.download_multi_symbol_data(coins)
         if len(data) < 4:
             logger.error("Not enough data for pair selection")
-            return False
-        
-        # Find best pair
-        result = self.find_best_pair(data)
-        if not result:
-            logger.info("No suitable pairs found")
-            return False
-        
-        pair, pair_info = result
-        
-        # Execute trade
-        if not self.execute_pair_trade(pair, pair_info, capital):
-            return False
-        
-        # Monitor position
-        while self.current_position:
-            time.sleep(self.config['check_interval_seconds'])
-            if not self.monitor_position():
-                break
-        
-        logger.info("Trading cycle completed")
+            return True
+
+        # 5. For each idle slot, find and enter a new pair
+        excluded = self.occupied_symbols
+        for slot in idle:
+            result = self.find_best_pair(data, excluded_symbols=excluded)
+            if not result:
+                logger.info(f"Slot {slot.slot_id}: No suitable pair found")
+                break  # API 호출 최소화: 하나 못 찾으면 나머지도 없을 가능성 높음
+
+            pair, pair_info = result
+
+            if self.execute_pair_trade(slot.slot_id, pair, pair_info, capital):
+                # Update excluded symbols for next idle slot
+                excluded = self.occupied_symbols
+                # Short delay between orders to not spam the API
+                time.sleep(2)
+
+        logger.info("Cycle completed")
         return True
+
+    def run_once(self):
+        """레거시 호환: 하나의 트레이드 사이클 (모든 슬롯)."""
+        return self.run_cycle()
     
     def run_continuous(self):
-        """연속 트레이딩 루프"""
-        logger.info("Starting continuous trading loop...")
+        """연속 트레이딩 루프 - 멀티 트레이더 모드.
+
+        매 check_interval마다 모든 슬롯을 순회하며:
+        1. 활성 슬롯: 청산 조건 확인
+        2. 유휴 슬롯: 새 페어 탐색 및 진입
+        """
+        logger.info(f"Starting continuous trading loop (max {self.max_traders} slots)...")
         self.print_balance()
         
         # Discord 시작 알림
@@ -807,12 +951,13 @@ class LivePairTrader:
         try:
             while True:
                 try:
-                    self.run_once()
-                    time.sleep(60)  # Wait before next cycle
+                    self.run_cycle()
+                    time.sleep(self.config['check_interval_seconds'])
                     
                 except Exception as e:
                     logger.error(f"Error in trading cycle: {e}")
                     self.discord.notify_error(str(e))
+                    # 에러 시 모든 포지션 청산 (안전 조치)
                     self.close_all_positions()
                     time.sleep(60)
                     
