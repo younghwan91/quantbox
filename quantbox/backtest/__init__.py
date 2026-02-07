@@ -9,6 +9,7 @@ from quantbox.backtest.continuous_backtest import (
     BacktestState,
     ExitReason,
     run_continuous_backtest,
+    compute_kelly_from_backtest,
 )
 from quantbox.backtest.metrics import PerformanceMetrics, calculate_metrics
 
@@ -19,6 +20,7 @@ __all__ = [
     "BacktestState",
     "ExitReason",
     "run_continuous_backtest",
+    "compute_kelly_from_backtest",
     "PerformanceMetrics",
     "calculate_metrics",
 ]
