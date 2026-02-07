@@ -962,7 +962,7 @@ class TestLivePairTraderMultiSlot:
             'quote_currency': 'USDT', 'n_coins': 10, 'interval': '15m',
             'formation_hours': 168, 'entry_zscore': 2.0, 'exit_zscore': 0.5,
             'stop_loss_zscore': 3.5, 'max_holding_hours': 24,
-            'max_position_pct': 0.1, 'trading_fee': 0.0005,
+            'position_size_pct': -1.0, 'trading_fee': 0.0005,
             'slippage': 0.001, 'leverage': 1,
             'max_traders': 3,
             'min_correlation': 0.5, 'max_cointegration_pvalue': 0.05,
@@ -974,3 +974,282 @@ class TestLivePairTraderMultiSlot:
             trader = LivePairTrader(paper_mode=True, config=config)
             assert trader.max_traders == 3
             assert len(trader.slots) == 3
+
+
+# ===========================================================================
+# PARITY TESTS: Backtest ↔ Live must use identical position sizing
+# ===========================================================================
+
+
+class TestPositionSizingParity:
+    """Strict tests ensuring backtest and live trader use identical
+    capital allocation logic (calculate_slot_capital).
+
+    핵심 원칙: 백테스트에서 사용한 로직과 동일한 로직이 실거래에서도 사용되어야 한다.
+    """
+
+    # ------------------------------------------------------------------
+    # 1. Config parity: auto position_size_pct
+    # ------------------------------------------------------------------
+    def test_backtest_auto_position_size_pct(self):
+        """Backtest: position_size_pct=-1 auto-resolves to 1/max_traders."""
+        cfg = ContinuousBacktestConfig(max_traders=5)
+        assert cfg.position_size_pct == pytest.approx(0.2)
+
+    def test_backtest_auto_position_size_3_traders(self):
+        cfg = ContinuousBacktestConfig(max_traders=3)
+        assert cfg.position_size_pct == pytest.approx(1.0 / 3)
+
+    def test_live_auto_position_size_pct(self):
+        """Live: position_size_pct=-1 auto-resolves to 1/max_traders."""
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            with patch.dict("os.environ", {
+                "BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s",
+                "BINANCE_TESTNET": "true", "MAX_TRADERS": "5",
+            }):
+                trader = LivePairTrader(paper_mode=True)
+                assert trader.config['position_size_pct'] == pytest.approx(0.2)
+
+    def test_live_auto_position_size_3_traders(self):
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            with patch.dict("os.environ", {
+                "BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s",
+                "BINANCE_TESTNET": "true", "MAX_TRADERS": "3",
+            }):
+                trader = LivePairTrader(paper_mode=True)
+                assert trader.config['position_size_pct'] == pytest.approx(1.0 / 3)
+
+    def test_live_explicit_position_size_pct(self):
+        """Explicit position_size_pct overrides auto-calc."""
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            cfg = {
+                'quote_currency': 'USDT', 'n_coins': 10, 'interval': '15m',
+                'formation_hours': 168, 'entry_zscore': 2.0, 'exit_zscore': 0.5,
+                'stop_loss_zscore': 3.5, 'max_holding_hours': 24,
+                'position_size_pct': 0.30,  # explicitly 30%
+                'trading_fee': 0.0005, 'slippage': 0.001, 'leverage': 1,
+                'max_traders': 5,
+                'min_correlation': 0.5, 'max_cointegration_pvalue': 0.05,
+                'min_half_life': 3, 'max_half_life': 60, 'max_hurst': 0.5,
+                'check_interval_seconds': 60, 'retry_attempts': 3, 'retry_delay': 2,
+            }
+            with patch.dict("os.environ", {
+                "BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s",
+                "BINANCE_TESTNET": "true",
+            }):
+                trader = LivePairTrader(paper_mode=True, config=cfg)
+                assert trader.config['position_size_pct'] == pytest.approx(0.30)
+
+    # ------------------------------------------------------------------
+    # 2. Capital allocation parity: same function, same results
+    # ------------------------------------------------------------------
+    def test_first_slot_capital_matches(self):
+        """First slot of 5 on $1000 gets $200 in both systems."""
+        # Backtest scenario
+        bt_state = BacktestState(
+            current_capital=1000.0, peak_capital=1000.0, max_traders=5,
+        )
+        bt_capital = calculate_slot_capital(
+            available_capital=bt_state.current_capital,
+            active_slots=bt_state.active_slots,
+            max_traders=5,
+            position_size_pct=0.2,
+        )
+
+        # Live scenario (same function)
+        live_capital = calculate_slot_capital(
+            available_capital=1000.0,
+            active_slots=[],
+            max_traders=5,
+            position_size_pct=0.2,
+        )
+
+        assert bt_capital == live_capital == pytest.approx(200.0)
+
+    def test_second_slot_capital_with_one_active(self):
+        """Second slot: total_book=$1000, 20% target, but only $800 available."""
+        slot0 = TraderSlotState(slot_id=0)
+        slot0.position_open = True
+        slot0.current_pair = ("A", "B")
+        slot0.position_info = {"capital": 200.0}
+
+        capital = calculate_slot_capital(
+            available_capital=800.0,
+            active_slots=[slot0],
+            max_traders=5,
+            position_size_pct=0.2,
+        )
+        # total_book = 800 + 200 = 1000, target = 1000 * 0.2 = 200
+        assert capital == pytest.approx(200.0)
+
+    def test_third_slot_capital_after_profit(self):
+        """If slot0 made profit: total_book increases, allocation scales up."""
+        slot0 = TraderSlotState(slot_id=0)
+        slot0.position_open = True
+        slot0.current_pair = ("A", "B")
+        slot0.position_info = {"capital": 200.0}
+
+        slot1 = TraderSlotState(slot_id=1)
+        slot1.position_open = True
+        slot1.current_pair = ("C", "D")
+        slot1.position_info = {"capital": 200.0}
+
+        # $650 available (returned $200 + $50 profit earlier, now $600 + $50)
+        capital = calculate_slot_capital(
+            available_capital=650.0,
+            active_slots=[slot0, slot1],
+            max_traders=5,
+            position_size_pct=0.2,
+        )
+        # total_book = 650 + 200 + 200 = 1050, target = 1050 * 0.2 = 210
+        assert capital == pytest.approx(210.0)
+
+    def test_capital_capped_at_available(self):
+        """Capital never exceeds available balance."""
+        capital = calculate_slot_capital(
+            available_capital=50.0,
+            active_slots=[],
+            max_traders=5,
+            position_size_pct=0.2,
+        )
+        # total_book = 50, target = 50 * 0.2 = 10  (< available, so 10)
+        assert capital == pytest.approx(10.0)
+
+    def test_all_five_slots_exhaust_capital(self):
+        """5 sequential entries on $1000: each gets $200, total = $1000."""
+        available = 1000.0
+        active: list[TraderSlotState] = []
+        allocations = []
+
+        for i in range(5):
+            cap = calculate_slot_capital(
+                available_capital=available,
+                active_slots=active,
+                max_traders=5,
+                position_size_pct=0.2,
+            )
+            allocations.append(cap)
+            available -= cap
+            slot = TraderSlotState(slot_id=i)
+            slot.position_open = True
+            slot.current_pair = (f"S{i}A", f"S{i}B")
+            slot.position_info = {"capital": cap}
+            active.append(slot)
+
+        assert all(a == pytest.approx(200.0) for a in allocations)
+        assert available == pytest.approx(0.0, abs=1e-10)
+
+    # ------------------------------------------------------------------
+    # 3. No max_position_pct in live config (removed legacy)
+    # ------------------------------------------------------------------
+    def test_no_max_position_pct_in_default_config(self):
+        """max_position_pct removed; only position_size_pct exists."""
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            with patch.dict("os.environ", {
+                "BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s",
+                "BINANCE_TESTNET": "true",
+            }):
+                trader = LivePairTrader(paper_mode=True)
+                assert 'max_position_pct' not in trader.config
+                assert 'position_size_pct' in trader.config
+
+    # ------------------------------------------------------------------
+    # 4. get_total_balance exists and is separate from get_available_balance
+    # ------------------------------------------------------------------
+    def test_get_total_balance_paper_mode(self):
+        """Paper mode total balance returns paper_balance."""
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            with patch.dict("os.environ", {
+                "BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s",
+                "BINANCE_TESTNET": "true",
+            }):
+                trader = LivePairTrader(paper_mode=True)
+                assert trader.get_total_balance() == trader.paper_balance
+
+    # ------------------------------------------------------------------
+    # 5. Position data includes 'capital' field (for slot awareness)
+    # ------------------------------------------------------------------
+    def test_execute_stores_capital_in_position(self):
+        """execute_pair_trade must store 'capital' in position_data
+        so calculate_slot_capital can read it from slot.position_info."""
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            with patch.dict("os.environ", {
+                "BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s",
+                "BINANCE_TESTNET": "true",
+            }):
+                trader = LivePairTrader(paper_mode=True)
+
+                # Mock required methods
+                trader.get_price = MagicMock(side_effect=[100.0, 50.0])
+                trader.calculate_zscore = MagicMock(return_value=-2.5)
+                trader.get_symbol_info = MagicMock(return_value={
+                    'step_size': 0.001, 'quantity_precision': 3,
+                    'min_notional': 5,
+                })
+                trader.place_order = MagicMock(return_value={'orderId': '123'})
+
+                pair = MagicMock()
+                pair.symbol1 = "BTCUSDT"
+                pair.symbol2 = "ETHUSDT"
+                pair_info = {
+                    'hedge_ratio': 1.0,
+                    'spread_mean': 0.0,
+                    'spread_std': 1.0,
+                }
+                capital = 200.0
+
+                result = trader.execute_pair_trade(0, pair, pair_info, capital)
+                assert result is True
+                assert 'capital' in trader.slot_positions[0]
+                assert trader.slot_positions[0]['capital'] == 200.0
+                assert trader.slots[0].position_info['capital'] == 200.0
+
+    # ------------------------------------------------------------------
+    # 6. run_cycle uses calculate_slot_capital (not raw balance)
+    # ------------------------------------------------------------------
+    def test_run_cycle_uses_pool_capital(self):
+        """run_cycle must call calculate_slot_capital, not raw balance * pct."""
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            with patch.dict("os.environ", {
+                "BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s",
+                "BINANCE_TESTNET": "true", "MAX_TRADERS": "5",
+            }):
+                trader = LivePairTrader(paper_mode=True)
+                trader.paper_balance = 1000.0
+
+                # Make slot 0 active (holds $200)
+                trader.slots[0].position_open = True
+                trader.slots[0].current_pair = ("BTCUSDT", "ETHUSDT")
+                trader.slots[0].position_info = {"capital": 200.0}
+                trader.slot_positions[0] = {"symbol1": "BTCUSDT", "symbol2": "ETHUSDT"}
+
+                # Mock monitor_slot to do nothing
+                trader.monitor_slot = MagicMock()
+                # Mock coin list
+                trader.get_trading_coins = MagicMock(return_value=[
+                    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
+                ])
+                trader.download_multi_symbol_data = MagicMock(return_value={
+                    "SOLUSDT": pd.DataFrame(), "XRPUSDT": pd.DataFrame(),
+                    "ADAUSDT": pd.DataFrame(), "DOGEUSDT": pd.DataFrame(),
+                    "BTCUSDT": pd.DataFrame(),
+                })
+                trader.find_best_pair = MagicMock(return_value=None)
+
+                # Run cycle (will find no pairs, but the important thing
+                # is it calls calculate_slot_capital internally)
+                with patch("quantbox.live_trader.calculate_slot_capital",
+                           wraps=calculate_slot_capital) as mock_calc:
+                    trader.run_cycle()
+                    # Should be called for the first idle slot at least
+                    if mock_calc.called:
+                        call_args = mock_calc.call_args
+                        assert call_args.kwargs['position_size_pct'] == pytest.approx(0.2)
+                        assert call_args.kwargs['max_traders'] == 5

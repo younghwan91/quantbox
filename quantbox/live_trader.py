@@ -35,6 +35,7 @@ from quantbox.core.trader_slot import (
     get_occupied_symbols,
     get_idle_slots,
     get_active_slots,
+    calculate_slot_capital,
     is_pair_available,
 )
 from quantbox.strategy.pair_selector import PairSelector, PairCandidate
@@ -175,6 +176,9 @@ class LivePairTrader:
         
         # Multi-trader state
         self.max_traders: int = self.config.get('max_traders', 5)
+        # Auto-calculate position_size_pct if sentinel (-1)
+        if self.config['position_size_pct'] < 0:
+            self.config['position_size_pct'] = 1.0 / self.max_traders
         self.slots: list[TraderSlotState] = [
             TraderSlotState(slot_id=i) for i in range(self.max_traders)
         ]
@@ -214,8 +218,8 @@ class LivePairTrader:
             'stop_loss_zscore': float(os.getenv('STOP_LOSS_ZSCORE', 3.5)),
             'max_holding_hours': 24,
             
-            # Risk parameters (Half Kelly: 12.5%)
-            'max_position_pct': 0.125,  # Half Kelly criterion
+            # Risk parameters
+            'position_size_pct': float(os.getenv('POSITION_SIZE_PCT', -1.0)),  # Auto: 1/max_traders
             'trading_fee': float(os.getenv('TRADING_FEE', 0.0005)),
             'slippage': float(os.getenv('SLIPPAGE', 0.001)),
             'leverage': 1,
@@ -366,8 +370,7 @@ class LivePairTrader:
             return self.prev_prices.get(symbol, 0.0)
     
     def get_available_balance(self, asset: str = 'USDT') -> float:
-        """사용 가능 잔고 조회"""
-        # Paper mode: use simulated balance
+        """사용 가능 잔고 조회 (미사용 마진)"""
         if self.paper_mode:
             return self.paper_balance
         
@@ -379,6 +382,31 @@ class LivePairTrader:
             return 0.0
         except Exception as e:
             logger.error(f"Failed to get balance: {e}")
+            return 0.0
+
+    def get_total_balance(self, asset: str = 'USDT') -> float:
+        """총 자산 잔고 조회 (available + 미실현 PnL 포함).
+
+        calculate_slot_capital()의 total_book_value 계산에 사용.
+        백테스트의 current_capital + total_allocated 와 동일한 개념.
+
+        Args:
+            asset: 조회할 자산 (기본 USDT).
+
+        Returns:
+            총 자산 잔고. 실패 시 0.0.
+        """
+        if self.paper_mode:
+            return self.paper_balance
+
+        try:
+            balances = self.client.futures_account_balance()
+            for balance in balances:
+                if balance['asset'] == asset:
+                    return float(balance['balance'])
+            return 0.0
+        except Exception as e:
+            logger.error(f"Failed to get total balance: {e}")
             return 0.0
     
     def get_current_positions(self) -> List[Dict]:
@@ -679,9 +707,8 @@ class LivePairTrader:
         side1 = 'BUY' if signal == 1 else 'SELL'
         side2 = 'SELL' if signal == 1 else 'BUY'
         
-        # Calculate position sizes
-        trade_capital = capital * self.config['max_position_pct']
-        effective_capital = trade_capital * (1 - 2 * self.config['trading_fee'])
+        # Calculate position sizes (capital is already slot-allocated by calculate_slot_capital)
+        effective_capital = capital * (1 - 2 * self.config['trading_fee'])
         
         s1_capital = effective_capital / (1 + hedge_ratio)
         s2_capital = hedge_ratio * s1_capital
@@ -740,6 +767,7 @@ class LivePairTrader:
             'hedge_ratio': hedge_ratio,
             'spread_mean': pair_info['spread_mean'],
             'spread_std': pair_info['spread_std'],
+            'capital': capital,  # Allocated capital (for calculate_slot_capital parity)
         }
 
         # Update slot state
@@ -891,11 +919,12 @@ class LivePairTrader:
             logger.info("All slots occupied, waiting...")
             return True
 
-        # 3. Get available capital
-        capital = self.get_available_balance()
-        logger.info(f"Available balance: ${capital:.2f}")
+        # 3. Get capital info (matches backtest pool model)
+        available = self.get_available_balance()
+        total = self.get_total_balance()
+        logger.info(f"Available balance: ${available:.2f}, Total: ${total:.2f}")
 
-        if capital < 100:
+        if available < 100:
             logger.warning("Insufficient balance for new trades")
             return True
 
@@ -911,8 +940,20 @@ class LivePairTrader:
             return True
 
         # 5. For each idle slot, find and enter a new pair
+        #    Capital is calculated per-slot using the same function as backtest
         excluded = self.occupied_symbols
         for slot in idle:
+            # Pool-based capital allocation (identical to backtest)
+            slot_capital = calculate_slot_capital(
+                available_capital=self.get_available_balance(),
+                active_slots=get_active_slots(self.slots),
+                max_traders=self.max_traders,
+                position_size_pct=self.config['position_size_pct'],
+            )
+            if slot_capital < 10:
+                logger.info(f"Slot {slot.slot_id}: Insufficient slot capital (${slot_capital:.2f})")
+                break
+
             result = self.find_best_pair(data, excluded_symbols=excluded)
             if not result:
                 logger.info(f"Slot {slot.slot_id}: No suitable pair found")
@@ -920,7 +961,7 @@ class LivePairTrader:
 
             pair, pair_info = result
 
-            if self.execute_pair_trade(slot.slot_id, pair, pair_info, capital):
+            if self.execute_pair_trade(slot.slot_id, pair, pair_info, slot_capital):
                 # Update excluded symbols for next idle slot
                 excluded = self.occupied_symbols
                 # Short delay between orders to not spam the API
