@@ -95,12 +95,12 @@ def config():
 @pytest.fixture
 def backtest_config():
     """Sample backtest configuration."""
-    from quantbox.backtest.runner import BacktestConfig
-    return BacktestConfig(
+    from quantbox.backtest.continuous_backtest import ContinuousBacktestConfig
+    return ContinuousBacktestConfig(
         initial_capital=10000.0,
         trading_fee=0.0005,
         slippage=0.001,
-        formation_periods=100,
-        trading_periods=50,
-        window_shift=25
+        lookback_window=100,
+        zscore_entry=2.0,
+        zscore_exit=0.5
     )
