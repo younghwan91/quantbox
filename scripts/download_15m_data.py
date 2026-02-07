@@ -35,17 +35,13 @@ TOP_COINS = [
 ]
 
 def main():
-    # API 키 확인 (두 가지 변수명 모두 지원)
-    api_key = os.getenv("BINANCE_API_KEY")
-    api_secret = os.getenv("BINANCE_API_SECRET") or os.getenv("BINANCE_SECRET")
-    
-    if not api_key or not api_secret:
-        print("❌ BINANCE_API_KEY and BINANCE_SECRET must be set in .env")
-        sys.exit(1)
+    # pydantic-settings: .env 검증 (필수 변수 누락 시 즉시 에러)
+    from quantbox.core.settings import get_settings
+    settings = get_settings()
     
     # 클라이언트 초기화
     print("🔌 Connecting to Binance...")
-    client = Client(api_key, api_secret)
+    client = Client(settings.binance_api_key, settings.binance_api_secret)
     
     # 설정 및 캐시
     config = Config()
