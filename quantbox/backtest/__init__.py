@@ -6,6 +6,7 @@ from quantbox.backtest.continuous_backtest import (
     ContinuousBacktestConfig,
     ContinuousPairBacktest,
     TradeResult,
+    BacktestState,
     ExitReason,
     run_continuous_backtest,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "ContinuousBacktestConfig",
     "ContinuousPairBacktest",
     "TradeResult",
+    "BacktestState",
     "ExitReason",
     "run_continuous_backtest",
     "PerformanceMetrics",
