@@ -410,7 +410,7 @@ class TestTradeResult:
             pair=("A", "B"), entry_time=datetime.now(), exit_time=datetime.now(),
             entry_z=2.0, exit_z=0.5, entry_spread=0.01, exit_spread=0.005,
             signal=1, capital_allocated=2000, gross_pnl=100, fees=2,
-            slippage_cost=4, net_pnl=94, net_return_pct=4.7, bars_held=10,
+            slippage_cost=4, funding_cost=0, net_pnl=94, net_return_pct=4.7, bars_held=10,
             exit_reason=ExitReason.MEAN_REVERSION, hedge_ratio=1.0,
             spread_mean=0.0, spread_std=0.01,
         )
@@ -421,7 +421,7 @@ class TestTradeResult:
             pair=("A", "B"), entry_time=datetime.now(), exit_time=datetime.now(),
             entry_z=2.0, exit_z=0.5, entry_spread=0.01, exit_spread=0.005,
             signal=1, capital_allocated=2000, gross_pnl=100, fees=2,
-            slippage_cost=4, net_pnl=94, net_return_pct=4.7, bars_held=10,
+            slippage_cost=4, funding_cost=0, net_pnl=94, net_return_pct=4.7, bars_held=10,
             exit_reason=ExitReason.MEAN_REVERSION, hedge_ratio=1.0,
             spread_mean=0.0, spread_std=0.01, slot_id=3,
         )

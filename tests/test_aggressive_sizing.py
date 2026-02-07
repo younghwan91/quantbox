@@ -654,6 +654,16 @@ class TestBacktestLeverageAccounting:
         expected_slippage = 2 * config.slippage * 4000.0
         assert trade.slippage_cost == pytest.approx(expected_slippage)
 
+        # Funding = funding_rate * 2 legs * notional * (bars_held / bars_per_8h)
+        bars_held = 10
+        bars_per_8h = config.bars_per_funding_period
+        expected_funding = config.funding_rate_8h * 2 * 4000.0 * (bars_held / bars_per_8h)
+        assert trade.funding_cost == pytest.approx(expected_funding)
+
+        # net_pnl should include all three cost components
+        expected_net = trade.gross_pnl - expected_fees - expected_slippage - expected_funding
+        assert trade.net_pnl == pytest.approx(expected_net)
+
     def test_return_pct_relative_to_margin(self):
         """Return percentage should be computed against margin, not notional.
         
@@ -700,6 +710,299 @@ class TestBacktestLeverageAccounting:
         # Return % should be (net_pnl / margin) * 100
         expected_return_pct = (trade.net_pnl / margin) * 100
         assert trade.net_return_pct == pytest.approx(expected_return_pct, rel=0.01)
+
+
+# ============================================================
+# Funding fee tests
+# ============================================================
+
+
+class TestFundingFee:
+    """Tests for funding fee modeling in backtest.
+
+    Binance perpetual futures charge funding every 8 hours.
+    For pair trades, BOTH legs pay funding (conservative assumption).
+    Funding must scale with notional (leveraged exposure).
+    """
+
+    def _make_engine_and_state(self, leverage=2, funding_rate=0.0001,
+                                bar_interval=15, capital=10000.0):
+        config = ContinuousBacktestConfig(
+            initial_capital=capital,
+            max_traders=5,
+            leverage=leverage,
+            funding_rate_8h=funding_rate,
+            bar_interval_minutes=bar_interval,
+        )
+        state = BacktestState(
+            current_capital=capital,
+            peak_capital=capital,
+            max_traders=5,
+        )
+        return ContinuousPairBacktest(config), state, config
+
+    def _setup_slot(self, state, margin, notional, entry_bar=0, leverage=2):
+        """Set up a position in slot 0."""
+        slot = state.slots[0]
+        slot.position_open = True
+        slot.current_pair = ("BTCUSDT", "ETHUSDT")
+        slot.position_info = {
+            'capital': margin,
+            'notional': notional,
+            'entry_spread': 0.1,
+            'entry_z': -2.0,
+            'signal': 1,
+            'hedge_ratio': 0.85,
+            'intercept': 0.0,
+            'spread_mean': 0.1,
+            'spread_std': 0.05,
+            'entry_bar': entry_bar,
+            'entry_time': datetime.now(timezone.utc),
+            'entry_price1': 100.0,
+            'entry_price2': 100.0,
+            'leverage': leverage,
+        }
+        state.current_capital -= margin
+        return slot
+
+    def test_config_funding_rate_default(self):
+        """Default funding rate should be 0.01% per 8h."""
+        config = ContinuousBacktestConfig()
+        assert config.funding_rate_8h == 0.0001
+
+    def test_config_funding_rate_custom(self):
+        """Custom funding rate should be accepted."""
+        config = ContinuousBacktestConfig(funding_rate_8h=0.0003)
+        assert config.funding_rate_8h == 0.0003
+
+    def test_config_bars_per_funding_period_15m(self):
+        """15-min bars: 8h = 32 bars."""
+        config = ContinuousBacktestConfig(bar_interval_minutes=15)
+        assert config.bars_per_funding_period == 32
+
+    def test_config_bars_per_funding_period_1h(self):
+        """1-hour bars: 8h = 8 bars."""
+        config = ContinuousBacktestConfig(bar_interval_minutes=60)
+        assert config.bars_per_funding_period == 8
+
+    def test_config_bars_per_funding_period_5m(self):
+        """5-min bars: 8h = 96 bars."""
+        config = ContinuousBacktestConfig(bar_interval_minutes=5)
+        assert config.bars_per_funding_period == 96
+
+    def test_funding_cost_recorded_in_trade(self):
+        """Closed trade should have a funding_cost field."""
+        engine, state, config = self._make_engine_and_state(leverage=2)
+        slot = self._setup_slot(state, margin=2000, notional=4000, entry_bar=0)
+
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+        engine._close_position(
+            state, slot, bar_data, bar_idx=32,
+            timestamp=datetime.now(timezone.utc),
+            exit_reason=ExitReason.MEAN_REVERSION,
+        )
+
+        trade = state.trades[0]
+        assert hasattr(trade, 'funding_cost')
+        assert trade.funding_cost > 0
+
+    def test_funding_cost_formula(self):
+        """Funding = funding_rate_8h × 2 × notional × (bars_held / bars_per_8h)."""
+        engine, state, config = self._make_engine_and_state(
+            leverage=2, funding_rate=0.0001
+        )
+        slot = self._setup_slot(state, margin=2000, notional=4000, entry_bar=0)
+
+        bars_held = 64  # 2 full funding periods (16 hours)
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+        engine._close_position(
+            state, slot, bar_data, bar_idx=bars_held,
+            timestamp=datetime.now(timezone.utc),
+            exit_reason=ExitReason.MAX_HOLDING,
+        )
+
+        trade = state.trades[0]
+        funding_periods = bars_held / config.bars_per_funding_period
+        expected_funding = 0.0001 * 2 * 4000 * funding_periods
+        assert trade.funding_cost == pytest.approx(expected_funding)
+
+    def test_funding_scales_with_leverage(self):
+        """2x leverage → 2x notional → 2x funding cost."""
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+
+        # 1x leverage
+        engine_1x, state_1x, _ = self._make_engine_and_state(leverage=1)
+        slot_1x = self._setup_slot(state_1x, margin=2000, notional=2000,
+                                    entry_bar=0, leverage=1)
+        engine_1x._close_position(
+            state_1x, slot_1x, bar_data, 32,
+            datetime.now(timezone.utc), ExitReason.MAX_HOLDING,
+        )
+
+        # 2x leverage
+        engine_2x, state_2x, _ = self._make_engine_and_state(leverage=2)
+        slot_2x = self._setup_slot(state_2x, margin=2000, notional=4000,
+                                    entry_bar=0, leverage=2)
+        engine_2x._close_position(
+            state_2x, slot_2x, bar_data, 32,
+            datetime.now(timezone.utc), ExitReason.MAX_HOLDING,
+        )
+
+        funding_1x = state_1x.trades[0].funding_cost
+        funding_2x = state_2x.trades[0].funding_cost
+        assert funding_2x == pytest.approx(funding_1x * 2)
+
+    def test_funding_scales_with_holding_time(self):
+        """Holding 2x longer → 2x funding cost."""
+        engine, state, config = self._make_engine_and_state(leverage=2)
+
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+
+        # Trade 1: hold for 32 bars (1 funding period)
+        slot1 = self._setup_slot(state, margin=2000, notional=4000, entry_bar=0)
+        engine._close_position(
+            state, slot1, bar_data, 32,
+            datetime.now(timezone.utc), ExitReason.MAX_HOLDING,
+        )
+        funding_short = state.trades[0].funding_cost
+
+        # Trade 2: hold for 64 bars (2 funding periods)
+        slot2 = self._setup_slot(state, margin=2000, notional=4000, entry_bar=100)
+        engine._close_position(
+            state, slot2, bar_data, 164,
+            datetime.now(timezone.utc), ExitReason.MAX_HOLDING,
+        )
+        funding_long = state.trades[1].funding_cost
+
+        assert funding_long == pytest.approx(funding_short * 2)
+
+    def test_zero_bars_zero_funding(self):
+        """Position closed instantly should have zero funding."""
+        engine, state, config = self._make_engine_and_state(leverage=2)
+        slot = self._setup_slot(state, margin=2000, notional=4000, entry_bar=10)
+
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+        engine._close_position(
+            state, slot, bar_data, bar_idx=10,  # same bar
+            timestamp=datetime.now(timezone.utc),
+            exit_reason=ExitReason.MEAN_REVERSION,
+        )
+        assert state.trades[0].funding_cost == pytest.approx(0.0)
+
+    def test_funding_deducted_from_net_pnl(self):
+        """net_pnl = gross_pnl - fees - slippage - funding."""
+        engine, state, config = self._make_engine_and_state(leverage=2)
+        slot = self._setup_slot(state, margin=2000, notional=4000, entry_bar=0)
+
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+        engine._close_position(
+            state, slot, bar_data, bar_idx=32,
+            timestamp=datetime.now(timezone.utc),
+            exit_reason=ExitReason.MAX_HOLDING,
+        )
+        trade = state.trades[0]
+        expected_net = trade.gross_pnl - trade.fees - trade.slippage_cost - trade.funding_cost
+        assert trade.net_pnl == pytest.approx(expected_net)
+
+    def test_funding_in_compile_results(self):
+        """Trades DataFrame in results should include funding_cost column."""
+        engine, state, config = self._make_engine_and_state(leverage=2)
+        slot = self._setup_slot(state, margin=2000, notional=4000, entry_bar=0)
+
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+        engine._close_position(
+            state, slot, bar_data, 32,
+            datetime.now(timezone.utc), ExitReason.MAX_HOLDING,
+        )
+
+        results = engine._compile_results(state)
+        trades_df = results['trades']
+        assert 'funding_cost' in trades_df.columns
+        assert trades_df['funding_cost'].iloc[0] > 0
+
+    def test_funding_zero_rate_no_cost(self):
+        """With funding_rate_8h=0, no funding cost should be charged."""
+        engine, state, config = self._make_engine_and_state(
+            leverage=2, funding_rate=0.0
+        )
+        slot = self._setup_slot(state, margin=2000, notional=4000, entry_bar=0)
+
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+        engine._close_position(
+            state, slot, bar_data, 64,
+            datetime.now(timezone.utc), ExitReason.MAX_HOLDING,
+        )
+        assert state.trades[0].funding_cost == pytest.approx(0.0)
+
+    def test_funding_realistic_24h_hold(self):
+        """Realistic test: 24h hold with 2x leverage, 0.01% funding per 8h.
+
+        Expected: 0.0001 × 2 legs × notional × 3 periods = 0.06% of notional
+        With $4000 notional → $2.40 funding cost
+        """
+        engine, state, config = self._make_engine_and_state(
+            leverage=2, funding_rate=0.0001, bar_interval=15
+        )
+        slot = self._setup_slot(state, margin=2000, notional=4000, entry_bar=0)
+
+        # 24 hours = 24*4 = 96 bars at 15min interval
+        bars_24h = 96
+        bar_data = {
+            'BTCUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+            'ETHUSDT': {'close': 100.0, 'high': 100, 'low': 100, 'volume': 1e6},
+        }
+        engine._close_position(
+            state, slot, bar_data, bars_24h,
+            datetime.now(timezone.utc), ExitReason.MAX_HOLDING,
+        )
+
+        trade = state.trades[0]
+        # 96 bars / 32 bars_per_8h = 3 funding periods
+        # 0.0001 × 2 × 4000 × 3 = 2.4
+        assert trade.funding_cost == pytest.approx(2.4)
+
+    def test_funding_parity_backtest_live(self):
+        """Backtest funding config should match live trader defaults."""
+        from quantbox.live_trader import LivePairTrader
+
+        bt_config = ContinuousBacktestConfig(
+            funding_rate_8h=0.0001,
+        )
+
+        # Live trader default config (without creating real client)
+        with patch.dict('os.environ', {
+            'BINANCE_API_KEY': 'test', 'BINANCE_API_SECRET': 'test',
+            'BINANCE_TESTNET': 'true',
+        }):
+            with patch('quantbox.live_trader.Client'):
+                trader = LivePairTrader(paper_mode=True)
+                live_funding = trader.config.get('funding_rate_8h', 0.0001)
+
+        assert bt_config.funding_rate_8h == live_funding
 
 
 # ============================================================

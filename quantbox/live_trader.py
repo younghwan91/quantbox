@@ -7,9 +7,24 @@ QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
 2. TRADING_MODE를 'live' 또는 'paper'로 설정
 3. 초기 자본금 및 리스크 파라미터 확인
 
+환경변수 (.env):
+    BINANCE_API_KEY: 바이낸스 API 키
+    BINANCE_API_SECRET: 바이낸스 시크릿 키
+    BINANCE_TESTNET: 테스트넷 사용 여부 (true/false)
+    LEVERAGE: 레버리지 배수 (기본값: 2)
+    MAX_TRADERS: 최대 동시 트레이더 수 (기본값: 5)
+    POSITION_SIZE_PCT: 슬롯당 자본 비율 (기본값: auto=1/max_traders)
+    ENTRY_ZSCORE: 진입 z-score 임계값 (기본값: 2.0)
+    EXIT_ZSCORE: 청산 z-score 임계값 (기본값: 0.5)
+    STOP_LOSS_ZSCORE: 손절 z-score (기본값: 3.5)
+    TRADING_FEE: 거래 수수료 (기본값: 0.0005)
+    SLIPPAGE: 슬리피지 (기본값: 0.001)
+    FUNDING_RATE_8H: 8시간 펀딩비 (기본값: 0.0001)
+    N_COINS: 유니버스 코인 수 (기본값: 30)
+
 사용법:
     python live_trader.py [--paper] [--once]
-    
+
     --paper: Paper trading 모드 (실제 주문 없이 시뮬레이션)
     --once: 한 번만 실행하고 종료
 """
@@ -224,6 +239,7 @@ class LivePairTrader:
             'position_size_pct': float(os.getenv('POSITION_SIZE_PCT', -1.0)),  # Auto: 1/max_traders
             'trading_fee': float(os.getenv('TRADING_FEE', 0.0005)),
             'slippage': float(os.getenv('SLIPPAGE', 0.001)),
+            'funding_rate_8h': float(os.getenv('FUNDING_RATE_8H', 0.0001)),  # 0.01% per 8h
             'leverage': int(os.getenv('LEVERAGE', 2)),  # 2x leverage default
             
             # Multi-trader
