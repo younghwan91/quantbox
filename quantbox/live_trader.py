@@ -747,7 +747,7 @@ class LivePairTrader:
         entry_time = self.slot_entry_times[slot_id]
         elapsed = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
         
-        logger.info(
+        logger.debug(
             f"Slot {slot_id}: Monitor {pos['symbol1']}/{pos['symbol2']}: "
             f"Z={z_score:.4f} (entry={entry_z:.4f}), "
             f"Elapsed={elapsed:.1f}h"
@@ -884,13 +884,15 @@ class LivePairTrader:
         Returns:
             True if 사이클이 정상 완료됨.
         """
-        logger.info("=" * 60)
         active = get_active_slots(self.slots)
         idle = get_idle_slots(self.slots)
-        logger.info(
+        logger.debug(
             f"Cycle: {len(active)} active, {len(idle)} idle "
             f"(occupied: {self.occupied_symbols or 'none'})"
         )
+
+        # 사이클 내 이벤트 추적 (포지션 열림/닫힘)
+        slots_before = {s.slot_id for s in active}
 
         # 1. Monitor all active slots
         for slot in active:
@@ -906,7 +908,7 @@ class LivePairTrader:
         # 3. Get capital info (matches backtest pool model)
         available = self.get_available_balance()
         total = self.get_total_balance()
-        logger.info(f"Available balance: ${available:.2f}, Total: ${total:.2f}")
+        logger.debug(f"Available balance: ${available:.2f}, Total: ${total:.2f}")
 
         if available < 100:
             logger.warning("Insufficient balance for new trades")
@@ -954,36 +956,42 @@ class LivePairTrader:
                 # Short delay between orders to not spam the API
                 time.sleep(2)
 
-        logger.info("Cycle completed")
+        logger.debug("Cycle completed")
 
-        # ── Cycle Summary ──
-        slots_info = self._build_slots_info()
-        available = self.get_available_balance()
-        total = self.get_total_balance()
-        total_unrealized = sum(
-            s.get('unrealized_pnl', 0.0) for s in slots_info if s['status'] == 'active'
-        )
-        session_pnl = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
-        self.discord.notify_cycle_summary(
-            slots_info=slots_info,
-            available_capital=available,
-            total_capital=total,
-            total_unrealized_pnl=total_unrealized,
-            session_pnl=session_pnl,
-            n_trades_session=len(self.trade_history),
-        )
+        # ── Cycle Summary: 포지션 변동이 있을 때만 알림 ──
+        slots_after = {s.slot_id for s in get_active_slots(self.slots)}
+        positions_changed = (slots_before != slots_after)
+
+        if positions_changed:
+            slots_info = self._build_slots_info()
+            available = self.get_available_balance()
+            total = self.get_total_balance()
+            total_unrealized = sum(
+                s.get('unrealized_pnl', 0.0) for s in slots_info if s['status'] == 'active'
+            )
+            session_pnl = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
+            self.discord.notify_cycle_summary(
+                slots_info=slots_info,
+                available_capital=available,
+                total_capital=total,
+                total_unrealized_pnl=total_unrealized,
+                session_pnl=session_pnl,
+                n_trades_session=len(self.trade_history),
+            )
 
         # ── Daily Report (24h 주기) ──
         if self.discord.should_send_daily_report():
+            total_bal = self.get_total_balance()
+            session_pnl_dr = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
             wins = [t for t in self.trade_history if t['pnl'] > 0]
             win_rate = (len(wins) / len(self.trade_history) * 100) if self.trade_history else 0.0
             active_count = len(get_active_slots(self.slots))
             self.discord.notify_daily_report(
-                total_balance=total,
-                daily_pnl=session_pnl,
-                daily_return_pct=(session_pnl / total * 100) if total > 0 else 0.0,
-                cumulative_pnl=session_pnl,
-                cumulative_return_pct=(session_pnl / total * 100) if total > 0 else 0.0,
+                total_balance=total_bal,
+                daily_pnl=session_pnl_dr,
+                daily_return_pct=(session_pnl_dr / total_bal * 100) if total_bal > 0 else 0.0,
+                cumulative_pnl=session_pnl_dr,
+                cumulative_return_pct=(session_pnl_dr / total_bal * 100) if total_bal > 0 else 0.0,
                 n_trades_today=len(self.trade_history),
                 n_trades_total=len(self.trade_history),
                 win_rate=win_rate,
