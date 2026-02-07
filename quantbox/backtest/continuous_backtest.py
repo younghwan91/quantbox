@@ -30,6 +30,7 @@ from quantbox.core.trader_slot import (
     get_idle_slots,
     get_active_slots,
     calculate_slot_capital,
+    calculate_margin_from_notional,
     is_pair_available,
 )
 
@@ -152,6 +153,7 @@ class ContinuousBacktestConfig:
     
     # Risk management
     position_size_pct: float = -1.0  # Fraction of capital per trade (auto: 1/max_traders)
+    leverage: int = 1  # Leverage multiplier (1=no leverage, 2=2x, etc.)
     
     # Multi-trader
     max_traders: int = 5  # Maximum concurrent independent traders
@@ -334,6 +336,7 @@ class ContinuousPairBacktest:
         logger.info(f"  Initial capital: ${self.config.initial_capital:,.2f}")
         logger.info(f"  Max concurrent traders: {self.config.max_traders}")
         logger.info(f"  Position size per trader: {self.config.position_size_pct*100:.1f}%")
+        logger.info(f"  Leverage: {self.config.leverage}x")
         logger.info(f"  Round-trip cost: {self.config.total_round_trip_cost*100:.2f}%")
         
         # Main backtest loop
@@ -519,19 +522,24 @@ class ContinuousPairBacktest:
             return False
 
         # Calculate position size using pool-based capital allocation
-        capital_allocated = calculate_slot_capital(
+        # With leverage, notional > margin. We deduct margin from cash pool.
+        notional = calculate_slot_capital(
             available_capital=state.current_capital,
             active_slots=state.active_slots,
             max_traders=self.config.max_traders,
             position_size_pct=self.config.position_size_pct,
+            leverage=self.config.leverage,
         )
 
-        if capital_allocated <= 0:
+        if notional <= 0:
             logger.debug(f"Slot {slot.slot_id}: no capital available")
             return False
 
-        # Deduct capital from pool
-        state.current_capital -= capital_allocated
+        # Margin is the actual cash consumed from the pool
+        margin = calculate_margin_from_notional(notional, self.config.leverage)
+
+        # Deduct margin (not notional) from pool
+        state.current_capital -= margin
 
         # Store position info in slot
         slot.position_open = True
@@ -544,7 +552,9 @@ class ContinuousPairBacktest:
             'entry_spread': entry_spread,
             'entry_z': entry_z,
             'signal': signal,
-            'capital': capital_allocated,
+            'capital': margin,  # Actual cash locked (margin)
+            'notional': notional,  # Effective exposure (margin × leverage)
+            'leverage': self.config.leverage,
             # Frozen formation statistics (NO UPDATES during trade)
             'hedge_ratio': candidate['hedge_ratio'],
             'intercept': candidate['intercept'],
@@ -555,7 +565,7 @@ class ContinuousPairBacktest:
         logger.debug(
             f"Slot {slot.slot_id}: Entered {symbol1}/{symbol2} at bar {bar_idx}: "
             f"z={entry_z:.2f}, signal={'LONG' if signal==1 else 'SHORT'}, "
-            f"capital=${capital_allocated:.2f}"
+            f"margin=${margin:.2f}, notional=${notional:.2f} ({self.config.leverage}x)"
         )
         return True
     
@@ -780,18 +790,22 @@ class ContinuousPairBacktest:
         exit_z = (exit_spread - pos['spread_mean']) / pos['spread_std']
         
         # Calculate PnL from spread change
+        # PnL is proportional to NOTIONAL (leveraged exposure), not margin
+        notional = pos.get('notional', pos['capital'])  # backward compat
         spread_change = exit_spread - pos['entry_spread']
-        gross_pnl = pos['signal'] * spread_change * pos['capital']
+        gross_pnl = pos['signal'] * spread_change * notional
         
-        # Calculate transaction costs
+        # Calculate transaction costs (also on notional, not margin)
         # Fees: entry + exit both sides
-        total_fees = self.config.trading_fee * 2 * pos['capital']
+        total_fees = self.config.trading_fee * 2 * notional
         
-        # Slippage: proportional to position size
-        total_slippage = self.config.slippage * 2 * pos['capital']
+        # Slippage: proportional to notional size
+        total_slippage = self.config.slippage * 2 * notional
         
         net_pnl = gross_pnl - total_fees - total_slippage
-        net_return_pct = (net_pnl / pos['capital']) * 100
+        # Return percentage is relative to MARGIN (actual cash invested)
+        margin = pos['capital']
+        net_return_pct = (net_pnl / margin) * 100 if margin > 0 else 0.0
         
         bars_held = bar_idx - pos['entry_bar']
         
@@ -805,7 +819,7 @@ class ContinuousPairBacktest:
             entry_spread=pos['entry_spread'],
             exit_spread=exit_spread,
             signal=pos['signal'],
-            capital_allocated=pos['capital'],
+            capital_allocated=margin,
             gross_pnl=gross_pnl,
             fees=total_fees,
             slippage_cost=total_slippage,
@@ -821,8 +835,8 @@ class ContinuousPairBacktest:
         
         state.trades.append(trade)
         
-        # Return capital + PnL to pool
-        state.current_capital += pos['capital'] + net_pnl
+        # Return margin + PnL to pool (margin is what was deducted on entry)
+        state.current_capital += margin + net_pnl
         state.peak_capital = max(state.peak_capital, state.total_equity)
         
         # Reset slot state
@@ -867,7 +881,9 @@ class ContinuousPairBacktest:
                 )[0]
 
                 spread_change = current_spread - pos['entry_spread']
-                slot_unrealized = pos['signal'] * spread_change * pos['capital']
+                # Unrealized PnL is based on notional (leveraged) exposure
+                notional = pos.get('notional', pos['capital'])
+                slot_unrealized = pos['signal'] * spread_change * notional
                 unrealized_pnl += slot_unrealized
 
         total_equity = state.current_capital + state.total_allocated + unrealized_pnl
@@ -912,6 +928,7 @@ class ContinuousPairBacktest:
                 'entry_z': t.entry_z,
                 'exit_z': t.exit_z,
                 'capital': t.capital_allocated,
+                'leverage': self.config.leverage,
                 'gross_pnl': t.gross_pnl,
                 'fees': t.fees,
                 'slippage': t.slippage_cost,
@@ -1060,3 +1077,83 @@ def run_continuous_backtest(
     cfg = ContinuousBacktestConfig(**(config or {}))
     engine = ContinuousPairBacktest(cfg)
     return engine.run(data)
+
+
+def compute_kelly_from_backtest(
+    results: Dict,
+    fraction: float = 0.5,
+) -> Dict:
+    """Compute Kelly-optimal position sizing from backtest results.
+
+    Uses actual per-trade net return distribution to calculate the
+    optimal fraction of capital per trade. This replaces naive
+    fixed-fraction sizing with data-driven sizing.
+
+    Args:
+        results: Output from ContinuousPairBacktest.run() or
+            run_continuous_backtest().
+        fraction: Kelly fraction (0.5 = half-Kelly, default).
+
+    Returns:
+        Dict with:
+            kelly_position_size_pct: Optimal position_size_pct
+            kelly_raw: Raw (full) Kelly fraction
+            n_trades: Number of trades used
+            win_rate: Win rate from trades
+            avg_win_pct: Average winning return %
+            avg_loss_pct: Average losing return % (absolute)
+            mean_return_pct: Mean per-trade return %
+            std_return_pct: Std dev of per-trade return %
+            continuous_kelly: Continuous Kelly result
+            discrete_kelly: Discrete Kelly result
+    """
+    from quantbox.core.trader_slot import (
+        calculate_kelly_from_trades,
+        calculate_kelly_discrete,
+    )
+
+    trades_df = results.get('trades')
+    if trades_df is None or trades_df.empty:
+        return {
+            'kelly_position_size_pct': 0.0,
+            'kelly_raw': 0.0,
+            'n_trades': 0,
+            'message': 'No trades available for Kelly calculation',
+        }
+
+    returns = trades_df['return_pct'].values
+    n_trades = len(returns)
+
+    # Continuous Kelly (uses full distribution)
+    continuous = calculate_kelly_from_trades(returns, fraction=fraction)
+
+    # Discrete Kelly (uses summary stats)
+    winners = returns[returns > 0]
+    losers = returns[returns <= 0]
+    win_rate = len(winners) / n_trades if n_trades > 0 else 0.0
+    avg_win = float(np.mean(winners)) if len(winners) > 0 else 0.0
+    avg_loss = float(np.mean(np.abs(losers))) if len(losers) > 0 else 0.0
+
+    discrete = calculate_kelly_discrete(
+        win_rate=win_rate,
+        avg_win_pct=avg_win,
+        avg_loss_pct=avg_loss,
+        fraction=fraction,
+    )
+
+    # Use the more conservative of the two estimates
+    kelly_pct = min(continuous, discrete)
+
+    return {
+        'kelly_position_size_pct': kelly_pct,
+        'continuous_kelly': continuous,
+        'discrete_kelly': discrete,
+        'kelly_raw': kelly_pct / fraction if fraction > 0 else 0.0,
+        'n_trades': n_trades,
+        'win_rate': win_rate * 100,
+        'avg_win_pct': avg_win,
+        'avg_loss_pct': avg_loss,
+        'mean_return_pct': float(np.mean(returns)),
+        'std_return_pct': float(np.std(returns, ddof=1)) if n_trades > 1 else 0.0,
+        'fraction': fraction,
+    }

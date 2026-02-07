@@ -1207,8 +1207,13 @@ class TestPositionSizingParity:
                 result = trader.execute_pair_trade(0, pair, pair_info, capital)
                 assert result is True
                 assert 'capital' in trader.slot_positions[0]
-                assert trader.slot_positions[0]['capital'] == 200.0
-                assert trader.slots[0].position_info['capital'] == 200.0
+                # capital now stores margin = notional / leverage
+                leverage = trader.config['leverage']
+                expected_margin = capital / leverage
+                assert trader.slot_positions[0]['capital'] == pytest.approx(expected_margin)
+                assert trader.slots[0].position_info['capital'] == pytest.approx(expected_margin)
+                # notional should be the original capital passed in
+                assert trader.slot_positions[0]['notional'] == pytest.approx(capital)
 
     # ------------------------------------------------------------------
     # 6. run_cycle uses calculate_slot_capital (not raw balance)
