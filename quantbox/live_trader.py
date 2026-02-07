@@ -3,14 +3,14 @@
 QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
 
 실행 전 확인사항:
-1. .env 파일에 바이낸스 API 키 설정
-2. TRADING_MODE를 'live' 또는 'paper'로 설정
+1. .env 파일에 바이낸스 API 키 설정 (cp .env.example .env)
+2. --paper 또는 --once 플래그로 모드 선택
 3. 초기 자본금 및 리스크 파라미터 확인
 
 환경변수 (.env):
-    BINANCE_API_KEY: 바이낸스 API 키
-    BINANCE_API_SECRET: 바이낸스 시크릿 키
-    BINANCE_TESTNET: 테스트넷 사용 여부 (true/false)
+    BINANCE_API_KEY: 바이낸스 API 키 (필수)
+    BINANCE_API_SECRET: 바이낸스 시크릿 키 (필수)
+    BINANCE_TESTNET: 테스트넷 사용 여부 (기본값: false)
     LEVERAGE: 레버리지 배수 (기본값: 2)
     MAX_TRADERS: 최대 동시 트레이더 수 (기본값: 5)
     POSITION_SIZE_PCT: 슬롯당 자본 비율 (기본값: auto=1/max_traders)
@@ -21,6 +21,8 @@ QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
     SLIPPAGE: 슬리피지 (기본값: 0.001)
     FUNDING_RATE_8H: 8시간 펀딩비 (기본값: 0.0001)
     N_COINS: 유니버스 코인 수 (기본값: 30)
+    PAPER_BALANCE: 페이퍼 트레이딩 가상 잔고 (기본값: 1000)
+    DISCORD_WEBHOOK_URL: Discord 웹훅 URL (미설정 시 알림 비활성화)
 
 사용법:
     python live_trader.py [--paper] [--once]
