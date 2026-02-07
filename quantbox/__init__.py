@@ -58,22 +58,13 @@ from quantbox.strategy.pair_selector import PairSelector, PairCandidate
 from quantbox.strategy.pair_strategy import PairTradingStrategy
 
 # Backtest components
-from quantbox.backtest.runner import BacktestRunner, BacktestConfig
+from quantbox.backtest.continuous_backtest import (
+    ContinuousBacktestConfig,
+    ContinuousPairBacktest,
+    TradeResult,
+    run_continuous_backtest,
+)
 from quantbox.backtest.metrics import PerformanceMetrics, calculate_metrics
-from quantbox.backtest.analyzer import BacktestAnalyzer
-from quantbox.backtest.walk_forward import WalkForwardAnalysis
-
-# Optimization components
-from quantbox.optimization.optimizer import (
-    GridSearchOptimizer, RandomSearchOptimizer,
-    DifferentialEvolutionOptimizer, BayesianOptimizer,
-    optimize_strategy
-)
-from quantbox.optimization.objective import (
-    SharpeObjective, CalmarObjective, MultiObjective,
-    create_objective
-)
-from quantbox.optimization.sensitivity import SensitivityAnalyzer
 
 __all__ = [
     # Version
@@ -115,22 +106,10 @@ __all__ = [
     "PairTradingStrategy",
     
     # Backtest
-    "BacktestRunner",
-    "BacktestConfig",
+    "ContinuousBacktestConfig",
+    "ContinuousPairBacktest",
+    "TradeResult",
+    "run_continuous_backtest",
     "PerformanceMetrics",
     "calculate_metrics",
-    "BacktestAnalyzer",
-    "WalkForwardAnalysis",
-    
-    # Optimization
-    "GridSearchOptimizer",
-    "RandomSearchOptimizer",
-    "DifferentialEvolutionOptimizer",
-    "BayesianOptimizer",
-    "optimize_strategy",
-    "SharpeObjective",
-    "CalmarObjective",
-    "MultiObjective",
-    "create_objective",
-    "SensitivityAnalyzer",
 ]
