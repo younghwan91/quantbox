@@ -47,6 +47,7 @@ import requests
 
 # QuantBox imports
 from quantbox.core.config import Config, TradingMode
+from quantbox.core.settings import get_settings
 from quantbox.core.trader_slot import (
     TraderSlotState,
     get_occupied_symbols,
@@ -99,17 +100,17 @@ class LivePairTrader:
         config: Dict = None
     ):
         self.paper_mode = paper_mode
-        self.config = config or self._default_config()
+
+        # pydantic-settings: .env 검증 (필수 변수 누락 시 즉시 에러)
+        self._settings = get_settings()
+        self.config = config or self._settings.to_trader_config()
         
         # Initialize Binance client
-        api_key = os.getenv('BINANCE_API_KEY')
-        api_secret = os.getenv('BINANCE_API_SECRET') or os.getenv('BINANCE_SECRET')
-        testnet = os.getenv('BINANCE_TESTNET', 'false').lower() == 'true'
-        
-        if not api_key or not api_secret:
-            raise ValueError("BINANCE_API_KEY and BINANCE_API_SECRET must be set in .env")
-        
-        self.client = Client(api_key=api_key, api_secret=api_secret, testnet=testnet)
+        self.client = Client(
+            api_key=self._settings.binance_api_key,
+            api_secret=self._settings.binance_api_secret,
+            testnet=self._settings.binance_testnet,
+        )
         
         # Initialize components
         self.preprocessor = DataPreprocessor()
@@ -135,57 +136,23 @@ class LivePairTrader:
         self.prev_prices: Dict[str, float] = {}
         
         # Paper trading state
-        self.paper_balance = float(os.getenv('PAPER_BALANCE', 1000.0))
+        self.paper_balance = self._settings.paper_balance
         self.paper_positions: List[Dict] = []
         
         # Discord notifications
-        self.discord = DiscordNotifier()
+        self.discord = DiscordNotifier(webhook_url=self._settings.discord_webhook_url)
         
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
         logger.info(f"Max concurrent traders: {self.max_traders}")
         logger.info(f"Leverage: {self.config['leverage']}x")
-        logger.info(f"Testnet: {testnet}")
+        logger.info(f"Testnet: {self._settings.binance_testnet}")
         if paper_mode:
             logger.info(f"Paper Balance: ${self.paper_balance:.2f} USDT")
         
     def _default_config(self) -> Dict:
-        """기본 설정"""
-        return {
-            # Data settings
-            'quote_currency': 'USDT',
-            'n_coins': int(os.getenv('N_COINS', 30)),  # 30 coins = 435 pairs
-            'interval': '15m',
-            'formation_hours': 168,  # 7 days
-            
-            # Strategy parameters
-            'entry_zscore': float(os.getenv('ENTRY_ZSCORE', 2.0)),
-            'exit_zscore': float(os.getenv('EXIT_ZSCORE', 0.5)),
-            'stop_loss_zscore': float(os.getenv('STOP_LOSS_ZSCORE', 3.5)),
-            'max_holding_hours': 24,
-            
-            # Risk parameters
-            'position_size_pct': float(os.getenv('POSITION_SIZE_PCT', -1.0)),  # Auto: 1/max_traders
-            'trading_fee': float(os.getenv('TRADING_FEE', 0.0005)),
-            'slippage': float(os.getenv('SLIPPAGE', 0.001)),
-            'funding_rate_8h': float(os.getenv('FUNDING_RATE_8H', 0.0001)),  # 0.01% per 8h
-            'leverage': int(os.getenv('LEVERAGE', 2)),  # 2x leverage default
-            
-            # Multi-trader
-            'max_traders': int(os.getenv('MAX_TRADERS', 5)),
-            
-            # Filter parameters
-            'min_correlation': 0.5,
-            'max_cointegration_pvalue': 0.05,
-            'min_half_life': 3,
-            'max_half_life': 60,
-            'max_hurst': 0.5,
-            
-            # Execution settings
-            'check_interval_seconds': 60,
-            'retry_attempts': 3,
-            'retry_delay': 2,
-        }
+        """기본 설정 — get_settings().to_trader_config() 사용 권장."""
+        return get_settings().to_trader_config()
     
     def _create_filter_pipeline(self) -> FilterPipeline:
         """필터 파이프라인 생성"""
