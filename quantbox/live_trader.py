@@ -26,6 +26,7 @@ import numpy as np
 from dotenv import load_dotenv
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
+import requests
 
 # QuantBox imports
 from quantbox.core.config import Config, TradingMode
@@ -53,6 +54,82 @@ logger = logging.getLogger('LiveTrader')
 # Suppress noisy loggers
 for log_name in ['urllib3', 'requests', 'binance']:
     logging.getLogger(log_name).setLevel(logging.WARNING)
+
+
+class DiscordNotifier:
+    """Discord 웹훅 알림 전송"""
+    
+    def __init__(self, webhook_url: Optional[str] = None):
+        self.webhook_url = webhook_url or os.getenv('DISCORD_WEBHOOK_URL')
+        self.enabled = bool(self.webhook_url)
+        if self.enabled:
+            logger.info("Discord notifications enabled")
+    
+    def send(self, content: str = None, embed: Dict = None) -> bool:
+        """메시지 전송"""
+        if not self.enabled:
+            return False
+        
+        try:
+            data = {}
+            if content:
+                data['content'] = content
+            if embed:
+                data['embeds'] = [embed]
+            
+            r = requests.post(self.webhook_url, json=data, timeout=5)
+            return r.status_code == 204
+        except Exception as e:
+            logger.warning(f"Discord notification failed: {e}")
+            return False
+    
+    def notify_start(self, mode: str, balance: float):
+        """봇 시작 알림"""
+        self.send(embed={
+            'title': '🚀 QuantBox 트레이딩 시작',
+            'color': 0x00ff00,
+            'fields': [
+                {'name': '모드', 'value': mode, 'inline': True},
+                {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
+                {'name': '시작 시간', 'value': datetime.now().strftime('%Y-%m-%d %H:%M'), 'inline': True}
+            ]
+        })
+    
+    def notify_open(self, symbol1: str, symbol2: str, direction: str, zscore: float, capital: float):
+        """포지션 오픈 알림"""
+        color = 0x00ff00 if direction == 'LONG' else 0xff0000
+        self.send(embed={
+            'title': f'📈 포지션 오픈',
+            'color': color,
+            'fields': [
+                {'name': '페어', 'value': f'{symbol1}/{symbol2}', 'inline': True},
+                {'name': '방향', 'value': direction, 'inline': True},
+                {'name': 'Z-Score', 'value': f'{zscore:.2f}', 'inline': True},
+                {'name': '투자금', 'value': f'${capital:,.2f}', 'inline': True}
+            ]
+        })
+    
+    def notify_close(self, symbol1: str, symbol2: str, pnl: float, pnl_pct: float, reason: str):
+        """포지션 청산 알림"""
+        color = 0x00ff00 if pnl >= 0 else 0xff0000
+        emoji = '✅' if pnl >= 0 else '❌'
+        self.send(embed={
+            'title': f'{emoji} 포지션 청산',
+            'color': color,
+            'fields': [
+                {'name': '페어', 'value': f'{symbol1}/{symbol2}', 'inline': True},
+                {'name': 'PnL', 'value': f'${pnl:+,.2f} ({pnl_pct:+.2f}%)', 'inline': True},
+                {'name': '청산 사유', 'value': reason, 'inline': True}
+            ]
+        })
+    
+    def notify_error(self, error: str):
+        """에러 알림"""
+        self.send(embed={
+            'title': '⚠️ 에러 발생',
+            'color': 0xff9900,
+            'description': error[:500]
+        })
 
 
 class LivePairTrader:
@@ -94,6 +171,9 @@ class LivePairTrader:
         self.paper_balance = float(os.getenv('PAPER_BALANCE', 1000.0))  # Default 1000 USDT
         self.paper_positions: List[Dict] = []
         
+        # Discord notifications
+        self.discord = DiscordNotifier()
+        
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
         logger.info(f"Testnet: {testnet}")
@@ -105,7 +185,7 @@ class LivePairTrader:
         return {
             # Data settings
             'quote_currency': 'USDT',
-            'n_coins': int(os.getenv('N_COINS', 20)),
+            'n_coins': int(os.getenv('N_COINS', 30)),  # 30 coins = 435 pairs
             'interval': '15m',
             'formation_hours': 168,  # 7 days
             
@@ -115,8 +195,8 @@ class LivePairTrader:
             'stop_loss_zscore': float(os.getenv('STOP_LOSS_ZSCORE', 3.5)),
             'max_holding_hours': 24,
             
-            # Risk parameters
-            'max_position_pct': 0.1,  # 10% of capital per trade
+            # Risk parameters (Half Kelly: 12.5%)
+            'max_position_pct': 0.125,  # Half Kelly criterion
             'trading_fee': float(os.getenv('TRADING_FEE', 0.0005)),
             'slippage': float(os.getenv('SLIPPAGE', 0.001)),
             'leverage': 1,
@@ -561,7 +641,14 @@ class LivePairTrader:
         }
         self.position_entry_time = datetime.now(timezone.utc)
         
+        direction = "LONG Spread" if signal == 1 else "SHORT Spread"
         logger.info(f"Position opened: signal={signal}, z-score={z_score:.4f}")
+        
+        # Discord 알림
+        self.discord.notify_open(
+            symbol1, symbol2, direction, z_score, notional1 + notional2
+        )
+        
         return True
     
     def monitor_position(self) -> bool:
@@ -625,6 +712,10 @@ class LivePairTrader:
             pnl2 = (price2 - pos['entry_price2']) * pos['qty2']
             total_pnl = pnl1 + pnl2
             
+            # Calculate PnL percentage
+            entry_value = abs(pos['qty1'] * pos['entry_price1']) + abs(pos['qty2'] * pos['entry_price2'])
+            pnl_pct = (total_pnl / entry_value * 100) if entry_value > 0 else 0
+            
             self.close_all_positions()
             
             # Record trade
@@ -640,6 +731,12 @@ class LivePairTrader:
             })
             
             logger.info(f"Trade closed: PnL=${total_pnl:.2f}, Reason={close_reason}")
+            
+            # Discord 알림
+            self.discord.notify_close(
+                pos['symbol1'], pos['symbol2'], total_pnl, pnl_pct, close_reason
+            )
+            
             return False
         
         return True  # Keep position
@@ -702,6 +799,11 @@ class LivePairTrader:
         logger.info("Starting continuous trading loop...")
         self.print_balance()
         
+        # Discord 시작 알림
+        balance = self.get_available_balance()
+        mode = "PAPER" if self.paper_mode else "LIVE"
+        self.discord.notify_start(mode, balance)
+        
         try:
             while True:
                 try:
@@ -710,6 +812,7 @@ class LivePairTrader:
                     
                 except Exception as e:
                     logger.error(f"Error in trading cycle: {e}")
+                    self.discord.notify_error(str(e))
                     self.close_all_positions()
                     time.sleep(60)
                     

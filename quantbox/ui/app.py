@@ -5,11 +5,10 @@ Web-based UI for:
 1. Running and visualizing backtests
 2. Monitoring live trading
 3. Analyzing performance metrics
-4. Comparing strategies
 
 Built with Streamlit for easy deployment.
 
-Run: streamlit run quantbox/ui/dashboard.py
+Run: streamlit run quantbox/ui/app.py
 """
 
 import streamlit as st
@@ -568,50 +567,6 @@ python -m quantbox.trading.live_trader --live --capital 1000
     )
 
 
-def validation_page():
-    """Validation and testing page"""
-    
-    st.header("🔍 System Validation")
-    
-    st.markdown("""
-    This page runs comprehensive validation tests to ensure:
-    1. **No Lookahead Bias** - Only historical data is used for decisions
-    2. **Correct Fee Calculation** - Transaction costs are accurately modeled
-    3. **Consistent Logic** - Backtest and live trading use identical logic
-    4. **Capital Tracking** - Money flows are correctly tracked
-    """)
-    
-    if st.button("🧪 Run Validation Tests", type="primary"):
-        with st.spinner("Running validation tests..."):
-            try:
-                from quantbox.backtest.validation import run_all_validation_tests
-                
-                # Capture output
-                import io
-                import sys
-                
-                old_stdout = sys.stdout
-                sys.stdout = buffer = io.StringIO()
-                
-                passed, failed = run_all_validation_tests()
-                
-                output = buffer.getvalue()
-                sys.stdout = old_stdout
-                
-                # Display results
-                if failed == 0:
-                    st.success(f"✅ All {passed} tests passed!")
-                else:
-                    st.error(f"❌ {failed} tests failed, {passed} passed")
-                
-                st.code(output)
-                
-            except Exception as e:
-                st.error(f"Validation failed: {e}")
-                import traceback
-                st.code(traceback.format_exc())
-
-
 def main():
     """Main dashboard entry point"""
     
@@ -621,7 +576,7 @@ def main():
     
     page = st.sidebar.radio(
         "Navigation",
-        ["🎯 Run Backtest", "📊 Results", "🔴 Live Trading", "🔍 Validation"],
+        ["🎯 Run Backtest", "📊 Results", "🔴 Live Trading"],
         label_visibility="hidden"
     )
     
@@ -647,8 +602,6 @@ def main():
         results_page()
     elif page == "🔴 Live Trading":
         live_trading_page()
-    elif page == "🔍 Validation":
-        validation_page()
 
 
 if __name__ == "__main__":
