@@ -103,7 +103,7 @@ class LivePairTrader:
         
         # Initialize Binance client
         api_key = os.getenv('BINANCE_API_KEY')
-        api_secret = os.getenv('BINANCE_API_SECRET')
+        api_secret = os.getenv('BINANCE_API_SECRET') or os.getenv('BINANCE_SECRET')
         testnet = os.getenv('BINANCE_TESTNET', 'false').lower() == 'true'
         
         if not api_key or not api_secret:
