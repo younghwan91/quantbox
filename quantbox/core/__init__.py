@@ -14,6 +14,9 @@ from quantbox.core.trader_slot import (
     get_active_slots,
     calculate_slot_capital,
     is_pair_available,
+    calculate_margin_from_notional,
+    calculate_kelly_from_trades,
+    calculate_kelly_discrete,
 )
 
 __all__ = [
@@ -34,4 +37,7 @@ __all__ = [
     "get_active_slots",
     "calculate_slot_capital",
     "is_pair_available",
+    "calculate_margin_from_notional",
+    "calculate_kelly_from_trades",
+    "calculate_kelly_discrete",
 ]

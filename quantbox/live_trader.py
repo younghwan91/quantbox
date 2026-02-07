@@ -7,9 +7,24 @@ QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
 2. TRADING_MODE를 'live' 또는 'paper'로 설정
 3. 초기 자본금 및 리스크 파라미터 확인
 
+환경변수 (.env):
+    BINANCE_API_KEY: 바이낸스 API 키
+    BINANCE_API_SECRET: 바이낸스 시크릿 키
+    BINANCE_TESTNET: 테스트넷 사용 여부 (true/false)
+    LEVERAGE: 레버리지 배수 (기본값: 2)
+    MAX_TRADERS: 최대 동시 트레이더 수 (기본값: 5)
+    POSITION_SIZE_PCT: 슬롯당 자본 비율 (기본값: auto=1/max_traders)
+    ENTRY_ZSCORE: 진입 z-score 임계값 (기본값: 2.0)
+    EXIT_ZSCORE: 청산 z-score 임계값 (기본값: 0.5)
+    STOP_LOSS_ZSCORE: 손절 z-score (기본값: 3.5)
+    TRADING_FEE: 거래 수수료 (기본값: 0.0005)
+    SLIPPAGE: 슬리피지 (기본값: 0.001)
+    FUNDING_RATE_8H: 8시간 펀딩비 (기본값: 0.0001)
+    N_COINS: 유니버스 코인 수 (기본값: 30)
+
 사용법:
     python live_trader.py [--paper] [--once]
-    
+
     --paper: Paper trading 모드 (실제 주문 없이 시뮬레이션)
     --once: 한 번만 실행하고 종료
 """
@@ -36,6 +51,7 @@ from quantbox.core.trader_slot import (
     get_idle_slots,
     get_active_slots,
     calculate_slot_capital,
+    calculate_margin_from_notional,
     is_pair_available,
 )
 from quantbox.strategy.pair_selector import PairSelector, PairCandidate
@@ -199,6 +215,7 @@ class LivePairTrader:
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
         logger.info(f"Max concurrent traders: {self.max_traders}")
+        logger.info(f"Leverage: {self.config['leverage']}x")
         logger.info(f"Testnet: {testnet}")
         if paper_mode:
             logger.info(f"Paper Balance: ${self.paper_balance:.2f} USDT")
@@ -222,7 +239,8 @@ class LivePairTrader:
             'position_size_pct': float(os.getenv('POSITION_SIZE_PCT', -1.0)),  # Auto: 1/max_traders
             'trading_fee': float(os.getenv('TRADING_FEE', 0.0005)),
             'slippage': float(os.getenv('SLIPPAGE', 0.001)),
-            'leverage': 1,
+            'funding_rate_8h': float(os.getenv('FUNDING_RATE_8H', 0.0001)),  # 0.01% per 8h
+            'leverage': int(os.getenv('LEVERAGE', 2)),  # 2x leverage default
             
             # Multi-trader
             'max_traders': int(os.getenv('MAX_TRADERS', 5)),
@@ -670,17 +688,22 @@ class LivePairTrader:
     ) -> bool:
         """특정 슬롯에서 페어 트레이드 실행.
 
+        capital은 calculate_slot_capital()에서 반환된 값으로,
+        leverage가 적용된 notional exposure이다.
+        실제 마진(cash)은 capital / leverage.
+
         Args:
             slot_id: 트레이드를 실행할 슬롯 ID.
             pair: 선택된 페어 후보.
             pair_info: 헤지 비율, 스프레드 통계 등.
-            capital: 사용 가능한 자본.
+            capital: 레버리지 적용된 노셔널 (calculate_slot_capital 반환값).
 
         Returns:
             True if 포지션 진입 성공.
         """
         symbol1, symbol2 = pair.symbol1, pair.symbol2
         hedge_ratio = pair_info['hedge_ratio']
+        leverage = self.config['leverage']
         
         # Get current prices
         price1 = self.get_price(symbol1)
@@ -707,7 +730,8 @@ class LivePairTrader:
         side1 = 'BUY' if signal == 1 else 'SELL'
         side2 = 'SELL' if signal == 1 else 'BUY'
         
-        # Calculate position sizes (capital is already slot-allocated by calculate_slot_capital)
+        # capital is notional (leveraged). Use full notional for position sizing.
+        margin = calculate_margin_from_notional(capital, leverage)
         effective_capital = capital * (1 - 2 * self.config['trading_fee'])
         
         s1_capital = effective_capital / (1 + hedge_ratio)
@@ -767,7 +791,9 @@ class LivePairTrader:
             'hedge_ratio': hedge_ratio,
             'spread_mean': pair_info['spread_mean'],
             'spread_std': pair_info['spread_std'],
-            'capital': capital,  # Allocated capital (for calculate_slot_capital parity)
+            'capital': margin,  # Margin (cash locked), matches backtest slot.position_info['capital']
+            'notional': capital,  # Notional exposure (margin × leverage)
+            'leverage': leverage,
         }
 
         # Update slot state
@@ -944,11 +970,13 @@ class LivePairTrader:
         excluded = self.occupied_symbols
         for slot in idle:
             # Pool-based capital allocation (identical to backtest)
+            # Returns notional (leveraged) amount
             slot_capital = calculate_slot_capital(
                 available_capital=self.get_available_balance(),
                 active_slots=get_active_slots(self.slots),
                 max_traders=self.max_traders,
                 position_size_pct=self.config['position_size_pct'],
+                leverage=self.config['leverage'],
             )
             if slot_capital < 10:
                 logger.info(f"Slot {slot.slot_id}: Insufficient slot capital (${slot_capital:.2f})")

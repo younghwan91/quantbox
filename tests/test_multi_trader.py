@@ -410,7 +410,7 @@ class TestTradeResult:
             pair=("A", "B"), entry_time=datetime.now(), exit_time=datetime.now(),
             entry_z=2.0, exit_z=0.5, entry_spread=0.01, exit_spread=0.005,
             signal=1, capital_allocated=2000, gross_pnl=100, fees=2,
-            slippage_cost=4, net_pnl=94, net_return_pct=4.7, bars_held=10,
+            slippage_cost=4, funding_cost=0, net_pnl=94, net_return_pct=4.7, bars_held=10,
             exit_reason=ExitReason.MEAN_REVERSION, hedge_ratio=1.0,
             spread_mean=0.0, spread_std=0.01,
         )
@@ -421,7 +421,7 @@ class TestTradeResult:
             pair=("A", "B"), entry_time=datetime.now(), exit_time=datetime.now(),
             entry_z=2.0, exit_z=0.5, entry_spread=0.01, exit_spread=0.005,
             signal=1, capital_allocated=2000, gross_pnl=100, fees=2,
-            slippage_cost=4, net_pnl=94, net_return_pct=4.7, bars_held=10,
+            slippage_cost=4, funding_cost=0, net_pnl=94, net_return_pct=4.7, bars_held=10,
             exit_reason=ExitReason.MEAN_REVERSION, hedge_ratio=1.0,
             spread_mean=0.0, spread_std=0.01, slot_id=3,
         )
@@ -1207,8 +1207,13 @@ class TestPositionSizingParity:
                 result = trader.execute_pair_trade(0, pair, pair_info, capital)
                 assert result is True
                 assert 'capital' in trader.slot_positions[0]
-                assert trader.slot_positions[0]['capital'] == 200.0
-                assert trader.slots[0].position_info['capital'] == 200.0
+                # capital now stores margin = notional / leverage
+                leverage = trader.config['leverage']
+                expected_margin = capital / leverage
+                assert trader.slot_positions[0]['capital'] == pytest.approx(expected_margin)
+                assert trader.slots[0].position_info['capital'] == pytest.approx(expected_margin)
+                # notional should be the original capital passed in
+                assert trader.slot_positions[0]['notional'] == pytest.approx(capital)
 
     # ------------------------------------------------------------------
     # 6. run_cycle uses calculate_slot_capital (not raw balance)
