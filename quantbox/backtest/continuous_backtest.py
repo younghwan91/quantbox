@@ -61,6 +61,7 @@ class TradeResult:
     gross_pnl: float
     fees: float
     slippage_cost: float
+    funding_cost: float
     net_pnl: float
     net_return_pct: float
     bars_held: int
@@ -133,6 +134,8 @@ class ContinuousBacktestConfig:
     # Transaction costs (per side)
     trading_fee: float = 0.0005  # 0.05% per trade (Binance maker)
     slippage: float = 0.0010    # 0.10% slippage estimate
+    funding_rate_8h: float = 0.0001  # 0.01% per 8h (Binance perpetual futures)
+    bar_interval_minutes: int = 15  # Bar interval for time calculations
     
     # Formation window for pair selection
     formation_bars: int = 240   # Bars to analyze for pair selection
@@ -168,8 +171,17 @@ class ContinuousBacktestConfig:
     
     @property
     def total_round_trip_cost(self) -> float:
-        """Total cost for entry + exit"""
+        """Total cost for entry + exit (excluding funding)"""
         return 2 * (self.trading_fee + self.slippage)
+
+    @property
+    def bars_per_funding_period(self) -> int:
+        """Number of bars in one 8-hour funding period.
+
+        Binance charges funding every 8 hours.
+        For 15-min bars: 8h * 60 / 15 = 32 bars.
+        """
+        return (8 * 60) // self.bar_interval_minutes
 
 
 class PairStatistics:
@@ -338,6 +350,7 @@ class ContinuousPairBacktest:
         logger.info(f"  Position size per trader: {self.config.position_size_pct*100:.1f}%")
         logger.info(f"  Leverage: {self.config.leverage}x")
         logger.info(f"  Round-trip cost: {self.config.total_round_trip_cost*100:.2f}%")
+        logger.info(f"  Funding rate: {self.config.funding_rate_8h*100:.4f}% per 8h")
         
         # Main backtest loop
         iterator = range(start_idx, end_idx)
@@ -802,12 +815,17 @@ class ContinuousPairBacktest:
         # Slippage: proportional to notional size
         total_slippage = self.config.slippage * 2 * notional
         
-        net_pnl = gross_pnl - total_fees - total_slippage
+        # Funding fee: both legs pay funding proportional to notional
+        # Conservative: assume BOTH legs pay (worst-case for pair trade)
+        # funding_cost = funding_rate_8h × 2 (legs) × notional × (bars_held / bars_per_8h)
+        bars_held = bar_idx - pos['entry_bar']
+        funding_periods = bars_held / self.config.bars_per_funding_period
+        total_funding = self.config.funding_rate_8h * 2 * notional * funding_periods
+        
+        net_pnl = gross_pnl - total_fees - total_slippage - total_funding
         # Return percentage is relative to MARGIN (actual cash invested)
         margin = pos['capital']
         net_return_pct = (net_pnl / margin) * 100 if margin > 0 else 0.0
-        
-        bars_held = bar_idx - pos['entry_bar']
         
         # Record trade
         trade = TradeResult(
@@ -823,6 +841,7 @@ class ContinuousPairBacktest:
             gross_pnl=gross_pnl,
             fees=total_fees,
             slippage_cost=total_slippage,
+            funding_cost=total_funding,
             net_pnl=net_pnl,
             net_return_pct=net_return_pct,
             bars_held=bars_held,
@@ -884,6 +903,15 @@ class ContinuousPairBacktest:
                 # Unrealized PnL is based on notional (leveraged) exposure
                 notional = pos.get('notional', pos['capital'])
                 slot_unrealized = pos['signal'] * spread_change * notional
+
+                # Deduct accrued funding cost from unrealized PnL
+                bars_held = len(state.equity_curve) - pos.get('entry_bar', 0)
+                if bars_held < 0:
+                    bars_held = 0
+                funding_periods = bars_held / self.config.bars_per_funding_period
+                accrued_funding = self.config.funding_rate_8h * 2 * notional * funding_periods
+                slot_unrealized -= accrued_funding
+
                 unrealized_pnl += slot_unrealized
 
         total_equity = state.current_capital + state.total_allocated + unrealized_pnl
@@ -932,6 +960,7 @@ class ContinuousPairBacktest:
                 'gross_pnl': t.gross_pnl,
                 'fees': t.fees,
                 'slippage': t.slippage_cost,
+                'funding_cost': t.funding_cost,
                 'net_pnl': t.net_pnl,
                 'return_pct': t.net_return_pct,
                 'bars_held': t.bars_held,

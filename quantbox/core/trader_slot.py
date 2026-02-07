@@ -16,7 +16,6 @@ Design:
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict
 
 import numpy as np
 
@@ -37,8 +36,8 @@ class TraderSlotState:
 
     slot_id: int
     position_open: bool = False
-    current_pair: Optional[tuple[str, str]] = None
-    position_info: Optional[Dict] = None
+    current_pair: tuple[str, str] | None = None
+    position_info: dict | None = None
 
     @property
     def occupied_symbols(self) -> set[str]:

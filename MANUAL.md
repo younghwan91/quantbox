@@ -155,6 +155,35 @@ dependencies = [
 mkdir -p data/cache data/raw data/processed
 ```
 
+### 2.6 환경변수 설정 (.env)
+
+실거래/페이퍼 트레이딩 시 `.env` 파일에 아래 환경변수를 설정합니다:
+
+```bash
+# 필수: 바이낸스 API
+BINANCE_API_KEY=your_api_key
+BINANCE_API_SECRET=your_api_secret
+BINANCE_TESTNET=true          # 테스트넷 사용 시
+
+# 레버리지 및 포지션 사이징
+LEVERAGE=2                     # 레버리지 배수 (기본값: 2)
+MAX_TRADERS=5                  # 최대 동시 트레이더 수 (기본값: 5)
+POSITION_SIZE_PCT=-1           # 슬롯당 자본 비율 (-1=자동: 1/MAX_TRADERS)
+
+# 전략 파라미터
+ENTRY_ZSCORE=2.0               # 진입 z-score 임계값
+EXIT_ZSCORE=0.5                # 청산 z-score 임계값
+STOP_LOSS_ZSCORE=3.5           # 손절 z-score
+
+# 비용 모델
+TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
+SLIPPAGE=0.001                 # 슬리피지 (0.10%)
+FUNDING_RATE_8H=0.0001         # 8시간 펀딩비 (0.01%)
+
+# 유니버스
+N_COINS=30                     # 상위 N개 코인 사용
+```
+
 ---
 
 ## 3. 아키텍처 이해
@@ -1219,7 +1248,8 @@ engine.run_live(strategy)
 config.risk.max_position_size = 0.05    # 최대 포지션: 5%
 config.risk.max_drawdown = 0.15         # 최대 낙폭: 15%
 config.risk.stop_loss_pct = 0.03        # 손절: 3%
-config.risk.leverage = 1                 # 레버리지: 1x
+config.risk.leverage = 2                 # 레버리지: 2x (환경변수 LEVERAGE로 설정 가능)
+config.risk.funding_rate_8h = 0.0001     # 8시간 펀딩비: 0.01%
 
 # 자동 리스크 관리
 if portfolio.current_drawdown > config.risk.max_drawdown:
@@ -1633,9 +1663,10 @@ class StrategyConfig:
 class RiskConfig:
     max_position_size: float = 0.1         # 최대 포지션 비율
     max_drawdown: float = 0.2              # 최대 낙폭
-    leverage: int = 1                       # 레버리지
+    leverage: int = 2                       # 레버리지 (환경변수: LEVERAGE)
     trading_fee: float = 0.0005            # 거래 수수료
     slippage: float = 0.001                # 슬리피지
+    funding_rate_8h: float = 0.0001        # 8시간 펀딩비
     stop_loss_pct: float = 0.05            # 손절 비율
     take_profit_pct: float = 0.10          # 익절 비율
 
