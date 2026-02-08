@@ -3,14 +3,14 @@
 QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
 
 실행 전 확인사항:
-1. .env 파일에 바이낸스 API 키 설정
-2. TRADING_MODE를 'live' 또는 'paper'로 설정
+1. .env 파일에 바이낸스 API 키 설정 (cp .env.example .env)
+2. --paper 또는 --once 플래그로 모드 선택
 3. 초기 자본금 및 리스크 파라미터 확인
 
 환경변수 (.env):
-    BINANCE_API_KEY: 바이낸스 API 키
-    BINANCE_API_SECRET: 바이낸스 시크릿 키
-    BINANCE_TESTNET: 테스트넷 사용 여부 (true/false)
+    BINANCE_API_KEY: 바이낸스 API 키 (필수)
+    BINANCE_API_SECRET: 바이낸스 시크릿 키 (필수)
+    BINANCE_TESTNET: 테스트넷 사용 여부 (기본값: false)
     LEVERAGE: 레버리지 배수 (기본값: 2)
     MAX_TRADERS: 최대 동시 트레이더 수 (기본값: 5)
     POSITION_SIZE_PCT: 슬롯당 자본 비율 (기본값: auto=1/max_traders)
@@ -21,6 +21,8 @@ QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
     SLIPPAGE: 슬리피지 (기본값: 0.001)
     FUNDING_RATE_8H: 8시간 펀딩비 (기본값: 0.0001)
     N_COINS: 유니버스 코인 수 (기본값: 30)
+    PAPER_BALANCE: 페이퍼 트레이딩 가상 잔고 (기본값: 1000)
+    DISCORD_WEBHOOK_URL: Discord 웹훅 URL (미설정 시 알림 비활성화)
 
 사용법:
     python live_trader.py [--paper] [--once]
@@ -45,6 +47,7 @@ import requests
 
 # QuantBox imports
 from quantbox.core.config import Config, TradingMode
+from quantbox.core.settings import get_settings
 from quantbox.core.trader_slot import (
     TraderSlotState,
     get_occupied_symbols,
@@ -97,17 +100,17 @@ class LivePairTrader:
         config: Dict = None
     ):
         self.paper_mode = paper_mode
-        self.config = config or self._default_config()
+
+        # pydantic-settings: .env 검증 (필수 변수 누락 시 즉시 에러)
+        self._settings = get_settings()
+        self.config = config or self._settings.to_trader_config()
         
         # Initialize Binance client
-        api_key = os.getenv('BINANCE_API_KEY')
-        api_secret = os.getenv('BINANCE_API_SECRET')
-        testnet = os.getenv('BINANCE_TESTNET', 'false').lower() == 'true'
-        
-        if not api_key or not api_secret:
-            raise ValueError("BINANCE_API_KEY and BINANCE_API_SECRET must be set in .env")
-        
-        self.client = Client(api_key=api_key, api_secret=api_secret, testnet=testnet)
+        self.client = Client(
+            api_key=self._settings.binance_api_key,
+            api_secret=self._settings.binance_api_secret,
+            testnet=self._settings.binance_testnet,
+        )
         
         # Initialize components
         self.preprocessor = DataPreprocessor()
@@ -133,57 +136,23 @@ class LivePairTrader:
         self.prev_prices: Dict[str, float] = {}
         
         # Paper trading state
-        self.paper_balance = float(os.getenv('PAPER_BALANCE', 1000.0))
+        self.paper_balance = self._settings.paper_balance
         self.paper_positions: List[Dict] = []
         
         # Discord notifications
-        self.discord = DiscordNotifier()
+        self.discord = DiscordNotifier(webhook_url=self._settings.discord_webhook_url)
         
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
         logger.info(f"Max concurrent traders: {self.max_traders}")
         logger.info(f"Leverage: {self.config['leverage']}x")
-        logger.info(f"Testnet: {testnet}")
+        logger.info(f"Testnet: {self._settings.binance_testnet}")
         if paper_mode:
             logger.info(f"Paper Balance: ${self.paper_balance:.2f} USDT")
         
     def _default_config(self) -> Dict:
-        """기본 설정"""
-        return {
-            # Data settings
-            'quote_currency': 'USDT',
-            'n_coins': int(os.getenv('N_COINS', 30)),  # 30 coins = 435 pairs
-            'interval': '15m',
-            'formation_hours': 168,  # 7 days
-            
-            # Strategy parameters
-            'entry_zscore': float(os.getenv('ENTRY_ZSCORE', 2.0)),
-            'exit_zscore': float(os.getenv('EXIT_ZSCORE', 0.5)),
-            'stop_loss_zscore': float(os.getenv('STOP_LOSS_ZSCORE', 3.5)),
-            'max_holding_hours': 24,
-            
-            # Risk parameters
-            'position_size_pct': float(os.getenv('POSITION_SIZE_PCT', -1.0)),  # Auto: 1/max_traders
-            'trading_fee': float(os.getenv('TRADING_FEE', 0.0005)),
-            'slippage': float(os.getenv('SLIPPAGE', 0.001)),
-            'funding_rate_8h': float(os.getenv('FUNDING_RATE_8H', 0.0001)),  # 0.01% per 8h
-            'leverage': int(os.getenv('LEVERAGE', 2)),  # 2x leverage default
-            
-            # Multi-trader
-            'max_traders': int(os.getenv('MAX_TRADERS', 5)),
-            
-            # Filter parameters
-            'min_correlation': 0.5,
-            'max_cointegration_pvalue': 0.05,
-            'min_half_life': 3,
-            'max_half_life': 60,
-            'max_hurst': 0.5,
-            
-            # Execution settings
-            'check_interval_seconds': 60,
-            'retry_attempts': 3,
-            'retry_delay': 2,
-        }
+        """기본 설정 — get_settings().to_trader_config() 사용 권장."""
+        return get_settings().to_trader_config()
     
     def _create_filter_pipeline(self) -> FilterPipeline:
         """필터 파이프라인 생성"""
@@ -525,21 +494,29 @@ class LivePairTrader:
         self,
         data: Dict[str, pd.DataFrame],
         excluded_symbols: set[str] = None,
+        cached_candidates: list[PairCandidate] | None = None,
     ) -> Optional[Tuple[PairCandidate, Dict]]:
         """최적 페어 선택 (이미 사용 중인 심볼 제외).
 
         Args:
             data: 심볼별 OHLCV 데이터.
             excluded_symbols: 제외할 심볼 집합 (다른 슬롯이 사용 중).
+            cached_candidates: 사전에 select_pairs()로 계산된 후보 리스트.
+                None이면 내부에서 select_pairs()를 호출한다.
+                run_cycle에서 1회 계산 후 재사용하여 CPU 낭비를 방지한다.
 
         Returns:
             (PairCandidate, pair_info) 또는 None.
         """
         excluded_symbols = excluded_symbols or set()
         logger.info(f"Searching for cointegrated pairs (excluded: {excluded_symbols or 'none'})...")
-        
-        candidates = self.pair_selector.select_pairs(data, progress=False)
-        
+
+        if cached_candidates is not None:
+            candidates = cached_candidates
+            logger.debug(f"Using cached candidates: {len(candidates)} pairs")
+        else:
+            candidates = self.pair_selector.select_pairs(data, progress=False)
+
         if not candidates:
             logger.warning("No valid pairs found")
             return None
@@ -778,7 +755,7 @@ class LivePairTrader:
         entry_time = self.slot_entry_times[slot_id]
         elapsed = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
         
-        logger.info(
+        logger.debug(
             f"Slot {slot_id}: Monitor {pos['symbol1']}/{pos['symbol2']}: "
             f"Z={z_score:.4f} (entry={entry_z:.4f}), "
             f"Elapsed={elapsed:.1f}h"
@@ -915,13 +892,15 @@ class LivePairTrader:
         Returns:
             True if 사이클이 정상 완료됨.
         """
-        logger.info("=" * 60)
         active = get_active_slots(self.slots)
         idle = get_idle_slots(self.slots)
-        logger.info(
+        logger.debug(
             f"Cycle: {len(active)} active, {len(idle)} idle "
             f"(occupied: {self.occupied_symbols or 'none'})"
         )
+
+        # 사이클 내 이벤트 추적 (포지션 열림/닫힘)
+        slots_before = {s.slot_id for s in active}
 
         # 1. Monitor all active slots
         for slot in active:
@@ -937,7 +916,7 @@ class LivePairTrader:
         # 3. Get capital info (matches backtest pool model)
         available = self.get_available_balance()
         total = self.get_total_balance()
-        logger.info(f"Available balance: ${available:.2f}, Total: ${total:.2f}")
+        logger.debug(f"Available balance: ${available:.2f}, Total: ${total:.2f}")
 
         if available < 100:
             logger.warning("Insufficient balance for new trades")
@@ -955,9 +934,19 @@ class LivePairTrader:
             logger.error("Not enough data for pair selection")
             return True
 
-        # 5. For each idle slot, find and enter a new pair
+        # 5. select_pairs를 1회만 호출하고 결과를 캐싱
+        #    모든 idle slot이 동일한 candidates를 재사용한다.
+        #    (이전: idle slot마다 select_pairs 재호출 → 동일 결과에 ~9초씩 낭비)
+        logger.info("Computing pair candidates (once per cycle)...")
+        cached_candidates = self.pair_selector.select_pairs(data, progress=False)
+        if not cached_candidates:
+            logger.warning("No valid pair candidates found")
+            return True
+        logger.info(f"Found {len(cached_candidates)} pair candidates")
+
+        # 6. For each idle slot, find and enter a new pair
         #    Capital is calculated per-slot using the same function as backtest
-        excluded = self.occupied_symbols
+        excluded = set(self.occupied_symbols)
         for slot in idle:
             # Pool-based capital allocation (identical to backtest)
             # Returns notional (leveraged) amount
@@ -972,49 +961,66 @@ class LivePairTrader:
                 logger.info(f"Slot {slot.slot_id}: Insufficient slot capital (${slot_capital:.2f})")
                 break
 
-            result = self.find_best_pair(data, excluded_symbols=excluded)
+            result = self.find_best_pair(
+                data, excluded_symbols=excluded,
+                cached_candidates=cached_candidates,
+            )
             if not result:
                 logger.info(f"Slot {slot.slot_id}: No suitable pair found")
-                break  # API 호출 최소화: 하나 못 찾으면 나머지도 없을 가능성 높음
+                break  # 캐시된 candidates에서 못 찾으면 나머지도 없음
 
             pair, pair_info = result
 
             if self.execute_pair_trade(slot.slot_id, pair, pair_info, slot_capital):
                 # Update excluded symbols for next idle slot
-                excluded = self.occupied_symbols
+                excluded = set(self.occupied_symbols)
                 # Short delay between orders to not spam the API
                 time.sleep(2)
+            else:
+                # 실패한 페어의 심볼을 제외하여 동일 페어 재시도 방지
+                excluded.add(pair.symbol1)
+                excluded.add(pair.symbol2)
+                logger.info(
+                    f"Slot {slot.slot_id}: Trade execution failed for "
+                    f"{pair.symbol1}/{pair.symbol2}, excluding from further search"
+                )
 
-        logger.info("Cycle completed")
+        logger.debug("Cycle completed")
 
-        # ── Cycle Summary ──
-        slots_info = self._build_slots_info()
-        available = self.get_available_balance()
-        total = self.get_total_balance()
-        total_unrealized = sum(
-            s.get('unrealized_pnl', 0.0) for s in slots_info if s['status'] == 'active'
-        )
-        session_pnl = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
-        self.discord.notify_cycle_summary(
-            slots_info=slots_info,
-            available_capital=available,
-            total_capital=total,
-            total_unrealized_pnl=total_unrealized,
-            session_pnl=session_pnl,
-            n_trades_session=len(self.trade_history),
-        )
+        # ── Cycle Summary: 포지션 변동이 있을 때만 알림 ──
+        slots_after = {s.slot_id for s in get_active_slots(self.slots)}
+        positions_changed = (slots_before != slots_after)
+
+        if positions_changed:
+            slots_info = self._build_slots_info()
+            available = self.get_available_balance()
+            total = self.get_total_balance()
+            total_unrealized = sum(
+                s.get('unrealized_pnl', 0.0) for s in slots_info if s['status'] == 'active'
+            )
+            session_pnl = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
+            self.discord.notify_cycle_summary(
+                slots_info=slots_info,
+                available_capital=available,
+                total_capital=total,
+                total_unrealized_pnl=total_unrealized,
+                session_pnl=session_pnl,
+                n_trades_session=len(self.trade_history),
+            )
 
         # ── Daily Report (24h 주기) ──
         if self.discord.should_send_daily_report():
+            total_bal = self.get_total_balance()
+            session_pnl_dr = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
             wins = [t for t in self.trade_history if t['pnl'] > 0]
             win_rate = (len(wins) / len(self.trade_history) * 100) if self.trade_history else 0.0
             active_count = len(get_active_slots(self.slots))
             self.discord.notify_daily_report(
-                total_balance=total,
-                daily_pnl=session_pnl,
-                daily_return_pct=(session_pnl / total * 100) if total > 0 else 0.0,
-                cumulative_pnl=session_pnl,
-                cumulative_return_pct=(session_pnl / total * 100) if total > 0 else 0.0,
+                total_balance=total_bal,
+                daily_pnl=session_pnl_dr,
+                daily_return_pct=(session_pnl_dr / total_bal * 100) if total_bal > 0 else 0.0,
+                cumulative_pnl=session_pnl_dr,
+                cumulative_return_pct=(session_pnl_dr / total_bal * 100) if total_bal > 0 else 0.0,
                 n_trades_today=len(self.trade_history),
                 n_trades_total=len(self.trade_history),
                 win_rate=win_rate,
