@@ -494,21 +494,29 @@ class LivePairTrader:
         self,
         data: Dict[str, pd.DataFrame],
         excluded_symbols: set[str] = None,
+        cached_candidates: list[PairCandidate] | None = None,
     ) -> Optional[Tuple[PairCandidate, Dict]]:
         """최적 페어 선택 (이미 사용 중인 심볼 제외).
 
         Args:
             data: 심볼별 OHLCV 데이터.
             excluded_symbols: 제외할 심볼 집합 (다른 슬롯이 사용 중).
+            cached_candidates: 사전에 select_pairs()로 계산된 후보 리스트.
+                None이면 내부에서 select_pairs()를 호출한다.
+                run_cycle에서 1회 계산 후 재사용하여 CPU 낭비를 방지한다.
 
         Returns:
             (PairCandidate, pair_info) 또는 None.
         """
         excluded_symbols = excluded_symbols or set()
         logger.info(f"Searching for cointegrated pairs (excluded: {excluded_symbols or 'none'})...")
-        
-        candidates = self.pair_selector.select_pairs(data, progress=False)
-        
+
+        if cached_candidates is not None:
+            candidates = cached_candidates
+            logger.debug(f"Using cached candidates: {len(candidates)} pairs")
+        else:
+            candidates = self.pair_selector.select_pairs(data, progress=False)
+
         if not candidates:
             logger.warning("No valid pairs found")
             return None
@@ -926,9 +934,19 @@ class LivePairTrader:
             logger.error("Not enough data for pair selection")
             return True
 
-        # 5. For each idle slot, find and enter a new pair
+        # 5. select_pairs를 1회만 호출하고 결과를 캐싱
+        #    모든 idle slot이 동일한 candidates를 재사용한다.
+        #    (이전: idle slot마다 select_pairs 재호출 → 동일 결과에 ~9초씩 낭비)
+        logger.info("Computing pair candidates (once per cycle)...")
+        cached_candidates = self.pair_selector.select_pairs(data, progress=False)
+        if not cached_candidates:
+            logger.warning("No valid pair candidates found")
+            return True
+        logger.info(f"Found {len(cached_candidates)} pair candidates")
+
+        # 6. For each idle slot, find and enter a new pair
         #    Capital is calculated per-slot using the same function as backtest
-        excluded = self.occupied_symbols
+        excluded = set(self.occupied_symbols)
         for slot in idle:
             # Pool-based capital allocation (identical to backtest)
             # Returns notional (leveraged) amount
@@ -943,18 +961,29 @@ class LivePairTrader:
                 logger.info(f"Slot {slot.slot_id}: Insufficient slot capital (${slot_capital:.2f})")
                 break
 
-            result = self.find_best_pair(data, excluded_symbols=excluded)
+            result = self.find_best_pair(
+                data, excluded_symbols=excluded,
+                cached_candidates=cached_candidates,
+            )
             if not result:
                 logger.info(f"Slot {slot.slot_id}: No suitable pair found")
-                break  # API 호출 최소화: 하나 못 찾으면 나머지도 없을 가능성 높음
+                break  # 캐시된 candidates에서 못 찾으면 나머지도 없음
 
             pair, pair_info = result
 
             if self.execute_pair_trade(slot.slot_id, pair, pair_info, slot_capital):
                 # Update excluded symbols for next idle slot
-                excluded = self.occupied_symbols
+                excluded = set(self.occupied_symbols)
                 # Short delay between orders to not spam the API
                 time.sleep(2)
+            else:
+                # 실패한 페어의 심볼을 제외하여 동일 페어 재시도 방지
+                excluded.add(pair.symbol1)
+                excluded.add(pair.symbol2)
+                logger.info(
+                    f"Slot {slot.slot_id}: Trade execution failed for "
+                    f"{pair.symbol1}/{pair.symbol2}, excluding from further search"
+                )
 
         logger.debug("Cycle completed")
 
