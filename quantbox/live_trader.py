@@ -1060,6 +1060,21 @@ class LivePairTrader:
 
     # ==================== Discord Bot Command Processing ====================
 
+    def _interruptible_sleep(self, total_seconds: int):
+        """짧은 간격으로 sleep하면서 봇 명령을 중간중간 처리한다.
+
+        Args:
+            total_seconds: 총 sleep 시간 (초)
+        """
+        poll_interval = 2  # 2초마다 큐 체크
+        elapsed = 0
+        while elapsed < total_seconds:
+            time.sleep(min(poll_interval, total_seconds - elapsed))
+            elapsed += poll_interval
+            self._process_bot_commands()
+            if self._stop_requested:
+                return
+
     def _process_bot_commands(self):
         """Discord 봇 큐에 쌓인 명령을 모두 처리한다.
 
@@ -1236,14 +1251,17 @@ class LivePairTrader:
                     if result is False:  # !stop 명령
                         logger.info("Stop requested via Discord")
                         break
-                    time.sleep(self.config['check_interval_seconds'])
+                    self._interruptible_sleep(self.config['check_interval_seconds'])
+                    if self._stop_requested:
+                        logger.info("Stop requested via Discord (during sleep)")
+                        break
                     
                 except Exception as e:
                     logger.error(f"Error in trading cycle: {e}")
                     self.discord.notify_error(str(e))
                     # 에러 시 모든 포지션 청산 (안전 조치)
                     self.close_all_positions()
-                    time.sleep(60)
+                    self._interruptible_sleep(60)
                     
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
