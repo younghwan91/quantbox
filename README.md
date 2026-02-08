@@ -2,7 +2,7 @@
 
 **암호화폐 페어 트레이딩 프레임워크**
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 
 백테스팅과 실거래를 통합한 암호화폐 페어 트레이딩 프레임워크
 

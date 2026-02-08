@@ -180,9 +180,15 @@ TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
 SLIPPAGE=0.001                 # 슬리피지 (0.10%)
 FUNDING_RATE_8H=0.0001         # 8시간 펀딩비 (0.01%)
 
-# 유니버스
+# 유니버스 & 페이퍼 트레이딩
 N_COINS=30                     # 상위 N개 코인 사용
+PAPER_BALANCE=1000             # 페이퍼 트레이딩 시 가상 잔고 ($)
+
+# 알림 (Discord)
+DISCORD_WEBHOOK_URL=           # 미설정 시 알림 비활성화
 ```
+
+> **팁**: `.env.example` 파일을 복사하여 시작하세요: `cp .env.example .env`
 
 ---
 
