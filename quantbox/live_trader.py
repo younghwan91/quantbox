@@ -804,13 +804,21 @@ class LivePairTrader:
         if should_close:
             logger.info(f"Slot {slot_id}: Closing position: {close_reason}")
             
-            # Calculate PnL
+            # Calculate PnL (with costs)
             pnl1 = (price1 - pos['entry_price1']) * pos['qty1']
             pnl2 = (price2 - pos['entry_price2']) * pos['qty2']
-            total_pnl = pnl1 + pnl2
+            raw_pnl = pnl1 + pnl2
             
-            # Calculate PnL percentage
+            # Deduct realistic costs
             entry_value = abs(pos['qty1'] * pos['entry_price1']) + abs(pos['qty2'] * pos['entry_price2'])
+            fee_cost = entry_value * self.config['trading_fee'] * 2  # entry + exit
+            slip_cost = entry_value * self.config['slippage'] * 2  # entry + exit
+            bars_held = max(1, elapsed * 4)  # hours → 15m bars
+            funding_cost = entry_value * self.config['funding_rate_8h'] * 2 * (bars_held / 32)  # 32 bars = 8h
+            total_cost = fee_cost + slip_cost + funding_cost
+            total_pnl = raw_pnl - total_cost
+            
+            # Calculate PnL percentage (net of costs)
             pnl_pct = (total_pnl / entry_value * 100) if entry_value > 0 else 0
             
             self.close_slot_positions(slot_id)
