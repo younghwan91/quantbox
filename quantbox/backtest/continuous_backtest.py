@@ -153,6 +153,7 @@ class ContinuousBacktestConfig:
     max_cointegration_pvalue: float = 0.05
     min_half_life: float = 2.0   # Minimum half-life in bars
     max_half_life: float = 50.0  # Maximum half-life in bars
+    max_hurst: float = 0.5  # Maximum Hurst exponent (< 0.5 = mean-reverting)
     
     # Risk management
     position_size_pct: float = -1.0  # Fraction of capital per trade (auto: 1/max_traders)
@@ -282,6 +283,25 @@ class PairStatistics:
             return 0.0
         
         return np.corrcoef(log_ret1, log_ret2)[0, 1]
+
+    @staticmethod
+    def calculate_hurst(spread: np.ndarray, max_lag: int = 100) -> float:
+        """Calculate Hurst exponent using R/S analysis.
+        
+        Same implementation as HurstFilter in strategy/filters.py.
+        H < 0.5 → mean-reverting, H > 0.5 → trending.
+        """
+        lags = range(2, min(max_lag, len(spread) // 4))
+        if len(list(lags)) < 2:
+            return 0.5  # not enough data, assume random walk
+        tau = [np.std(np.subtract(spread[lag:], spread[:-lag])) for lag in lags]
+        # Avoid log(0)
+        tau = [t for t in tau if t > 0]
+        if len(tau) < 2:
+            return 0.5
+        valid_lags = list(range(2, 2 + len(tau)))
+        poly = np.polyfit(np.log(valid_lags), np.log(tau), 1)
+        return poly[0] / 2.0
 
 
 class ContinuousPairBacktest:
@@ -655,6 +675,11 @@ class ContinuousPairBacktest:
                 if not (self.config.min_half_life < half_life < self.config.max_half_life):
                     continue
                 
+                # 5. Hurst exponent filter
+                hurst = self.stats.calculate_hurst(spread)
+                if hurst >= self.config.max_hurst:
+                    continue
+                
                 # Z-score at end of formation (for tracking, not filtering)
                 current_z = (spread[-1] - spread_mean) / spread_std
                 
@@ -1026,7 +1051,8 @@ class ContinuousPairBacktest:
             returns = returns[~np.isnan(returns) & ~np.isinf(returns)]
             
             if len(returns) > 0 and np.std(returns) > 0:
-                sharpe = np.mean(returns) / np.std(returns) * np.sqrt(252 * 24)  # Annualized
+                bars_per_year = 365.25 * 24 * (60 / self.config.bar_interval_minutes)
+                sharpe = np.mean(returns) / np.std(returns) * np.sqrt(bars_per_year)
             else:
                 sharpe = 0
         else:

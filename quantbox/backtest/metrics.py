@@ -225,7 +225,8 @@ def calculate_metrics(
 
 def calculate_rolling_metrics(
     equity_curve: pd.DataFrame,
-    window: int = 252
+    window: int = 252,
+    periods_per_year: int = 35064,  # 15m bars: 365.25 * 24 * 4
 ) -> pd.DataFrame:
     """
     Calculate rolling performance metrics.
@@ -242,12 +243,12 @@ def calculate_rolling_metrics(
     rolling['rolling_return'] = equity / equity.shift(window) - 1
     
     # Rolling volatility
-    rolling['rolling_volatility'] = returns.rolling(window).std() * np.sqrt(252)
+    rolling['rolling_volatility'] = returns.rolling(window).std() * np.sqrt(periods_per_year)
     
     # Rolling Sharpe
     rolling_mean = returns.rolling(window).mean()
     rolling_std = returns.rolling(window).std()
-    rolling['rolling_sharpe'] = (rolling_mean / rolling_std) * np.sqrt(252)
+    rolling['rolling_sharpe'] = (rolling_mean / rolling_std) * np.sqrt(periods_per_year)
     
     # Rolling max drawdown
     def max_dd(x):
