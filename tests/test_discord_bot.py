@@ -308,12 +308,58 @@ class TestRunCycleBotIntegration:
         monkeypatch.setenv("BINANCE_API_SECRET", "test_secret")
         monkeypatch.setenv("BINANCE_TESTNET", "true")
         monkeypatch.setenv("MAX_TRADERS", "3")
+        monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+        monkeypatch.delenv("DISCORD_CHANNEL_ID", raising=False)
 
     @pytest.fixture
     def trader(self, mock_env):
         with patch("quantbox.live_trader.Client"):
             from quantbox.live_trader import LivePairTrader
-            trader = LivePairTrader(paper_mode=True)
+            with patch("quantbox.live_trader.get_settings") as mock_settings:
+                s = mock_settings.return_value
+                s.binance_api_key = "test_key"
+                s.binance_api_secret = "test_secret"
+                s.binance_testnet = True
+                s.max_traders = 3
+                s.leverage = 2
+                s.position_size_pct = -1
+                s.entry_zscore = 2.0
+                s.exit_zscore = 0.5
+                s.stop_loss_zscore = 3.5
+                s.trading_fee = 0.0005
+                s.slippage = 0.001
+                s.funding_rate_8h = 0.0001
+                s.n_coins = 30
+                s.paper_balance = 1000.0
+                s.discord_webhook_url = None
+                s.discord_bot_token = None
+                s.discord_channel_id = None
+                s.to_trader_config.return_value = {
+                    'quote_currency': 'USDT',
+                    'n_coins': 30,
+                    'interval': '15m',
+                    'formation_hours': 168,
+                    'entry_zscore': 2.0,
+                    'exit_zscore': 0.5,
+                    'stop_loss_zscore': 3.5,
+                    'max_holding_hours': 24,
+                    'position_size_pct': 0.333,
+                    'trading_fee': 0.0005,
+                    'slippage': 0.001,
+                    'funding_rate_8h': 0.0001,
+                    'leverage': 2,
+                    'max_traders': 3,
+                    'min_correlation': 0.5,
+                    'max_cointegration_pvalue': 0.05,
+                    'min_half_life': 3,
+                    'max_half_life': 60,
+                    'max_hurst': 0.5,
+                    'check_interval_seconds': 900,
+                    'retry_attempts': 3,
+                    'retry_delay': 2,
+                    'lookback_bars': 200,
+                }
+                trader = LivePairTrader(paper_mode=True)
             trader.get_available_balance = MagicMock(return_value=5000.0)
             trader.get_total_balance = MagicMock(return_value=5000.0)
             trader.get_trading_coins = MagicMock(return_value=["BTCUSDT", "ETHUSDT"])
@@ -406,3 +452,50 @@ class TestRunCycleBotIntegration:
         trader._process_bot_commands()
 
         assert trader.paused is True  # pause가 먼저 처리됨
+
+    def test_interruptible_sleep_processes_commands(self, trader):
+        """_interruptible_sleep 중에도 봇 명령이 처리된다."""
+        runner = DiscordBotRunner(token="fake", channel_id=1)
+        trader._bot_runner = runner
+
+        import threading
+        import time
+
+        # 1초 후에 STATUS 명령 큐에 넣기
+        def delayed_cmd():
+            time.sleep(1)
+            runner.command_queue.put(BotCommand(command=CommandType.PAUSE))
+
+        t = threading.Thread(target=delayed_cmd)
+        t.start()
+
+        # 4초짜리 interruptible sleep (2초마다 poll)
+        trader._interruptible_sleep(4)
+        t.join()
+
+        # sleep 중에 PAUSE 명령이 처리되었어야 함
+        assert trader.paused is True
+
+    def test_interruptible_sleep_stops_on_stop_request(self, trader):
+        """_interruptible_sleep 중 !stop이 오면 즉시 빠져나온다."""
+        runner = DiscordBotRunner(token="fake", channel_id=1)
+        trader._bot_runner = runner
+
+        import threading
+        import time
+
+        # 0.5초 후에 STOP 명령
+        def delayed_stop():
+            time.sleep(0.5)
+            runner.command_queue.put(BotCommand(command=CommandType.STOP))
+
+        t = threading.Thread(target=delayed_stop)
+        t.start()
+
+        start = time.time()
+        trader._interruptible_sleep(30)  # 30초 요청했지만 빨리 끝나야 함
+        elapsed = time.time() - start
+        t.join()
+
+        assert trader._stop_requested is True
+        assert elapsed < 10  # 30초 다 안 기다림
