@@ -84,6 +84,9 @@ for log_name in ['urllib3', 'requests', 'binance']:
 
 
 from quantbox.notifications.discord import DiscordNotifier
+from quantbox.notifications.bot import (
+    DiscordBotRunner, BotCommand, CommandType,
+)
 
 
 class LivePairTrader:
@@ -141,7 +144,20 @@ class LivePairTrader:
         
         # Discord notifications
         self.discord = DiscordNotifier(webhook_url=self._settings.discord_webhook_url)
-        
+
+        # Discord bot (양방향 원격 명령)
+        self._bot_runner: DiscordBotRunner | None = None
+        if self._settings.discord_bot_token and self._settings.discord_channel_id:
+            self._bot_runner = DiscordBotRunner(
+                token=self._settings.discord_bot_token,
+                channel_id=self._settings.discord_channel_id,
+            )
+
+        # 일시정지 플래그 (Discord !pause / !resume)
+        self.paused: bool = False
+        # 종료 요청 플래그 (Discord !stop)
+        self._stop_requested: bool = False
+
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
         logger.info(f"Max concurrent traders: {self.max_traders}")
@@ -892,6 +908,11 @@ class LivePairTrader:
         Returns:
             True if 사이클이 정상 완료됨.
         """
+        # 0. Discord 봇 명령 처리
+        self._process_bot_commands()
+        if self._stop_requested:
+            return False  # run_continuous에서 루프 탈출
+
         active = get_active_slots(self.slots)
         idle = get_idle_slots(self.slots)
         logger.debug(
@@ -911,6 +932,11 @@ class LivePairTrader:
         if not idle:
             logger.info("All slots occupied, waiting...")
             self.discord.notify_all_slots_occupied(self._build_slots_info())
+            return True
+
+        # 2.5. Paused 상태면 신규 진입 건너뛰기
+        if self.paused:
+            logger.info("Trading paused — monitoring only, skipping new entries")
             return True
 
         # 3. Get capital info (matches backtest pool model)
@@ -1032,6 +1058,149 @@ class LivePairTrader:
 
         return True
 
+    # ==================== Discord Bot Command Processing ====================
+
+    def _process_bot_commands(self):
+        """Discord 봇 큐에 쌓인 명령을 모두 처리한다.
+
+        매 run_cycle() 시작 시 호출된다.
+        각 명령의 결과를 set_response()로 Discord 채널에 응답한다.
+        """
+        if not self._bot_runner:
+            return
+
+        for cmd in self._bot_runner.get_all_commands():
+            try:
+                response = self._handle_command(cmd)
+                cmd.set_response(response)
+            except Exception as e:
+                logger.error(f"Bot command error: {e}")
+                cmd.set_response(f"❌ 명령 처리 오류: {e}")
+
+    def _handle_command(self, cmd: BotCommand) -> str:
+        """개별 명령을 처리하고 응답 문자열을 반환한다.
+
+        Args:
+            cmd: 처리할 BotCommand.
+
+        Returns:
+            Discord에 보낼 응답 문자열.
+        """
+        if cmd.command == CommandType.STATUS:
+            return self._cmd_status()
+        elif cmd.command == CommandType.CLOSE_ALL:
+            return self._cmd_close_all()
+        elif cmd.command == CommandType.CLOSE_SLOT:
+            slot_id = cmd.args['slot_id']
+            return self._cmd_close_slot(slot_id)
+        elif cmd.command == CommandType.PAUSE:
+            return self._cmd_pause()
+        elif cmd.command == CommandType.RESUME:
+            return self._cmd_resume()
+        elif cmd.command == CommandType.STOP:
+            return self._cmd_stop()
+        elif cmd.command == CommandType.PNL:
+            return self._cmd_pnl()
+        else:
+            return "❓ 알 수 없는 명령"
+
+    def _cmd_status(self) -> str:
+        """슬롯 상태 + 잔고 요약."""
+        active = get_active_slots(self.slots)
+        idle = get_idle_slots(self.slots)
+        available = self.get_available_balance()
+        total = self.get_total_balance()
+        paused_str = " ⏸️ **PAUSED**" if self.paused else ""
+
+        lines = [f"📊 **QuantBox Status**{paused_str}"]
+        lines.append(f"잔고: ${available:,.2f} / ${total:,.2f}")
+        lines.append(f"슬롯: {len(active)} active / {len(idle)} idle")
+        lines.append("")
+
+        for slot in self.slots:
+            if slot.position_open and slot.current_pair:
+                pos = self.slot_positions.get(slot.slot_id, {})
+                z = pos.get('entry_zscore', 0)
+                capital = pos.get('capital', 0)
+                sym1, sym2 = slot.current_pair
+                lines.append(
+                    f"  `[{slot.slot_id}]` {sym1}/{sym2} "
+                    f"| z={z:.2f} | ${capital:.0f}"
+                )
+            else:
+                lines.append(f"  `[{slot.slot_id}]` — idle")
+
+        return "\n".join(lines)
+
+    def _cmd_close_all(self) -> str:
+        """전체 포지션 청산."""
+        active = get_active_slots(self.slots)
+        if not active:
+            return "ℹ️ 청산할 포지션 없음"
+
+        n = len(active)
+        self.close_all_positions()
+        return f"✅ {n}개 슬롯 전체 청산 완료"
+
+    def _cmd_close_slot(self, slot_id: int) -> str:
+        """특정 슬롯 청산."""
+        if slot_id < 0 or slot_id >= self.max_traders:
+            return f"❌ 유효하지 않은 슬롯 번호: {slot_id} (0~{self.max_traders - 1})"
+
+        slot = self.slots[slot_id]
+        if not slot.position_open:
+            return f"ℹ️ 슬롯 {slot_id}는 이미 비어있음"
+
+        pair = slot.current_pair
+        self.close_slot_positions(slot_id)
+        return f"✅ 슬롯 {slot_id} 청산 완료 ({pair[0]}/{pair[1]})"
+
+    def _cmd_pause(self) -> str:
+        """신규 진입 중지."""
+        if self.paused:
+            return "ℹ️ 이미 일시정지 상태"
+        self.paused = True
+        logger.info("Trading PAUSED via Discord")
+        return "⏸️ **신규 진입 중지** — 기존 포지션 모니터링만 계속"
+
+    def _cmd_resume(self) -> str:
+        """신규 진입 재개."""
+        if not self.paused:
+            return "ℹ️ 이미 활성 상태"
+        self.paused = False
+        logger.info("Trading RESUMED via Discord")
+        return "▶️ **트레이딩 재개** — 신규 진입 활성화"
+
+    def _cmd_stop(self) -> str:
+        """전체 청산 후 종료 요청."""
+        self._stop_requested = True
+        logger.info("STOP requested via Discord")
+        return "🛑 **종료 요청 접수** — 현재 사이클 종료 후 전체 청산 및 프로세스 종료"
+
+    def _cmd_pnl(self) -> str:
+        """세션 손익 요약."""
+        if not self.trade_history:
+            return "ℹ️ 아직 완료된 트레이드 없음"
+
+        total_pnl = sum(t['pnl'] for t in self.trade_history)
+        wins = [t for t in self.trade_history if t['pnl'] > 0]
+        losses = [t for t in self.trade_history if t['pnl'] <= 0]
+        win_rate = len(wins) / len(self.trade_history) * 100
+
+        lines = ["📈 **세션 손익 요약**"]
+        lines.append(f"총 트레이드: {len(self.trade_history)}")
+        lines.append(f"총 손익: **${total_pnl:+.2f}**")
+        lines.append(f"승률: {win_rate:.0f}% ({len(wins)}W / {len(losses)}L)")
+
+        if wins:
+            best = max(t['pnl'] for t in wins)
+            lines.append(f"최대 수익: ${best:+.2f}")
+        if losses:
+            worst = min(t['pnl'] for t in losses)
+            lines.append(f"최대 손실: ${worst:+.2f}")
+
+        return "\n".join(lines)
+
     def run_once(self):
         """레거시 호환: 하나의 트레이드 사이클 (모든 슬롯)."""
         return self.run_cycle()
@@ -1045,7 +1214,12 @@ class LivePairTrader:
         """
         logger.info(f"Starting continuous trading loop (max {self.max_traders} slots)...")
         self.print_balance()
-        
+
+        # Discord Bot 시작 (토큰이 설정되어 있을 때만)
+        if self._bot_runner:
+            self._bot_runner.start()
+            logger.info("Discord Bot started — remote commands enabled")
+
         # Discord 시작 알림
         balance = self.get_available_balance()
         mode = "PAPER" if self.paper_mode else "LIVE"
@@ -1058,7 +1232,10 @@ class LivePairTrader:
         try:
             while True:
                 try:
-                    self.run_cycle()
+                    result = self.run_cycle()
+                    if result is False:  # !stop 명령
+                        logger.info("Stop requested via Discord")
+                        break
                     time.sleep(self.config['check_interval_seconds'])
                     
                 except Exception as e:
@@ -1070,14 +1247,20 @@ class LivePairTrader:
                     
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
-            total_pnl = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
-            self.discord.notify_stop(
-                reason='사용자 종료',
-                total_pnl=total_pnl,
-                n_trades=len(self.trade_history),
-            )
-            self.close_all_positions()
-            self.print_summary()
+
+        # 종료 처리
+        total_pnl = sum(t['pnl'] for t in self.trade_history) if self.trade_history else 0.0
+        reason = 'Discord !stop' if self._stop_requested else '사용자 종료'
+        self.discord.notify_stop(
+            reason=reason,
+            total_pnl=total_pnl,
+            n_trades=len(self.trade_history),
+        )
+        self.close_all_positions()
+        self.print_summary()
+
+        if self._bot_runner:
+            self._bot_runner.stop()
     
     def print_balance(self):
         """잔고 출력"""
