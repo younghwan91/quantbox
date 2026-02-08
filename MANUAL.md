@@ -2,8 +2,8 @@
 
 **암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
 
-> 버전: 1.0.0  
-> 최종 업데이트: 2026년 2월
+> 버전: 1.1.0  
+> 최종 업데이트: 2026년 2월 9일
 
 ---
 
@@ -20,10 +20,11 @@
 9. [파라미터 최적화](#9-파라미터-최적화)
 10. [Walk-Forward 분석](#10-walk-forward-분석)
 11. [실거래 연동](#11-실거래-연동)
-12. [성과 지표 해석](#12-성과-지표-해석)
-13. [고급 사용법](#13-고급-사용법)
-14. [트러블슈팅](#14-트러블슈팅)
-15. [API 레퍼런스](#15-api-레퍼런스)
+12. [Discord Bot (원격 제어)](#12-discord-bot-원격-제어)
+13. [성과 지표 해석](#13-성과-지표-해석)
+14. [고급 사용법](#14-고급-사용법)
+15. [트러블슈팅](#15-트러블슈팅)
+16. [API 레퍼런스](#16-api-레퍼런스)
 
 ---
 
@@ -184,8 +185,12 @@ FUNDING_RATE_8H=0.0001         # 8시간 펀딩비 (0.01%)
 N_COINS=30                     # 상위 N개 코인 사용
 PAPER_BALANCE=1000             # 페이퍼 트레이딩 시 가상 잔고 ($)
 
-# 알림 (Discord)
+# 알림 (Discord Webhook - 단방향 알림)
 DISCORD_WEBHOOK_URL=           # 미설정 시 알림 비활성화
+
+# Discord Bot (양방향 원격 명령)
+DISCORD_BOT_TOKEN=             # Bot 토큰 (미설정 시 봇 비활성화)
+DISCORD_CHANNEL_ID=            # 명령 수신 채널 ID (숫자)
 ```
 
 > **팁**: `.env.example` 파일을 복사하여 시작하세요: `cp .env.example .env`
@@ -222,6 +227,9 @@ quantbox/
 │   ├── optimizer.py        # 최적화 알고리즘
 │   ├── objective.py        # 목적 함수
 │   └── sensitivity.py      # 민감도 분석
+├── notifications/          # 알림 & 원격 제어
+│   ├── discord.py          # Discord 웹훅 (단방향 알림)
+│   └── bot.py              # Discord 봇 (양방향 명령)
 └── utils/                  # 유틸리티
     ├── numba_ops.py        # Numba 가속 함수
     └── costs.py            # 거래 비용 모델
@@ -1265,7 +1273,85 @@ if portfolio.current_drawdown > config.risk.max_drawdown:
 
 ---
 
-## 12. 성과 지표 해석
+## 12. Discord Bot (원격 제어)
+
+### 12.1 개요
+
+Discord Bot을 통해 실거래 중인 시스템을 채팅으로 원격 제어할 수 있습니다. Webhook(단방향 알림)과 달리, Bot은 **양방향 통신**이 가능하여 상태 조회, 포지션 청산, 시스템 정지 등의 명령을 실행할 수 있습니다.
+
+**아키텍처:**
+```
+메인 스레드 (트레이딩 루프)     데몬 스레드 (Discord Bot)
+┌──────────────────┐          ┌──────────────────┐
+│  run_cycle()     │◀─Queue──│  on_message()    │
+│  _process_cmds() │──Reply──▶│  send response   │
+└──────────────────┘          └──────────────────┘
+```
+
+### 12.2 Bot 생성 및 설정
+
+**1단계: Discord Developer Portal에서 Bot 생성**
+
+1. https://discord.com/developers/applications 접속
+2. "New Application" → 이름 입력 → 생성
+3. 좌측 "Bot" 메뉴 → "Reset Token" → **토큰 복사**
+4. "Privileged Gateway Intents" → **Message Content Intent** 활성화
+
+**2단계: Bot을 서버에 초대**
+
+1. 좌측 "OAuth2" → "URL Generator"
+2. Scopes: `bot` 선택
+3. Bot Permissions: `Send Messages`, `Read Message History` 선택
+4. 생성된 URL로 서버에 초대
+
+**3단계: 채널 ID 확인**
+
+1. Discord 설정 → 고급 → "개발자 모드" 활성화
+2. 명령용 채널 우클릭 → "ID 복사"
+
+**4단계: .env 설정**
+
+```dotenv
+DISCORD_BOT_TOKEN=your_bot_token_here
+DISCORD_CHANNEL_ID=1234567890123456789
+```
+
+### 12.3 사용 가능한 명령어
+
+| 명령어 | 설명 | 응답 예시 |
+|--------|------|----------|
+| `!status` | 전체 시스템 상태 | 슬롯별 페어, PnL, z-score |
+| `!pnl` | 손익 요약 | 총 PnL, 슬롯별 수익률 |
+| `!pause` | 신규 진입 일시 정지 | 기존 포지션은 유지, 새 진입만 차단 |
+| `!resume` | 일시 정지 해제 | 정상 운영 복귀 |
+| `!close all` | 전체 포지션 청산 | 모든 슬롯 즉시 청산 |
+| `!close N` | N번 슬롯 청산 | 특정 슬롯만 청산 (0부터 시작) |
+| `!stop` | 시스템 종료 | 전체 포지션 청산 후 안전 종료 |
+| `!help` | 명령어 목록 | 위 명령어 안내 |
+
+> **안전장치**: `!close`와 `!stop`은 실제 바이낸스 주문을 트리거합니다. 반드시 의도한 것인지 확인하세요.
+
+### 12.4 작동 방식
+
+- Bot은 `run_continuous()` 호출 시 **데몬 스레드**로 자동 시작
+- `DISCORD_BOT_TOKEN`과 `DISCORD_CHANNEL_ID`가 모두 설정된 경우에만 활성화
+- 미설정 시 기존과 동일하게 봇 없이 운영 (하위 호환)
+- 매 `run_cycle()` 시작 시 큐에 쌓인 명령을 처리
+- 명령 응답은 3초 타임아웃 (봇 → 트레이딩 스레드 응답 대기)
+
+```python
+# 코드에서 직접 사용 (자동으로 통합됨)
+from quantbox.live_trader import LivePairTrader
+from quantbox.core.settings import Settings
+
+settings = Settings()  # .env에서 자동 로드
+trader = LivePairTrader(settings)
+trader.run_continuous()  # Bot 자동 시작 (토큰 설정 시)
+```
+
+---
+
+## 13. 성과 지표 해석
 
 ### 12.1 수익 지표
 
@@ -1324,9 +1410,9 @@ print(f"Expectancy per Trade: ${expectancy:.2f}")
 
 ---
 
-## 13. 고급 사용법
+## 14. 고급 사용법
 
-### 13.1 Numba 가속 함수
+### 14.1 Numba 가속 함수
 
 ```python
 from quantbox.utils.numba_ops import (
@@ -1357,7 +1443,7 @@ position_size = optimal_position_sizing(
 )
 ```
 
-### 13.2 몬테카를로 시뮬레이션
+### 14.2 몬테카를로 시뮬레이션
 
 ```python
 from quantbox.backtest import MonteCarloSimulation
@@ -1379,7 +1465,7 @@ print(f"Expected Drawdown: {mc_results['expected_dd']:.2f}%")
 mc.plot_distribution()
 ```
 
-### 13.3 칼만 필터 헤지 비율
+### 14.3 칼만 필터 헤지 비율
 
 ```python
 from pykalman import KalmanFilter
@@ -1408,7 +1494,7 @@ def kalman_hedge_ratio(price1, price2):
     return hedge_ratios, intercepts
 ```
 
-### 13.4 다중 타임프레임 전략
+### 14.4 다중 타임프레임 전략
 
 ```python
 class MultiTimeframeStrategy(StatefulStrategy):
@@ -1436,7 +1522,7 @@ class MultiTimeframeStrategy(StatefulStrategy):
         return self.generate_signal(z_score, trend=daily_trend)
 ```
 
-### 13.5 포트폴리오 레벨 리스크 관리
+### 14.5 포트폴리오 레벨 리스크 관리
 
 ```python
 class PortfolioRiskManager:
@@ -1475,9 +1561,9 @@ class PortfolioRiskManager:
 
 ---
 
-## 14. 트러블슈팅
+## 15. 트러블슈팅
 
-### 14.1 일반적인 오류
+### 15.1 일반적인 오류
 
 #### API 연결 오류
 ```python
@@ -1520,7 +1606,7 @@ def process_in_chunks(data, chunk_size=10000):
         yield process_chunk(chunk)
 ```
 
-### 14.2 성능 최적화
+### 15.2 성능 최적화
 
 ```python
 # 1. Numba 캐시 활용
@@ -1538,7 +1624,7 @@ df['result'] = df.apply(calculate, axis=1)
 df = pd.read_csv('data.csv', usecols=['Open', 'High', 'Low', 'Close'])
 ```
 
-### 14.3 디버깅 팁
+### 15.3 디버깅 팁
 
 ```python
 import logging
@@ -1560,9 +1646,9 @@ logging.getLogger('BacktestRunner').setLevel(logging.INFO)
 
 ---
 
-## 15. API 레퍼런스
+## 16. API 레퍼런스
 
-### 15.1 주요 클래스
+### 16.1 주요 클래스
 
 ```python
 # Core
@@ -1647,7 +1733,7 @@ from quantbox.utils.numba_ops import (
 )
 ```
 
-### 15.2 설정 옵션 전체 목록
+### 16.2 설정 옵션 전체 목록
 
 ```python
 @dataclass
@@ -1755,6 +1841,7 @@ $$
 - [ ] Walk-Forward 검증
 - [ ] 파라미터 최적화
 - [ ] Paper Trading 테스트
+- [ ] Discord Bot 설정 (선택사항)
 
 ---
 
@@ -1764,4 +1851,4 @@ $$
 
 ---
 
-*이 문서는 QuantBox 1.0.0 기준으로 작성되었습니다.*
+*이 문서는 QuantBox 1.1.0 기준으로 작성되었습니다.*

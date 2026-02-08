@@ -79,6 +79,8 @@ class QuantBoxSettings(BaseSettings):
 
     # ── 알림 ──
     discord_webhook_url: str | None = None
+    discord_bot_token: str | None = None
+    discord_channel_id: int | None = None
 
     @model_validator(mode='after')
     def _resolve_api_secret(self) -> 'QuantBoxSettings':
