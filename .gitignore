@@ -24,3 +24,5 @@ __pycache__/
 config.local.json
 secrets.json
 trading_code.egg-info/
+# Dev diary (local only)
+devlog/
