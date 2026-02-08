@@ -33,4 +33,18 @@ Numba: 루프가 10,000회 이상 반복되는 연산(백테스트)에는 반드
 로그 레벨은 개발 시 DEBUG, 운영 시 INFO로 설정하되, 주문 체결 로그는 별도 파일로 영구 보존한다.
 모든 코드 수정 뒤엔 필요하다고 판단되면 README.md, MANUAL.md의 설치 및 실행 방법을 최신 상태로 유지한다.
 
+## Git Flow 전략 (필수 준수)
+
+- **main**: 프로덕션 릴리스 브랜치. 태그(v1.x.x)만 존재. 직접 커밋 금지.
+- **develop**: 개발 통합 브랜치. 모든 feature가 머지되는 곳.
+- **feature/xxx**: 새 기능 개발. `develop`에서 분기 → 완료 후 `develop`으로 머지.
+- **fix/xxx**: 버그 수정. `develop`에서 분기 → 완료 후 `develop`으로 머지.
+- **hotfix/xxx**: 긴급 수정. `main`에서 분기 → `main`과 `develop` 둘 다 머지.
+
+**규칙:**
+1. feature/fix 브랜치 작업 완료 시 **반드시 develop에 머지**한 뒤 push한다. 브랜치만 push하고 develop을 안 건드리면 안 된다.
+2. develop에 직접 커밋하지 않고, 항상 feature/fix 브랜치를 경유한다.
+3. main에는 릴리스 준비가 완료된 develop만 머지한다.
+4. 머지 시 `--no-ff` 옵션으로 머지 커밋을 남긴다.
+
 **Agent Note:** 사용자는 엄격하며 공격적인 퀀트 트레이더입니다. 코드가 예쁘게 보이는 것보다, **돈을 잃지 않는 안전장치(Safety check)**가 구현되었는지를 가장 중요하게 생각합니다.
