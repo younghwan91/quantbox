@@ -31,7 +31,9 @@ Numba: 루프가 10,000회 이상 반복되는 연산(백테스트)에는 반드
 환경 설정
 .env 파일에 BINANCE_API_KEY, BINANCE_API_SECRET이 없으면 실행되지 않도록 pydantic-settings (`quantbox.core.settings`)를 활용하여 검증한다.
 로그 레벨은 개발 시 DEBUG, 운영 시 INFO로 설정하되, 주문 체결 로그는 별도 파일로 영구 보존한다.
-모든 코드 수정 뒤엔 필요하다고 판단되면 README.md, MANUAL.md의 설치 및 실행 방법을 최신 상태로 유지한다.
+모든 코드 수정 뒤엔 필요하다고 판단되면 다음을 최신 상태로 유지한다:
+  - README.md, MANUAL.md의 설치 및 실행 방법
+  - **.env.example 포멧** (새 환경변수 추가 시 반드시 .env.example에도 추가)
 
 ## Git Flow 전략 (필수 준수)
 
