@@ -583,3 +583,170 @@ class TestChaseResult:
         assert ChaseFillStatus.FALLBACK_MARKET.value == "fallback_market"
         assert ChaseFillStatus.FAILED.value == "failed"
         assert ChaseFillStatus.TIMEOUT.value == "timeout"
+
+
+# ──────── Market Fallback Parsing Tests (fills 배열) ─────────────
+
+
+class TestMarketFallbackParsing:
+    """바이낸스 MARKET 주문 응답 파싱 — fills 배열 우선.
+    
+    max_chase_ticks=0 → limit 1회 시도 후 즉시 fallback.
+    side_effect: [limit_order, market_fallback]
+    """
+
+    @pytest.fixture
+    def fallback_chaser(self, mock_client: MagicMock) -> LimitOrderChaser:
+        """max_chase_ticks=0, fallback=True인 chaser (limit 1회→즉시 fallback)."""
+        config = ChaseConfig(
+            max_chase_ticks=0,
+            chase_interval_seconds=0.01,
+            timeout_seconds=5.0,
+            fallback_to_market=True,
+        )
+        return LimitOrderChaser(client=mock_client, config=config)
+
+    def test_fills_array_single_fill(
+        self, fallback_chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """fills 배열에 1건 — 정상 파싱."""
+        mock_client.futures_create_order.side_effect = [
+            {"orderId": 100, "status": "NEW"},  # limit (chase 0)
+            # market fallback
+            {
+                "orderId": 200,
+                "executedQty": "0",
+                "avgPrice": "0",
+                "fills": [
+                    {"qty": "185.0", "price": "3.456"},
+                ],
+            },
+        ]
+        mock_client.futures_get_order.return_value = {
+            "status": "NEW",
+            "executedQty": "0",
+            "avgPrice": "0",
+        }
+
+        result = fallback_chaser.chase_limit_order(
+            "NEARUSDT", "BUY", 185.0, tick_size=0.001, price_precision=3
+        )
+
+        assert result.status == ChaseFillStatus.FALLBACK_MARKET
+        assert result.filled_quantity == 185.0
+        assert abs(result.avg_price - 3.456) < 0.0001
+        assert result.maker_fill is False
+
+    def test_fills_array_multiple_fills(
+        self, fallback_chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """fills 배열에 여러 건 — 가중평균 계산."""
+        mock_client.futures_create_order.side_effect = [
+            {"orderId": 100, "status": "NEW"},  # limit
+            # market fallback: 2개 fill에 분할 체결
+            {
+                "orderId": 201,
+                "executedQty": "0",
+                "avgPrice": "0",
+                "fills": [
+                    {"qty": "100.0", "price": "3.450"},
+                    {"qty": "85.0", "price": "3.460"},
+                ],
+            },
+        ]
+        mock_client.futures_get_order.return_value = {
+            "status": "NEW",
+            "executedQty": "0",
+            "avgPrice": "0",
+        }
+
+        result = fallback_chaser.chase_limit_order(
+            "NEARUSDT", "BUY", 185.0, tick_size=0.001, price_precision=3
+        )
+
+        assert result.status == ChaseFillStatus.FALLBACK_MARKET
+        assert result.filled_quantity == 185.0
+        expected_avg = (100.0 * 3.450 + 85.0 * 3.460) / 185.0
+        assert abs(result.avg_price - expected_avg) < 0.0001
+
+    def test_fallback_to_executedQty_when_no_fills(
+        self, fallback_chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """fills 배열 없지만 executedQty/avgPrice가 유효한 경우."""
+        mock_client.futures_create_order.side_effect = [
+            {"orderId": 100, "status": "NEW"},
+            {
+                "orderId": 202,
+                "executedQty": "185.0",
+                "avgPrice": "3.456",
+                "status": "FILLED",
+            },
+        ]
+        mock_client.futures_get_order.return_value = {
+            "status": "NEW",
+            "executedQty": "0",
+            "avgPrice": "0",
+        }
+
+        result = fallback_chaser.chase_limit_order(
+            "NEARUSDT", "BUY", 185.0, tick_size=0.001, price_precision=3
+        )
+
+        assert result.status == ChaseFillStatus.FALLBACK_MARKET
+        assert result.filled_quantity == 185.0
+        assert abs(result.avg_price - 3.456) < 0.0001
+
+    def test_fallback_to_cumQuote(
+        self, fallback_chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """fills 없고 avgPrice=0이지만 cumQuote가 있는 경우."""
+        mock_client.futures_create_order.side_effect = [
+            {"orderId": 100, "status": "NEW"},
+            {
+                "orderId": 203,
+                "executedQty": "185.0",
+                "avgPrice": "0",
+                "cumQuote": "639.36",  # 185 * 3.456
+                "status": "FILLED",
+            },
+        ]
+        mock_client.futures_get_order.return_value = {
+            "status": "NEW",
+            "executedQty": "0",
+            "avgPrice": "0",
+        }
+
+        result = fallback_chaser.chase_limit_order(
+            "NEARUSDT", "BUY", 185.0, tick_size=0.001, price_precision=3
+        )
+
+        assert result.status == ChaseFillStatus.FALLBACK_MARKET
+        assert result.filled_quantity == 185.0
+        assert abs(result.avg_price - 639.36 / 185.0) < 0.0001
+
+    def test_all_fields_zero_uses_requested_qty(
+        self, fallback_chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """모든 필드가 0인 극단 케이스 — 요청 수량 사용 + 경고."""
+        mock_client.futures_create_order.side_effect = [
+            {"orderId": 100, "status": "NEW"},
+            {
+                "orderId": 204,
+                "executedQty": "0",
+                "avgPrice": "0",
+                "status": "FILLED",
+            },
+        ]
+        mock_client.futures_get_order.return_value = {
+            "status": "NEW",
+            "executedQty": "0",
+            "avgPrice": "0",
+        }
+
+        result = fallback_chaser.chase_limit_order(
+            "NEARUSDT", "BUY", 185.0, tick_size=0.001, price_precision=3
+        )
+
+        assert result.status == ChaseFillStatus.FALLBACK_MARKET
+        assert result.filled_quantity == 185.0
+        assert result.avg_price == 0.0  # 가격 파싱 불가
