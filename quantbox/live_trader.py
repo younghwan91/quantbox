@@ -63,6 +63,9 @@ from quantbox.strategy.filters import (
     HalfLifeFilter, HurstFilter
 )
 from quantbox.data.preprocessor import DataPreprocessor
+from quantbox.core.limit_chaser import (
+    LimitOrderChaser, ChaseConfig, ChaseFillStatus, ChaseResult,
+)
 
 # Load environment variables
 load_dotenv()
@@ -152,6 +155,19 @@ class LivePairTrader:
                 token=self._settings.discord_bot_token,
                 channel_id=self._settings.discord_channel_id,
             )
+
+        # Limit order chaser (maker-only execution)
+        self._chaser = LimitOrderChaser(
+            client=self.client,
+            config=ChaseConfig(
+                max_chase_ticks=10,
+                chase_interval_seconds=1.0,
+                timeout_seconds=30.0,
+                fallback_to_market=True,
+                initial_offset_ticks=0,
+            ),
+            paper_mode=self.paper_mode,
+        )
 
         # 일시정지 플래그 (Discord !pause / !resume)
         self.paused: bool = False
@@ -356,7 +372,7 @@ class LivePairTrader:
             return []
     
     def get_symbol_info(self, symbol: str) -> Dict:
-        """심볼 정보 조회"""
+        """심볼 정보 조회 (tick_size, price_precision 포함)."""
         try:
             info = self.client.futures_exchange_info()
             for sym_info in info['symbols']:
@@ -370,6 +386,8 @@ class LivePairTrader:
                         if f['filterType'] == 'LOT_SIZE':
                             result['step_size'] = float(f['stepSize'])
                             result['min_qty'] = float(f['minQty'])
+                        elif f['filterType'] == 'PRICE_FILTER':
+                            result['tick_size'] = float(f['tickSize'])
                         elif f['filterType'] == 'MIN_NOTIONAL':
                             result['min_notional'] = float(f['notional'])
                     return result
@@ -390,29 +408,63 @@ class LivePairTrader:
         side: str,
         quantity: float
     ) -> Optional[Dict]:
-        """주문 실행"""
-        if self.paper_mode:
-            logger.info(f"[PAPER] Order: {side} {quantity:.6f} {symbol}")
-            return {'orderId': f'paper_{int(time.time())}', 'status': 'FILLED'}
-        
+        """주문 실행 — LimitOrderChaser를 통한 maker-only 체결.
+
+        Limit 지정가를 best bid/ask에 걸고, 미체결 시 가격을 추격한다.
+        추격 실패 시 시장가(MARKET)로 fallback하여 체결을 보장한다.
+
+        Returns:
+            체결 정보 dict 또는 None (실패 시).
+        """
         try:
-            # Set leverage
-            self.client.futures_change_leverage(
-                symbol=symbol,
-                leverage=self.config['leverage']
-            )
-            
-            order = self.client.futures_create_order(
+            # Set leverage (live mode only)
+            if not self.paper_mode:
+                self.client.futures_change_leverage(
+                    symbol=symbol,
+                    leverage=self.config['leverage']
+                )
+
+            # Get tick_size for price rounding
+            info = self.get_symbol_info(symbol)
+            tick_size = info.get('tick_size', 0.01)
+            price_precision = info.get('price_precision', 2)
+
+            # Execute via limit chaser
+            result: ChaseResult = self._chaser.chase_limit_order(
                 symbol=symbol,
                 side=side,
-                type='MARKET',
-                quantity=quantity
+                quantity=quantity,
+                tick_size=tick_size,
+                price_precision=price_precision,
             )
-            logger.info(f"Order placed: {side} {quantity:.6f} {symbol} - ID: {order.get('orderId')}")
-            return order
-            
+
+            if result.status in (ChaseFillStatus.FILLED, ChaseFillStatus.FALLBACK_MARKET):
+                fill_type = "MAKER" if result.maker_fill else "TAKER(fallback)"
+                logger.info(
+                    f"Order {fill_type}: {side} {result.filled_quantity:.6f} {symbol} "
+                    f"@ {result.avg_price:.4f} (chase={result.chase_count}, "
+                    f"{result.elapsed_seconds:.1f}s) - ID: {result.order_id}"
+                )
+                return {
+                    'orderId': result.order_id,
+                    'status': 'FILLED',
+                    'executedQty': str(result.filled_quantity),
+                    'avgPrice': str(result.avg_price),
+                    'makerFill': result.maker_fill,
+                    'chaseCount': result.chase_count,
+                }
+            else:
+                logger.error(
+                    f"Order FAILED: {side} {quantity:.6f} {symbol} "
+                    f"(status={result.status.value}, chase={result.chase_count})"
+                )
+                return None
+
         except BinanceAPIException as e:
             logger.error(f"Order failed for {symbol}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected order error for {symbol}: {e}")
             return None
     
     def close_position(self, symbol: str, quantity: float) -> bool:
