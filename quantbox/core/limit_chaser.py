@@ -370,6 +370,9 @@ class LimitOrderChaser:
     ) -> tuple[float, float, str] | None:
         """시장가 fallback 주문.
 
+        바이낸스 MARKET 응답에서 executedQty/avgPrice가 "0"으로 올 수 있으므로
+        fills 배열에서 실제 체결 데이터를 파싱한다.
+
         Returns:
             (filled_qty, avg_price, order_id) 또는 None.
         """
@@ -380,13 +383,53 @@ class LimitOrderChaser:
                 type="MARKET",
                 quantity=quantity,
             )
-            filled_qty = float(order.get("executedQty", quantity))
-            avg_price = float(order.get("avgPrice", order.get("price", 0)))
             order_id = str(order["orderId"])
-            logger.info(
-                f"[{symbol}] Market fallback FILLED: {side} {filled_qty} @ {avg_price}"
+
+            # 1차: fills 배열에서 정확한 체결 데이터 추출
+            fills = order.get("fills", [])
+            if fills:
+                total_qty = 0.0
+                total_cost = 0.0
+                for fill in fills:
+                    qty = float(fill.get("qty", 0))
+                    price = float(fill.get("price", 0))
+                    total_qty += qty
+                    total_cost += qty * price
+                if total_qty > 0:
+                    filled_qty = total_qty
+                    avg_price = total_cost / total_qty
+                    logger.info(
+                        f"[{symbol}] Market fallback FILLED: {side} "
+                        f"{filled_qty} @ {avg_price:.4f} ({len(fills)} fills)"
+                    )
+                    return filled_qty, avg_price, order_id
+
+            # 2차: executedQty / avgPrice 필드 (0이 아닌 경우만)
+            filled_qty = float(order.get("executedQty", 0))
+            avg_price = float(order.get("avgPrice", 0))
+            if filled_qty > 0 and avg_price > 0:
+                logger.info(
+                    f"[{symbol}] Market fallback FILLED: {side} "
+                    f"{filled_qty} @ {avg_price:.4f}"
+                )
+                return filled_qty, avg_price, order_id
+
+            # 3차: cumQuote에서 역산 (최후 수단)
+            cum_quote = float(order.get("cumQuote", 0))
+            if filled_qty > 0 and cum_quote > 0:
+                avg_price = cum_quote / filled_qty
+                logger.info(
+                    f"[{symbol}] Market fallback FILLED (cumQuote): {side} "
+                    f"{filled_qty} @ {avg_price:.4f}"
+                )
+                return filled_qty, avg_price, order_id
+
+            # 모든 파싱 실패 — 요청 수량은 체결된 것으로 간주하되 경고
+            logger.warning(
+                f"[{symbol}] Market order response missing fill data: "
+                f"{order}. Using requested quantity={quantity}"
             )
-            return filled_qty, avg_price, order_id
+            return quantity, 0.0, order_id
         except Exception as e:
             logger.error(f"[{symbol}] Market fallback FAILED: {e}")
             return None
