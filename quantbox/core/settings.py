@@ -69,7 +69,7 @@ class QuantBoxSettings(BaseSettings):
     stop_loss_zscore: float = 3.5
 
     # ── Dynamic exit ──
-    use_dynamic_exit: bool = False
+    use_dynamic_exit: bool = True
     dynamic_exit_base: float = 0.3
     dynamic_exit_range: float = 0.7
 
