@@ -12,6 +12,7 @@
 - **이벤트 기반 엔진**: 백테스트와 실거래에서 동일한 코드 사용
 - **모듈형 설계**: 전략, 필터, 실행 컴포넌트 조합 가능
 - **타입 안전성**: 전체 코드베이스에 타입 힌트 적용
+- **안전장치 내장**: Market Fallback 검증, 알림 스로틀링, avg_price=0 거부 등
 
 ### 데이터 관리
 - **2단계 캐싱**: 메모리(LRU) + 디스크(압축) 캐싱 시스템
@@ -28,6 +29,13 @@
   - 거래량 필터
 - **페어 선택**: 통계적 페어 식별 및 순위화
 - **칼만 필터**: 온라인 헤지 비율 추정
+- **Dynamic Exit**: Half-life 기반 청산 z-score 자동 조절 (빠른 페어 → tight exit, 느린 페어 → loose exit)
+
+### 실거래 안전장치
+- **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
+- **Market Fallback 검증**: ACK 응답 감지 → 자동 재조회 (유령 체결 방지)
+- **알림 스로틀링**: 슬롯 포화/잔고 부족 알림 중복 전송 방지
+- **Discord Bot**: 원격 모니터링 및 명령 (포지션 조회, 강제 청산 등)
 
 ### 백테스팅
 - **롤링 윈도우**: Formation/Trading 기간 시뮬레이션
@@ -47,8 +55,13 @@
 ## 📦 설치
 
 \`\`\`bash
-git clone https://github.com/younghwan91/trading_code.git
-cd trading_code
+git clone https://github.com/younghwan91/quantbox.git
+cd quantbox
+
+# uv 사용 (권장)
+uv sync
+
+# 또는 pip
 pip install -e .
 \`\`\`
 
@@ -115,24 +128,32 @@ quantbox/
 │   ├── engine.py           # 트레이딩 엔진
 │   ├── events.py           # 이벤트 시스템
 │   ├── execution.py        # 주문 실행
-│   └── portfolio.py        # 포지션 관리
+│   ├── limit_chaser.py     # 지정가 추격 주문
+│   ├── portfolio.py        # 포지션 관리
+│   ├── settings.py         # 환경변수 검증 (pydantic-settings)
+│   └── trader_slot.py      # 트레이더 슬롯 관리
 ├── data/                    # 데이터 처리
-│   ├── cache.py            # 캐싱 시스템
-│   └── downloader.py       # 데이터 다운로드
+│   ├── cache.py            # 2단계 캐싱 (LRU + gzip)
+│   ├── downloader.py       # 바이낸스 데이터 다운로드
+│   ├── preprocessor.py     # 데이터 전처리
+│   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 컴포넌트
-│   ├── filters.py          # 필터 구현
+│   ├── filters.py          # 필터 파이프라인
+│   ├── pair_selector.py    # 페어 선택기
 │   └── pair_strategy.py    # 페어 트레이딩 전략
 ├── backtest/               # 백테스팅 프레임워크
-│   ├── runner.py           # 백테스트 실행
-│   ├── metrics.py          # 성과 지표
-│   └── walk_forward.py     # Walk-Forward 테스트
-├── optimization/           # 파라미터 최적화
-│   └── optimizer.py        # 최적화 알고리즘
+│   ├── continuous_backtest.py  # 연속 백테스트 엔진
+│   └── metrics.py          # 성과 지표
+├── notifications/          # 알림 시스템
+│   ├── bot.py              # Discord Bot (양방향)
+│   └── discord.py          # Discord Webhook (단방향)
+├── ui/                     # 대시보드
+│   └── app.py              # Streamlit 앱
 └── utils/                  # 유틸리티
     ├── numba_ops.py        # Numba JIT 가속 함수
     └── costs.py            # 거래 비용 모델
 
-tests/                      # 유닛 테스트 (117개)
+tests/                      # 유닛 테스트 (474개)
 \`\`\`
 
 ## 📈 성과 지표
@@ -149,7 +170,7 @@ tests/                      # 유닛 테스트 (117개)
 ## 🧪 테스트
 
 \`\`\`bash
-pytest tests/ -v
+uv run pytest tests/ -v
 \`\`\`
 
 ## ⚠️ 면책 조항
