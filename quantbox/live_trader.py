@@ -689,6 +689,31 @@ class LivePairTrader:
         """Z-Score 계산"""
         spread = np.log(price1) - hedge_ratio * np.log(price2)
         return (spread - spread_mean) / spread_std if spread_std > 0 else 0.0
+
+    def _get_effective_exit_zscore(self, pos: Dict) -> float:
+        """Half-life 기반 동적 exit z-score 계산.
+
+        use_dynamic_exit=False이면 고정 exit_zscore 반환.
+        True이면 half_life에 비례해 exit threshold를 조정:
+          - 빠른 회귀 (low half_life) → 타이트한 exit (0에 가깝게)
+          - 느린 회귀 (high half_life) → 느슨한 exit (일찍 청산)
+
+        Args:
+            pos: slot_positions의 position dict (half_life 포함).
+
+        Returns:
+            해당 포지션에 적용할 exit z-score 임계값.
+        """
+        if not self.config.get('use_dynamic_exit', False):
+            return self.config['exit_zscore']
+
+        half_life = pos.get('half_life', self.config['max_half_life'])
+        min_hl = self.config['min_half_life']
+        max_hl = self.config['max_half_life']
+        hl_ratio = (half_life - min_hl) / (max_hl - min_hl)
+        hl_ratio = max(0.0, min(1.0, hl_ratio))
+
+        return self.config['dynamic_exit_base'] + hl_ratio * self.config['dynamic_exit_range']
     
     def execute_pair_trade(
         self,
@@ -802,6 +827,7 @@ class LivePairTrader:
             'hedge_ratio': hedge_ratio,
             'spread_mean': pair_info['spread_mean'],
             'spread_std': pair_info['spread_std'],
+            'half_life': pair_info['half_life'],
             'capital': margin,  # Margin (cash locked), matches backtest slot.position_info['capital']
             'notional': capital,  # Notional exposure (margin × leverage)
             'leverage': leverage,
@@ -870,17 +896,20 @@ class LivePairTrader:
         
         should_close = False
         close_reason = ""
+
+        # Determine effective exit threshold
+        effective_exit_z = self._get_effective_exit_zscore(pos)
         
         # Exit conditions
         if signal == 1:  # Long spread
-            if z_score >= -self.config['exit_zscore']:
+            if z_score >= -effective_exit_z:
                 should_close = True
                 close_reason = "mean_reversion"
             elif z_score < entry_z - self.config['stop_loss_zscore']:
                 should_close = True
                 close_reason = "stop_loss"
         else:  # Short spread
-            if z_score <= self.config['exit_zscore']:
+            if z_score <= effective_exit_z:
                 should_close = True
                 close_reason = "mean_reversion"
             elif z_score > entry_z + self.config['stop_loss_zscore']:
