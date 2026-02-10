@@ -382,6 +382,7 @@ class LimitOrderChaser:
                 side=side,
                 type="MARKET",
                 quantity=quantity,
+                newOrderRespType="RESULT",
             )
             order_id = str(order["orderId"])
 
@@ -424,15 +425,105 @@ class LimitOrderChaser:
                 )
                 return filled_qty, avg_price, order_id
 
-            # 모든 파싱 실패 — 요청 수량은 체결된 것으로 간주하되 경고
+            # 4차: 응답 파싱 실패 → 거래소에 직접 주문 상태 조회
             logger.warning(
-                f"[{symbol}] Market order response missing fill data: "
-                f"{order}. Using requested quantity={quantity}"
+                f"[{symbol}] Market response has no fill data, "
+                f"querying order status (orderId={order_id})..."
             )
-            return quantity, 0.0, order_id
+            return self._verify_market_order(
+                symbol, side, quantity, order_id
+            )
         except Exception as e:
             logger.error(f"[{symbol}] Market fallback FAILED: {e}")
             return None
+
+    def _verify_market_order(
+        self,
+        symbol: str,
+        side: str,
+        requested_qty: float,
+        order_id: str,
+        max_retries: int = 5,
+        retry_interval: float = 0.5,
+    ) -> tuple[float, float, str] | None:
+        """거래소에 주문 상태를 직접 조회하여 체결을 확인.
+
+        MARKET 주문이 ACK 응답만 돌려준 경우의 safety net.
+        체결 확인될 때까지 최대 max_retries회 재시도한다.
+        끝까지 미체결이면 None을 반환하여 주문 실패로 처리.
+
+        Args:
+            symbol: 심볼.
+            side: "BUY" 또는 "SELL".
+            requested_qty: 요청한 수량.
+            order_id: 검증할 주문 ID.
+            max_retries: 최대 재시도 횟수.
+            retry_interval: 재시도 간격 (초).
+
+        Returns:
+            (filled_qty, avg_price, order_id) 또는 None.
+        """
+        for attempt in range(max_retries):
+            try:
+                status = self.client.futures_get_order(
+                    symbol=symbol, orderId=int(order_id)
+                )
+                exec_qty = float(status.get("executedQty", 0))
+                avg_price = float(status.get("avgPrice", 0))
+                order_status = status.get("status", "UNKNOWN")
+
+                if order_status == "FILLED" and exec_qty > 0 and avg_price > 0:
+                    logger.info(
+                        f"[{symbol}] Market order verified via query: {side} "
+                        f"{exec_qty} @ {avg_price:.4f} (attempt {attempt + 1})"
+                    )
+                    return exec_qty, avg_price, order_id
+
+                # cumQuote 역산 시도
+                cum_quote = float(status.get("cumQuote", 0))
+                if order_status == "FILLED" and exec_qty > 0 and cum_quote > 0:
+                    avg_price = cum_quote / exec_qty
+                    logger.info(
+                        f"[{symbol}] Market order verified (cumQuote): {side} "
+                        f"{exec_qty} @ {avg_price:.4f} (attempt {attempt + 1})"
+                    )
+                    return exec_qty, avg_price, order_id
+
+                if order_status in ("FILLED", "PARTIALLY_FILLED") and exec_qty > 0:
+                    # 체결은 됐지만 가격 정보 없음 — 안전하지 않으므로 실패 처리
+                    logger.error(
+                        f"[{symbol}] Market order filled (qty={exec_qty}) "
+                        f"but avg_price=0 — treating as FAILED for safety"
+                    )
+                    return None
+
+                if order_status in ("CANCELED", "REJECTED", "EXPIRED"):
+                    logger.error(
+                        f"[{symbol}] Market order {order_status}: "
+                        f"orderId={order_id}"
+                    )
+                    return None
+
+                # 아직 NEW — 재시도
+                logger.debug(
+                    f"[{symbol}] Order still {order_status}, "
+                    f"retrying ({attempt + 1}/{max_retries})..."
+                )
+                time.sleep(retry_interval)
+
+            except Exception as e:
+                logger.error(
+                    f"[{symbol}] Order query failed (attempt {attempt + 1}): {e}"
+                )
+                time.sleep(retry_interval)
+
+        # 최대 재시도 초과 — 체결 미확인, 안전을 위해 실패 처리
+        logger.error(
+            f"[{symbol}] Market order verification FAILED after "
+            f"{max_retries} retries (orderId={order_id}). "
+            f"MANUAL CHECK REQUIRED."
+        )
+        return None
 
     def _paper_fill(
         self, symbol: str, side: str, quantity: float
