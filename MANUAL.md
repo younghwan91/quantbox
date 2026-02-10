@@ -2,8 +2,8 @@
 
 **암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
 
-> 버전: 1.1.0  
-> 최종 업데이트: 2026년 2월 9일
+> 버전: 1.2.0  
+> 최종 업데이트: 2026년 2월 11일
 
 ---
 
@@ -173,8 +173,13 @@ POSITION_SIZE_PCT=-1           # 슬롯당 자본 비율 (-1=자동: 1/MAX_TRADE
 
 # 전략 파라미터
 ENTRY_ZSCORE=2.0               # 진입 z-score 임계값
-EXIT_ZSCORE=0.5                # 청산 z-score 임계값
+EXIT_ZSCORE=0.5                # 청산 z-score 임계값 (dynamic_exit 비활성 시)
 STOP_LOSS_ZSCORE=3.5           # 손절 z-score
+
+# Dynamic Exit: half-life 기반 청산 z-score 자동 조절
+# USE_DYNAMIC_EXIT=true         # 활성화 시 EXIT_ZSCORE 대신 half-life 기반 동적 값 사용
+# DYNAMIC_EXIT_BASE=0.3         # 빠른 페어 exit z-score (half_life=min)
+# DYNAMIC_EXIT_RANGE=0.7        # 느린 페어까지의 범위 (max exit = base + range = 1.0)
 
 # 비용 모델
 TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
@@ -783,7 +788,41 @@ if bars_held >= max_holding_periods:
     exit_reason = "max_holding"
 ```
 
-### 7.4 커스텀 전략 구현 예시
+### 7.4 Dynamic Exit (Half-Life 기반 청산)
+
+진입 시 계산된 **half-life**를 활용하여 청산 z-score를 페어별로 자동 조절합니다.
+
+**원리:**
+- **빠른 페어** (낮은 half-life): 평균 회귀가 빠르므로 tight exit (z=0.3) → 더 깊은 수익 포착
+- **느린 페어** (높은 half-life): 전부 돌아올 때까지 기다리면 스탑에 걸림 → loose exit (z=1.0) → 부분 수익 확정
+
+**계산식:**
+```
+exit_z = base + clamp((hl - min_hl) / (max_hl - min_hl), 0, 1) × range
+```
+
+**기본값:** `base=0.3`, `range=0.7` → 출력 범위 [0.3, 1.0]
+
+**A/B 백테스트 결과 (35심볼, 2877봉):**
+
+| Metric | Static (exit=0.5) | Dynamic (hl-based) |
+|--------|------------------:|-------------------:|
+| Total Return | 0.25% | **3.38%** |
+| Sharpe Ratio | 0.98 | **4.06** |
+| Max Drawdown | 24.69% | **23.92%** |
+| Stop Loss 횟수 | 11 | **10** |
+
+**활성화:**
+```bash
+# .env
+USE_DYNAMIC_EXIT=true
+DYNAMIC_EXIT_BASE=0.3
+DYNAMIC_EXIT_RANGE=0.7
+```
+
+> **주의**: 기본적으로 비활성화 상태입니다 (`USE_DYNAMIC_EXIT=false`). 활성화 시 `EXIT_ZSCORE` 값은 무시됩니다.
+
+### 7.5 커스텀 전략 구현 예시
 
 ```python
 from quantbox.strategy.base import StatefulStrategy
