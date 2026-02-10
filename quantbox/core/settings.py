@@ -68,6 +68,11 @@ class QuantBoxSettings(BaseSettings):
     exit_zscore: float = 0.5
     stop_loss_zscore: float = 3.5
 
+    # ── Dynamic exit ──
+    use_dynamic_exit: bool = False
+    dynamic_exit_base: float = 0.3
+    dynamic_exit_range: float = 0.7
+
     # ── 비용 모델 ──
     trading_fee: float = 0.0005
     slippage: float = 0.001
@@ -120,6 +125,9 @@ class QuantBoxSettings(BaseSettings):
             'entry_zscore': self.entry_zscore,
             'exit_zscore': self.exit_zscore,
             'stop_loss_zscore': self.stop_loss_zscore,
+            'use_dynamic_exit': self.use_dynamic_exit,
+            'dynamic_exit_base': self.dynamic_exit_base,
+            'dynamic_exit_range': self.dynamic_exit_range,
             'max_holding_hours': 24,
             # Risk
             'position_size_pct': pct,
