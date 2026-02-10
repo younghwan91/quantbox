@@ -219,12 +219,22 @@ class TestChaseRetry:
     def test_chase_respects_max_ticks(
         self, chaser: LimitOrderChaser, mock_client: MagicMock
     ):
-        """max_chase_ticks 초과 시 추격 중단."""
-        mock_client.futures_create_order.return_value = {
-            "orderId": 200,
-            "status": "NEW",
-        }
-        # 항상 미체결
+        """max_chase_ticks 초과 시 추격 중단 → 시장가 fallback."""
+        # limit 주문 4회 (chase 0~3) + market fallback 1회
+        mock_client.futures_create_order.side_effect = [
+            {"orderId": 200, "status": "NEW"},  # limit chase 0
+            {"orderId": 201, "status": "NEW"},  # limit chase 1
+            {"orderId": 202, "status": "NEW"},  # limit chase 2
+            {"orderId": 203, "status": "NEW"},  # limit chase 3
+            # market fallback: 정상 체결
+            {
+                "orderId": 204,
+                "executedQty": "0.001",
+                "avgPrice": "50005.0",
+                "status": "FILLED",
+            },
+        ]
+        # limit 주문은 항상 미체결
         mock_client.futures_get_order.return_value = {
             "status": "NEW",
             "executedQty": "0",
@@ -724,19 +734,24 @@ class TestMarketFallbackParsing:
         assert result.filled_quantity == 185.0
         assert abs(result.avg_price - 639.36 / 185.0) < 0.0001
 
-    def test_all_fields_zero_uses_requested_qty(
+    def test_all_fields_zero_triggers_verify_and_fails(
         self, fallback_chaser: LimitOrderChaser, mock_client: MagicMock
     ):
-        """모든 필드가 0인 극단 케이스 — 요청 수량 사용 + 경고."""
+        """모든 필드가 0인 극단 케이스 — _verify_market_order 호출 후 FAILED.
+
+        응답에 체결 데이터가 없으면 거래소에 직접 조회하여 확인하고,
+        조회에서도 체결이 확인되지 않으면 안전을 위해 FAILED 처리한다.
+        """
         mock_client.futures_create_order.side_effect = [
             {"orderId": 100, "status": "NEW"},
             {
                 "orderId": 204,
                 "executedQty": "0",
                 "avgPrice": "0",
-                "status": "FILLED",
+                "status": "NEW",
             },
         ]
+        # limit 체결 확인(1회) + _verify_market_order 재시도(5회) = 6회
         mock_client.futures_get_order.return_value = {
             "status": "NEW",
             "executedQty": "0",
@@ -747,6 +762,322 @@ class TestMarketFallbackParsing:
             "NEARUSDT", "BUY", 185.0, tick_size=0.001, price_precision=3
         )
 
-        assert result.status == ChaseFillStatus.FALLBACK_MARKET
-        assert result.filled_quantity == 185.0
-        assert result.avg_price == 0.0  # 가격 파싱 불가
+        # _verify_market_order에서 끝까지 NEW → None 반환 → FAILED
+        assert result.status == ChaseFillStatus.FAILED
+        assert result.filled_quantity == 0.0
+
+
+# ──────── _verify_market_order Tests ─────────────────────────────
+
+
+class TestVerifyMarketOrder:
+    """_verify_market_order: 응답 파싱 실패 시 거래소 직접 조회 검증."""
+
+    @pytest.fixture
+    def chaser(self, mock_client: MagicMock) -> LimitOrderChaser:
+        return LimitOrderChaser(client=mock_client, config=ChaseConfig(), paper_mode=False)
+
+    def test_verify_filled_on_first_query(
+        self, chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """1회 조회에서 FILLED + 유효한 가격 발견."""
+        mock_client.futures_get_order.return_value = {
+            "status": "FILLED",
+            "executedQty": "185.0",
+            "avgPrice": "3.456",
+        }
+
+        result = chaser._verify_market_order("NEARUSDT", "BUY", 185.0, "12345")
+
+        assert result is not None
+        filled_qty, avg_price, order_id = result
+        assert filled_qty == 185.0
+        assert abs(avg_price - 3.456) < 0.0001
+        assert order_id == "12345"
+        assert mock_client.futures_get_order.call_count == 1
+
+    def test_verify_filled_via_cumquote(
+        self, chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """avgPrice=0이지만 cumQuote로 역산 가능."""
+        mock_client.futures_get_order.return_value = {
+            "status": "FILLED",
+            "executedQty": "100.0",
+            "avgPrice": "0",
+            "cumQuote": "345.6",
+        }
+
+        result = chaser._verify_market_order("BTCUSDT", "SELL", 100.0, "99999")
+
+        assert result is not None
+        filled_qty, avg_price, _ = result
+        assert filled_qty == 100.0
+        assert abs(avg_price - 3.456) < 0.0001
+
+    def test_verify_filled_but_no_price_returns_none(
+        self, chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """FILLED이지만 가격 정보 없음 → 안전을 위해 None 반환."""
+        mock_client.futures_get_order.return_value = {
+            "status": "FILLED",
+            "executedQty": "185.0",
+            "avgPrice": "0",
+            "cumQuote": "0",
+        }
+
+        result = chaser._verify_market_order("NEARUSDT", "BUY", 185.0, "12345")
+
+        assert result is None  # 가격 미확인 → 안전 실패
+
+    def test_verify_canceled_returns_none(
+        self, chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """주문 CANCELED 상태 → 즉시 실패."""
+        mock_client.futures_get_order.return_value = {
+            "status": "CANCELED",
+            "executedQty": "0",
+            "avgPrice": "0",
+        }
+
+        result = chaser._verify_market_order("NEARUSDT", "BUY", 185.0, "12345")
+
+        assert result is None
+        assert mock_client.futures_get_order.call_count == 1  # 재시도 없이 즉시 실패
+
+    def test_verify_new_then_filled(
+        self, chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """처음 NEW → 재시도 후 FILLED 확인."""
+        mock_client.futures_get_order.side_effect = [
+            {"status": "NEW", "executedQty": "0", "avgPrice": "0"},
+            {"status": "NEW", "executedQty": "0", "avgPrice": "0"},
+            {"status": "FILLED", "executedQty": "185.0", "avgPrice": "3.456"},
+        ]
+
+        result = chaser._verify_market_order(
+            "NEARUSDT", "BUY", 185.0, "12345",
+            max_retries=5, retry_interval=0.01,
+        )
+
+        assert result is not None
+        filled_qty, avg_price, _ = result
+        assert filled_qty == 185.0
+        assert mock_client.futures_get_order.call_count == 3
+
+    def test_verify_max_retries_exhausted(
+        self, chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """max_retries 소진 → None 반환."""
+        mock_client.futures_get_order.return_value = {
+            "status": "NEW",
+            "executedQty": "0",
+            "avgPrice": "0",
+        }
+
+        result = chaser._verify_market_order(
+            "NEARUSDT", "BUY", 185.0, "12345",
+            max_retries=3, retry_interval=0.01,
+        )
+
+        assert result is None
+        assert mock_client.futures_get_order.call_count == 3
+
+    def test_verify_query_exception_retries(
+        self, chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """조회 중 예외 → 재시도 후 성공."""
+        mock_client.futures_get_order.side_effect = [
+            Exception("Network error"),
+            {"status": "FILLED", "executedQty": "50.0", "avgPrice": "100.5"},
+        ]
+
+        result = chaser._verify_market_order(
+            "BTCUSDT", "BUY", 50.0, "77777",
+            max_retries=3, retry_interval=0.01,
+        )
+
+        assert result is not None
+        assert result[0] == 50.0
+        assert abs(result[1] - 100.5) < 0.0001
+
+
+# ──────── Market Order newOrderRespType=RESULT Tests ─────────────
+
+
+class TestMarketOrderRespType:
+    """MARKET 주문에 newOrderRespType='RESULT' 포함 확인."""
+
+    @pytest.fixture
+    def fallback_chaser(self, mock_client: MagicMock) -> LimitOrderChaser:
+        config = ChaseConfig(
+            max_chase_ticks=0,
+            chase_interval_seconds=0.01,
+            timeout_seconds=5.0,
+            fallback_to_market=True,
+        )
+        return LimitOrderChaser(client=mock_client, config=config)
+
+    def test_market_fallback_includes_result_resp_type(
+        self, fallback_chaser: LimitOrderChaser, mock_client: MagicMock
+    ):
+        """_market_fallback이 newOrderRespType='RESULT' 파라미터를 포함."""
+        mock_client.futures_create_order.side_effect = [
+            {"orderId": 100, "status": "NEW"},  # limit
+            {
+                "orderId": 200,
+                "executedQty": "10.0",
+                "avgPrice": "50.0",
+                "status": "FILLED",
+            },
+        ]
+        mock_client.futures_get_order.return_value = {
+            "status": "NEW", "executedQty": "0", "avgPrice": "0",
+        }
+
+        fallback_chaser.chase_limit_order(
+            "BTCUSDT", "BUY", 10.0, tick_size=0.1, price_precision=1
+        )
+
+        # 두 번째 futures_create_order 호출 (market fallback)
+        market_call = mock_client.futures_create_order.call_args_list[1]
+        assert market_call.kwargs.get("newOrderRespType") == "RESULT"
+
+
+# ─────── place_order avg_price=0 Safety Validation ──────────────
+
+
+class TestPlaceOrderPriceValidation:
+    """place_order: avg_price=0인 체결은 실패 처리."""
+
+    @pytest.fixture
+    def mock_env(self, monkeypatch):
+        monkeypatch.setenv("BINANCE_API_KEY", "test_key")
+        monkeypatch.setenv("BINANCE_API_SECRET", "test_secret")
+        monkeypatch.setenv("BINANCE_TESTNET", "true")
+
+    @pytest.fixture
+    def trader(self, mock_env):
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            trader = LivePairTrader(paper_mode=True)
+            return trader
+
+    def test_place_order_rejects_zero_avg_price(self, trader):
+        """avg_price=0인 ChaseResult는 None 반환 (주문 실패)."""
+        from quantbox.core.limit_chaser import ChaseResult, ChaseFillStatus
+
+        mock_result = ChaseResult(
+            status=ChaseFillStatus.FALLBACK_MARKET,
+            filled_quantity=100.0,
+            avg_price=0.0,  # ← 체결 미확인
+            order_id="fake_123",
+            chase_count=5,
+            elapsed_seconds=10.0,
+            maker_fill=False,
+        )
+        trader._chaser = MagicMock()
+        trader._chaser.chase_limit_order.return_value = mock_result
+        trader.get_symbol_info = MagicMock(return_value={
+            'tick_size': 0.01, 'price_precision': 2,
+        })
+
+        result = trader.place_order("BTCUSDT", "BUY", 0.001)
+
+        assert result is None  # avg_price=0 → 안전 실패
+
+    def test_place_order_accepts_valid_price(self, trader):
+        """avg_price>0인 정상 체결은 성공."""
+        from quantbox.core.limit_chaser import ChaseResult, ChaseFillStatus
+
+        mock_result = ChaseResult(
+            status=ChaseFillStatus.FILLED,
+            filled_quantity=100.0,
+            avg_price=50000.0,
+            order_id="real_456",
+            chase_count=2,
+            elapsed_seconds=3.0,
+            maker_fill=True,
+        )
+        trader._chaser = MagicMock()
+        trader._chaser.chase_limit_order.return_value = mock_result
+        trader.get_symbol_info = MagicMock(return_value={
+            'tick_size': 0.01, 'price_precision': 2,
+        })
+
+        result = trader.place_order("BTCUSDT", "BUY", 0.001)
+
+        assert result is not None
+        assert result['status'] == 'FILLED'
+        assert result['avgPrice'] == '50000.0'
+
+
+# ─────── close_slot_positions Failure Handling ──────────────────
+
+
+class TestCloseSlotFailureHandling:
+    """close_slot_positions: 레그 청산 실패 시 CRITICAL 경고."""
+
+    @pytest.fixture
+    def mock_env(self, monkeypatch):
+        monkeypatch.setenv("BINANCE_API_KEY", "test_key")
+        monkeypatch.setenv("BINANCE_API_SECRET", "test_secret")
+        monkeypatch.setenv("BINANCE_TESTNET", "true")
+        monkeypatch.setenv("MAX_TRADERS", "3")
+
+    @pytest.fixture
+    def trader(self, mock_env):
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            trader = LivePairTrader(paper_mode=True)
+            trader.discord = MagicMock()
+            return trader
+
+    def _setup_active_slot(self, trader, slot_id: int = 0):
+        from datetime import datetime, timezone
+        trader.slots[slot_id].position_open = True
+        trader.slots[slot_id].current_pair = ("BTCUSDT", "ETHUSDT")
+        trader.slot_positions[slot_id] = {
+            'symbol1': 'BTCUSDT', 'symbol2': 'ETHUSDT',
+            'qty1': 0.001, 'qty2': -0.01,
+        }
+        trader.slot_entry_times[slot_id] = datetime.now(timezone.utc)
+
+    def test_both_legs_close_success(self, trader):
+        """양쪽 레그 모두 청산 성공 → 슬롯 리셋, CRITICAL 없음."""
+        self._setup_active_slot(trader, 0)
+        trader.close_position = MagicMock(return_value=True)
+
+        trader.close_slot_positions(0)
+
+        assert trader.slots[0].position_open is False
+        assert 0 not in trader.slot_positions
+        trader.discord.send.assert_not_called()
+
+    def test_one_leg_fails_sends_critical(self, trader):
+        """한쪽 레그 청산 실패 → CRITICAL 경고 + Discord 알림."""
+        self._setup_active_slot(trader, 1)
+        # 첫 번째 레그 성공, 두 번째 실패
+        trader.close_position = MagicMock(side_effect=[True, False])
+
+        trader.close_slot_positions(1)
+
+        # 슬롯은 리셋됨 (재시도 불가이므로)
+        assert trader.slots[1].position_open is False
+        assert 1 not in trader.slot_positions
+        # Discord CRITICAL 알림 발송됨
+        trader.discord.send.assert_called_once()
+        call_kwargs = trader.discord.send.call_args
+        assert 'CRITICAL' in call_kwargs.kwargs.get('content', '') or \
+               'CRITICAL' in call_kwargs.args[0] if call_kwargs.args else True
+
+    def test_both_legs_fail_sends_critical(self, trader):
+        """양쪽 레그 모두 청산 실패 → CRITICAL 경고."""
+        self._setup_active_slot(trader, 2)
+        trader.close_position = MagicMock(return_value=False)
+
+        trader.close_slot_positions(2)
+
+        trader.discord.send.assert_called_once()
+        content = trader.discord.send.call_args.kwargs.get('content', '')
+        assert 'BTCUSDT' in content
+        assert 'ETHUSDT' in content
