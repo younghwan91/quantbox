@@ -144,6 +144,11 @@ class ContinuousBacktestConfig:
     entry_zscore: float = 2.0
     exit_zscore: float = 0.5    # Exit when z-score returns to this level
     stop_loss_zscore: float = 3.5  # Max adverse z-score movement
+
+    # Dynamic exit: half-life 기반 exit_zscore 조정
+    use_dynamic_exit: bool = False
+    dynamic_exit_base: float = 0.3   # 가장 빠른 페어의 exit z-score
+    dynamic_exit_range: float = 0.7  # base + range = 가장 느린 페어의 exit z-score
     
     # Holding limits
     max_holding_bars: int = 100
@@ -593,6 +598,7 @@ class ContinuousPairBacktest:
             'intercept': candidate['intercept'],
             'spread_mean': candidate['spread_mean'],
             'spread_std': candidate['spread_std'],
+            'half_life': candidate['half_life'],
         }
 
         logger.debug(
@@ -720,6 +726,31 @@ class ContinuousPairBacktest:
                     break
 
         return selected
+
+    def _get_effective_exit_zscore(self, pos: Dict) -> float:
+        """Half-life 기반 동적 exit z-score 계산.
+
+        use_dynamic_exit=False이면 고정 exit_zscore 반환.
+        True이면 half_life에 비례해 exit threshold를 조정:
+          - 빠른 회귀 (low half_life) → 타이트한 exit (0에 가깝게)
+          - 느린 회귀 (high half_life) → 느슨한 exit (일찍 청산)
+
+        Args:
+            pos: 슬롯의 position_info dict (half_life 포함).
+
+        Returns:
+            해당 포지션에 적용할 exit z-score 임계값.
+        """
+        if not self.config.use_dynamic_exit:
+            return self.config.exit_zscore
+
+        half_life = pos.get('half_life', self.config.max_half_life)
+        hl_ratio = (half_life - self.config.min_half_life) / (
+            self.config.max_half_life - self.config.min_half_life
+        )
+        hl_ratio = max(0.0, min(1.0, hl_ratio))  # clamp [0, 1]
+
+        return self.config.dynamic_exit_base + hl_ratio * self.config.dynamic_exit_range
     
     def _update_position(
         self,
@@ -766,13 +797,16 @@ class ContinuousPairBacktest:
         
         # Check exit conditions
         exit_reason = None
+
+        # Determine effective exit threshold
+        effective_exit_z = self._get_effective_exit_zscore(pos)
         
         # 1. Mean reversion target
         if pos['signal'] == 1:  # Long spread
-            if current_z >= -self.config.exit_zscore:
+            if current_z >= -effective_exit_z:
                 exit_reason = ExitReason.MEAN_REVERSION
         else:  # Short spread
-            if current_z <= self.config.exit_zscore:
+            if current_z <= effective_exit_z:
                 exit_reason = ExitReason.MEAN_REVERSION
         
         # 2. Stop loss
