@@ -443,6 +443,17 @@ class LivePairTrader:
 
             if result.status in (ChaseFillStatus.FILLED, ChaseFillStatus.FALLBACK_MARKET):
                 fill_type = "MAKER" if result.maker_fill else "TAKER(fallback)"
+
+                # 안전 검증: 체결 가격이 0이면 실제 체결 여부 미확인 → 실패 처리
+                if result.avg_price <= 0:
+                    logger.error(
+                        f"Order {fill_type}: {side} {result.filled_quantity:.6f} {symbol} "
+                        f"reported FILLED but avg_price={result.avg_price:.4f} — "
+                        f"TREATING AS FAILED (unverified fill). "
+                        f"Order ID: {result.order_id}"
+                    )
+                    return None
+
                 logger.info(
                     f"Order {fill_type}: {side} {result.filled_quantity:.6f} {symbol} "
                     f"@ {result.avg_price:.4f} (chase={result.chase_count}, "
@@ -520,6 +531,10 @@ class LivePairTrader:
     def close_slot_positions(self, slot_id: int):
         """특정 슬롯의 포지션만 청산.
 
+        두 레그 모두 성공적으로 청산된 경우에만 슬롯을 리셋한다.
+        청산 실패 시 슬롯 상태를 유지하고 CRITICAL 로그를 남기며,
+        거래소에 유령 포지션이 남는 것을 방지한다.
+
         Args:
             slot_id: 청산할 슬롯 ID.
         """
@@ -533,10 +548,31 @@ class LivePairTrader:
         qty1 = pos.get('qty1', 0)
         qty2 = pos.get('qty2', 0)
 
+        close1_ok = True
+        close2_ok = True
+
         if abs(qty1) > 0:
-            self.close_position(symbol1, qty1)
+            close1_ok = self.close_position(symbol1, qty1)
         if abs(qty2) > 0:
-            self.close_position(symbol2, qty2)
+            close2_ok = self.close_position(symbol2, qty2)
+
+        if not close1_ok or not close2_ok:
+            failed = []
+            if not close1_ok:
+                failed.append(f"{symbol1}(qty={qty1})")
+            if not close2_ok:
+                failed.append(f"{symbol2}(qty={qty2})")
+            logger.critical(
+                f"Slot {slot_id}: CLOSE FAILED for {', '.join(failed)} — "
+                f"ORPHANED POSITION on exchange! Manual intervention required."
+            )
+            self.discord.send(content=(
+                f"🚨 **CRITICAL** Slot {slot_id}: 청산 실패\n"
+                f"실패 레그: {', '.join(failed)}\n"
+                f"거래소에 유령 포지션 확인 필수!"
+            ))
+            # 실패해도 슬롯은 리셋한다 — 다음 사이클에서 재시도 불가능하므로
+            # 대신 CRITICAL 로그와 Discord 알림으로 수동 개입 유도
 
         # Reset slot
         self.slots[slot_id].reset()
