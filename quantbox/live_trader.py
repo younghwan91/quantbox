@@ -173,6 +173,9 @@ class LivePairTrader:
         self.paused: bool = False
         # 종료 요청 플래그 (Discord !stop)
         self._stop_requested: bool = False
+        # 알림 중복 방지 플래그 (상태 전이 시 1회만 발송)
+        self._all_slots_occupied_notified: bool = False
+        self._insufficient_balance_notified: bool = False
 
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
@@ -991,8 +994,13 @@ class LivePairTrader:
         idle = get_idle_slots(self.slots)
         if not idle:
             logger.info("All slots occupied, waiting...")
-            self.discord.notify_all_slots_occupied(self._build_slots_info())
+            if not self._all_slots_occupied_notified:
+                self.discord.notify_all_slots_occupied(self._build_slots_info())
+                self._all_slots_occupied_notified = True
             return True
+
+        # 슬롯이 비었으므로 다음 점유 시 알림 재발송 허용
+        self._all_slots_occupied_notified = False
 
         # 2.5. Paused 상태면 신규 진입 건너뛰기
         if self.paused:
@@ -1006,8 +1014,13 @@ class LivePairTrader:
 
         if available < 100:
             logger.warning("Insufficient balance for new trades")
-            self.discord.notify_insufficient_balance(available, required=100.0)
+            if not self._insufficient_balance_notified:
+                self.discord.notify_insufficient_balance(available, required=100.0)
+                self._insufficient_balance_notified = True
             return True
+
+        # 잔고 복구 시 다음 부족 알림 재발송 허용
+        self._insufficient_balance_notified = False
 
         # 4. Get trading coins and download data
         coins = self.get_trading_coins()

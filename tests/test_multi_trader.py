@@ -1258,3 +1258,123 @@ class TestPositionSizingParity:
                         call_args = mock_calc.call_args
                         assert call_args.kwargs['position_size_pct'] == pytest.approx(0.2)
                         assert call_args.kwargs['max_traders'] == 5
+
+
+# ============================================================
+# Notification throttle tests (fix/throttle-all-slots-notification)
+# ============================================================
+
+
+class TestNotificationThrottle:
+    """모든 슬롯 사용 중 / 잔고 부족 알림이 상태 전이 시 1회만 발송되는지 검증."""
+
+    @pytest.fixture
+    def mock_env(self, monkeypatch):
+        monkeypatch.setenv("BINANCE_API_KEY", "test_key")
+        monkeypatch.setenv("BINANCE_API_SECRET", "test_secret")
+        monkeypatch.setenv("BINANCE_TESTNET", "true")
+        monkeypatch.setenv("MAX_TRADERS", "2")
+
+    @pytest.fixture
+    def trader(self, mock_env):
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            trader = LivePairTrader(paper_mode=True)
+            # Stub out methods that hit external services
+            trader._process_bot_commands = MagicMock()
+            trader.monitor_slot = MagicMock()
+            trader._build_slots_info = MagicMock(return_value=[
+                {'slot_id': 0, 'pair': 'BTCUSDT/ETHUSDT', 'holding_hours': 1.0},
+                {'slot_id': 1, 'pair': 'SOLUSDT/AVAXUSDT', 'holding_hours': 0.5},
+            ])
+            return trader
+
+    def _make_all_slots_active(self, trader):
+        """모든 슬롯을 사용 중 상태로 만든다."""
+        for slot in trader.slots:
+            slot.position_open = True
+            slot.current_pair = ("SYMX", "SYMY")
+
+    def _make_one_slot_idle(self, trader):
+        """슬롯 하나를 유휴 상태로 되돌린다."""
+        trader.slots[0].position_open = False
+        trader.slots[0].current_pair = None
+
+    def test_all_slots_occupied_notified_once(self, trader):
+        """모든 슬롯 점유 시 알림은 최초 1회만 발송된다."""
+        self._make_all_slots_active(trader)
+        trader.discord = MagicMock()
+
+        # 첫 사이클 → 알림 1회
+        trader.run_cycle()
+        assert trader.discord.notify_all_slots_occupied.call_count == 1
+
+        # 두 번째 사이클 → 추가 알림 없음 (이미 notified)
+        trader.run_cycle()
+        assert trader.discord.notify_all_slots_occupied.call_count == 1
+
+        # 세 번째 사이클도 동일
+        trader.run_cycle()
+        assert trader.discord.notify_all_slots_occupied.call_count == 1
+
+    def test_all_slots_occupied_re_notified_after_slot_freed(self, trader):
+        """슬롯이 비었다가 다시 찼을 때 알림이 재발송된다."""
+        self._make_all_slots_active(trader)
+        trader.discord = MagicMock()
+        # Stub balance/trade methods for idle path
+        trader.get_available_balance = MagicMock(return_value=0.0)
+        trader.get_total_balance = MagicMock(return_value=1000.0)
+
+        # 1차 점유 → 알림 1회
+        trader.run_cycle()
+        assert trader.discord.notify_all_slots_occupied.call_count == 1
+        assert trader._all_slots_occupied_notified is True
+
+        # 슬롯 비움 → 플래그 리셋
+        self._make_one_slot_idle(trader)
+        trader.run_cycle()  # idle path 진입 → 플래그 리셋됨
+        assert trader._all_slots_occupied_notified is False
+
+        # 다시 점유 → 알림 재발송
+        self._make_all_slots_active(trader)
+        trader.run_cycle()
+        assert trader.discord.notify_all_slots_occupied.call_count == 2
+
+    def test_insufficient_balance_notified_once(self, trader):
+        """잔고 부족 알림도 상태 전이 시 1회만 발송된다."""
+        trader.discord = MagicMock()
+        trader.get_available_balance = MagicMock(return_value=50.0)
+        trader.get_total_balance = MagicMock(return_value=50.0)
+
+        # 모든 슬롯 idle 상태 유지 (기본값)
+        trader.run_cycle()
+        assert trader.discord.notify_insufficient_balance.call_count == 1
+
+        trader.run_cycle()
+        assert trader.discord.notify_insufficient_balance.call_count == 1
+
+        trader.run_cycle()
+        assert trader.discord.notify_insufficient_balance.call_count == 1
+
+    def test_insufficient_balance_re_notified_after_recovery(self, trader):
+        """잔고가 복구되었다가 다시 부족해지면 알림이 재발송된다."""
+        trader.discord = MagicMock()
+        trader.get_available_balance = MagicMock(return_value=50.0)
+        trader.get_total_balance = MagicMock(return_value=50.0)
+        trader.get_trading_coins = MagicMock(return_value=["BTCUSDT"])
+        trader.download_multi_symbol_data = MagicMock(return_value={})
+        trader.find_best_pair = MagicMock(return_value=None)
+
+        # 1차 부족 → 알림 1회
+        trader.run_cycle()
+        assert trader.discord.notify_insufficient_balance.call_count == 1
+
+        # 잔고 복구
+        trader.get_available_balance = MagicMock(return_value=500.0)
+        trader.run_cycle()
+        assert trader._insufficient_balance_notified is False
+
+        # 다시 부족 → 알림 재발송
+        trader.get_available_balance = MagicMock(return_value=30.0)
+        trader.run_cycle()
+        assert trader.discord.notify_insufficient_balance.call_count == 2
