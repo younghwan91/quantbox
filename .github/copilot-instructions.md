@@ -23,6 +23,21 @@
     - 실거래와 백테스트 간의 괴리는 절대 발생해서는 안 된다.
     - 백테스트에서만 특별히 유리한 조건을 부여하는 코드는 허용되지 않는다.
 
+## 📝 문서 자동 관리 (Documentation Auto-Sync)
+
+코드 변경 시 아래 항목을 **사용자가 요청하지 않아도 알아서** 최신 상태로 유지한다:
+
+1. **README.md**: 새 기능 추가/삭제 시 주요 기능 섹션, 프로젝트 구조, 테스트 수를 업데이트한다.
+2. **MANUAL.md**: 환경변수 추가, 전략 파라미터 변경, 새 모듈 추가 시 해당 섹션을 업데이트한다. 버전 번호와 최종 업데이트 날짜도 갱신한다.
+3. **.env.example**: 새 환경변수 추가 시 **반드시** `.env.example`에도 주석과 함께 추가한다.
+4. **copilot-instructions.md**: 개발 원칙이나 워크플로우가 변경될 때 이 문서도 갱신한다.
+
+**판단 기준:**
+- feature 브랜치 머지 시: README.md 기능 목록 + MANUAL.md 해당 섹션 확인
+- 환경변수 추가 시: .env.example + MANUAL.md 환경변수 섹션
+- 테스트 파일 추가/삭제 시: README.md 테스트 수 갱신
+- 프로젝트 구조 변경 시 (파일 추가/삭제/이동): README.md 프로젝트 구조 트리 갱신
+
 코딩 컨벤션 및 타입
 Type Hinting: typing.List, typing.Dict 대신 Python 3.9+ 표준인 list[], dict[], tuple[] 사용을 지향한다.
 Docstring: Google Style Docstring을 사용하여 입출력 데이터의 형상을 명시한다.
@@ -31,9 +46,6 @@ Numba: 루프가 10,000회 이상 반복되는 연산(백테스트)에는 반드
 환경 설정
 .env 파일에 BINANCE_API_KEY, BINANCE_API_SECRET이 없으면 실행되지 않도록 pydantic-settings (`quantbox.core.settings`)를 활용하여 검증한다.
 로그 레벨은 개발 시 DEBUG, 운영 시 INFO로 설정하되, 주문 체결 로그는 별도 파일로 영구 보존한다.
-모든 코드 수정 뒤엔 필요하다고 판단되면 다음을 최신 상태로 유지한다:
-  - README.md, MANUAL.md의 설치 및 실행 방법
-  - **.env.example 포멧** (새 환경변수 추가 시 반드시 .env.example에도 추가)
 
 ## Git Flow 전략 (필수 준수)
 
