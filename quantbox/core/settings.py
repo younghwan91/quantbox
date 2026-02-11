@@ -68,6 +68,9 @@ class QuantBoxSettings(BaseSettings):
     exit_zscore: float = 0.5
     stop_loss_zscore: float = 3.5
 
+    # ── 홀딩 제한 ──
+    max_holding_hours: int = 16
+
     # ── Dynamic exit ──
     use_dynamic_exit: bool = True
     dynamic_exit_base: float = 0.3
@@ -128,7 +131,7 @@ class QuantBoxSettings(BaseSettings):
             'use_dynamic_exit': self.use_dynamic_exit,
             'dynamic_exit_base': self.dynamic_exit_base,
             'dynamic_exit_range': self.dynamic_exit_range,
-            'max_holding_hours': 24,
+            'max_holding_hours': self.max_holding_hours,
             # Risk
             'position_size_pct': pct,
             'trading_fee': self.trading_fee,
