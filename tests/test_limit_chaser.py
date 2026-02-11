@@ -867,7 +867,7 @@ class TestVerifyMarketOrder:
     def test_verify_max_retries_exhausted(
         self, chaser: LimitOrderChaser, mock_client: MagicMock
     ):
-        """max_retries 소진 → None 반환."""
+        """max_retries 소진 → 최종 확인 후 취소 시도 → None 반환."""
         mock_client.futures_get_order.return_value = {
             "status": "NEW",
             "executedQty": "0",
@@ -880,7 +880,12 @@ class TestVerifyMarketOrder:
         )
 
         assert result is None
-        assert mock_client.futures_get_order.call_count == 3
+        # 3 retries + 1 final check before cancel = 4 calls
+        assert mock_client.futures_get_order.call_count == 4
+        # 최종 확인 후 NEW 상태이므로 cancel 호출됨
+        mock_client.futures_cancel_order.assert_called_once_with(
+            symbol="NEARUSDT", orderId=12345
+        )
 
     def test_verify_query_exception_retries(
         self, chaser: LimitOrderChaser, mock_client: MagicMock
