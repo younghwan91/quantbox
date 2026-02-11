@@ -249,6 +249,55 @@ class TestLivePnlCostDeduction:
         assert trade['pnl'] < 2.0, "PnL should be less than raw due to costs"
         assert trade['pnl'] > 0, f"$2 profit should still be positive after costs on $200 position"
 
+    def test_live_mode_no_slippage_deduction(self, trader):
+        """Live mode에서는 슬리피지를 이중 차감하지 않는다.
+
+        실거래에서 entry_price는 이미 실제 체결가(슬리피지 반영 완료).
+        별도로 슬리피지를 차감하면 이중 차감.
+        """
+        # Switch to live mode
+        trader.paper_mode = False
+
+        self._open_position(trader, slot_id=0, hours_ago=2.0)
+
+        # 가격 변동 없음 → raw PnL = 0, 비용만 차감
+        trader.get_price = MagicMock(side_effect=[100.0, 50.0])
+        trader.close_slot_positions = MagicMock()
+
+        with patch.object(trader, 'calculate_zscore', return_value=0.0):
+            trader.monitor_slot(0)
+
+        trade = trader.trade_history[-1]
+
+        # entry_value=200, fee=200*0.0005*2=0.2
+        # Slippage should NOT be deducted in live mode
+        # funding = small
+        # Total cost should be ~0.2 + small funding, NOT ~0.6+
+        assert trade['pnl'] > -0.5, (
+            f"Live PnL should NOT include slippage deduction. "
+            f"Expected > -$0.5, got {trade['pnl']:.4f}"
+        )
+
+    def test_paper_mode_includes_slippage(self, trader):
+        """Paper mode에서는 슬리피지를 차감한다 (보수적 시뮬레이션)."""
+        assert trader.paper_mode is True  # fixture is paper_mode
+
+        self._open_position(trader, slot_id=0, hours_ago=2.0)
+
+        trader.get_price = MagicMock(side_effect=[100.0, 50.0])
+        trader.close_slot_positions = MagicMock()
+
+        with patch.object(trader, 'calculate_zscore', return_value=0.0):
+            trader.monitor_slot(0)
+
+        trade = trader.trade_history[-1]
+
+        # Paper: fee(0.2) + slippage(0.4) + funding → should be > 0.5
+        assert trade['pnl'] < -0.5, (
+            f"Paper PnL should include slippage. "
+            f"Expected < -$0.5, got {trade['pnl']:.4f}"
+        )
+
 
 # ============================================================
 # C. Sharpe annualization

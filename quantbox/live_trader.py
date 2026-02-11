@@ -965,7 +965,13 @@ class LivePairTrader:
             # Deduct realistic costs
             entry_value = abs(pos['qty1'] * pos['entry_price1']) + abs(pos['qty2'] * pos['entry_price2'])
             fee_cost = entry_value * self.config['trading_fee'] * 2  # entry + exit
-            slip_cost = entry_value * self.config['slippage'] * 2  # entry + exit
+            # Live: slippage already reflected in actual fill prices.
+            # Paper: simulate slippage as conservative estimate.
+            slip_cost = (
+                entry_value * self.config['slippage'] * 2
+                if self.paper_mode
+                else 0.0
+            )
             bars_held = max(1, elapsed * 4)  # hours → 15m bars
             funding_cost = entry_value * self.config['funding_rate_8h'] * 2 * (bars_held / 32)  # 32 bars = 8h
             total_cost = fee_cost + slip_cost + funding_cost
