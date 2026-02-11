@@ -249,6 +249,13 @@ class DiscordBotRunner:
         except Exception as e:
             logger.error(f"Discord Bot error: {e}")
         finally:
+            # 잔여 태스크 정리 — "Task was destroyed but it is pending" 방지
+            pending = asyncio.all_tasks(self._loop)
+            if pending:
+                self._loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
+            self._loop.run_until_complete(self._loop.shutdown_asyncgens())
             self._loop.close()
 
     def get_command(self) -> BotCommand | None:
@@ -276,12 +283,32 @@ class DiscordBotRunner:
             commands.append(cmd)
         return commands
 
-    def stop(self):
-        """봇을 종료한다."""
-        if self._bot and self._loop:
-            asyncio.run_coroutine_threadsafe(
-                self._bot.close(), self._loop
-            )
+    def stop(self, timeout: float = 5.0):
+        """봇을 안전하게 종료한다.
+
+        discord.py Client.close()를 호출하고 스레드가 정리될 때까지 대기한다.
+        대기하지 않으면 asyncio 커넥터/태스크 리소스 누수가 발생한다.
+
+        Args:
+            timeout: 종료 대기 최대 시간(초). 초과 시 강제 진행.
+        """
+        if self._bot and self._loop and not self._loop.is_closed():
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._bot.close(), self._loop
+                )
+                future.result(timeout=timeout)
+            except Exception as e:
+                logger.warning(f"Discord Bot close error (non-fatal): {e}")
+
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                logger.warning(
+                    "Discord Bot thread did not terminate within "
+                    f"{timeout}s — proceeding anyway"
+                )
+
         logger.info("Discord Bot stopped")
 
     @property
