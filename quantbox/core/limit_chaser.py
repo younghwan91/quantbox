@@ -142,6 +142,27 @@ class LimitOrderChaser:
         rounded = round(price / tick_size) * tick_size
         return round(rounded, price_precision)
 
+    def round_quantity(
+        self, quantity: float, step_size: float, quantity_precision: int
+    ) -> float:
+        """수량을 거래소 step_size에 맞게 내림 반올림.
+
+        바이낸스 LOT_SIZE 필터: (quantity - minQty) % stepSize == 0 이어야 함.
+        pricePrecision/quantityPrecision은 stepSize/tickSize 대용 불가 (공식 문서 명시).
+
+        Args:
+            quantity: 원래 수량.
+            step_size: LOT_SIZE 필터의 stepSize.
+            quantity_precision: 소수점 자릿수 (부동소수점 오차 보정용).
+
+        Returns:
+            step_size 배수로 내림된 수량.
+        """
+        if step_size <= 0:
+            return quantity
+        rounded = math.floor(quantity / step_size) * step_size
+        return round(rounded, quantity_precision)
+
     def chase_limit_order(
         self,
         symbol: str,
@@ -149,6 +170,8 @@ class LimitOrderChaser:
         quantity: float,
         tick_size: float = 0.01,
         price_precision: int = 2,
+        step_size: float = 0.0,
+        quantity_precision: int = 8,
     ) -> ChaseResult:
         """Limit 지정가 추격 주문 실행.
 
@@ -163,12 +186,30 @@ class LimitOrderChaser:
             quantity: 주문 수량.
             tick_size: 최소 가격 변동 단위.
             price_precision: 가격 소수점 자릿수.
+            step_size: LOT_SIZE 필터의 stepSize (수량 정밀도).
+                0이면 수량 반올림을 건너뛴다 (하위 호환성).
+            quantity_precision: 수량 소수점 자릿수.
 
         Returns:
             ChaseResult with 체결 정보.
         """
         if self.paper_mode:
             return self._paper_fill(symbol, side, quantity)
+
+        # step_size가 주어진 경우, 최초 수량도 반올림 보정
+        if step_size > 0:
+            quantity = self.round_quantity(quantity, step_size, quantity_precision)
+            if quantity <= 0:
+                logger.error(f"[{symbol}] Quantity rounded to 0 by step_size={step_size}")
+                return ChaseResult(
+                    status=ChaseFillStatus.FAILED,
+                    filled_quantity=0.0,
+                    avg_price=0.0,
+                    order_id="",
+                    chase_count=0,
+                    elapsed_seconds=0.0,
+                    maker_fill=False,
+                )
 
         start_time = time.monotonic()
         chase_count = 0
@@ -237,6 +278,11 @@ class LimitOrderChaser:
                     weighted_price_sum += filled_qty * avg_price
                     total_filled += filled_qty
                     remaining_qty = quantity - total_filled
+                    # 부분 체결 후 남은 수량을 step_size에 맞게 반올림
+                    if step_size > 0:
+                        remaining_qty = self.round_quantity(
+                            remaining_qty, step_size, quantity_precision
+                        )
 
                 if status == "FILLED":
                     logger.info(
@@ -326,12 +372,29 @@ class LimitOrderChaser:
             )
 
         if self.config.fallback_to_market and remaining_qty > 0:
+            # Market fallback 전 수량 재확인
+            if step_size > 0:
+                remaining_qty = self.round_quantity(
+                    remaining_qty, step_size, quantity_precision
+                )
+            if remaining_qty <= 0:
+                # 반올림으로 남은 수량이 0이 된 경우 — 성공 처리
+                if total_filled > 0:
+                    return ChaseResult(
+                        status=ChaseFillStatus.FILLED,
+                        filled_quantity=total_filled,
+                        avg_price=weighted_price_sum / total_filled,
+                        order_id=last_order_id,
+                        chase_count=chase_count,
+                        elapsed_seconds=elapsed,
+                        maker_fill=True,
+                    )
             logger.warning(
                 f"[{symbol}] Falling back to MARKET for remaining "
                 f"{remaining_qty:.6f} (filled {total_filled:.6f} via limit)"
             )
             market_result = self._market_fallback(
-                symbol, side, remaining_qty
+                symbol, side, remaining_qty, step_size, quantity_precision
             )
             if market_result is not None:
                 mkt_qty, mkt_price, mkt_oid = market_result
@@ -366,16 +429,38 @@ class LimitOrderChaser:
         )
 
     def _market_fallback(
-        self, symbol: str, side: str, quantity: float
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        step_size: float = 0.0,
+        quantity_precision: int = 8,
     ) -> tuple[float, float, str] | None:
         """시장가 fallback 주문.
 
         바이낸스 MARKET 응답에서 executedQty/avgPrice가 "0"으로 올 수 있으므로
         fills 배열에서 실제 체결 데이터를 파싱한다.
+        MARKET_LOT_SIZE 필터도 stepSize를 요구하므로 수량을 반올림한다.
+
+        Args:
+            symbol: 심볼.
+            side: "BUY" 또는 "SELL".
+            quantity: 주문 수량.
+            step_size: LOT_SIZE 필터의 stepSize.
+            quantity_precision: 수량 소수점 자릿수.
 
         Returns:
             (filled_qty, avg_price, order_id) 또는 None.
         """
+        # Market 주문도 MARKET_LOT_SIZE 필터 적용 — stepSize 반올림 필수
+        if step_size > 0:
+            quantity = self.round_quantity(quantity, step_size, quantity_precision)
+            if quantity <= 0:
+                logger.error(
+                    f"[{symbol}] Market fallback quantity rounded to 0 "
+                    f"(step_size={step_size})"
+                )
+                return None
         try:
             order = self.client.futures_create_order(
                 symbol=symbol,
@@ -517,7 +602,45 @@ class LimitOrderChaser:
                 )
                 time.sleep(retry_interval)
 
-        # 최대 재시도 초과 — 체결 미확인, 안전을 위해 실패 처리
+        # 최대 재시도 초과 — 체결 미확인
+        # MARKET 주문이 여전히 NEW면 취소 시도 (유령 주문 방지)
+        try:
+            cancel_status = self.client.futures_get_order(
+                symbol=symbol, orderId=int(order_id)
+            )
+            cancel_order_status = cancel_status.get("status", "UNKNOWN")
+            cancel_exec_qty = float(cancel_status.get("executedQty", 0))
+
+            if cancel_order_status == "NEW" and cancel_exec_qty == 0:
+                logger.warning(
+                    f"[{symbol}] Market order still NEW after {max_retries} retries, "
+                    f"cancelling to prevent orphaned order..."
+                )
+                try:
+                    self.client.futures_cancel_order(
+                        symbol=symbol, orderId=int(order_id)
+                    )
+                    logger.info(f"[{symbol}] Orphaned market order cancelled: {order_id}")
+                except Exception as cancel_err:
+                    logger.error(
+                        f"[{symbol}] Failed to cancel orphaned market order: {cancel_err}"
+                    )
+            elif cancel_order_status == "FILLED":
+                # 최종 확인에서 체결이 확인됨
+                avg_p = float(cancel_status.get("avgPrice", 0))
+                cum_q = float(cancel_status.get("cumQuote", 0))
+                if avg_p > 0:
+                    logger.info(
+                        f"[{symbol}] Market order confirmed on final check: "
+                        f"{cancel_exec_qty} @ {avg_p:.4f}"
+                    )
+                    return cancel_exec_qty, avg_p, order_id
+                elif cum_q > 0 and cancel_exec_qty > 0:
+                    avg_p = cum_q / cancel_exec_qty
+                    return cancel_exec_qty, avg_p, order_id
+        except Exception:
+            pass
+
         logger.error(
             f"[{symbol}] Market order verification FAILED after "
             f"{max_retries} retries (orderId={order_id}). "

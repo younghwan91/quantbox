@@ -431,6 +431,8 @@ class LivePairTrader:
             info = self.get_symbol_info(symbol)
             tick_size = info.get('tick_size', 0.01)
             price_precision = info.get('price_precision', 2)
+            step_size = info.get('step_size', 0.0)
+            quantity_precision = info.get('quantity_precision', 8)
 
             # Execute via limit chaser
             result: ChaseResult = self._chaser.chase_limit_order(
@@ -439,6 +441,8 @@ class LivePairTrader:
                 quantity=quantity,
                 tick_size=tick_size,
                 price_precision=price_precision,
+                step_size=step_size,
+                quantity_precision=quantity_precision,
             )
 
             if result.status in (ChaseFillStatus.FILLED, ChaseFillStatus.FALLBACK_MARKET):
@@ -807,11 +811,40 @@ class LivePairTrader:
         
         # Place orders
         order1 = self.place_order(symbol1, side1, qty1)
-        order2 = self.place_order(symbol2, side2, qty2)
-        
+        order2 = None
+
+        if order1:
+            order2 = self.place_order(symbol2, side2, qty2)
+
         if not order1 or not order2:
-            logger.error(f"Slot {slot_id}: Order failed, closing slot positions")
-            self.close_slot_positions(slot_id)
+            # 한쪽 레그만 체결된 경우 — 거래소에 남은 포지션 직접 청산
+            if order1 and not order2:
+                logger.error(
+                    f"Slot {slot_id}: Leg2 ({symbol2}) failed, "
+                    f"closing orphaned leg1 ({symbol1}) directly"
+                )
+                filled_qty1 = float(order1.get('executedQty', qty1))
+                close_side1 = 'SELL' if side1 == 'BUY' else 'BUY'
+                close_ok = self.close_position(
+                    symbol1, filled_qty1 if side1 == 'BUY' else -filled_qty1
+                )
+                if not close_ok:
+                    logger.critical(
+                        f"Slot {slot_id}: FAILED to close orphaned position "
+                        f"{symbol1} qty={filled_qty1} — MANUAL CHECK REQUIRED"
+                    )
+                    self.discord.send(content=(
+                        f"🚨 **CRITICAL** Slot {slot_id}: 유령 포지션 발생\n"
+                        f"심볼: {symbol1} qty={filled_qty1}\n"
+                        f"거래소에서 수동으로 청산 필요!"
+                    ))
+            elif not order1:
+                logger.error(f"Slot {slot_id}: Leg1 ({symbol1}) failed, no cleanup needed")
+
+            logger.info(
+                f"Slot {slot_id}: Trade execution failed for "
+                f"{symbol1}/{symbol2}, excluding from further search"
+            )
             return False
         
         # Record position in slot
