@@ -169,6 +169,69 @@ class TestDiscordBotRunner:
         runner = DiscordBotRunner(token="fake", channel_id=1)
         assert runner.is_running is False
 
+    def test_stop_waits_for_close(self):
+        """stop()이 bot.close()를 기다리고 스레드를 join하는지 검증."""
+        runner = DiscordBotRunner(token="fake", channel_id=1)
+
+        mock_bot = MagicMock()
+        mock_loop = MagicMock()
+        mock_loop.is_closed.return_value = False
+        mock_thread = MagicMock()
+        # join 전에는 alive, join 후에는 dead
+        mock_thread.is_alive.side_effect = [True, False]
+
+        mock_future = MagicMock()
+        mock_future.result.return_value = None
+
+        runner._bot = mock_bot
+        runner._loop = mock_loop
+        runner._thread = mock_thread
+
+        with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future) as mock_rcts:
+            runner.stop(timeout=3.0)
+
+        # bot.close()가 스케줄링 되었는지
+        mock_rcts.assert_called_once_with(mock_bot.close(), mock_loop)
+        # Future.result()로 완료 대기했는지
+        mock_future.result.assert_called_once_with(timeout=3.0)
+        # 스레드 join이 호출되었는지
+        mock_thread.join.assert_called_once_with(timeout=3.0)
+
+    def test_stop_handles_closed_loop(self):
+        """이미 닫힌 이벤트 루프에서 stop()이 에러 없이 종료되는지 검증."""
+        runner = DiscordBotRunner(token="fake", channel_id=1)
+
+        mock_loop = MagicMock()
+        mock_loop.is_closed.return_value = True
+        runner._bot = MagicMock()
+        runner._loop = mock_loop
+
+        # 이미 닫힌 루프 → close 스케줄링 건너뜀
+        runner.stop()
+        # asyncio.run_coroutine_threadsafe가 호출되지 않아야 함
+
+    def test_stop_handles_close_error(self):
+        """bot.close()가 에러를 던져도 stop()이 정상 종료되는지 검증."""
+        runner = DiscordBotRunner(token="fake", channel_id=1)
+
+        mock_loop = MagicMock()
+        mock_loop.is_closed.return_value = False
+        mock_thread = MagicMock()
+        mock_thread.is_alive.side_effect = [True, False]
+
+        mock_future = MagicMock()
+        mock_future.result.side_effect = TimeoutError("close timeout")
+
+        runner._bot = MagicMock()
+        runner._loop = mock_loop
+        runner._thread = mock_thread
+
+        with patch("asyncio.run_coroutine_threadsafe", return_value=mock_future):
+            # 에러가 전파되지 않고 정상 종료되어야 함
+            runner.stop(timeout=1.0)
+
+        mock_thread.join.assert_called_once_with(timeout=1.0)
+
 
 # ============================================================
 # LivePairTrader command handlers
