@@ -9,7 +9,7 @@ temp
 __pycache__/
 *.pyc
 .venv/
-
+/reports
 
 # Secrets & Environment
 .env
