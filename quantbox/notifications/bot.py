@@ -47,6 +47,7 @@ class CommandType(Enum):
     RESUME = auto()
     STOP = auto()
     PNL = auto()
+    BLACKLIST = auto()
     HELP = auto()
 
 
@@ -76,6 +77,8 @@ HELP_TEXT = """```
 !resume       신규 진입 재개
 !stop         전체 청산 + 종료
 !pnl          세션 손익 요약
+!blacklist    블랙리스트 조회
+!blacklist clear  블랙리스트 초기화
 !help         이 메시지
 ─────────────────────────
 ```"""
@@ -191,6 +194,13 @@ class TradingBot(discord.Client):
             return BotCommand(command=CommandType.STOP)
         elif cmd == '!pnl':
             return BotCommand(command=CommandType.PNL)
+        elif cmd == '!blacklist':
+            if len(parts) >= 2 and parts[1].lower() == 'clear':
+                return BotCommand(
+                    command=CommandType.BLACKLIST,
+                    args={'action': 'clear'},
+                )
+            return BotCommand(command=CommandType.BLACKLIST)
         elif cmd == '!help':
             return BotCommand(command=CommandType.HELP)
         else:
