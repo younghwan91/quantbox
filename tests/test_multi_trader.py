@@ -926,8 +926,12 @@ class TestLivePairTraderMultiSlot:
         }
         trader.slot_entry_times[slot_id] = datetime.now(timezone.utc)
 
-        # Mock close_position
-        trader.close_position = MagicMock(return_value=True)
+        # Mock close_position to return fill info dict (like real place_order)
+        trader.close_position = MagicMock(return_value={
+            'orderId': 12345, 'status': 'FILLED',
+            'executedQty': '0.001', 'avgPrice': '50000.0',
+            'makerFill': True, 'chaseCount': 1,
+        })
 
         trader.close_slot_positions(slot_id)
 
