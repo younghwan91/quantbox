@@ -169,6 +169,11 @@ class LivePairTrader:
             paper_mode=self.paper_mode,
         )
 
+        # 실패한 심볼 블랙리스트 (사이클 간 지속, TTL 기반 자동 만료)
+        # key: symbol, value: 실패 시각
+        self.BLACKLIST_TTL_SECONDS: int = 3600  # 1시간 후 자동 만료
+        self._failed_symbols: dict[str, datetime] = {}
+
         # 일시정지 플래그 (Discord !pause / !resume)
         self.paused: bool = False
         # 종료 요청 플래그 (Discord !stop)
@@ -305,6 +310,58 @@ class LivePairTrader:
         logger.info(f"Downloaded data for {len(data)} symbols")
         return data
     
+    # ==================== Cost Calculation ====================
+
+    def _fetch_funding_rate(self, symbol: str) -> float:
+        """바이낸스 선물 실시간 펀딩비 조회.
+
+        Returns:
+            현재 펀딩비 (8시간 기준). 실패 시 config fallback값.
+        """
+        try:
+            info = self.client.futures_mark_price(symbol=symbol)
+            rate = float(info.get('lastFundingRate', 0))
+            if rate != 0:
+                return abs(rate)
+        except Exception as e:
+            logger.debug(f"Failed to fetch funding rate for {symbol}: {e}")
+        return self.config['funding_rate_8h']
+
+    def _calculate_funding_cost(
+        self,
+        symbol1: str,
+        symbol2: str,
+        notional: float,
+        holding_hours: float,
+    ) -> float:
+        """실제 펀딩비 기반 비용 계산.
+
+        양 레그의 실시간 펀딩비를 조회하여 보유 시간에 비례한 비용을 반환.
+        페이퍼 모드 또는 API 실패 시 config 고정값으로 fallback.
+
+        Args:
+            symbol1: Leg1 심볼.
+            symbol2: Leg2 심볼.
+            notional: 포지션 총 노셔널 가치.
+            holding_hours: 보유 시간 (hours).
+
+        Returns:
+            추정 펀딩비 비용 (양수).
+        """
+        if self.paper_mode:
+            rate = self.config['funding_rate_8h']
+        else:
+            rate1 = self._fetch_funding_rate(symbol1)
+            rate2 = self._fetch_funding_rate(symbol2)
+            # 페어 트레이딩은 양 레그이므로 두 펀딩비 합산
+            # (한쪽은 long, 한쪽은 short → 부호 반대이지만 보수적으로 양쪽 절대값 합산)
+            rate = (rate1 + rate2) / 2
+
+        funding_periods = holding_hours / 8.0
+        # 양 레그 × 펀딩비 × 기간
+        cost = rate * 2 * notional * funding_periods
+        return max(0.0, cost)
+
     # ==================== Trading Methods ====================
     
     def get_price(self, symbol: str) -> float:
@@ -485,14 +542,18 @@ class LivePairTrader:
             logger.error(f"Unexpected order error for {symbol}: {e}")
             return None
     
-    def close_position(self, symbol: str, quantity: float) -> bool:
-        """포지션 청산"""
+    def close_position(self, symbol: str, quantity: float) -> dict | None:
+        """포지션 청산.
+
+        Returns:
+            체결 정보 dict {'avgPrice': float, 'executedQty': float} 또는 실패 시 None.
+        """
         side = 'SELL' if quantity > 0 else 'BUY'
         quantity = abs(quantity)
         
         info = self.get_symbol_info(symbol)
         if not info:
-            return False
+            return None
         
         rounded_qty = self.round_quantity(
             quantity,
@@ -502,10 +563,10 @@ class LivePairTrader:
         
         if rounded_qty <= 0:
             logger.warning(f"Quantity too small to close for {symbol}")
-            return False
+            return None
         
         order = self.place_order(symbol, side, rounded_qty)
-        return order is not None
+        return order
     
     def close_all_positions(self):
         """모든 포지션 청산"""
@@ -532,7 +593,7 @@ class LivePairTrader:
         self.slot_positions.clear()
         self.slot_entry_times.clear()
 
-    def close_slot_positions(self, slot_id: int):
+    def close_slot_positions(self, slot_id: int) -> dict[str, float]:
         """특정 슬롯의 포지션만 청산.
 
         두 레그 모두 성공적으로 청산된 경우에만 슬롯을 리셋한다.
@@ -541,9 +602,15 @@ class LivePairTrader:
 
         Args:
             slot_id: 청산할 슬롯 ID.
+
+        Returns:
+            {'exit_price1': float, 'exit_price2': float} 실제 체결가.
+            체결 실패한 레그는 0.0.
         """
+        exit_prices = {'exit_price1': 0.0, 'exit_price2': 0.0}
+
         if slot_id not in self.slot_positions:
-            return
+            return exit_prices
 
         pos = self.slot_positions[slot_id]
         symbol1, symbol2 = pos['symbol1'], pos['symbol2']
@@ -552,19 +619,24 @@ class LivePairTrader:
         qty1 = pos.get('qty1', 0)
         qty2 = pos.get('qty2', 0)
 
-        close1_ok = True
-        close2_ok = True
+        close1_result = None
+        close2_result = None
 
         if abs(qty1) > 0:
-            close1_ok = self.close_position(symbol1, qty1)
+            close1_result = self.close_position(symbol1, qty1)
         if abs(qty2) > 0:
-            close2_ok = self.close_position(symbol2, qty2)
+            close2_result = self.close_position(symbol2, qty2)
 
-        if not close1_ok or not close2_ok:
+        if close1_result:
+            exit_prices['exit_price1'] = float(close1_result.get('avgPrice', 0))
+        if close2_result:
+            exit_prices['exit_price2'] = float(close2_result.get('avgPrice', 0))
+
+        if not close1_result or not close2_result:
             failed = []
-            if not close1_ok:
+            if not close1_result:
                 failed.append(f"{symbol1}(qty={qty1})")
-            if not close2_ok:
+            if not close2_result:
                 failed.append(f"{symbol2}(qty={qty2})")
             logger.critical(
                 f"Slot {slot_id}: CLOSE FAILED for {', '.join(failed)} — "
@@ -583,6 +655,8 @@ class LivePairTrader:
         del self.slot_positions[slot_id]
         if slot_id in self.slot_entry_times:
             del self.slot_entry_times[slot_id]
+
+        return exit_prices
 
     @property
     def occupied_symbols(self) -> set[str]:
@@ -847,15 +921,25 @@ class LivePairTrader:
             )
             return False
         
-        # Record position in slot
+        # Record position in slot — use actual fill prices for accurate PnL
+        fill_price1 = float(order1.get('avgPrice', 0)) if order1 else price1
+        fill_price2 = float(order2.get('avgPrice', 0)) if order2 else price2
+        # Fallback to ticker price if fill price is missing (should not happen)
+        if fill_price1 <= 0:
+            logger.warning(f"Slot {slot_id}: Leg1 avgPrice missing, using ticker {price1}")
+            fill_price1 = price1
+        if fill_price2 <= 0:
+            logger.warning(f"Slot {slot_id}: Leg2 avgPrice missing, using ticker {price2}")
+            fill_price2 = price2
+
         position_data = {
             'symbol1': symbol1,
             'symbol2': symbol2,
             'signal': signal,
             'qty1': qty1 if signal == 1 else -qty1,
             'qty2': -qty2 if signal == 1 else qty2,
-            'entry_price1': price1,
-            'entry_price2': price2,
+            'entry_price1': fill_price1,
+            'entry_price2': fill_price2,
             'entry_zscore': z_score,
             'hedge_ratio': hedge_ratio,
             'spread_mean': pair_info['spread_mean'],
@@ -957,30 +1041,42 @@ class LivePairTrader:
         if should_close:
             logger.info(f"Slot {slot_id}: Closing position: {close_reason}")
             
-            # Calculate PnL (with costs)
-            pnl1 = (price1 - pos['entry_price1']) * pos['qty1']
-            pnl2 = (price2 - pos['entry_price2']) * pos['qty2']
+            # Close positions FIRST to get actual fill prices
+            exit_prices = self.close_slot_positions(slot_id)
+            exit_p1 = exit_prices['exit_price1']
+            exit_p2 = exit_prices['exit_price2']
+
+            # Fallback to mark price if fill price unavailable (paper mode or close failure)
+            if exit_p1 <= 0:
+                exit_p1 = price1
+            if exit_p2 <= 0:
+                exit_p2 = price2
+
+            # Calculate PnL using actual fill prices
+            pnl1 = (exit_p1 - pos['entry_price1']) * pos['qty1']
+            pnl2 = (exit_p2 - pos['entry_price2']) * pos['qty2']
             raw_pnl = pnl1 + pnl2
             
             # Deduct realistic costs
             entry_value = abs(pos['qty1'] * pos['entry_price1']) + abs(pos['qty2'] * pos['entry_price2'])
-            fee_cost = entry_value * self.config['trading_fee'] * 2  # entry + exit
-            # Live: slippage already reflected in actual fill prices.
+            exit_value = abs(pos['qty1'] * exit_p1) + abs(pos['qty2'] * exit_p2)
+            fee_cost = (entry_value + exit_value) * self.config['trading_fee']  # entry + exit
             # Paper: simulate slippage as conservative estimate.
+            # Live: entry/exit fill prices already include real slippage.
             slip_cost = (
-                entry_value * self.config['slippage'] * 2
+                (entry_value + exit_value) * self.config['slippage']
                 if self.paper_mode
                 else 0.0
             )
-            bars_held = max(1, elapsed * 4)  # hours → 15m bars
-            funding_cost = entry_value * self.config['funding_rate_8h'] * 2 * (bars_held / 32)  # 32 bars = 8h
+            # Funding cost: fetch actual rates from Binance, fallback to config
+            funding_cost = self._calculate_funding_cost(
+                pos['symbol1'], pos['symbol2'], entry_value, elapsed,
+            )
             total_cost = fee_cost + slip_cost + funding_cost
             total_pnl = raw_pnl - total_cost
             
             # Calculate PnL percentage (net of costs)
             pnl_pct = (total_pnl / entry_value * 100) if entry_value > 0 else 0
-            
-            self.close_slot_positions(slot_id)
             
             # Record trade
             self.trade_history.append({
@@ -993,10 +1089,21 @@ class LivePairTrader:
                 'exit_zscore': z_score,
                 'pnl': total_pnl,
                 'pnl_pct': pnl_pct,
+                'raw_pnl': raw_pnl,
+                'fee_cost': fee_cost,
+                'funding_cost': funding_cost,
+                'slip_cost': slip_cost,
                 'reason': close_reason,
             })
             
-            logger.info(f"Slot {slot_id}: Trade closed: PnL=${total_pnl:.2f} ({pnl_pct:+.2f}%), Reason={close_reason}")
+            logger.info(
+                f"Slot {slot_id}: Trade closed: PnL=${total_pnl:.2f} ({pnl_pct:+.2f}%), "
+                f"Reason={close_reason}, "
+                f"costs=[fee=${fee_cost:.2f}, fund=${funding_cost:.2f}, slip=${slip_cost:.2f}], "
+                f"raw=${raw_pnl:.2f}, "
+                f"entry_p=({pos['entry_price1']:.4f},{pos['entry_price2']:.4f}), "
+                f"exit_p=({exit_p1:.4f},{exit_p2:.4f})"
+            )
             
             # Discord 알림
             elapsed_hours = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
@@ -1149,7 +1256,10 @@ class LivePairTrader:
 
         # 6. For each idle slot, find and enter a new pair
         #    Capital is calculated per-slot using the same function as backtest
-        excluded = set(self.occupied_symbols)
+        self._clean_expired_failures()
+        excluded = set(self.occupied_symbols) | set(self._failed_symbols.keys())
+        if self._failed_symbols:
+            logger.info(f"Blacklisted symbols ({len(self._failed_symbols)}): {set(self._failed_symbols.keys())}")
         for slot in idle:
             # Pool-based capital allocation (identical to backtest)
             # Returns notional (leveraged) amount
@@ -1180,12 +1290,16 @@ class LivePairTrader:
                 # Short delay between orders to not spam the API
                 time.sleep(2)
             else:
-                # 실패한 페어의 심볼을 제외하여 동일 페어 재시도 방지
+                # 실패한 페어의 심볼을 블랙리스트에 추가 (사이클 간 지속)
+                now = datetime.now(timezone.utc)
+                self._failed_symbols[pair.symbol1] = now
+                self._failed_symbols[pair.symbol2] = now
                 excluded.add(pair.symbol1)
                 excluded.add(pair.symbol2)
-                logger.info(
+                logger.warning(
                     f"Slot {slot.slot_id}: Trade execution failed for "
-                    f"{pair.symbol1}/{pair.symbol2}, excluding from further search"
+                    f"{pair.symbol1}/{pair.symbol2}, blacklisted for "
+                    f"{self.BLACKLIST_TTL_SECONDS}s"
                 )
 
         logger.debug("Cycle completed")
@@ -1293,6 +1407,10 @@ class LivePairTrader:
             return self._cmd_stop()
         elif cmd.command == CommandType.PNL:
             return self._cmd_pnl()
+        elif cmd.command == CommandType.BLACKLIST:
+            if cmd.args and cmd.args.get('action') == 'clear':
+                return self._cmd_blacklist_clear()
+            return self._cmd_blacklist()
         else:
             return "❓ 알 수 없는 명령"
 
@@ -1369,6 +1487,26 @@ class LivePairTrader:
         logger.info("STOP requested via Discord")
         return "🛑 **종료 요청 접수** — 현재 사이클 종료 후 전체 청산 및 프로세스 종료"
 
+    def _cmd_blacklist(self) -> str:
+        """블랙리스트 현황 조회."""
+        if not self._failed_symbols:
+            return "✅ 블랙리스트 비어있음"
+
+        now = datetime.now(timezone.utc)
+        lines = [f"🚫 **블랙리스트** ({len(self._failed_symbols)}개 심볼)"]
+        for sym, ts in sorted(self._failed_symbols.items()):
+            elapsed = (now - ts).total_seconds()
+            remaining = max(0, self.BLACKLIST_TTL_SECONDS - elapsed)
+            lines.append(f"  `{sym}` — {remaining:.0f}초 남음")
+        return "\n".join(lines)
+
+    def _cmd_blacklist_clear(self) -> str:
+        """블랙리스트 수동 초기화."""
+        n = len(self._failed_symbols)
+        self._failed_symbols.clear()
+        logger.info("Blacklist cleared via Discord command")
+        return f"✅ 블랙리스트 초기화 ({n}개 심볼 제거)"
+
     def _cmd_pnl(self) -> str:
         """세션 손익 요약."""
         if not self.trade_history:
@@ -1392,6 +1530,19 @@ class LivePairTrader:
             lines.append(f"최대 손실: ${worst:+.2f}")
 
         return "\n".join(lines)
+
+    def _clean_expired_failures(self):
+        """TTL이 지난 실패 심볼을 블랙리스트에서 제거한다."""
+        if not self._failed_symbols:
+            return
+        now = datetime.now(timezone.utc)
+        expired = [
+            sym for sym, ts in self._failed_symbols.items()
+            if (now - ts).total_seconds() > self.BLACKLIST_TTL_SECONDS
+        ]
+        for sym in expired:
+            del self._failed_symbols[sym]
+            logger.info(f"Blacklist expired: {sym}")
 
     def run_once(self):
         """레거시 호환: 하나의 트레이드 사이클 (모든 슬롯)."""
