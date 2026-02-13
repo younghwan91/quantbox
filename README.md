@@ -153,7 +153,12 @@ quantbox/
     ├── numba_ops.py        # Numba JIT 가속 함수
     └── costs.py            # 거래 비용 모델
 
-tests/                      # 유닛 테스트 (474개)
+scripts/                    # 스크립트
+    ├── sweep_profit_max.py     # 멀티 파라미터 그리드 스윅
+    ├── sweep_max_holding.py    # Max holding 스윅
+    └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
+
+tests/                      # 유닛 테스트 (494개)
 \`\`\`
 
 ## 📈 성과 지표
