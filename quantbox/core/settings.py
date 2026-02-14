@@ -76,6 +76,12 @@ class QuantBoxSettings(BaseSettings):
     dynamic_exit_base: float = 0.3
     dynamic_exit_range: float = 0.7
 
+    # ── Adaptive Kalman & Regime Protection ──
+    z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
+    vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부
+    kalman_delta: float = 1e-5         # Kalman 상태 전이 노이즈 스케일
+    kalman_obs_noise: float = 1e-3     # Kalman 관측 노이즈 분산
+
     # ── 비용 모델 ──
     trading_fee: float = 0.0005
     slippage: float = 0.001
@@ -150,6 +156,11 @@ class QuantBoxSettings(BaseSettings):
             'check_interval_seconds': 60,
             'retry_attempts': 3,
             'retry_delay': 2,
+            # Adaptive Kalman & Regime Protection
+            'z_score_cap': self.z_score_cap,
+            'vol_expansion_gate': self.vol_expansion_gate,
+            'kalman_delta': self.kalman_delta,
+            'kalman_obs_noise': self.kalman_obs_noise,
         }
 
 
