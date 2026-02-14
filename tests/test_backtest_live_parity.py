@@ -421,3 +421,283 @@ class TestFilterParity:
         assert 'cointegration' in source.lower() or 'coint' in source.lower(), "Missing cointegration filter"
         assert 'half_life' in source.lower(), "Missing half-life filter"
         assert 'hurst' in source.lower(), "Missing Hurst filter"
+
+
+# ============================================================
+# D. Regime gate parity (z-cap, vol expansion, BTC crash)
+# ============================================================
+
+class TestRegimeGateParity:
+    """백테스트에 라이브와 동일한 레짐 보호 게이트가 존재하는지 검증."""
+
+    def test_backtest_config_has_z_score_cap(self):
+        """ContinuousBacktestConfig에 z_score_cap 필드가 존재한다."""
+        from quantbox.backtest.continuous_backtest import ContinuousBacktestConfig
+        config = ContinuousBacktestConfig()
+        assert hasattr(config, 'z_score_cap')
+        assert config.z_score_cap == 4.0
+
+    def test_backtest_config_has_vol_expansion_gate(self):
+        """ContinuousBacktestConfig에 vol_expansion_gate 필드가 존재한다."""
+        from quantbox.backtest.continuous_backtest import ContinuousBacktestConfig
+        config = ContinuousBacktestConfig()
+        assert hasattr(config, 'vol_expansion_gate')
+        assert config.vol_expansion_gate == 2.0
+        assert hasattr(config, 'vol_expansion_window')
+        assert config.vol_expansion_window == 8
+
+    def test_backtest_config_has_btc_crash_gate(self):
+        """ContinuousBacktestConfig에 BTC crash gate 필드가 존재한다."""
+        from quantbox.backtest.continuous_backtest import ContinuousBacktestConfig
+        config = ContinuousBacktestConfig()
+        assert hasattr(config, 'btc_crash_gate_enabled')
+        assert config.btc_crash_gate_enabled is True
+        assert hasattr(config, 'btc_crash_window')
+        assert config.btc_crash_window == 8
+        assert hasattr(config, 'btc_crash_threshold')
+        assert config.btc_crash_threshold == 0.03
+
+    def test_enter_slot_source_has_all_gates(self):
+        """백테스트 _enter_slot에 모든 5개 게이트가 존재한다."""
+        import inspect
+        from quantbox.backtest.continuous_backtest import ContinuousPairBacktest
+
+        source = inspect.getsource(ContinuousPairBacktest._enter_slot)
+
+        assert 'btc_crash_gate' in source.lower() or 'check_btc_crash_gate' in source.lower(), \
+            "Missing BTC crash gate in _enter_slot"
+        assert 'z_score_cap' in source.lower(), \
+            "Missing z_score_cap gate in _enter_slot"
+        assert 'vol_expansion' in source.lower(), \
+            "Missing vol expansion gate in _enter_slot"
+        assert 'entry_zscore' in source.lower(), \
+            "Missing entry z-score threshold in _enter_slot"
+
+    def test_z_score_cap_blocks_extreme_z(self):
+        """z_score_cap보다 큰 z-score에서 진입이 차단된다."""
+        from quantbox.backtest.continuous_backtest import (
+            ContinuousPairBacktest, ContinuousBacktestConfig,
+            BacktestState, TraderSlotState
+        )
+
+        config = ContinuousBacktestConfig(
+            z_score_cap=4.0,
+            entry_zscore=2.0,
+            formation_bars=50,
+        )
+        bt = ContinuousPairBacktest(config)
+
+        # Create a candidate where the current z-score will be extreme (>4.0)
+        # by setting spread_std very small relative to spread change
+        candidate = {
+            'symbol1': 'AAUSDT', 'symbol2': 'BBUSDT',
+            'hedge_ratio': 1.0, 'intercept': 0.0,
+            'spread_mean': 0.0, 'spread_std': 0.001,  # tiny std → huge z
+            'half_life': 10.0, 'correlation': 0.8,
+            'coint_pvalue': 0.01, 'current_z': 5.0, 'score': 0.01,
+        }
+
+        state = BacktestState(current_capital=10000, peak_capital=10000, max_traders=5)
+        slot = state.slots[0]
+
+        # Build minimal data: two symbols with a wide spread
+        n = 100
+        prices_a = np.full(n, 100.0)
+        prices_b = np.full(n, 50.0)
+        # At bar 80, make a big divergence → z-score will exceed cap
+        prices_a[80] = 110.0  # log(110) - 1.0*log(50) = 4.70 - 3.91 = 0.79, z = 0.79/0.001 = 790
+
+        data = {
+            'AAUSDT': pd.DataFrame({'Close': prices_a}),
+            'BBUSDT': pd.DataFrame({'Close': prices_b}),
+        }
+
+        from datetime import datetime, timezone
+        result = bt._enter_slot(state, slot, candidate, data, 80, datetime.now(timezone.utc))
+        assert result is False, "Z-score cap should block entry when |z| > cap"
+
+    def test_btc_crash_gate_blocks_when_btc_crashes(self):
+        """BTC가 급락하면 백테스트에서도 진입이 차단된다."""
+        from quantbox.backtest.continuous_backtest import (
+            ContinuousPairBacktest, ContinuousBacktestConfig,
+        )
+
+        config = ContinuousBacktestConfig(
+            btc_crash_gate_enabled=True,
+            btc_crash_window=8,
+            btc_crash_threshold=0.03,
+        )
+        bt = ContinuousPairBacktest(config)
+
+        n = 100
+        # BTC crashes 5% over 8 bars
+        btc_prices = np.full(n, 50000.0)
+        btc_prices[92:] = 47500.0  # -5% at bars 92+
+
+        data = {
+            'BTCUSDT': pd.DataFrame({'Close': btc_prices}),
+            'ETHUSDT': pd.DataFrame({'Close': np.full(n, 3000.0)}),
+        }
+
+        blocked, ret = bt._check_btc_crash_gate(data, bar_idx=95)
+        assert blocked is True, f"BTC crash gate should block, return={ret:.4f}"
+        assert abs(ret) > 0.03
+
+    def test_btc_crash_gate_passes_when_calm(self):
+        """BTC가 안정적이면 게이트를 통과한다."""
+        from quantbox.backtest.continuous_backtest import (
+            ContinuousPairBacktest, ContinuousBacktestConfig,
+        )
+
+        config = ContinuousBacktestConfig(
+            btc_crash_gate_enabled=True,
+            btc_crash_window=8,
+            btc_crash_threshold=0.03,
+        )
+        bt = ContinuousPairBacktest(config)
+
+        n = 100
+        btc_prices = np.full(n, 50000.0)  # Stable BTC
+
+        data = {
+            'BTCUSDT': pd.DataFrame({'Close': btc_prices}),
+        }
+
+        blocked, ret = bt._check_btc_crash_gate(data, bar_idx=50)
+        assert blocked is False
+        assert abs(ret) < 0.001
+
+    def test_btc_crash_gate_disabled(self):
+        """btc_crash_gate_enabled=False이면 게이트가 항상 통과한다."""
+        from quantbox.backtest.continuous_backtest import (
+            ContinuousPairBacktest, ContinuousBacktestConfig,
+        )
+
+        config = ContinuousBacktestConfig(btc_crash_gate_enabled=False)
+        bt = ContinuousPairBacktest(config)
+
+        # Even with crashing BTC data
+        n = 100
+        btc_prices = np.full(n, 50000.0)
+        btc_prices[90:] = 40000.0  # -20%
+
+        data = {'BTCUSDT': pd.DataFrame({'Close': btc_prices})}
+
+        blocked, ret = bt._check_btc_crash_gate(data, bar_idx=95)
+        assert blocked is False
+
+    def test_btc_crash_gate_no_btc_data_passes(self):
+        """BTC 데이터가 없으면 fail-open으로 통과한다."""
+        from quantbox.backtest.continuous_backtest import (
+            ContinuousPairBacktest, ContinuousBacktestConfig,
+        )
+
+        config = ContinuousBacktestConfig(btc_crash_gate_enabled=True)
+        bt = ContinuousPairBacktest(config)
+
+        data = {'ETHUSDT': pd.DataFrame({'Close': np.full(100, 3000.0)})}
+
+        blocked, ret = bt._check_btc_crash_gate(data, bar_idx=50)
+        assert blocked is False
+
+    def test_vol_expansion_gate_blocks_volatile_spread(self):
+        """최근 스프레드 변동성이 formation 대비 2배 이상이면 진입 차단."""
+        from quantbox.backtest.continuous_backtest import (
+            ContinuousPairBacktest, ContinuousBacktestConfig,
+            BacktestState,
+        )
+        from datetime import datetime, timezone
+
+        config = ContinuousBacktestConfig(
+            vol_expansion_gate=2.0,
+            vol_expansion_window=8,
+            entry_zscore=2.0,
+            z_score_cap=10.0,  # Widen cap so z-cap doesn't interfere
+            btc_crash_gate_enabled=False,  # Isolate vol gate test
+            formation_bars=50,
+        )
+        bt = ContinuousPairBacktest(config)
+
+        n = 100
+        # Stable formation period, then volatile recent bars
+        prices1 = np.full(n, 100.0)
+        prices2 = np.full(n, 50.0)
+        # Add huge volatility at the recent end
+        prices1[92] = 95.0
+        prices1[93] = 105.0
+        prices1[94] = 90.0
+        prices1[95] = 110.0
+        prices1[96] = 85.0
+        prices1[97] = 115.0
+        prices1[98] = 80.0
+        prices1[99] = 120.0
+
+        data = {
+            'AAUSDT': pd.DataFrame({'Close': prices1}),
+            'BBUSDT': pd.DataFrame({'Close': prices2}),
+        }
+
+        candidate = {
+            'symbol1': 'AAUSDT', 'symbol2': 'BBUSDT',
+            'hedge_ratio': 1.0, 'intercept': 0.0,
+            'spread_mean': np.log(100.0) - np.log(50.0),
+            'spread_std': 0.001,  # Very tight formation std
+            'half_life': 10.0, 'correlation': 0.8,
+            'coint_pvalue': 0.01, 'current_z': 3.0, 'score': 0.01,
+        }
+
+        state = BacktestState(current_capital=10000, peak_capital=10000, max_traders=5)
+        slot = state.slots[0]
+
+        result = bt._enter_slot(state, slot, candidate, data, 99, datetime.now(timezone.utc))
+        assert result is False, "Vol expansion gate should block entry when volatility spikes"
+
+
+# ============================================================
+# E. Formation window parity
+# ============================================================
+
+class TestFormationWindowParity:
+    """Formation window 설정이 백테스트와 실거래에서 일치하는지 검증."""
+
+    def test_settings_has_formation_hours(self):
+        """QuantBoxSettings에 formation_hours 필드가 존재한다."""
+        from quantbox.core.settings import QuantBoxSettings
+        assert hasattr(QuantBoxSettings, 'model_fields')
+        assert 'formation_hours' in QuantBoxSettings.model_fields
+
+    def test_to_trader_config_uses_formation_hours(self):
+        """to_trader_config()가 formation_hours를 반영한다."""
+        import os
+        os.environ['BINANCE_API_KEY'] = 'test_key'
+        os.environ['BINANCE_API_SECRET'] = 'test_secret'
+
+        from quantbox.core.settings import QuantBoxSettings
+        settings = QuantBoxSettings(
+            binance_api_key='test',
+            binance_api_secret='test',
+            formation_hours=60,
+        )
+        config = settings.to_trader_config()
+        assert config['formation_hours'] == 60
+
+    def test_formation_bars_matches_hours(self):
+        """백테스트 formation_bars와 라이브 formation_hours가 정합성을 가진다.
+
+        기본값: formation_hours=60, bar_interval=15m → 60*4 = 240 bars.
+        """
+        from quantbox.backtest.continuous_backtest import ContinuousBacktestConfig
+        from quantbox.core.settings import QuantBoxSettings
+
+        bt_config = ContinuousBacktestConfig()
+        settings = QuantBoxSettings(
+            binance_api_key='test',
+            binance_api_secret='test',
+        )
+
+        expected_bars = settings.formation_hours * (60 // bt_config.bar_interval_minutes)
+        assert bt_config.formation_bars == expected_bars, (
+            f"Backtest formation_bars ({bt_config.formation_bars}) != "
+            f"live formation_hours ({settings.formation_hours}) * "
+            f"bars/hour ({60 // bt_config.bar_interval_minutes}) = {expected_bars}"
+        )
