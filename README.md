@@ -143,7 +143,7 @@ scripts/                    # 스크립트
     ├── sweep_max_holding.py    # Max holding 스윕
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (548개)
+tests/                      # 유닛 테스트 (547개)
 \`\`\`
 
 ## 📈 성과 지표

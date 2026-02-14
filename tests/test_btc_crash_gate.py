@@ -109,8 +109,9 @@ class TestCheckBTCCrashGate:
                 "5000.0",       # Taker Buy Quote
                 "0",            # Ignore
             ])
-        # 가장 오래된 봉: Open = open_price, 가장 최근 봉: Close = close_price
-        klines[0][1] = str(open_price)   # oldest Open
+        # 가장 오래된 봉: Close = open_price (live는 Close-to-Close 기준)
+        # 가장 최근 봉: Close = close_price
+        klines[0][4] = str(open_price)   # oldest Close
         klines[-1][4] = str(close_price)  # newest Close
         return klines
 
