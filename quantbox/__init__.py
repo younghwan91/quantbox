@@ -5,7 +5,7 @@ A quantitative trading framework for cryptocurrency pair trading
 on Binance Futures with continuous backtesting and live trading.
 
 Features:
-- Kalman filter-based spread tracking with adaptive z-score
+- Frozen z-score spread tracking with formation-period statistics
 - Multi-layer defense: Z-Score Cap, Vol Gate, BTC Crash Gate
 - Continuous pair backtesting with realistic cost modeling
 - Systematic multi-timeframe data caching
