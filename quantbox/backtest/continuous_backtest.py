@@ -17,12 +17,11 @@ Key Design Principles:
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple, Any, Callable
+from typing import Dict, List, Optional, Tuple
 from enum import Enum
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import warnings
 
 from quantbox.core.trader_slot import (
     TraderSlotState,
