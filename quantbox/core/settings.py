@@ -77,11 +77,9 @@ class QuantBoxSettings(BaseSettings):
     dynamic_exit_base: float = 0.3
     dynamic_exit_range: float = 0.7
 
-    # ── Adaptive Kalman & Regime Protection ──
+    # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부
-    kalman_delta: float = 1e-5         # Kalman 상태 전이 노이즈 스케일
-    kalman_obs_noise: float = 1e-3     # Kalman 관측 노이즈 분산
 
     # ── BTC Crash Gate (매크로 방어) ──
     btc_crash_gate_enabled: bool = True    # BTC 급락 시 진입 차단 활성화
@@ -162,11 +160,9 @@ class QuantBoxSettings(BaseSettings):
             'check_interval_seconds': 60,
             'retry_attempts': 3,
             'retry_delay': 2,
-            # Adaptive Kalman & Regime Protection
+            # Regime Protection
             'z_score_cap': self.z_score_cap,
             'vol_expansion_gate': self.vol_expansion_gate,
-            'kalman_delta': self.kalman_delta,
-            'kalman_obs_noise': self.kalman_obs_noise,
             # BTC Crash Gate
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,
