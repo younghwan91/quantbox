@@ -253,7 +253,7 @@ class TestRunCycleCachedSearch:
         trader.execute_pair_trade = MagicMock(return_value=True)
 
         # Simulate slot successfully entering position
-        def side_effect_execute(slot_id, pair, pair_info, capital):
+        def side_effect_execute(slot_id, pair, pair_info, capital, **kwargs):
             trader.slots[slot_id].position_open = True
             trader.slots[slot_id].current_pair = (pair.symbol1, pair.symbol2)
             return True
@@ -284,7 +284,7 @@ class TestRunCycleCachedSearch:
 
         call_count = 0
 
-        def side_effect_execute(slot_id, pair, pair_info, capital):
+        def side_effect_execute(slot_id, pair, pair_info, capital, **kwargs):
             nonlocal call_count
             call_count += 1
             trader.slots[slot_id].position_open = True
@@ -317,7 +317,7 @@ class TestRunCycleCachedSearch:
 
         execute_calls = []
 
-        def side_effect_execute(slot_id, pair, pair_info, capital):
+        def side_effect_execute(slot_id, pair, pair_info, capital, **kwargs):
             execute_calls.append({
                 'slot_id': slot_id,
                 'pair': (pair.symbol1, pair.symbol2),
@@ -396,7 +396,7 @@ class TestRunCycleCachedSearch:
 
         trader.find_best_pair = track_find_best_pair
 
-        def side_effect_execute(slot_id, pair, pair_info, capital):
+        def side_effect_execute(slot_id, pair, pair_info, capital, **kwargs):
             trader.slots[slot_id].position_open = True
             trader.slots[slot_id].current_pair = (pair.symbol1, pair.symbol2)
             return True
