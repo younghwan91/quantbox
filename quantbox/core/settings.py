@@ -90,6 +90,10 @@ class QuantBoxSettings(BaseSettings):
     btc_crash_window: int = 8              # 최근 N봉 (15분봉 기준 = 2시간)
     btc_crash_threshold: float = 0.03     # |수익률| > 3% 이면 진입 차단
 
+    # ── 드로다운 & 일일 손실 제한 ──
+    max_drawdown_pct: float = 0.10         # 세션 최고 잔고 대비 10% 드로다운 시 전체 청산+일시정지
+    daily_loss_limit_pct: float = 0.05     # 당일 시작 잔고 대비 5% 손실 시 진입 중단
+
     # ── 비용 모델 ──
     trading_fee: float = 0.0005
     slippage: float = 0.001
@@ -173,6 +177,9 @@ class QuantBoxSettings(BaseSettings):
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,
             'btc_crash_threshold': self.btc_crash_threshold,
+            # Drawdown & Daily Loss
+            'max_drawdown_pct': self.max_drawdown_pct,
+            'daily_loss_limit_pct': self.daily_loss_limit_pct,
         }
 
 
