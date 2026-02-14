@@ -766,8 +766,15 @@ class TestRecordEquity:
 # ============================================================
 
 
+@pytest.mark.slow
 class TestMultiTraderBacktestIntegration:
-    """Integration tests for multi-trader backtest with real data."""
+    """Integration tests for multi-trader backtest with real data.
+
+    These tests run full ContinuousPairBacktest.run() with 5 symbols and
+    take several minutes. Skipped by default; run with:
+        pytest -m slow
+        pytest -m ''       # all tests including slow
+    """
 
     @pytest.fixture
     def multi_symbol_data(self):
