@@ -4,6 +4,7 @@
 /saved_plots/*
 temp
 *.log
+logs/
 *.json
 # Python cache
 __pycache__/
