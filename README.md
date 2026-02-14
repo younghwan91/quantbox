@@ -9,7 +9,7 @@
 ## 🌟 주요 기능
 
 ### 핵심 아키텍처
-- **이벤트 기반 엔진**: 백테스트와 실거래에서 동일한 코드 사용
+- **실거래/백테스트 일체형**: 동일한 Kalman 로직이 백테스트와 실거래에서 동작
 - **모듈형 설계**: 전략, 필터, 실행 컴포넌트 조합 가능
 - **타입 안전성**: 전체 코드베이스에 타입 힌트 적용
 - **안전장치 내장**: Market Fallback 검증, 알림 스로틀링, avg_price=0 거부 등
@@ -43,18 +43,7 @@
 
 ### 백테스팅
 - **롤링 윈도우**: Formation/Trading 기간 시뮬레이션
-- **Walk-Forward 분석**: Out-of-Sample 검증
-- **몬테카를로 시뮬레이션**: 강건성 테스트
 - **종합 지표**: Sharpe, Sortino, Calmar, Profit Factor 등
-
-### 최적화
-- **다양한 알고리즘**:
-  - Grid Search
-  - Random Search
-  - Differential Evolution
-  - Bayesian Optimization
-- **민감도 분석**: 파라미터 강건성 테스트
-- **다목적 최적화**: 복합 최적화 기준
 
 ## 📦 설치
 
@@ -74,8 +63,8 @@ pip install -e .
 ### 기본 백테스트
 
 \`\`\`python
-from quantbox import Config, BacktestRunner
 from quantbox.data import DataDownloader
+from quantbox.backtest import run_continuous_backtest, ContinuousBacktestConfig
 
 # 데이터 다운로드
 downloader = DataDownloader()
@@ -86,18 +75,15 @@ data = downloader.download_multiple(
 )
 
 # 백테스트 설정
-from quantbox.backtest.runner import BacktestConfig
-
-config = BacktestConfig(
+config = ContinuousBacktestConfig(
     initial_capital=10000.0,
     trading_fee=0.0005,
     entry_zscore=2.0,
     exit_zscore=0.5,
 )
 
-# 백테스트 실행
-runner = BacktestRunner(config)
-results = runner.run_backtest(data)
+# 백테스트 실행 (Kalman filter 내장)
+results = run_continuous_backtest(config, data)
 print(results['metrics'].summary())
 \`\`\`
 
@@ -127,13 +113,10 @@ print(f"통과 여부: {result.passed}")
 
 \`\`\`
 quantbox/
-├── core/                    # 핵심 엔진 컴포넌트
+├── core/                    # 핵심 컴포넌트
 │   ├── config.py           # 설정 관리
-│   ├── engine.py           # 트레이딩 엔진
 │   ├── events.py           # 이벤트 시스템
-│   ├── execution.py        # 주문 실행
 │   ├── limit_chaser.py     # 지정가 추격 주문
-│   ├── portfolio.py        # 포지션 관리
 │   ├── settings.py         # 환경변수 검증 (pydantic-settings)
 │   └── trader_slot.py      # 트레이더 슬롯 관리
 ├── data/                    # 데이터 처리
@@ -142,28 +125,26 @@ quantbox/
 │   ├── preprocessor.py     # 데이터 전처리
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 컴포넌트
+│   ├── base.py             # 전략 베이스 클래스
 │   ├── filters.py          # 필터 파이프라인
-│   ├── kalman_spread.py    # Online Kalman Filter (적응형 z-score)
-│   ├── pair_selector.py    # 페어 선택기
-│   └── pair_strategy.py    # 페어 트레이딩 전략
+│   └── pair_selector.py    # 페어 선택기
 ├── backtest/               # 백테스팅 프레임워크
-│   ├── continuous_backtest.py  # 연속 백테스트 엔진
+│   ├── continuous_backtest.py  # 연속 백테스트 엔진 (Kalman 내장)
 │   └── metrics.py          # 성과 지표
 ├── notifications/          # 알림 시스템
 │   ├── bot.py              # Discord Bot (양방향)
 │   └── discord.py          # Discord Webhook (단방향)
-├── ui/                     # 대시보드
-│   └── app.py              # Streamlit 앱
+├── live_trader.py          # 실거래 트레이더 (Multi-slot)
 └── utils/                  # 유틸리티
     ├── numba_ops.py        # Numba JIT 가속 함수
     └── costs.py            # 거래 비용 모델
 
 scripts/                    # 스크립트
-    ├── sweep_profit_max.py     # 멀티 파라미터 그리드 스윅
-    ├── sweep_max_holding.py    # Max holding 스윅
+    ├── download_15m_data.py    # 15m 데이터 다운로드
+    ├── sweep_max_holding.py    # Max holding 스윕
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (554개)
+tests/                      # 유닛 테스트 (445개)
 \`\`\`
 
 ## 📈 성과 지표
