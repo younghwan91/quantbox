@@ -15,7 +15,7 @@ Design:
     - All helper functions are pure (no side effects) for testability
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
