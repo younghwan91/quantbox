@@ -592,6 +592,7 @@ class TestEnterAndCloseSlot:
             "intercept": 0.0,
             "spread_mean": 0.0,
             "spread_std": 0.01,
+            "half_life": 10.0,
         }
 
         # Create minimal data with extreme z-score for guaranteed entry
@@ -1205,6 +1206,7 @@ class TestPositionSizingParity:
                     'hedge_ratio': 1.0,
                     'spread_mean': 0.0,
                     'spread_std': 1.0,
+                    'half_life': 10.0,
                 }
                 capital = 200.0
 
