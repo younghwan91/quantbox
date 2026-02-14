@@ -7,7 +7,7 @@
 
 ## 1. 시스템 개요
 
-QuantBox v1.5.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 트레이딩 시스템이다.
+QuantBox v1.8.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 트레이딩 시스템이다.
 
 | 구성 요소 | 역할 |
 |-----------|------|
@@ -17,6 +17,8 @@ QuantBox v1.5.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 
 | **FilterPipeline** | 통계적 페어 선별 (상관관계 → 공적분 → 반감기 → 허스트) |
 | **Vol-Inverse Sizing** | 변동성 반비례 포지션 사이징. 동일 달러 손절액 보장 |
 | **Dynamic Leverage** | 트레이드당 R=target_r_pct(기본 1%)가 되도록 레버리지 자동 계산 |
+| **State Persistence** | JSON 기반 상태 영속화. 원자적 쓰기. 크래시 복구 지원 |
+| **Drawdown / Daily Loss Breaker** | 세션 HWM 10% / 당일 5% 초과 시 자동 포지션 청산 + 일시정지 |
 | **Discord Bot/Notifier** | 원격 제어(!status, !close all 등) 및 실시간 알림 |
 
 ---
@@ -25,6 +27,8 @@ QuantBox v1.5.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
+│  0. _check_drawdown()         ← 세션 HWM 대비 드로다운 체크       │
+│  0. _check_daily_loss()       ← 당일 잔고 대비 손실 제한 체크      │
 │  1. _process_bot_commands()   ← Discord 큐에서 명령 수신          │
 │  2. monitor_slot(i)           ← 활성 슬롯: Frozen z-score 모니터링 │
 │     → 평균회귀(|z| ≤ exit_z) / 손절(z > stop_z) / 최대보유 초과  │
@@ -160,6 +164,7 @@ return_pct = net_pnl / margin × 100
 | `events.py` | `SignalEvent`, `OrderEvent`, `FillEvent`, `EventQueue` | 이벤트 드리븐 아키텍처 기반 |
 | `trader_slot.py` | `TraderSlotState`, `calculate_slot_capital` | 멀티슬롯 상태 관리 + 자본 배분 |
 | `limit_chaser.py` | `LimitOrderChaser`, `ChaseResult` | 메이커 주문 추격 + 시장가 폴백 |
+| `state_persistence.py` | `save_state`, `load_state`, `clear_state` | JSON 원자적 쓰기/읽기. 슬롯·포지션 직렬화 |
 
 ### 3.2 `quantbox/strategy/`
 
@@ -219,17 +224,29 @@ return_pct = net_pnl / margin × 100
 - [ ] Hurst Filter (< 0.5) — 평균회귀 아닌 페어 필터링
 
 ### 4.3 포지션 관리
-- [ ] `close_all_positions()` — 에러 시 전체 청산
+- [ ] `close_all_positions()` — 에러 시 전체 청산 (5연속 에러 트리거)
+- [ ] `close_slot_positions()` — 청산 실패 시 슬롯 유지 (재시도 보장, v1.8.0)
 - [ ] 블랙리스트 TTL (3600초) — 실패 심볼 재진입 방지
 - [ ] 동적 청산 z-score — 반감기 기반 적응형 청산
 - [ ] 최대 보유 기간 강제 청산
+- [ ] 연속 에러 카운터 — 5회 연속 실패 시에만 전체 청산 (v1.8.0)
 
 ### 4.4 자본 보호
 - [ ] 풀 기반 자본 배분 — `calculate_slot_capital()`
 - [ ] available_capital 초과 배분 방지 (`min(target, available)`)
 - [ ] 잔고 부족 시 알림 + 진입 거부
+- [ ] Max Drawdown Breaker — 세션 HWM 대비 10% 초과 시 전체 청산 + 일시정지 (v1.8.0)
+- [ ] Daily Loss Limit — 당일 잔고 대비 5% 초과 시 신규 진입 차단 (v1.8.0)
 
-### 4.5 실거래-백테스트 패리티
+### 4.5 상태 영속화 & 복구 (v1.8.0)
+- [ ] `save_state()` — 포지션 진입/청산 시 JSON 원자적 저장 (tmpfile → os.replace)
+- [ ] `load_state()` — 시작 시 크래시 전 상태 복원
+- [ ] `clear_state()` — 정상 종료 시 상태 파일 삭제
+- [ ] 거래소 포지션 대조 (reconciliation) — 저장 상태 vs 실제 거래소 포지션 비교
+- [ ] 고아 포지션 감지 — 거래소에만 존재하는 포지션 Discord 경고
+- [ ] 로그 파일 로테이션 — RotatingFileHandler 50MB/5백업
+
+### 4.6 실거래-백테스트 패리티
 - [x] `_get_effective_exit_zscore()` — 양쪽 동일 공식
 - [x] `ExitReason` enum 공유
 - [x] 동일 비용 모델 (수수료 + 슬리피지 + 펀딩비)
@@ -259,6 +276,8 @@ return_pct = net_pnl / margin × 100
 | `TraderSlotState` 수정 | `trader_slot.py`, `live_trader.py`, `continuous_backtest.py`, `test_multi_trader.py` |
 | Vol-Inverse Sizing 수정 | `live_trader.py`, `continuous_backtest.py`, `test_vol_inverse_sizing.py` |
 | Dynamic Leverage 수정 | `trader_slot.py`, `live_trader.py`, `continuous_backtest.py`, `settings.py`, `test_dynamic_leverage.py` |
+| State Persistence 수정 | `state_persistence.py`, `live_trader.py`, `test_state_persistence.py` |
+| Drawdown/Daily Loss 수정 | `live_trader.py`, `settings.py`, `test_safety_features.py` |
 | `TransactionCosts` 수정 | `costs.py`, `continuous_backtest.py`, `test_pnl_accuracy.py` |
 | numba 함수 수정 | `numba_ops.py`, `__pycache__/` 캐시 무효화 필요, `test_numba_ops.py` |
 | Discord 명령어 추가 | `bot.py`, `live_trader.py`의 `_handle_command()`, `test_discord_bot.py` |
@@ -287,6 +306,8 @@ return_pct = net_pnl / margin × 100
 | `vol_inverse_sizing` | True | backtest config | 변동성 반비례 사이징 활성화 |
 | `vol_sizing_max_multiplier` | 3.0 | backtest config | 사이징 최대 배율 제한 |
 | `max_holding_hours` | 20 | settings.py | 최대 보유 시간 (80bars@15m) |
+| `max_drawdown_pct` | 0.10 (10%) | settings.py | 세션 HWM 대비 최대 드로다운 |
+| `daily_loss_limit_pct` | 0.05 (5%) | settings.py | 당일 잔고 대비 최대 손실 |
 | `dynamic_exit_base` | 0.3 | settings.py | 동적 청산 기저값 |
 | `dynamic_exit_range` | 0.7 | settings.py | 동적 청산 범위 |
 | `BLACKLIST_TTL_SECONDS` | 3600 | live_trader.py | 실패 심볼 블랙리스트 TTL |
@@ -294,10 +315,11 @@ return_pct = net_pnl / margin × 100
 | `chase_timeout` | 30초 | limit_chaser.py | 추격 타임아웃 |
 | `formation_hours` | 60 | settings.py | 페어 선별용 과거 데이터 길이 (60h = 240 bars @ 15m) |
 | `formation_bars` | 240 | backtest | 형성 구간 (60시간 @ 15m) |
+| `MAX_CONSECUTIVE_ERRORS` | 5 | live_trader.py | 연속 에러 전체 청산 임계값 |
 
 ---
 
-## 7. 테스트 현황 (21파일, ~572 테스트)
+## 7. 테스트 현황 (23파일, ~616 테스트)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
@@ -321,6 +343,8 @@ return_pct = net_pnl / margin × 100
 | `test_settings` | 설정 검증 | 환경변수, 기본값, 별칭, 타입 에러 |
 | `test_config` | Config | 생성, 검증, 직렬화 |
 | `test_cache` | 캐시 | Memory LRU, Disk, 만료, Timeframed |
+| `test_state_persistence` | 상태 영속화 | 직렬화, 원자적 쓰기, 라운드트립, 역직렬화 |
+| `test_safety_features` | 안전장치 | 드로다운, 일일손실, 청산실패, 연속에러, 로그 로테이션 |
 
 ---
 
