@@ -30,6 +30,8 @@
 1. **README.md**: 새 기능 추가/삭제 시 주요 기능 섹션, 프로젝트 구조, 테스트 수를 업데이트한다.
 2. **MANUAL.md**: 환경변수 추가, 전략 파라미터 변경, 새 모듈 추가 시 해당 섹션을 업데이트한다. 버전 번호와 최종 업데이트 날짜도 갱신한다.
 3. **.env.example**: 새 환경변수 추가 시 **반드시** `.env.example`에도 주석과 함께 추가한다. 동시에 .env 파일에도 수정을 반영한다.
+
+> ⚠️ **`.env` 우선순위 주의**: `pydantic-settings`는 `.env` 값이 `settings.py` 기본값보다 **항상 우선**한다. 파라미터를 변경할 때 `settings.py`만 수정하고 `.env`를 안 바꾸면 **실제 적용값은 변하지 않는다.** 반드시 `settings.py`, `.env`, `.env.example` **3곳을 동시에** 수정해야 한다.
 4. **copilot-instructions.md**: 개발 원칙이나 워크플로우가 변경될 때 이 문서도 갱신한다.
 5. **agents.md**: 아키텍처, 모듈 구조, 안전장치, 파라미터, 트레이딩 흐름 등이 변경될 때 `.github/agents.md`도 **반드시** 동기화한다. `copilot-instructions.md`와 `agents.md`는 항상 쌍으로 최신 상태를 유지해야 한다.
 
