@@ -6,7 +6,7 @@ real-time signal generation in live trading.
 """
 
 import numpy as np
-from numba import jit, prange, float64, int64, boolean
+from numba import jit, prange
 from typing import Tuple
 
 
