@@ -399,8 +399,8 @@ class LivePairTrader:
                 logger.warning("BTC crash gate: 캔들 데이터 부족, gate 통과")
                 return False, 0.0
 
-            # 가장 오래된 봉의 시가 vs 최신 봉의 종가
-            open_price = float(klines[0][1])   # Open of oldest candle
+            # 가장 오래된 봉의 종가 vs 최신 봉의 종가 (backtest와 동일: Close-to-Close)
+            open_price = float(klines[0][4])   # Close of oldest candle
             close_price = float(klines[-1][4])  # Close of newest candle
 
             if open_price <= 0:
@@ -1070,6 +1070,11 @@ class LivePairTrader:
         self.slot_positions[slot_id] = position_data
         self.slot_entry_times[slot_id] = datetime.now(timezone.utc)
 
+        # Paper mode: deduct margin from pool (parity with backtest)
+        if self.paper_mode:
+            self.paper_balance -= margin
+            logger.debug(f"Slot {slot_id}: paper_balance -= ${margin:.2f} → ${self.paper_balance:.2f}")
+
         direction = "LONG Spread" if signal == 1 else "SHORT Spread"
         logger.info(f"Slot {slot_id}: Position opened: signal={signal}, z-score={z_score:.4f}")
         
@@ -1187,8 +1192,10 @@ class LivePairTrader:
             total_cost = fee_cost + slip_cost + funding_cost
             total_pnl = raw_pnl - total_cost
             
-            # Calculate PnL percentage (net of costs)
-            pnl_pct = (total_pnl / entry_value * 100) if entry_value > 0 else 0
+            # Calculate PnL percentage (net of costs, relative to MARGIN)
+            # Matches backtest convention: return % = net_pnl / margin × 100
+            margin = pos.get('capital', entry_value)
+            pnl_pct = (total_pnl / margin * 100) if margin > 0 else 0
             
             # Record trade
             self.trade_history.append({
@@ -1217,6 +1224,15 @@ class LivePairTrader:
                 f"exit_p=({exit_p1:.4f},{exit_p2:.4f})"
             )
             
+            # Paper mode: return margin + PnL to pool (parity with backtest)
+            if self.paper_mode:
+                margin = pos.get('capital', 0)
+                self.paper_balance += margin + total_pnl
+                logger.debug(
+                    f"Slot {slot_id}: paper_balance += ${margin + total_pnl:.2f} "
+                    f"→ ${self.paper_balance:.2f}"
+                )
+
             # Discord 알림
             elapsed_hours = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
             cumulative = sum(t['pnl'] for t in self.trade_history)

@@ -105,7 +105,24 @@ stop_loss_dollar = stop_z × spread_std × notional
 - High-vol 페어: 비례 축소 (vol_ratio < 1.0)
 - 실거래(`live_trader.py`)와 백테스트(`continuous_backtest.py`) 양쪽에 동일 로직 적용
 
-### 2.6 비용 모델
+### 2.6 PnL 공식 (백테스트/실거래 통일)
+
+```
+# 실거래 (leg-split 방식):
+s1_capital = notional / (1 + HR)
+s2_capital = HR × s1_capital
+pnl = qty1 × Δprice1 + qty2 × Δprice2
+
+# 백테스트 (spread-based 방식 — 수학적으로 동일):
+gross_pnl = signal × spread_change × notional / (1 + HR)
+```
+
+수익률 % 분모는 **margin** (= notional / leverage)으로 통일:
+```
+return_pct = net_pnl / margin × 100
+```
+
+### 2.7 비용 모델
 
 | 비용 항목 | 공식 (레그당) | 비고 |
 |-----------|---------------|------|
@@ -248,7 +265,7 @@ stop_loss_dollar = stop_z × spread_std × notional
 | `funding_rate_8h` | 0.0001 (0.01%) | settings.py | 8시간 펀딩비 |
 | `vol_inverse_sizing` | True | backtest config | 변동성 반비례 사이징 활성화 |
 | `vol_sizing_max_multiplier` | 3.0 | backtest config | 사이징 최대 배율 제한 |
-| `max_holding_hours` | 16 | settings.py | 최대 보유 시간 |
+| `max_holding_hours` | 20 | settings.py | 최대 보유 시간 (80bars@15m) |
 | `dynamic_exit_base` | 0.3 | settings.py | 동적 청산 기저값 |
 | `dynamic_exit_range` | 0.7 | settings.py | 동적 청산 범위 |
 | `BLACKLIST_TTL_SECONDS` | 3600 | live_trader.py | 실패 심볼 블랙리스트 TTL |
