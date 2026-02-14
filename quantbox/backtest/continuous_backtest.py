@@ -31,6 +31,8 @@ from quantbox.core.trader_slot import (
     calculate_slot_capital,
     calculate_margin_from_notional,
     is_pair_available,
+    calculate_dynamic_leverage,
+    estimate_cost_rate,
 )
 
 logger = logging.getLogger('ContinuousBacktest')
@@ -171,7 +173,9 @@ class ContinuousBacktestConfig:
 
     # Risk management
     position_size_pct: float = -1.0  # Fraction of capital per trade (auto: 1/max_traders)
-    leverage: int = 1  # Leverage multiplier (1=no leverage, 2=2x, etc.)
+    leverage: int = 1  # Fallback leverage (used when target_r_pct=0, i.e. dynamic disabled)
+    target_r_pct: float = 0.01  # Target risk per trade as fraction of balance (0.01=1%, 0=disable dynamic)
+    max_leverage: float = 10.0  # Safety cap for dynamic leverage
     vol_inverse_sizing: bool = True   # Position size ∝ 1/spread_std (risk parity)
     vol_sizing_max_multiplier: float = 3.0  # Cap: notional ≤ base × multiplier
     
@@ -384,7 +388,10 @@ class ContinuousPairBacktest:
         logger.info(f"  Initial capital: ${self.config.initial_capital:,.2f}")
         logger.info(f"  Max concurrent traders: {self.config.max_traders}")
         logger.info(f"  Position size per trader: {self.config.position_size_pct*100:.1f}%")
-        logger.info(f"  Leverage: {self.config.leverage}x")
+        if self.config.target_r_pct > 0:
+            logger.info(f"  Dynamic leverage: target R={self.config.target_r_pct*100:.1f}%, max={self.config.max_leverage:.0f}x")
+        else:
+            logger.info(f"  Leverage: {self.config.leverage}x (fixed)")
         logger.info(f"  Round-trip cost: {self.config.total_round_trip_cost*100:.2f}%")
         logger.info(f"  Funding rate: {self.config.funding_rate_8h*100:.4f}% per 8h")
         
@@ -668,6 +675,30 @@ class ContinuousPairBacktest:
             # Z-score not extreme enough (market moved since formation end)
             return False
 
+        # ── Dynamic leverage: target R = target_r_pct × balance ──
+        if self.config.target_r_pct > 0:
+            # Determine effective std for stop-loss risk calculation
+            risk_std = anchor_std if (self.config.vol_inverse_sizing and anchor_std > 0) else candidate['spread_std']
+            cost_rate = estimate_cost_rate(
+                trading_fee=self.config.trading_fee,
+                slippage=self.config.slippage,
+                funding_rate_8h=self.config.funding_rate_8h,
+                expected_holding_bars=self.config.max_holding_bars // 2,
+                bar_interval_minutes=self.config.bar_interval_minutes,
+            )
+            effective_leverage = calculate_dynamic_leverage(
+                target_r_pct=self.config.target_r_pct,
+                position_size_pct=self.config.position_size_pct,
+                stop_loss_zscore=self.config.stop_loss_zscore,
+                risk_std=risk_std,
+                hedge_ratio=candidate['hedge_ratio'],
+                cost_rate=cost_rate,
+                max_leverage=self.config.max_leverage,
+            )
+        else:
+            # Dynamic leverage disabled — use fixed config value
+            effective_leverage = float(self.config.leverage)
+
         # Calculate position size using pool-based capital allocation
         # With leverage, notional > margin. We deduct margin from cash pool.
         notional = calculate_slot_capital(
@@ -675,7 +706,7 @@ class ContinuousPairBacktest:
             active_slots=state.active_slots,
             max_traders=self.config.max_traders,
             position_size_pct=self.config.position_size_pct,
-            leverage=self.config.leverage,
+            leverage=effective_leverage,
         )
 
         if notional <= 0:
@@ -694,7 +725,7 @@ class ContinuousPairBacktest:
             notional = notional * vol_ratio
 
         # Margin is the actual cash consumed from the pool
-        margin = calculate_margin_from_notional(notional, self.config.leverage)
+        margin = calculate_margin_from_notional(notional, effective_leverage)
 
         # Deduct margin (not notional) from pool
         state.current_capital -= margin
@@ -712,7 +743,7 @@ class ContinuousPairBacktest:
             'signal': signal,
             'capital': margin,  # Actual cash locked (margin)
             'notional': notional,  # Effective exposure (margin × leverage)
-            'leverage': self.config.leverage,
+            'leverage': effective_leverage,
             # Frozen formation statistics (NO UPDATES during trade)
             'hedge_ratio': candidate['hedge_ratio'],
             'intercept': candidate['intercept'],
@@ -724,7 +755,7 @@ class ContinuousPairBacktest:
         logger.debug(
             f"Slot {slot.slot_id}: Entered {symbol1}/{symbol2} at bar {bar_idx}: "
             f"z={entry_z:.2f}, signal={'LONG' if signal==1 else 'SHORT'}, "
-            f"margin=${margin:.2f}, notional=${notional:.2f} ({self.config.leverage}x)"
+            f"margin=${margin:.2f}, notional=${notional:.2f} ({effective_leverage:.1f}x)"
         )
         return True
     

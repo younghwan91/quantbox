@@ -92,12 +92,106 @@ def get_active_slots(slots: list[TraderSlotState]) -> list[TraderSlotState]:
     return [s for s in slots if s.position_open]
 
 
+def calculate_dynamic_leverage(
+    target_r_pct: float,
+    position_size_pct: float,
+    stop_loss_zscore: float,
+    risk_std: float,
+    hedge_ratio: float,
+    cost_rate: float,
+    max_leverage: float = 10.0,
+) -> float:
+    """Calculate dynamic leverage to target a specific risk-per-trade.
+
+    Determines the leverage multiplier such that maximum loss on a single
+    trade equals ``target_r_pct`` of total balance.
+
+    Formula derivation:
+        R = notional × [stop_z × risk_std / (1 + HR) + cost_rate]
+        notional = balance × pct × leverage
+        Target: R = target_r_pct × balance
+        → leverage = target_r_pct / (pct × [stop_z × risk_std / (1+HR) + cost_rate])
+
+    ``risk_std`` should be:
+        - ``anchor_std`` when vol-inverse sizing is ON (stop-loss is
+          normalised to anchor_std for all pairs).
+        - ``spread_std`` when vol-inverse sizing is OFF (each pair uses
+          its own spread volatility).
+
+    Args:
+        target_r_pct: Target risk per trade as fraction of balance
+            (e.g. 0.01 for 1%).
+        position_size_pct: Fraction of book value allocated per slot.
+        stop_loss_zscore: Stop-loss z-score threshold (e.g. 3.5).
+        risk_std: Effective spread standard deviation for stop-loss.
+        hedge_ratio: Hedge ratio of the pair.
+        cost_rate: Total round-trip cost as fraction of notional.
+            Typically ``2*(trading_fee + slippage) + 2*funding_rate_8h *
+            expected_bars / bars_per_funding``.
+        max_leverage: Safety cap on leverage (exchange / risk limit).
+
+    Returns:
+        Leverage multiplier, clamped to [1.0, max_leverage].
+
+    Raises:
+        ValueError: If target_r_pct <= 0, position_size_pct <= 0, or
+            max_leverage < 1.
+    """
+    if target_r_pct <= 0:
+        raise ValueError(f"target_r_pct must be > 0: {target_r_pct}")
+    if position_size_pct <= 0:
+        raise ValueError(f"position_size_pct must be > 0: {position_size_pct}")
+    if max_leverage < 1:
+        raise ValueError(f"max_leverage must be >= 1: {max_leverage}")
+
+    risk_per_unit = (
+        stop_loss_zscore * risk_std / (1 + hedge_ratio) + cost_rate
+    )
+
+    if risk_per_unit <= 0:
+        # Degenerate case — cap at max
+        return max_leverage
+
+    leverage = target_r_pct / (position_size_pct * risk_per_unit)
+    return max(1.0, min(leverage, max_leverage))
+
+
+def estimate_cost_rate(
+    trading_fee: float,
+    slippage: float,
+    funding_rate_8h: float,
+    expected_holding_bars: int,
+    bar_interval_minutes: int = 15,
+) -> float:
+    """Estimate total round-trip cost rate as a fraction of notional.
+
+    Costs include:
+        - Trading fees (entry + exit, both legs summed into notional)
+        - Slippage (entry + exit)
+        - Funding fee (both legs, prorated by holding duration)
+
+    Args:
+        trading_fee: Per-side fee rate (e.g. 0.0005).
+        slippage: Per-side slippage rate (e.g. 0.001).
+        funding_rate_8h: Funding rate per 8-hour period (e.g. 0.0001).
+        expected_holding_bars: Expected number of bars the position is held.
+        bar_interval_minutes: Duration of each bar in minutes (default 15).
+
+    Returns:
+        Cost rate as fraction of notional (e.g. 0.005).
+    """
+    bars_per_funding = (8 * 60) // bar_interval_minutes  # 32 for 15m bars
+    round_trip_cost = 2 * (trading_fee + slippage)
+    funding_cost = 2 * funding_rate_8h * expected_holding_bars / bars_per_funding
+    return round_trip_cost + funding_cost
+
+
 def calculate_slot_capital(
     available_capital: float,
     active_slots: list[TraderSlotState],
     max_traders: int,
     position_size_pct: float,
-    leverage: int = 1,
+    leverage: float = 1.0,
 ) -> float:
     """Calculate capital allocation for a new slot entry.
 
@@ -114,7 +208,7 @@ def calculate_slot_capital(
         active_slots: Currently active (positioned) slots.
         max_traders: Maximum number of concurrent traders.
         position_size_pct: Fraction of total book value per trade.
-        leverage: Leverage multiplier (1 = no leverage, 2 = 2x, etc.).
+        leverage: Leverage multiplier (1.0 = no leverage, 2.0 = 2x, etc.).
 
     Returns:
         Effective notional capital for the trade. Always >= 0.
@@ -164,7 +258,7 @@ def is_pair_available(
     return pair[0] not in occupied_symbols and pair[1] not in occupied_symbols
 
 
-def calculate_margin_from_notional(notional: float, leverage: int) -> float:
+def calculate_margin_from_notional(notional: float, leverage: float) -> float:
     """Calculate actual margin (cash locked) from notional exposure.
 
     This is the inverse of the leverage multiplication in calculate_slot_capital.

@@ -16,6 +16,7 @@ QuantBox v1.5.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 
 | **LimitOrderChaser** | 메이커 지정가 추격 주문. 타임아웃 시 시장가 폴백 |
 | **FilterPipeline** | 통계적 페어 선별 (상관관계 → 공적분 → 반감기 → 허스트) |
 | **Vol-Inverse Sizing** | 변동성 반비례 포지션 사이징. 동일 달러 손절액 보장 |
+| **Dynamic Leverage** | 트레이드당 R=target_r_pct(기본 1%)가 되도록 레버리지 자동 계산 |
 | **Discord Bot/Notifier** | 원격 제어(!status, !close all 등) 및 실시간 알림 |
 
 ---
@@ -105,7 +106,23 @@ stop_loss_dollar = stop_z × spread_std × notional
 - High-vol 페어: 비례 축소 (vol_ratio < 1.0)
 - 실거래(`live_trader.py`)와 백테스트(`continuous_backtest.py`) 양쪽에 동일 로직 적용
 
-### 2.6 PnL 공식 (백테스트/실거래 통일)
+### 2.6 Dynamic Leverage (동적 레버리지)
+
+매 트레이드마다 레버리지를 자동 계산하여 **최대 손실(R)이 잔고의 target_r_pct**가 되도록 한다.
+
+```
+risk_per_unit = stop_z × risk_std / (1 + HR) + cost_rate
+leverage = target_r_pct / (position_size_pct × risk_per_unit)
+leverage = clamp(leverage, 1.0, max_leverage)
+```
+
+- `risk_std`: vol-inverse sizing ON → `anchor_std`, OFF → `spread_std`
+- `cost_rate = 2×(fee+slippage) + 2×funding×bars/bars_per_funding`
+- `target_r_pct=0`이면 동적 레버리지 비활성 → 고정 `leverage` 사용
+
+검증: dynamically computed leverage로 R을 역산하면 항상 `target_r_pct × balance`와 일치.
+
+### 2.7 PnL 공식 (백테스트/실거래 통일)
 
 ```
 # 실거래 (leg-split 방식):
@@ -223,6 +240,7 @@ return_pct = net_pnl / margin × 100
 - [x] Vol Expansion Gate — 백테스트 `_enter_slot()`에 구현 (v1.4.0)
 - [x] Formation window 동기화 — `FORMATION_HOURS=60` (v1.4.0)
 - [x] Vol-Inverse Sizing — 양쪽 동일 anchor_std 기반 비율 적용 (v1.5.0)
+- [x] Dynamic Leverage — target_r_pct 기반 동적 레버리지 (v1.7.0)
 - [x] `test_backtest_live_parity.py`로 검증
 
 ---
@@ -240,6 +258,7 @@ return_pct = net_pnl / margin × 100
 | `LimitOrderChaser` 수정 | `limit_chaser.py`, `live_trader.py`, `test_limit_chaser.py` |
 | `TraderSlotState` 수정 | `trader_slot.py`, `live_trader.py`, `continuous_backtest.py`, `test_multi_trader.py` |
 | Vol-Inverse Sizing 수정 | `live_trader.py`, `continuous_backtest.py`, `test_vol_inverse_sizing.py` |
+| Dynamic Leverage 수정 | `trader_slot.py`, `live_trader.py`, `continuous_backtest.py`, `settings.py`, `test_dynamic_leverage.py` |
 | `TransactionCosts` 수정 | `costs.py`, `continuous_backtest.py`, `test_pnl_accuracy.py` |
 | numba 함수 수정 | `numba_ops.py`, `__pycache__/` 캐시 무효화 필요, `test_numba_ops.py` |
 | Discord 명령어 추가 | `bot.py`, `live_trader.py`의 `_handle_command()`, `test_discord_bot.py` |
@@ -259,7 +278,9 @@ return_pct = net_pnl / margin × 100
 | `btc_crash_threshold` | 0.03 (3%) | settings.py | BTC 급락 게이트 |
 | `btc_crash_window` | 8 | settings.py | BTC 게이트 관찰 캔들 수 |
 | `max_traders` | 5 | settings.py | 동시 거래 슬롯 수 |
-| `leverage` | 2 | settings.py | 레버리지 배수 |
+| `leverage` | 2 | settings.py | Fallback 레버리지 (동적 미사용 시) |
+| `target_r_pct` | 0.01 (1%) | settings.py | 트레이드당 목표 리스크 (밸런스 비율) |
+| `max_leverage` | 10 | settings.py | 동적 레버리지 안전 상한 |
 | `trading_fee` | 0.0005 (0.05%) | settings.py | 거래 수수료 |
 | `slippage` | 0.001 (0.1%) | settings.py | 슬리피지 추정치 |
 | `funding_rate_8h` | 0.0001 (0.01%) | settings.py | 8시간 펀딩비 |
@@ -276,13 +297,14 @@ return_pct = net_pnl / margin × 100
 
 ---
 
-## 7. 테스트 현황 (20파일, ~534 테스트)
+## 7. 테스트 현황 (21파일, ~572 테스트)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
 | `test_backtest_live_parity` | 실거래-백테스트 로직 일치 | Hurst 필터, 청산 로직 동기화 |
 | `test_pnl_accuracy` | PnL 계산 정확성 | 체결가, 비용 차감, 수익 계산 |
 | `test_aggressive_sizing` | 자본 배분 | 레버리지, Kelly, slot_capital |
+| `test_dynamic_leverage` | 동적 레버리지 | 공식 검증, 클램핑, R=target, 비용율 |
 | `test_btc_crash_gate` | BTC 게이트 | 차단/통과, 임계값, 에지 케이스 |
 | `test_dynamic_exit` | 동적 청산 | 반감기 기반 exit_zscore 계산 |
 | `test_multi_trader` | 멀티슬롯 | 상태 관리, 자본 배분, 심볼 비중복 |
