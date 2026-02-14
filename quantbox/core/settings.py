@@ -82,6 +82,11 @@ class QuantBoxSettings(BaseSettings):
     kalman_delta: float = 1e-5         # Kalman 상태 전이 노이즈 스케일
     kalman_obs_noise: float = 1e-3     # Kalman 관측 노이즈 분산
 
+    # ── BTC Crash Gate (매크로 방어) ──
+    btc_crash_gate_enabled: bool = True    # BTC 급락 시 진입 차단 활성화
+    btc_crash_window: int = 8              # 최근 N봉 (15분봉 기준 = 2시간)
+    btc_crash_threshold: float = 0.03     # |수익률| > 3% 이면 진입 차단
+
     # ── 비용 모델 ──
     trading_fee: float = 0.0005
     slippage: float = 0.001
@@ -161,6 +166,10 @@ class QuantBoxSettings(BaseSettings):
             'vol_expansion_gate': self.vol_expansion_gate,
             'kalman_delta': self.kalman_delta,
             'kalman_obs_noise': self.kalman_obs_noise,
+            # BTC Crash Gate
+            'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
+            'btc_crash_window': self.btc_crash_window,
+            'btc_crash_threshold': self.btc_crash_threshold,
         }
 
 
