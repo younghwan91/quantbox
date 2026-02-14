@@ -2,8 +2,8 @@
 
 **암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
 
-> 버전: 1.2.0  
-> 최종 업데이트: 2026년 2월 11일
+> 버전: 1.3.0  
+> 최종 업데이트: 2026년 2월 14일
 
 ---
 
@@ -186,6 +186,11 @@ Z_SCORE_CAP=4.0                # |z| > cap 이면 진입 거부 (레짐 변화 �
 VOL_EXPANSION_GATE=2.0         # recent_std / formation_std > gate 이면 진입 거부
 KALMAN_DELTA=1e-5              # Kalman 상태 전이 노이즈 스케일
 KALMAN_OBS_NOISE=1e-3          # Kalman 관측 노이즈 분산
+
+# BTC Crash Gate (매크로 방어)
+BTC_CRASH_GATE_ENABLED=true    # BTC 급락/급등 시 진입 차단 활성화
+BTC_CRASH_WINDOW=8             # 최근 N봉 체크 (15분봉 기준 = 2시간)
+BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 진입 차단
 
 # 비용 모델
 TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
@@ -829,7 +834,34 @@ DYNAMIC_EXIT_RANGE=0.7
 
 > **주의**: 기본적으로 비활성화 상태입니다 (`USE_DYNAMIC_EXIT=false`). 활성화 시 `EXIT_ZSCORE` 값은 무시됩니다.
 
-### 7.5 커스텀 전략 구현 예시
+### 7.5 진입 방어 레이어 (Entry Gates)
+
+`execute_pair_trade()` 진입 시 4개 레이어가 순서대로 실행됩니다. 하나라도 차단되면 진입하지 않습니다.
+
+| # | Gate | 대상 | 설정 | 기본값 |
+|---|------|------|------|--------|
+| 1 | **BTC Crash Gate** | 시장 전체 | `BTC_CRASH_THRESHOLD` | ±3% |
+| 2 | **Z-Score Cap** | 개별 페어 | `Z_SCORE_CAP` | \|z\| > 4.0 |
+| 3 | **Vol Expansion Gate** | 개별 페어 | `VOL_EXPANSION_GATE` | ratio > 2.0x |
+| 4 | **Adaptive KF z-score** | 개별 페어 (모니터링) | `KALMAN_DELTA` | 자동 |
+
+**BTC Crash Gate 상세:**
+
+BTC가 최근 N봉(기본 8봉 = 2시간) 동안 ±3% 이상 움직이면 **모든 페어의 신규 진입을 차단**합니다.
+
+- **목적**: 시장 전체 상관관계 급등 시 페어 스프레드의 평균회귀 전제 자체가 깨지는 것을 방어
+- **실전 사례**: 2026-02-13 BTC $70K→$65K (-7.1%), AI 공포 + 테크 셀오프 → 7연속 SL 방지
+- **Fail-open**: API 에러 시 차단하지 않음 (보수적 안전장치)
+- **기존 포지션**: 영향 없음 (모니터링/청산은 정상 동작)
+- **Discord 상태**: `!status` 명령에 BTC 🟢/🔴 표시
+
+```bash
+BTC_CRASH_GATE_ENABLED=true    # 활성화/비활성화
+BTC_CRASH_WINDOW=8             # 최근 N봉 (15분봉 기준)
+BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 차단
+```
+
+### 7.6 커스텀 전략 구현 예시
 
 ```python
 from quantbox.strategy.base import StatefulStrategy
