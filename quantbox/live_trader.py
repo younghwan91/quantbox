@@ -31,7 +31,6 @@ QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
     --once: 한 번만 실행하고 종료
 """
 
-import os
 import sys
 import time
 import logging
@@ -43,10 +42,8 @@ import numpy as np
 from dotenv import load_dotenv
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-import requests
 
 # QuantBox imports
-from quantbox.core.config import Config, TradingMode
 from quantbox.core.settings import get_settings
 from quantbox.core.trader_slot import (
     TraderSlotState,
