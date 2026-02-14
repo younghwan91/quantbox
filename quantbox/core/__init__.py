@@ -14,6 +14,8 @@ from quantbox.core.trader_slot import (
     calculate_margin_from_notional,
     calculate_kelly_from_trades,
     calculate_kelly_discrete,
+    calculate_dynamic_leverage,
+    estimate_cost_rate,
 )
 
 __all__ = [
@@ -32,4 +34,6 @@ __all__ = [
     "calculate_margin_from_notional",
     "calculate_kelly_from_trades",
     "calculate_kelly_discrete",
+    "calculate_dynamic_leverage",
+    "estimate_cost_rate",
 ]

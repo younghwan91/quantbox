@@ -32,7 +32,9 @@ class QuantBoxSettings(BaseSettings):
         binance_api_secret: 바이낸스 API 시크릿 (필수).
         binance_secret: BINANCE_SECRET 호환 별칭 (deprecated).
         binance_testnet: 테스트넷 사용 여부.
-        leverage: 레버리지 배수.
+        leverage: 레버리지 배수 (동적 레버리지 미사용 시 fallback).
+        max_leverage: 동적 레버리지 안전 상한.
+        target_r_pct: 트레이드당 목표 리스크 (밸런스의 비율, 0.01=1%).
         max_traders: 최대 동시 트레이더 수.
         position_size_pct: 슬롯당 자본 비율 (-1=자동).
         entry_zscore: 진입 z-score 임계값.
@@ -59,7 +61,9 @@ class QuantBoxSettings(BaseSettings):
     binance_testnet: bool = False
 
     # ── 레버리지 및 포지션 사이징 ──
-    leverage: int = 2
+    leverage: int = 2  # max_leverage의 fallback (동적 레버리지 미사용 시)
+    max_leverage: int = 10  # 동적 레버리지 안전 상한
+    target_r_pct: float = 0.01  # 트레이드당 목표 리스크 (밸런스의 1%)
     max_traders: int = 5
     position_size_pct: float = -1.0  # -1 = auto (1/max_traders)
 
@@ -148,6 +152,8 @@ class QuantBoxSettings(BaseSettings):
             'slippage': self.slippage,
             'funding_rate_8h': self.funding_rate_8h,
             'leverage': self.leverage,
+            'max_leverage': self.max_leverage,
+            'target_r_pct': self.target_r_pct,
             # Multi-trader
             'max_traders': self.max_traders,
             # Filters
