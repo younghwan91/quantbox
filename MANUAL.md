@@ -2,7 +2,7 @@
 
 **암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
 
-> 버전: 1.4.0  
+> 버전: 1.6.0  
 > 최종 업데이트: 2026년 2월 14일
 
 ---
@@ -175,7 +175,7 @@ POSITION_SIZE_PCT=-1           # 슬롯당 자본 비율 (-1=자동: 1/MAX_TRADE
 ENTRY_ZSCORE=2.0               # 진입 z-score 임계값
 EXIT_ZSCORE=0.5                # 청산 z-score 임계값 (dynamic_exit 비활성 시)
 STOP_LOSS_ZSCORE=3.5           # 손절 z-score
-MAX_HOLDING_HOURS=16           # 최대 보유 시간 (초과 시 강제 청산)
+MAX_HOLDING_HOURS=20           # 최대 보유 시간 (초과 시 강제 청산, 백테스트 80bars@15m과 동일)
 FORMATION_HOURS=60             # 페어 선별에 사용할 과거 데이터 길이 (60h = 240 bars @ 15m)
 
 # Dynamic Exit: half-life 기반 청산 z-score 자동 조절
@@ -315,7 +315,7 @@ config = Config(
 config.strategy.entry_zscore = 2.0
 config.strategy.exit_zscore = 0.5
 config.strategy.stop_loss_zscore = 3.5
-config.strategy.max_holding_periods = 100
+config.strategy.max_holding_periods = 80
 config.strategy.formation_periods = 240
 config.strategy.trading_periods = 24
 
@@ -733,7 +733,7 @@ strategy = PairTradingStrategy(
         'entry_zscore': 2.0,        # 진입 Z-Score
         'exit_zscore': 0.5,         # 청산 Z-Score
         'stop_loss_zscore': 3.5,    # 손절 Z-Score
-        'max_holding_periods': 100,  # 최대 보유 기간
+        'max_holding_periods': 80,  # 최대 보유 기간 (20h @ 15m)
         'lookback_periods': 240,     # 통계 계산 기간
         'recalculate_hedge': True,   # 동적 헤지 비율
         'use_dynamic_zscore': False, # 동적 Z-Score 사용
@@ -941,7 +941,7 @@ config = BacktestConfig(
     entry_zscore=2.0,
     exit_zscore=0.5,
     stop_loss_zscore=3.5,
-    max_holding_periods=100,
+    max_holding_periods=80,
     
     # 페어 선택
     max_pairs_per_window=10,
@@ -1815,7 +1815,7 @@ class StrategyConfig:
     entry_zscore: float = 2.0              # 진입 Z-Score
     exit_zscore: float = 0.0               # 청산 Z-Score
     stop_loss_zscore: float = 3.5          # 손절 Z-Score
-    max_holding_periods: int = 100         # 최대 보유 기간
+    max_holding_periods: int = 80          # 최대 보유 기간 (20h @ 15m)
     formation_periods: int = 240           # 형성 기간
     trading_periods: int = 24              # 거래 기간
 

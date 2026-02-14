@@ -97,7 +97,7 @@ class StrategyConfig:
     entry_zscore: float = 2.0
     exit_zscore: float = 0.0
     stop_loss_zscore: float = 3.5
-    max_holding_periods: int = 100
+    max_holding_periods: int = 80  # 20h @ 15m (parity with settings.max_holding_hours)
     
     # Formation/Trading window
     formation_periods: int = 240  # in bars

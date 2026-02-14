@@ -69,7 +69,7 @@ class QuantBoxSettings(BaseSettings):
     stop_loss_zscore: float = 3.5
 
     # ── 홀딩 제한 ──
-    max_holding_hours: int = 16
+    max_holding_hours: int = 20
     # ── Formation window ──
     formation_hours: int = 60  # Formation period in hours (default: 60h = 240 bars @ 15m)
     # ── Dynamic exit ──
