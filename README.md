@@ -30,6 +30,7 @@
 - **페어 선택**: 통계적 페어 식별 및 순위화
 - **Dynamic Exit**: Half-life 기반 청산 z-score 자동 조절 (빠른 페어 → tight exit, 느린 페어 → loose exit)
 - **Vol-Inverse Sizing**: 변동성 반비례 포지션 사이징 (Risk Parity — 모든 페어의 손절 $loss 동일)
+- **Dynamic Leverage**: 트레이드당 R=target_r_pct(기본 1%)가 되도록 레버리지 자동 계산 (spread_std, HR, 비용 반영)
 - **Z-Score Cap**: |z| > 4.0 진입 거부 (레짐 변화 방어)
 - **Vol Expansion Gate**: 최근 변동성/포메이션 변동성 > 2.0 진입 거부
 - **BTC Crash Gate**: BTC 급락/급등(±3%) 감지 시 전체 진입 차단 (매크로 방어)
@@ -117,7 +118,7 @@ quantbox/
 │   ├── events.py           # 이벤트 시스템
 │   ├── limit_chaser.py     # 지정가 추격 주문
 │   ├── settings.py         # 환경변수 검증 (pydantic-settings)
-│   └── trader_slot.py      # 트레이더 슬롯 관리
+│   └── trader_slot.py      # 트레이더 슬롯 관리 (Dynamic Leverage)
 ├── data/                    # 데이터 처리
 │   ├── cache.py            # 2단계 캐싱 (LRU + gzip)
 │   ├── downloader.py       # 바이낸스 데이터 다운로드
@@ -143,7 +144,7 @@ scripts/                    # 스크립트
     ├── sweep_max_holding.py    # Max holding 스윕
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (547개)
+tests/                      # 유닛 테스트 (572개)
 \`\`\`
 
 ## 📈 성과 지표
