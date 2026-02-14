@@ -33,6 +33,7 @@
 - **적응형 Kalman z-score**: Online KF 기반 적응형 z-score — 레짐 변화 시 자동 조정
 - **Z-Score Cap**: |z| > 4.0 진입 거부 (레짐 변화 방어)
 - **Vol Expansion Gate**: 최근 변동성/포메이션 변동성 > 2.0 진입 거부
+- **BTC Crash Gate**: BTC 급락/급등(±3%) 감지 시 전체 진입 차단 (매크로 방어)
 
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
@@ -162,7 +163,7 @@ scripts/                    # 스크립트
     ├── sweep_max_holding.py    # Max holding 스윅
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (562개)
+tests/                      # 유닛 테스트 (554개)
 \`\`\`
 
 ## 📈 성과 지표
