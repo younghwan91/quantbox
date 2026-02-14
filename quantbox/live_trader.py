@@ -219,6 +219,10 @@ class LivePairTrader:
         self._daily_start_time: datetime = datetime.now(timezone.utc)
         self._drawdown_triggered: bool = False  # DD 브레이커 발동 시 True
 
+        # Cycle counter for periodic logging
+        self._cycle_count: int = 0
+        self._last_no_pair_reason: str = ""  # Suppress duplicate "no pair" logs
+
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
         logger.info(f"Max concurrent traders: {self.max_traders}")
@@ -226,6 +230,31 @@ class LivePairTrader:
         logger.info(f"Testnet: {self._settings.binance_testnet}")
         if paper_mode:
             logger.info(f"Paper Balance: ${self.paper_balance:.2f} USDT")
+
+        # ── Session Config Dump (파라미터 최적화 비교용) ──
+        c = self.config
+        logger.info(
+            f"[Config] entry_z={c.get('entry_zscore', '?')}, exit_z={c.get('exit_zscore', '?')}, "
+            f"stop_z={c.get('stop_loss_zscore', '?')}, max_hold={c.get('max_holding_hours', '?')}h, "
+            f"n_coins={c.get('n_coins', '?')}, pos_pct={c.get('position_size_pct', 0):.2f}"
+        )
+        logger.info(
+            f"[Config] dynamic_exit={c.get('use_dynamic_exit', False)}, "
+            f"base={c.get('dynamic_exit_base', '-')}, range={c.get('dynamic_exit_range', '-')} | "
+            f"z_cap={c.get('z_score_cap', 4.0)}, vol_gate={c.get('vol_expansion_gate', 2.0)}"
+        )
+        logger.info(
+            f"[Config] target_r={c.get('target_r_pct', 0)*100:.1f}%, "
+            f"max_lev={c.get('max_leverage', 10)}x, "
+            f"fee={c.get('trading_fee', '?')}, slip={c.get('slippage', '?')}, "
+            f"funding={c.get('funding_rate_8h', '?')}"
+        )
+        logger.info(
+            f"[Config] filters: corr>={c.get('min_correlation', 0.6)}, "
+            f"coint_p<={c.get('max_cointegration_pvalue', 0.05)}, "
+            f"hl=[{c.get('min_half_life', 5)},{c.get('max_half_life', 40)}], "
+            f"hurst<={c.get('max_hurst', 0.5)}"
+        )
         
     def _default_config(self) -> Dict:
         """기본 설정 — get_settings().to_trader_config() 사용 권장."""
@@ -819,28 +848,55 @@ class LivePairTrader:
         )
         
         if not tradeable:
-            logger.info("No pairs meet entry criteria")
+            # 왜 진입 기준 미달인지 로깅 (best candidate의 z-score 표시)
+            if candidates:
+                best_z = max(candidates, key=lambda c: abs(c.current_z_score))
+                logger.info(
+                    f"No pairs meet entry criteria "
+                    f"(best |z|={abs(best_z.current_z_score):.2f} < threshold {self.config['entry_zscore']}, "
+                    f"{len(candidates)} candidates)"
+                )
+            else:
+                logger.info("No pairs meet entry criteria (0 candidates)")
             return None
 
         # Find best pair that doesn't overlap with excluded symbols
         best = None
+        overlap_count = 0
         for candidate in tradeable:
             if is_pair_available(
                 (candidate.symbol1, candidate.symbol2), excluded_symbols
             ):
                 best = candidate
                 break
+            else:
+                overlap_count += 1
 
         if best is None:
-            logger.info("No pairs available (all overlap with active positions)")
+            # 중복 스킵은 첫 발생 시에만 INFO, 반복 시 DEBUG
+            if self._last_no_pair_reason != "overlap":
+                logger.info(
+                    f"No pairs available ({overlap_count} tradeable, all overlap with active positions)"
+                )
+                self._last_no_pair_reason = "overlap"
+            else:
+                logger.debug(
+                    f"No pairs available ({overlap_count} tradeable, all overlap)"
+                )
             return None
-        
-        logger.info(
-            f"Best pair: {best.symbol1}/{best.symbol2} | "
-            f"Z-Score: {best.current_z_score:.2f} | "
-            f"Half-life: {best.half_life:.1f} | "
-            f"Score: {best.combined_score:.4f}"
-        )
+
+        self._last_no_pair_reason = ""  # Reset suppression
+
+        # Top-3 tradeable candidates 로깅 (파라미터 최적화 비교용)
+        top3 = tradeable[:3]
+        for i, c in enumerate(top3):
+            avail = "✓" if is_pair_available((c.symbol1, c.symbol2), excluded_symbols) else "✗overlap"
+            logger.info(
+                f"  #{i+1} {c.symbol1}/{c.symbol2}: "
+                f"z={c.current_z_score:+.2f}, score={c.combined_score:.4f}, "
+                f"hl={c.half_life:.1f}, hr={c.hedge_ratio:.3f}, "
+                f"corr={c.correlation:.3f}, hurst={c.hurst:.3f} [{avail}]"
+            )
         
         # Prepare pair info
         pair_info = {
@@ -964,6 +1020,8 @@ class LivePairTrader:
 
         # ── Adaptive entry gates ──
         z_cap = self.config.get('z_score_cap', 4.0)
+        vol_ratio_val = 0.0  # for gate summary
+
         if abs(z_score) > z_cap:
             logger.warning(
                 f"Slot {slot_id}: Z-Score {z_score:.2f} exceeds cap "
@@ -981,19 +1039,25 @@ class LivePairTrader:
                                  - hedge_ratio * np.log(df2['Close'].iloc[-8:].values))
                 recent_std = float(np.std(recent_spread))
                 formation_std = pair_info['spread_std']
-                vr = recent_std / formation_std if formation_std > 0 else 999
-                if vr > vol_gate:
+                vol_ratio_val = recent_std / formation_std if formation_std > 0 else 999
+                if vol_ratio_val > vol_gate:
                     logger.warning(
-                        f"Slot {slot_id}: Vol expansion {vr:.2f}x "
+                        f"Slot {slot_id}: Vol expansion {vol_ratio_val:.2f}x "
                         f"(recent_std={recent_std:.6f}, formation={formation_std:.6f}) "
                         f"> gate {vol_gate:.1f}x — skipping entry"
                     )
                     return False
-                logger.debug(f"Slot {slot_id}: Vol ratio {vr:.2f}x — OK")
 
         if abs(z_score) < self.config['entry_zscore']:
             logger.info(f"Slot {slot_id}: Z-Score below entry threshold")
             return False
+
+        # ── Gate Summary (모든 게이트 통과 시 한 줄로 기록) ──
+        logger.info(
+            f"Slot {slot_id}: Gates PASS — BTC={btc_ret:+.2%}, "
+            f"|z|={abs(z_score):.2f}/{z_cap}, "
+            f"vol={vol_ratio_val:.2f}x/{vol_gate:.1f}x"
+        )
         
         # Determine signal: z < 0 -> Long spread, z > 0 -> Short spread
         signal = 1 if z_score < 0 else -1
@@ -1181,17 +1245,45 @@ class LivePairTrader:
         entry_time = self.slot_entry_times[slot_id]
         elapsed = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
 
-        logger.debug(
-            f"Slot {slot_id}: Monitor {pos['symbol1']}/{pos['symbol2']}: "
-            f"Z={z_score:.4f} (entry={entry_z:.4f}), "
-            f"Elapsed={elapsed:.1f}h"
-        )
-        
-        should_close = False
-        close_reason = ""
-
         # Determine effective exit threshold
         effective_exit_z = self._get_effective_exit_zscore(pos)
+
+        # 평균회귀/손절까지 거리 계산
+        if signal == 1:  # Long spread
+            dist_exit = z_score - (-effective_exit_z)  # z가 -exit_z 이상이면 청산
+            dist_stop = (entry_z - self.config['stop_loss_zscore']) - z_score
+        else:  # Short spread
+            dist_exit = effective_exit_z - z_score  # z가 exit_z 이하이면 청산
+            dist_stop = z_score - (entry_z + self.config['stop_loss_zscore'])
+
+        time_remaining = max(0, self.config['max_holding_hours'] - elapsed)
+
+        logger.debug(
+            f"Slot {slot_id}: {pos['symbol1']}/{pos['symbol2']} "
+            f"z={z_score:+.4f} (entry={entry_z:+.4f}), "
+            f"exit_z={effective_exit_z:.2f}, "
+            f"dist_exit={dist_exit:+.3f}, dist_stop={dist_stop:+.3f}, "
+            f"elapsed={elapsed:.1f}h/{self.config['max_holding_hours']}h"
+        )
+
+        # 주기적 INFO 스냅샷: 15사이클마다 (≈15분) 활성 포지션 상태 기록
+        if self._cycle_count % 15 == 0:
+            # Unrealized PnL 추정
+            try:
+                upnl = (price1 - pos['entry_price1']) * pos.get('qty1', 0) + \
+                       (price2 - pos['entry_price2']) * pos.get('qty2', 0)
+            except Exception:
+                upnl = 0.0
+            logger.info(
+                f"Slot {slot_id}: [MONITOR] {pos['symbol1']}/{pos['symbol2']} "
+                f"z={z_score:+.3f} (entry={entry_z:+.3f}), "
+                f"exit_z={effective_exit_z:.2f}, "
+                f"uPnL=${upnl:+.2f}, "
+                f"elapsed={elapsed:.1f}h, remain={time_remaining:.1f}h"
+            )
+
+        should_close = False
+        close_reason = ""
         
         # Exit conditions
         if signal == 1:  # Long spread
@@ -1277,6 +1369,8 @@ class LivePairTrader:
             logger.info(
                 f"Slot {slot_id}: Trade closed: PnL=${total_pnl:.2f} ({pnl_pct:+.2f}%), "
                 f"Reason={close_reason}, "
+                f"held={elapsed:.1f}h, "
+                f"z: {entry_z:+.3f}→{z_score:+.3f} (exit_z={effective_exit_z:.2f}), "
                 f"costs=[fee=${fee_cost:.2f}, fund=${funding_cost:.2f}, slip=${slip_cost:.2f}], "
                 f"raw=${raw_pnl:.2f}, "
                 f"entry_p=({pos['entry_price1']:.4f},{pos['entry_price2']:.4f}), "
@@ -1640,10 +1734,11 @@ class LivePairTrader:
         if self._check_drawdown():
             return True  # 브레이커 발동 — 이번 사이클 스킵
 
+        self._cycle_count += 1
         active = get_active_slots(self.slots)
         idle = get_idle_slots(self.slots)
         logger.debug(
-            f"Cycle: {len(active)} active, {len(idle)} idle "
+            f"Cycle #{self._cycle_count}: {len(active)} active, {len(idle)} idle "
             f"(occupied: {self.occupied_symbols or 'none'})"
         )
 
@@ -1657,7 +1752,10 @@ class LivePairTrader:
         # 2. Refresh idle slot list (some may have closed above)
         idle = get_idle_slots(self.slots)
         if not idle:
-            logger.info("All slots occupied, waiting...")
+            if self._cycle_count % 15 == 0:
+                logger.info(f"All slots occupied (cycle #{self._cycle_count}), monitoring only")
+            else:
+                logger.debug("All slots occupied, waiting...")
             if not self._all_slots_occupied_notified:
                 self.discord.notify_all_slots_occupied(self._build_slots_info())
                 self._all_slots_occupied_notified = True
