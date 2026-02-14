@@ -53,6 +53,8 @@ from quantbox.core.trader_slot import (
     calculate_slot_capital,
     calculate_margin_from_notional,
     is_pair_available,
+    calculate_dynamic_leverage,
+    estimate_cost_rate,
 )
 from quantbox.strategy.pair_selector import PairSelector, PairCandidate
 from quantbox.strategy.filters import (
@@ -516,22 +518,32 @@ class LivePairTrader:
         self,
         symbol: str,
         side: str,
-        quantity: float
+        quantity: float,
+        leverage: float = 0.0,
     ) -> Optional[Dict]:
         """주문 실행 — LimitOrderChaser를 통한 maker-only 체결.
 
         Limit 지정가를 best bid/ask에 걸고, 미체결 시 가격을 추격한다.
         추격 실패 시 시장가(MARKET)로 fallback하여 체결을 보장한다.
 
+        Args:
+            symbol: 거래 심볼.
+            side: 'BUY' 또는 'SELL'.
+            quantity: 주문 수량.
+            leverage: 동적 레버리지 (0이면 config fallback).
+
         Returns:
             체결 정보 dict 또는 None (실패 시).
         """
         try:
-            # Set leverage (live mode only)
-            if not self.paper_mode:
+            # Set leverage (live mode only, entry orders)
+            # Skip for close orders (leverage=0) to avoid margin requirement changes
+            import math
+            if leverage > 0 and not self.paper_mode:
+                exchange_leverage = int(math.ceil(leverage))
                 self.client.futures_change_leverage(
                     symbol=symbol,
-                    leverage=self.config['leverage']
+                    leverage=exchange_leverage,
                 )
 
             # Get tick_size for price rounding
@@ -856,6 +868,7 @@ class LivePairTrader:
         pair_info: Dict,
         capital: float,
         anchor_std: float = 0.0,
+        leverage: float = 0.0,
     ) -> bool:
         """특정 슬롯에서 페어 트레이드 실행.
 
@@ -873,13 +886,15 @@ class LivePairTrader:
             pair_info: 헤지 비율, 스프레드 통계 등.
             capital: 레버리지 적용된 노셔널 (calculate_slot_capital 반환값).
             anchor_std: 최소 spread_std (vol-inverse sizing 기준값).
+            leverage: 동적 레버리지 (0이면 config fallback).
 
         Returns:
             True if 포지션 진입 성공.
         """
         symbol1, symbol2 = pair.symbol1, pair.symbol2
         hedge_ratio = pair_info['hedge_ratio']
-        leverage = self.config['leverage']
+        if leverage <= 0:
+            leverage = float(self.config['leverage'])
 
         # ── BTC Crash Gate (매크로 방어, 최우선) ──
         btc_blocked, btc_ret = self.check_btc_crash_gate()
@@ -996,11 +1011,11 @@ class LivePairTrader:
         logger.info(f"Slot {slot_id}: Capital usage: ${notional1 + notional2:.2f} ({(notional1 + notional2) / capital * 100:.1f}%)")
         
         # Place orders
-        order1 = self.place_order(symbol1, side1, qty1)
+        order1 = self.place_order(symbol1, side1, qty1, leverage=leverage)
         order2 = None
 
         if order1:
-            order2 = self.place_order(symbol2, side2, qty2)
+            order2 = self.place_order(symbol2, side2, qty2, leverage=leverage)
 
         if not order1 or not order2:
             # 한쪽 레그만 체결된 경우 — 거래소에 남은 포지션 직접 청산
@@ -1397,17 +1412,10 @@ class LivePairTrader:
         )
 
         for slot in idle:
-            # Pool-based capital allocation (identical to backtest)
-            # Returns notional (leveraged) amount
-            slot_capital = calculate_slot_capital(
-                available_capital=self.get_available_balance(),
-                active_slots=get_active_slots(self.slots),
-                max_traders=self.max_traders,
-                position_size_pct=self.config['position_size_pct'],
-                leverage=self.config['leverage'],
-            )
-            if slot_capital < 10:
-                logger.info(f"Slot {slot.slot_id}: Insufficient slot capital (${slot_capital:.2f})")
+            # Quick balance check (before pair search)
+            avail_balance = self.get_available_balance()
+            if avail_balance < 10:
+                logger.info(f"Slot {slot.slot_id}: Insufficient available balance (${avail_balance:.2f})")
                 break
 
             result = self.find_best_pair(
@@ -1420,7 +1428,51 @@ class LivePairTrader:
 
             pair, pair_info = result
 
-            if self.execute_pair_trade(slot.slot_id, pair, pair_info, slot_capital, anchor_std=anchor_std):
+            # ── Dynamic leverage: target R = target_r_pct × balance ──
+            target_r = self.config.get('target_r_pct', 0.01)
+            if target_r > 0:
+                risk_std = anchor_std if anchor_std > 0 else pair_info.get('spread_std', 0.01)
+                cost_rate = estimate_cost_rate(
+                    trading_fee=self.config['trading_fee'],
+                    slippage=self.config['slippage'],
+                    funding_rate_8h=self.config['funding_rate_8h'],
+                    expected_holding_bars=self.config.get('max_holding_hours', 20) * 4 // 2,
+                    bar_interval_minutes=15,
+                )
+                effective_leverage = calculate_dynamic_leverage(
+                    target_r_pct=target_r,
+                    position_size_pct=self.config['position_size_pct'],
+                    stop_loss_zscore=self.config['stop_loss_zscore'],
+                    risk_std=risk_std,
+                    hedge_ratio=pair_info['hedge_ratio'],
+                    cost_rate=cost_rate,
+                    max_leverage=float(self.config.get('max_leverage', 10)),
+                )
+                logger.info(
+                    f"Slot {slot.slot_id}: Dynamic leverage={effective_leverage:.2f}x "
+                    f"(target_r={target_r*100:.1f}%, risk_std={risk_std:.6f}, "
+                    f"HR={pair_info['hedge_ratio']:.3f})"
+                )
+            else:
+                effective_leverage = float(self.config['leverage'])
+
+            # Pool-based capital allocation (identical to backtest)
+            # Returns notional (leveraged) amount
+            slot_capital = calculate_slot_capital(
+                available_capital=self.get_available_balance(),
+                active_slots=get_active_slots(self.slots),
+                max_traders=self.max_traders,
+                position_size_pct=self.config['position_size_pct'],
+                leverage=effective_leverage,
+            )
+            if slot_capital < 10:
+                logger.info(f"Slot {slot.slot_id}: Insufficient slot capital (${slot_capital:.2f})")
+                break
+
+            if self.execute_pair_trade(
+                slot.slot_id, pair, pair_info, slot_capital,
+                anchor_std=anchor_std, leverage=effective_leverage,
+            ):
                 # Update excluded symbols for next idle slot
                 excluded = set(self.occupied_symbols)
                 # Short delay between orders to not spam the API
