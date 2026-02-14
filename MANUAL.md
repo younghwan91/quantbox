@@ -2,7 +2,7 @@
 
 **암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
 
-> 버전: 1.3.0  
+> 버전: 1.4.0  
 > 최종 업데이트: 2026년 2월 14일
 
 ---
@@ -175,6 +175,8 @@ POSITION_SIZE_PCT=-1           # 슬롯당 자본 비율 (-1=자동: 1/MAX_TRADE
 ENTRY_ZSCORE=2.0               # 진입 z-score 임계값
 EXIT_ZSCORE=0.5                # 청산 z-score 임계값 (dynamic_exit 비활성 시)
 STOP_LOSS_ZSCORE=3.5           # 손절 z-score
+MAX_HOLDING_HOURS=16           # 최대 보유 시간 (초과 시 강제 청산)
+FORMATION_HOURS=60             # 페어 선별에 사용할 과거 데이터 길이 (60h = 240 bars @ 15m)
 
 # Dynamic Exit: half-life 기반 청산 z-score 자동 조절
 # USE_DYNAMIC_EXIT=true         # 활성화 시 EXIT_ZSCORE 대신 half-life 기반 동적 값 사용
@@ -836,14 +838,16 @@ DYNAMIC_EXIT_RANGE=0.7
 
 ### 7.5 진입 방어 레이어 (Entry Gates)
 
-`execute_pair_trade()` 진입 시 4개 레이어가 순서대로 실행됩니다. 하나라도 차단되면 진입하지 않습니다.
+진입 시 5개 레이어가 순서대로 실행됩니다. 하나라도 차단되면 진입하지 않습니다.
+**라이브와 백테스트 모두 동일한 게이트를 적용합니다** (v1.4.0부터 패리티 달성).
 
 | # | Gate | 대상 | 설정 | 기본값 |
 |---|------|------|------|--------|
 | 1 | **BTC Crash Gate** | 시장 전체 | `BTC_CRASH_THRESHOLD` | ±3% |
 | 2 | **Z-Score Cap** | 개별 페어 | `Z_SCORE_CAP` | \|z\| > 4.0 |
 | 3 | **Vol Expansion Gate** | 개별 페어 | `VOL_EXPANSION_GATE` | ratio > 2.0x |
-| 4 | **Adaptive KF z-score** | 개별 페어 (모니터링) | `KALMAN_DELTA` | 자동 |
+| 4 | **Entry Z-Score Threshold** | 개별 페어 | `ENTRY_ZSCORE` | \|z\| >= 2.0 |
+| 5 | **자본 충분성** | 슬롯 | - | min notional 이상 |
 
 **BTC Crash Gate 상세:**
 
