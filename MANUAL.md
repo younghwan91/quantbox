@@ -2,7 +2,7 @@
 
 **암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
 
-> 버전: 1.7.0  
+> 버전: 1.8.0  
 > 최종 업데이트: 2026년 2월 14일
 
 ---
@@ -193,6 +193,10 @@ VOL_EXPANSION_GATE=2.0         # recent_std / formation_std > gate 이면 진입
 BTC_CRASH_GATE_ENABLED=true    # BTC 급락/급등 시 진입 차단 활성화
 BTC_CRASH_WINDOW=8             # 최근 N봉 체크 (15분봉 기준 = 2시간)
 BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 진입 차단
+
+# 드로다운 & 손실 제한
+MAX_DRAWDOWN_PCT=0.10          # 세션 HWM 대비 최대 허용 드로다운 (10%)
+DAILY_LOSS_LIMIT_PCT=0.05      # 당일 시작 잔고 대비 최대 허용 손실 (5%)
 
 # 비용 모델
 TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
