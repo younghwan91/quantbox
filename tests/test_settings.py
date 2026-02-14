@@ -121,7 +121,7 @@ class TestDefaultValues:
 
     def test_stop_loss_zscore_default(self):
         s = _make_settings()
-        assert s.stop_loss_zscore == 3.5
+        assert s.stop_loss_zscore == 1.5
 
     def test_trading_fee_default(self):
         s = _make_settings()
@@ -137,7 +137,7 @@ class TestDefaultValues:
 
     def test_n_coins_default(self):
         s = _make_settings()
-        assert s.n_coins == 30
+        assert s.n_coins == 40
 
     def test_paper_balance_default(self):
         s = _make_settings()
