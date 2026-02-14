@@ -9,7 +9,7 @@
 ## 🌟 주요 기능
 
 ### 핵심 아키텍처
-- **실거래/백테스트 일체형**: 동일한 Kalman 로직이 백테스트와 실거래에서 동작
+- **실거래/백테스트 일체형**: 동일한 Frozen z-score 로직이 백테스트와 실거래에서 동작
 - **모듈형 설계**: 전략, 필터, 실행 컴포넌트 조합 가능
 - **타입 안전성**: 전체 코드베이스에 타입 힌트 적용
 - **안전장치 내장**: Market Fallback 검증, 알림 스로틀링, avg_price=0 거부 등
@@ -28,9 +28,8 @@
   - 정상성 (ADF) 필터
   - 거래량 필터
 - **페어 선택**: 통계적 페어 식별 및 순위화
-- **칼만 필터**: 온라인 헤지 비율 추정
 - **Dynamic Exit**: Half-life 기반 청산 z-score 자동 조절 (빠른 페어 → tight exit, 느린 페어 → loose exit)
-- **적응형 Kalman z-score**: Online KF 기반 적응형 z-score — 레짐 변화 시 자동 조정
+- **Vol-Inverse Sizing**: 변동성 반비례 포지션 사이징 (Risk Parity — 모든 페어의 손절 $loss 동일)
 - **Z-Score Cap**: |z| > 4.0 진입 거부 (레짐 변화 방어)
 - **Vol Expansion Gate**: 최근 변동성/포메이션 변동성 > 2.0 진입 거부
 - **BTC Crash Gate**: BTC 급락/급등(±3%) 감지 시 전체 진입 차단 (매크로 방어)
@@ -82,7 +81,7 @@ config = ContinuousBacktestConfig(
     exit_zscore=0.5,
 )
 
-# 백테스트 실행 (Kalman filter 내장)
+# 백테스트 실행 (Frozen z-score + Vol-inverse sizing)
 results = run_continuous_backtest(config, data)
 print(results['metrics'].summary())
 \`\`\`
@@ -129,7 +128,7 @@ quantbox/
 │   ├── filters.py          # 필터 파이프라인
 │   └── pair_selector.py    # 페어 선택기
 ├── backtest/               # 백테스팅 프레임워크
-│   ├── continuous_backtest.py  # 연속 백테스트 엔진 (Kalman 내장)
+│   ├── continuous_backtest.py  # 연속 백테스트 엔진 (Vol-inverse sizing)
 │   └── metrics.py          # 성과 지표
 ├── notifications/          # 알림 시스템
 │   ├── bot.py              # Discord Bot (양방향)
@@ -144,7 +143,7 @@ scripts/                    # 스크립트
     ├── sweep_max_holding.py    # Max holding 스윕
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (549개)
+tests/                      # 유닛 테스트 (548개)
 \`\`\`
 
 ## 📈 성과 지표
