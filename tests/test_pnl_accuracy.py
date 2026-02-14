@@ -26,7 +26,7 @@ def mock_env(monkeypatch):
     monkeypatch.setenv("ENTRY_ZSCORE", "2.0")
     monkeypatch.setenv("EXIT_ZSCORE", "0.5")
     monkeypatch.setenv("STOP_LOSS_ZSCORE", "1.5")
-    monkeypatch.setenv("MAX_HOLDING_HOURS", "16")
+    monkeypatch.setenv("MAX_HOLDING_HOURS", "20")
     monkeypatch.setenv("USE_DYNAMIC_EXIT", "false")
     monkeypatch.setenv("TRADING_FEE", "0.0005")
     monkeypatch.setenv("SLIPPAGE", "0.001")
