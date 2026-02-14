@@ -149,8 +149,8 @@ class ContinuousBacktestConfig:
     dynamic_exit_base: float = 0.3   # 가장 빠른 페어의 exit z-score
     dynamic_exit_range: float = 0.7  # base + range = 가장 느린 페어의 exit z-score
     
-    # Holding limits
-    max_holding_bars: int = 100
+    # Holding limits (20h = 80 bars @ 15min interval)
+    max_holding_bars: int = 80
     
     # Pair selection criteria
     min_correlation: float = 0.6
@@ -983,9 +983,13 @@ class ContinuousPairBacktest:
         
         # Calculate PnL from spread change
         # PnL is proportional to NOTIONAL (leveraged exposure), not margin
+        # Must divide by (1 + hedge_ratio) because capital is split between legs:
+        #   s1_capital = notional / (1 + HR), s2_capital = HR * notional / (1 + HR)
+        #   actual PnL = signal * spread_change * notional / (1 + HR)
         notional = pos.get('notional', pos['capital'])  # backward compat
         spread_change = exit_spread - pos['entry_spread']
-        gross_pnl = pos['signal'] * spread_change * notional
+        hr = pos['hedge_ratio']
+        gross_pnl = pos['signal'] * spread_change * notional / (1 + hr)
         
         # Calculate transaction costs (also on notional, not margin)
         # Fees: entry + exit both sides
@@ -1080,8 +1084,10 @@ class ContinuousPairBacktest:
 
                 spread_change = current_spread - pos['entry_spread']
                 # Unrealized PnL is based on notional (leveraged) exposure
+                # Divided by (1 + HR) to match actual leg-split capital allocation
                 notional = pos.get('notional', pos['capital'])
-                slot_unrealized = pos['signal'] * spread_change * notional
+                hr = pos.get('hedge_ratio', 1.0)
+                slot_unrealized = pos['signal'] * spread_change * notional / (1 + hr)
 
                 # Deduct accrued funding cost from unrealized PnL
                 bars_held = len(state.equity_curve) - pos.get('entry_bar', 0)
