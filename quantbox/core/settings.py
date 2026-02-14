@@ -70,7 +70,7 @@ class QuantBoxSettings(BaseSettings):
     # ── 전략 파라미터 ──
     entry_zscore: float = 2.0
     exit_zscore: float = 0.5
-    stop_loss_zscore: float = 3.5
+    stop_loss_zscore: float = 1.5  # entry에서 +1.5 이동 시 손절
 
     # ── 홀딩 제한 ──
     max_holding_hours: int = 20
@@ -78,8 +78,8 @@ class QuantBoxSettings(BaseSettings):
     formation_hours: int = 60  # Formation period in hours (default: 60h = 240 bars @ 15m)
     # ── Dynamic exit ──
     use_dynamic_exit: bool = True
-    dynamic_exit_base: float = 0.3
-    dynamic_exit_range: float = 0.7
+    dynamic_exit_base: float = 0.1  # 빠른 페어 exit z-score (half_life=min)
+    dynamic_exit_range: float = 0.9  # max exit = base + range = 1.0
 
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
@@ -100,7 +100,7 @@ class QuantBoxSettings(BaseSettings):
     funding_rate_8h: float = 0.0001
 
     # ── 유니버스 & 페이퍼 ──
-    n_coins: int = 30
+    n_coins: int = 40
     paper_balance: float = 1000.0
 
     # ── 알림 ──
