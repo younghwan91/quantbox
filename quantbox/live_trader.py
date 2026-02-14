@@ -66,6 +66,7 @@ from quantbox.data.preprocessor import DataPreprocessor
 from quantbox.core.limit_chaser import (
     LimitOrderChaser, ChaseConfig, ChaseFillStatus, ChaseResult,
 )
+from quantbox.strategy.kalman_spread import OnlineKalmanSpread, KalmanState
 
 # Load environment variables
 load_dotenv()
@@ -173,6 +174,10 @@ class LivePairTrader:
         # key: symbol, value: 실패 시각
         self.BLACKLIST_TTL_SECONDS: int = 3600  # 1시간 후 자동 만료
         self._failed_symbols: dict[str, datetime] = {}
+
+        # Kalman filter instances per slot (adaptive z-score)
+        # key: slot_id, value: OnlineKalmanSpread
+        self._slot_kalman: dict[int, OnlineKalmanSpread] = {}
 
         # 일시정지 플래그 (Discord !pause / !resume)
         self.paused: bool = False
@@ -628,9 +633,11 @@ class LivePairTrader:
             close2_result = self.close_position(symbol2, qty2)
 
         if close1_result:
-            exit_prices['exit_price1'] = float(close1_result.get('avgPrice', 0))
+            if isinstance(close1_result, dict):
+                exit_prices['exit_price1'] = float(close1_result.get('avgPrice', 0))
         if close2_result:
-            exit_prices['exit_price2'] = float(close2_result.get('avgPrice', 0))
+            if isinstance(close2_result, dict):
+                exit_prices['exit_price2'] = float(close2_result.get('avgPrice', 0))
 
         if not close1_result or not close2_result:
             failed = []
@@ -655,6 +662,8 @@ class LivePairTrader:
         del self.slot_positions[slot_id]
         if slot_id in self.slot_entry_times:
             del self.slot_entry_times[slot_id]
+        # Clean up Kalman filter for this slot
+        self._slot_kalman.pop(slot_id, None)
 
         return exit_prices
 
@@ -753,6 +762,10 @@ class LivePairTrader:
         spread = log1 - best.hedge_ratio * log2
         pair_info['spread_mean'] = spread.mean()
         pair_info['spread_std'] = spread.std()
+
+        # Attach raw DataFrames for KF warmup & vol gate
+        pair_info['_df1'] = df1
+        pair_info['_df2'] = df2
         
         return best, pair_info
     
@@ -834,7 +847,36 @@ class LivePairTrader:
         )
         
         logger.info(f"Slot {slot_id}: Current Z-Score: {z_score:.4f}")
-        
+
+        # ── Adaptive entry gates ──
+        z_cap = self.config.get('z_score_cap', 4.0)
+        if abs(z_score) > z_cap:
+            logger.warning(
+                f"Slot {slot_id}: Z-Score {z_score:.2f} exceeds cap "
+                f"|{z_cap}| — regime anomaly, skipping entry"
+            )
+            return False
+
+        vol_gate = self.config.get('vol_expansion_gate', 2.0)
+        if vol_gate > 0:
+            # Quick vol check: recent spread std vs formation std
+            df1 = pair_info.get('_df1')
+            df2 = pair_info.get('_df2')
+            if df1 is not None and df2 is not None and len(df1) >= 8:
+                recent_spread = (np.log(df1['Close'].iloc[-8:].values)
+                                 - hedge_ratio * np.log(df2['Close'].iloc[-8:].values))
+                recent_std = float(np.std(recent_spread))
+                formation_std = pair_info['spread_std']
+                vr = recent_std / formation_std if formation_std > 0 else 999
+                if vr > vol_gate:
+                    logger.warning(
+                        f"Slot {slot_id}: Vol expansion {vr:.2f}x "
+                        f"(recent_std={recent_std:.6f}, formation={formation_std:.6f}) "
+                        f"> gate {vol_gate:.1f}x — skipping entry"
+                    )
+                    return False
+                logger.debug(f"Slot {slot_id}: Vol ratio {vr:.2f}x — OK")
+
         if abs(z_score) < self.config['entry_zscore']:
             logger.info(f"Slot {slot_id}: Z-Score below entry threshold")
             return False
@@ -957,7 +999,31 @@ class LivePairTrader:
         slot.position_info = position_data
         self.slot_positions[slot_id] = position_data
         self.slot_entry_times[slot_id] = datetime.now(timezone.utc)
-        
+
+        # ── Initialize Kalman filter for this slot ──
+        try:
+            kf = OnlineKalmanSpread(
+                init_mu=position_data['spread_mean'],
+                init_gamma=hedge_ratio,
+                formation_spread_std=pair_info['spread_std'],
+                delta=self.config.get('kalman_delta', 1e-5),
+                obs_noise=self.config.get('kalman_obs_noise', 1e-3),
+            )
+            # Warmup with formation data
+            df1_warmup = pair_info.get('_df1')
+            df2_warmup = pair_info.get('_df2')
+            if df1_warmup is not None and df2_warmup is not None:
+                lp1 = np.log(df1_warmup['Close'].values).astype(np.float64)
+                lp2 = np.log(df2_warmup['Close'].values).astype(np.float64)
+                kf.warmup(lp1, lp2)
+                logger.info(
+                    f"Slot {slot_id}: KF warmed up ({len(lp1)} bars), "
+                    f"gamma={kf.gamma:.4f}, mu={kf.mu:.6f}"
+                )
+            self._slot_kalman[slot_id] = kf
+        except Exception as e:
+            logger.warning(f"Slot {slot_id}: KF init failed: {e}, using fixed params")
+
         direction = "LONG Spread" if signal == 1 else "SHORT Spread"
         logger.info(f"Slot {slot_id}: Position opened: signal={signal}, z-score={z_score:.4f}")
         
@@ -994,21 +1060,38 @@ class LivePairTrader:
         if price1 <= 0 or price2 <= 0:
             return True  # Keep position (price fetch error)
         
-        # Calculate current z-score
-        z_score = self.calculate_zscore(
-            price1, price2, pos['hedge_ratio'],
-            pos['spread_mean'], pos['spread_std']
-        )
+        # Calculate current z-score — prefer Kalman adaptive if available
+        kf = self._slot_kalman.get(slot_id)
+        kf_state: KalmanState | None = None
+        if kf is not None:
+            try:
+                kf_state = kf.update(np.log(price1), np.log(price2))
+                z_score = kf_state.z_score
+            except Exception as e:
+                logger.warning(f"Slot {slot_id}: KF update failed: {e}, falling back")
+                kf_state = None
+
+        if kf_state is None:
+            z_score = self.calculate_zscore(
+                price1, price2, pos['hedge_ratio'],
+                pos['spread_mean'], pos['spread_std']
+            )
         
         signal = pos['signal']
         entry_z = pos['entry_zscore']
         entry_time = self.slot_entry_times[slot_id]
         elapsed = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
-        
+
+        kf_info = ""
+        if kf_state is not None:
+            kf_info = (
+                f", KF[gamma={kf_state.gamma:.4f}, "
+                f"vol_r={kf_state.vol_ratio:.2f}]"
+            )
         logger.debug(
             f"Slot {slot_id}: Monitor {pos['symbol1']}/{pos['symbol2']}: "
             f"Z={z_score:.4f} (entry={entry_z:.4f}), "
-            f"Elapsed={elapsed:.1f}h"
+            f"Elapsed={elapsed:.1f}h{kf_info}"
         )
         
         should_close = False
@@ -1146,12 +1229,17 @@ class LivePairTrader:
                 except Exception:
                     pnl = 0.0
 
-                # Current z-score
+                # Current z-score (prefer KF adaptive z-score)
                 try:
-                    current_z = self.calculate_zscore(
-                        p1, p2, pos['hedge_ratio'],
-                        pos['spread_mean'], pos['spread_std'],
-                    )
+                    kf = self._slot_kalman.get(slot.slot_id)
+                    if kf is not None:
+                        kf_state = kf.update(np.log(p1), np.log(p2))
+                        current_z = kf_state.z_score
+                    else:
+                        current_z = self.calculate_zscore(
+                            p1, p2, pos['hedge_ratio'],
+                            pos['spread_mean'], pos['spread_std'],
+                        )
                 except Exception:
                     current_z = 0.0
 

@@ -30,6 +30,9 @@
 - **페어 선택**: 통계적 페어 식별 및 순위화
 - **칼만 필터**: 온라인 헤지 비율 추정
 - **Dynamic Exit**: Half-life 기반 청산 z-score 자동 조절 (빠른 페어 → tight exit, 느린 페어 → loose exit)
+- **적응형 Kalman z-score**: Online KF 기반 적응형 z-score — 레짐 변화 시 자동 조정
+- **Z-Score Cap**: |z| > 4.0 진입 거부 (레짐 변화 방어)
+- **Vol Expansion Gate**: 최근 변동성/포메이션 변동성 > 2.0 진입 거부
 
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
@@ -139,6 +142,7 @@ quantbox/
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 컴포넌트
 │   ├── filters.py          # 필터 파이프라인
+│   ├── kalman_spread.py    # Online Kalman Filter (적응형 z-score)
 │   ├── pair_selector.py    # 페어 선택기
 │   └── pair_strategy.py    # 페어 트레이딩 전략
 ├── backtest/               # 백테스팅 프레임워크
@@ -158,7 +162,7 @@ scripts/                    # 스크립트
     ├── sweep_max_holding.py    # Max holding 스윅
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (494개)
+tests/                      # 유닛 테스트 (562개)
 \`\`\`
 
 ## 📈 성과 지표
