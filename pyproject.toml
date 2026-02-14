@@ -23,3 +23,10 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["quantbox*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests that run full backtests with real data (deselect with '-m \"not slow\"')",
+]
+addopts = "-m 'not slow'"
+asyncio_mode = "strict"
