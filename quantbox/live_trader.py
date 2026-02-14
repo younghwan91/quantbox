@@ -63,7 +63,6 @@ from quantbox.data.preprocessor import DataPreprocessor
 from quantbox.core.limit_chaser import (
     LimitOrderChaser, ChaseConfig, ChaseFillStatus, ChaseResult,
 )
-from quantbox.strategy.kalman_spread import OnlineKalmanSpread, KalmanState
 
 # Load environment variables
 load_dotenv()
@@ -171,10 +170,6 @@ class LivePairTrader:
         # key: symbol, value: 실패 시각
         self.BLACKLIST_TTL_SECONDS: int = 3600  # 1시간 후 자동 만료
         self._failed_symbols: dict[str, datetime] = {}
-
-        # Kalman filter instances per slot (adaptive z-score)
-        # key: slot_id, value: OnlineKalmanSpread
-        self._slot_kalman: dict[int, OnlineKalmanSpread] = {}
 
         # 일시정지 플래그 (Discord !pause / !resume)
         self.paused: bool = False
@@ -712,8 +707,6 @@ class LivePairTrader:
         del self.slot_positions[slot_id]
         if slot_id in self.slot_entry_times:
             del self.slot_entry_times[slot_id]
-        # Clean up Kalman filter for this slot
-        self._slot_kalman.pop(slot_id, None)
 
         return exit_prices
 
@@ -861,7 +854,8 @@ class LivePairTrader:
         slot_id: int,
         pair: PairCandidate,
         pair_info: Dict,
-        capital: float
+        capital: float,
+        anchor_std: float = 0.0,
     ) -> bool:
         """특정 슬롯에서 페어 트레이드 실행.
 
@@ -869,11 +863,16 @@ class LivePairTrader:
         leverage가 적용된 notional exposure이다.
         실제 마진(cash)은 capital / leverage.
 
+        Vol-inverse sizing: anchor_std > 0이면 capital을
+        anchor_std / spread_std 비율로 스케일 다운하여
+        모든 페어의 손절 dollar loss를 동일하게 만든다.
+
         Args:
             slot_id: 트레이드를 실행할 슬롯 ID.
             pair: 선택된 페어 후보.
             pair_info: 헤지 비율, 스프레드 통계 등.
             capital: 레버리지 적용된 노셔널 (calculate_slot_capital 반환값).
+            anchor_std: 최소 spread_std (vol-inverse sizing 기준값).
 
         Returns:
             True if 포지션 진입 성공.
@@ -946,6 +945,18 @@ class LivePairTrader:
         side2 = 'SELL' if signal == 1 else 'BUY'
         
         # capital is notional (leveraged). Use full notional for position sizing.
+        # ── Vol-inverse sizing (risk parity) ──
+        # Scale capital so all pairs have equal dollar stop-loss
+        spread_std = pair_info['spread_std']
+        if anchor_std > 0 and spread_std > 0:
+            vol_ratio = min(anchor_std / spread_std, 1.0)  # anchor=min → ratio ≤ 1
+            capital = capital * vol_ratio
+            logger.info(
+                f"Slot {slot_id}: Vol-inverse sizing: "
+                f"anchor_std={anchor_std:.6f}, spread_std={spread_std:.6f}, "
+                f"ratio={vol_ratio:.3f}, adjusted_capital=${capital:.2f}"
+            )
+
         margin = calculate_margin_from_notional(capital, leverage)
         effective_capital = capital * (1 - 2 * self.config['trading_fee'])
         
@@ -1059,30 +1070,6 @@ class LivePairTrader:
         self.slot_positions[slot_id] = position_data
         self.slot_entry_times[slot_id] = datetime.now(timezone.utc)
 
-        # ── Initialize Kalman filter for this slot ──
-        try:
-            kf = OnlineKalmanSpread(
-                init_mu=position_data['spread_mean'],
-                init_gamma=hedge_ratio,
-                formation_spread_std=pair_info['spread_std'],
-                delta=self.config.get('kalman_delta', 1e-5),
-                obs_noise=self.config.get('kalman_obs_noise', 1e-3),
-            )
-            # Warmup with formation data
-            df1_warmup = pair_info.get('_df1')
-            df2_warmup = pair_info.get('_df2')
-            if df1_warmup is not None and df2_warmup is not None:
-                lp1 = np.log(df1_warmup['Close'].values).astype(np.float64)
-                lp2 = np.log(df2_warmup['Close'].values).astype(np.float64)
-                kf.warmup(lp1, lp2)
-                logger.info(
-                    f"Slot {slot_id}: KF warmed up ({len(lp1)} bars), "
-                    f"gamma={kf.gamma:.4f}, mu={kf.mu:.6f}"
-                )
-            self._slot_kalman[slot_id] = kf
-        except Exception as e:
-            logger.warning(f"Slot {slot_id}: KF init failed: {e}, using fixed params")
-
         direction = "LONG Spread" if signal == 1 else "SHORT Spread"
         logger.info(f"Slot {slot_id}: Position opened: signal={signal}, z-score={z_score:.4f}")
         
@@ -1119,38 +1106,21 @@ class LivePairTrader:
         if price1 <= 0 or price2 <= 0:
             return True  # Keep position (price fetch error)
         
-        # Calculate current z-score — prefer Kalman adaptive if available
-        kf = self._slot_kalman.get(slot_id)
-        kf_state: KalmanState | None = None
-        if kf is not None:
-            try:
-                kf_state = kf.update(np.log(price1), np.log(price2))
-                z_score = kf_state.z_score
-            except Exception as e:
-                logger.warning(f"Slot {slot_id}: KF update failed: {e}, falling back")
-                kf_state = None
-
-        if kf_state is None:
-            z_score = self.calculate_zscore(
-                price1, price2, pos['hedge_ratio'],
-                pos['spread_mean'], pos['spread_std']
-            )
+        # Calculate current z-score using frozen formation statistics
+        z_score = self.calculate_zscore(
+            price1, price2, pos['hedge_ratio'],
+            pos['spread_mean'], pos['spread_std']
+        )
         
         signal = pos['signal']
         entry_z = pos['entry_zscore']
         entry_time = self.slot_entry_times[slot_id]
         elapsed = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
 
-        kf_info = ""
-        if kf_state is not None:
-            kf_info = (
-                f", KF[gamma={kf_state.gamma:.4f}, "
-                f"vol_r={kf_state.vol_ratio:.2f}]"
-            )
         logger.debug(
             f"Slot {slot_id}: Monitor {pos['symbol1']}/{pos['symbol2']}: "
             f"Z={z_score:.4f} (entry={entry_z:.4f}), "
-            f"Elapsed={elapsed:.1f}h{kf_info}"
+            f"Elapsed={elapsed:.1f}h"
         )
         
         should_close = False
@@ -1288,17 +1258,12 @@ class LivePairTrader:
                 except Exception:
                     pnl = 0.0
 
-                # Current z-score (prefer KF adaptive z-score)
+                # Current z-score using frozen formation statistics
                 try:
-                    kf = self._slot_kalman.get(slot.slot_id)
-                    if kf is not None:
-                        kf_state = kf.update(np.log(p1), np.log(p2))
-                        current_z = kf_state.z_score
-                    else:
-                        current_z = self.calculate_zscore(
-                            p1, p2, pos['hedge_ratio'],
-                            pos['spread_mean'], pos['spread_std'],
-                        )
+                    current_z = self.calculate_zscore(
+                        p1, p2, pos['hedge_ratio'],
+                        pos['spread_mean'], pos['spread_std'],
+                    )
                 except Exception:
                     current_z = 0.0
 
@@ -1407,6 +1372,14 @@ class LivePairTrader:
         excluded = set(self.occupied_symbols) | set(self._failed_symbols.keys())
         if self._failed_symbols:
             logger.info(f"Blacklisted symbols ({len(self._failed_symbols)}): {set(self._failed_symbols.keys())}")
+
+        # ── Vol-inverse sizing: compute anchor_std from all candidates ──
+        # Low-vol pair gets full capital, high-vol gets proportionally less
+        anchor_std = min(
+            (c.spread_std for c in cached_candidates if c.spread_std > 0),
+            default=0.0,
+        )
+
         for slot in idle:
             # Pool-based capital allocation (identical to backtest)
             # Returns notional (leveraged) amount
@@ -1431,7 +1404,7 @@ class LivePairTrader:
 
             pair, pair_info = result
 
-            if self.execute_pair_trade(slot.slot_id, pair, pair_info, slot_capital):
+            if self.execute_pair_trade(slot.slot_id, pair, pair_info, slot_capital, anchor_std=anchor_std):
                 # Update excluded symbols for next idle slot
                 excluded = set(self.occupied_symbols)
                 # Short delay between orders to not spam the API

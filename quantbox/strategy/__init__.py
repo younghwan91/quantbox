@@ -1,5 +1,5 @@
 """
-Strategy module - Filters, pair selection, and Kalman spread.
+Strategy module - Filters and pair selection.
 """
 
 from quantbox.strategy.base import Strategy
