@@ -31,6 +31,7 @@
 2. **MANUAL.md**: 환경변수 추가, 전략 파라미터 변경, 새 모듈 추가 시 해당 섹션을 업데이트한다. 버전 번호와 최종 업데이트 날짜도 갱신한다.
 3. **.env.example**: 새 환경변수 추가 시 **반드시** `.env.example`에도 주석과 함께 추가한다. 동시에 .env 파일에도 수정을 반영한다.
 4. **copilot-instructions.md**: 개발 원칙이나 워크플로우가 변경될 때 이 문서도 갱신한다.
+5. **agents.md**: 아키텍처, 모듈 구조, 안전장치, 파라미터, 트레이딩 흐름 등이 변경될 때 `.github/agents.md`도 **반드시** 동기화한다. `copilot-instructions.md`와 `agents.md`는 항상 쌍으로 최신 상태를 유지해야 한다.
 
 **판단 기준:**
 - feature 브랜치 머지 시: README.md 기능 목록 + MANUAL.md 해당 섹션 확인
