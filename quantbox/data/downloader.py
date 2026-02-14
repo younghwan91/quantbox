@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 from tqdm import tqdm
 
-from quantbox.core.config import Config, Interval
+from quantbox.core.config import Config
 
 
 logger = logging.getLogger('DataDownloader')
