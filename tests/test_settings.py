@@ -251,7 +251,7 @@ class TestToTraderConfig:
         cfg = s.to_trader_config()
         assert cfg['quote_currency'] == 'USDT'
         assert cfg['interval'] == '15m'
-        assert cfg['formation_hours'] == 168
+        assert cfg['formation_hours'] == 60
         assert cfg['max_holding_hours'] == 16
         assert cfg['min_correlation'] == 0.5
         assert cfg['max_hurst'] == 0.5
