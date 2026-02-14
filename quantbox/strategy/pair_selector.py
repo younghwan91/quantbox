@@ -6,8 +6,7 @@ from a universe of assets.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple
 from itertools import combinations
 import numpy as np
 import pandas as pd
@@ -16,7 +15,7 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from quantbox.strategy.filters import FilterPipeline, create_default_pipeline, FilterResult
-from quantbox.data.preprocessor import DataPreprocessor, PairData
+from quantbox.data.preprocessor import DataPreprocessor
 
 
 logger = logging.getLogger('PairSelector')
