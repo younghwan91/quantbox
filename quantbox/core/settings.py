@@ -70,7 +70,8 @@ class QuantBoxSettings(BaseSettings):
 
     # ── 홀딩 제한 ──
     max_holding_hours: int = 16
-
+    # ── Formation window ──
+    formation_hours: int = 60  # Formation period in hours (default: 60h = 240 bars @ 15m)
     # ── Dynamic exit ──
     use_dynamic_exit: bool = True
     dynamic_exit_base: float = 0.3
@@ -134,7 +135,7 @@ class QuantBoxSettings(BaseSettings):
             'quote_currency': 'USDT',
             'n_coins': self.n_coins,
             'interval': '15m',
-            'formation_hours': 168,
+            'formation_hours': self.formation_hours,
             # Strategy
             'entry_zscore': self.entry_zscore,
             'exit_zscore': self.exit_zscore,
