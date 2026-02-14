@@ -2,7 +2,7 @@
 
 **암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
 
-> 버전: 1.6.0  
+> 버전: 1.7.0  
 > 최종 업데이트: 2026년 2월 14일
 
 ---
@@ -167,7 +167,9 @@ BINANCE_API_SECRET=your_api_secret
 BINANCE_TESTNET=true          # 테스트넷 사용 시
 
 # 레버리지 및 포지션 사이징
-LEVERAGE=2                     # 레버리지 배수 (기본값: 2)
+LEVERAGE=2                     # Fallback 레버리지 (동적 레버리지 미사용 시)
+TARGET_R_PCT=0.01              # 트레이드당 목표 리스크 (밸런스의 1%, 0=동적 비활성)
+MAX_LEVERAGE=10                # 동적 레버리지 안전 상한
 MAX_TRADERS=5                  # 최대 동시 트레이더 수 (기본값: 5)
 POSITION_SIZE_PCT=-1           # 슬롯당 자본 비율 (-1=자동: 1/MAX_TRADERS)
 
@@ -1341,7 +1343,9 @@ engine.run_live(strategy)
 config.risk.max_position_size = 0.05    # 최대 포지션: 5%
 config.risk.max_drawdown = 0.15         # 최대 낙폭: 15%
 config.risk.stop_loss_pct = 0.03        # 손절: 3%
-config.risk.leverage = 2                 # 레버리지: 2x (환경변수 LEVERAGE로 설정 가능)
+config.risk.leverage = 2                 # Fallback 레버리지 (동적 미사용 시)
+config.risk.target_r_pct = 0.01         # 트레이드당 목표 리스크: 밸런스의 1%
+config.risk.max_leverage = 10           # 동적 레버리지 상한: 10x
 config.risk.funding_rate_8h = 0.0001     # 8시간 펀딩비: 0.01%
 
 # 자동 리스크 관리
@@ -1823,7 +1827,9 @@ class StrategyConfig:
 class RiskConfig:
     max_position_size: float = 0.1         # 최대 포지션 비율
     max_drawdown: float = 0.2              # 최대 낙폭
-    leverage: int = 2                       # 레버리지 (환경변수: LEVERAGE)
+    leverage: int = 2                       # Fallback 레버리지 (동적 미사용 시)
+    target_r_pct: float = 0.01             # 트레이드당 목표 리스크 (밸런스의 1%)
+    max_leverage: int = 10                 # 동적 레버리지 안전 상한
     trading_fee: float = 0.0005            # 거래 수수료
     slippage: float = 0.001                # 슬리피지
     funding_rate_8h: float = 0.0001        # 8시간 펀딩비
