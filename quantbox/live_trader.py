@@ -31,12 +31,14 @@ QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
     --once: 한 번만 실행하고 종료
 """
 
+import os
 import sys
 import time
 import logging
 import logging.handlers
 import argparse
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
@@ -74,19 +76,39 @@ from quantbox.core.state_persistence import (
 # Load environment variables
 load_dotenv()
 
-# Configure logging with rotation
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.handlers.RotatingFileHandler(
-            'live_trader.log', mode='a',
-            maxBytes=50 * 1024 * 1024,  # 50MB
-            backupCount=5,  # 최대 5개 백업 (총 ~300MB)
-        ),
-    ]
-)
+# Configure logging with session-based log directory
+def _setup_session_logging() -> Path:
+    """Create session-based log directory and configure logging.
+
+    Each session gets a timestamped log file under logs/ directory:
+        logs/session_20260214_153000.log
+        logs/session_20260214_180000.log
+
+    Returns:
+        Path to the session log file.
+    """
+    log_dir = Path('logs')
+    log_dir.mkdir(exist_ok=True)
+
+    session_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    session_log = log_dir / f'session_{session_ts}.log'
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.handlers.RotatingFileHandler(
+                str(session_log), mode='a',
+                maxBytes=50 * 1024 * 1024,  # 50MB
+                backupCount=5,
+            ),
+        ]
+    )
+    return session_log
+
+
+_session_log_path = _setup_session_logging()
 logger = logging.getLogger('LiveTrader')
 
 # Suppress noisy loggers
