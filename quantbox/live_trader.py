@@ -34,6 +34,7 @@ QuantBox Live Trader - 암호화폐 페어 트레이딩 실거래 시스템
 import sys
 import time
 import logging
+import logging.handlers
 import argparse
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -65,17 +66,25 @@ from quantbox.data.preprocessor import DataPreprocessor
 from quantbox.core.limit_chaser import (
     LimitOrderChaser, ChaseConfig, ChaseFillStatus, ChaseResult,
 )
+from quantbox.core.state_persistence import (
+    save_state, load_state, clear_state,
+    deserialize_entry_times, deserialize_positions,
+)
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging
+# Configure logging with rotation
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('live_trader.log', mode='a')
+        logging.handlers.RotatingFileHandler(
+            'live_trader.log', mode='a',
+            maxBytes=50 * 1024 * 1024,  # 50MB
+            backupCount=5,  # 최대 5개 백업 (총 ~300MB)
+        ),
     ]
 )
 logger = logging.getLogger('LiveTrader')
@@ -180,6 +189,13 @@ class LivePairTrader:
         # 알림 중복 방지 플래그 (상태 전이 시 1회만 발송)
         self._all_slots_occupied_notified: bool = False
         self._insufficient_balance_notified: bool = False
+
+        # ── Drawdown & Daily Loss Tracking ──
+        self._initial_balance: float = 0.0  # 세션 시작 잔고 (run_continuous에서 설정)
+        self._session_high_water_mark: float = 0.0  # 세션 최고 잔고
+        self._daily_start_balance: float = 0.0  # 당일 시작 잔고
+        self._daily_start_time: datetime = datetime.now(timezone.utc)
+        self._drawdown_triggered: bool = False  # DD 브레이커 발동 시 True
 
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"LivePairTrader initialized in {mode_str} mode")
@@ -711,10 +727,13 @@ class LivePairTrader:
                 f"실패 레그: {', '.join(failed)}\n"
                 f"거래소에 유령 포지션 확인 필수!"
             ))
-            # 실패해도 슬롯은 리셋한다 — 다음 사이클에서 재시도 불가능하므로
-            # 대신 CRITICAL 로그와 Discord 알림으로 수동 개입 유도
+            # 청산 실패 시 슬롯을 리셋하지 않는다.
+            # 리셋하면 봇이 거래소 포지션을 잊어버리고, 다음 사이클에서
+            # 유령 포지션이 방치된다. 슬롯은 점유 상태로 유지하여
+            # 다음 monitor_slot 사이클에서 재시도할 수 있도록 한다.
+            return exit_prices
 
-        # Reset slot
+        # Reset slot only if BOTH legs closed successfully
         self.slots[slot_id].reset()
         del self.slot_positions[slot_id]
         if slot_id in self.slot_entry_times:
@@ -1092,6 +1111,9 @@ class LivePairTrader:
 
         direction = "LONG Spread" if signal == 1 else "SHORT Spread"
         logger.info(f"Slot {slot_id}: Position opened: signal={signal}, z-score={z_score:.4f}")
+
+        # 상태 저장 (크래시 복구용)
+        self._save_state()
         
         # Discord 알림
         self.discord.notify_open(
@@ -1248,6 +1270,9 @@ class LivePairTrader:
                     f"→ ${self.paper_balance:.2f}"
                 )
 
+            # 상태 저장 (크래시 복구용)
+            self._save_state()
+
             # Discord 알림
             elapsed_hours = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
             cumulative = sum(t['pnl'] for t in self.trade_history)
@@ -1314,6 +1339,265 @@ class LivePairTrader:
                 })
         return info
 
+    # ==================== State Persistence ====================
+
+    def _save_state(self) -> None:
+        """현재 슬롯/포지션 상태를 디스크에 저장.
+
+        포지션 진입/청산 시 호출하여 크래시 복구를 지원한다.
+        """
+        try:
+            save_state(
+                slots=self.slots,
+                slot_positions=self.slot_positions,
+                slot_entry_times=self.slot_entry_times,
+                trade_history=self.trade_history,
+                paper_balance=self.paper_balance,
+                paper_mode=self.paper_mode,
+                initial_balance=self._initial_balance,
+                session_high_water_mark=self._session_high_water_mark,
+                daily_start_balance=self._daily_start_balance,
+                daily_start_time=self._daily_start_time.isoformat(),
+            )
+        except Exception as e:
+            logger.error(f"Failed to save state: {e}")
+
+    def _recover_state(self) -> bool:
+        """디스크에서 이전 상태를 복구.
+
+        크래시 후 재시작 시 호출. 저장된 포지션 상태를 복원하고
+        거래소 실제 포지션과 대조(reconcile)한다.
+
+        Returns:
+            True if 상태 복구됨, False if 복구할 상태 없음.
+        """
+        state = load_state()
+        if state is None:
+            return False
+
+        # 모드 불일치 체크
+        saved_mode = state.get('paper_mode', False)
+        if saved_mode != self.paper_mode:
+            logger.warning(
+                f"State file mode mismatch: saved={saved_mode}, current={self.paper_mode} — "
+                f"ignoring saved state"
+            )
+            clear_state()
+            return False
+
+        # 포지션 복원
+        saved_positions = deserialize_positions(state.get('positions', {}))
+        saved_entry_times = deserialize_entry_times(state.get('entry_times', {}))
+
+        if not saved_positions:
+            logger.info("Saved state has no open positions — clean start")
+            clear_state()
+            return False
+
+        # 거래소 실제 포지션과 대조
+        exchange_positions = self.get_current_positions()
+        exchange_symbols = set()
+        for pos in exchange_positions:
+            exchange_symbols.add(pos['symbol'])
+
+        restored_count = 0
+        orphaned_exchange = []
+
+        for slot_id_int, pos_data in saved_positions.items():
+            slot_id = int(slot_id_int)
+            if slot_id >= len(self.slots):
+                logger.warning(f"Slot {slot_id} exceeds max_traders — skipping")
+                continue
+
+            sym1 = pos_data.get('symbol1', '')
+            sym2 = pos_data.get('symbol2', '')
+
+            # Live mode: 거래소에 해당 심볼 포지션이 있는지 확인
+            if not self.paper_mode:
+                has_sym1 = sym1 in exchange_symbols
+                has_sym2 = sym2 in exchange_symbols
+
+                if not has_sym1 and not has_sym2:
+                    logger.warning(
+                        f"Slot {slot_id}: Saved position {sym1}/{sym2} "
+                        f"not found on exchange — discarding"
+                    )
+                    continue
+
+                if has_sym1 != has_sym2:
+                    missing = sym2 if has_sym1 else sym1
+                    logger.critical(
+                        f"Slot {slot_id}: Partial position detected — "
+                        f"exchange has {'sym1' if has_sym1 else 'sym2'} "
+                        f"but missing {missing}. MANUAL CHECK REQUIRED."
+                    )
+                    self.discord.send(content=(
+                        f"🚨 **CRITICAL** 부분 포지션 감지 (복구 시)\n"
+                        f"Slot {slot_id}: {sym1}/{sym2}\n"
+                        f"누락 심볼: {missing}\n"
+                        f"거래소에서 확인 필요!"
+                    ))
+
+            # 슬롯 복원
+            slot = self.slots[slot_id]
+            slot.position_open = True
+            slot.current_pair = (sym1, sym2)
+            slot.position_info = pos_data
+            self.slot_positions[slot_id] = pos_data
+            if slot_id in saved_entry_times:
+                self.slot_entry_times[slot_id] = saved_entry_times[slot_id]
+
+            restored_count += 1
+            logger.info(
+                f"Slot {slot_id}: Restored position {sym1}/{sym2} "
+                f"(entry_z={pos_data.get('entry_zscore', '?')})"
+            )
+
+        # 거래소에 있지만 저장된 상태에 없는 포지션 검출
+        if not self.paper_mode:
+            saved_symbols = set()
+            for pos_data in saved_positions.values():
+                saved_symbols.add(pos_data.get('symbol1', ''))
+                saved_symbols.add(pos_data.get('symbol2', ''))
+
+            for sym in exchange_symbols:
+                if sym not in saved_symbols:
+                    orphaned_exchange.append(sym)
+
+            if orphaned_exchange:
+                logger.critical(
+                    f"Orphaned exchange positions (not in saved state): "
+                    f"{orphaned_exchange} — MANUAL CHECK REQUIRED"
+                )
+                self.discord.send(content=(
+                    f"🚨 **CRITICAL** 미확인 거래소 포지션 발견 (복구 시)\n"
+                    f"심볼: {', '.join(orphaned_exchange)}\n"
+                    f"저장된 상태에 없는 포지션 — 수동 확인 필요!"
+                ))
+
+        # Drawdown 상태 복원
+        self._initial_balance = state.get('initial_balance', 0.0)
+        self._session_high_water_mark = state.get('session_high_water_mark', 0.0)
+        self._daily_start_balance = state.get('daily_start_balance', 0.0)
+        daily_start_str = state.get('daily_start_time', '')
+        if daily_start_str:
+            try:
+                self._daily_start_time = datetime.fromisoformat(daily_start_str)
+                if self._daily_start_time.tzinfo is None:
+                    self._daily_start_time = self._daily_start_time.replace(tzinfo=timezone.utc)
+            except ValueError:
+                self._daily_start_time = datetime.now(timezone.utc)
+
+        # Paper balance 복원
+        if self.paper_mode:
+            self.paper_balance = state.get('paper_balance', self.paper_balance)
+
+        # Trade history 복원
+        saved_trades = state.get('trade_history', [])
+        if saved_trades:
+            self.trade_history = saved_trades
+            logger.info(f"Restored {len(saved_trades)} trade history records")
+
+        logger.info(
+            f"State recovery complete: {restored_count} positions restored"
+        )
+        self.discord.send(content=(
+            f"♻️ **상태 복구 완료**\n"
+            f"복원된 포지션: {restored_count}개\n"
+            f"{'⚠️ 미확인 포지션: ' + ', '.join(orphaned_exchange) if orphaned_exchange else '✅ 거래소 대조 정상'}"
+        ))
+        return restored_count > 0
+
+    # ==================== Drawdown & Daily Loss ====================
+
+    def _check_drawdown(self) -> bool:
+        """세션 최고 잔고 대비 드로다운 체크.
+
+        max_drawdown_pct 초과 시 전체 청산 + 일시정지.
+
+        Returns:
+            True if 드로다운 브레이커 발동됨.
+        """
+        max_dd = self.config.get('max_drawdown_pct', 0.10)
+        if max_dd <= 0:
+            return False
+
+        current_balance = self.get_total_balance()
+        if current_balance <= 0:
+            return False
+
+        # High water mark 갱신
+        if current_balance > self._session_high_water_mark:
+            self._session_high_water_mark = current_balance
+
+        if self._session_high_water_mark <= 0:
+            return False
+
+        drawdown = (self._session_high_water_mark - current_balance) / self._session_high_water_mark
+
+        if drawdown >= max_dd:
+            logger.critical(
+                f"DRAWDOWN CIRCUIT BREAKER: {drawdown:.1%} >= {max_dd:.1%} "
+                f"(HWM=${self._session_high_water_mark:.2f}, current=${current_balance:.2f})"
+            )
+            self.discord.send(content=(
+                f"🔴 **드로다운 서킷 브레이커 발동**\n"
+                f"드로다운: {drawdown:.1%} (한도: {max_dd:.1%})\n"
+                f"최고 잔고: ${self._session_high_water_mark:,.2f}\n"
+                f"현재 잔고: ${current_balance:,.2f}\n"
+                f"→ 전체 청산 후 신규 진입 중단"
+            ))
+            self.close_all_positions()
+            self._drawdown_triggered = True
+            self.paused = True
+            self._save_state()
+            return True
+
+        return False
+
+    def _check_daily_loss(self) -> bool:
+        """당일 손실 한도 체크.
+
+        daily_loss_limit_pct 초과 시 신규 진입 중단 (기존 포지션 유지).
+
+        Returns:
+            True if 일일 손실 한도 도달.
+        """
+        limit = self.config.get('daily_loss_limit_pct', 0.05)
+        if limit <= 0:
+            return False
+
+        # 24시간마다 daily_start_balance 리셋
+        now = datetime.now(timezone.utc)
+        if (now - self._daily_start_time).total_seconds() >= 86400:
+            self._daily_start_balance = self.get_total_balance()
+            self._daily_start_time = now
+            logger.info(f"Daily loss tracker reset: start_balance=${self._daily_start_balance:.2f}")
+
+        if self._daily_start_balance <= 0:
+            return False
+
+        current = self.get_total_balance()
+        daily_loss = (self._daily_start_balance - current) / self._daily_start_balance
+
+        if daily_loss >= limit:
+            logger.warning(
+                f"DAILY LOSS LIMIT: {daily_loss:.1%} >= {limit:.1%} "
+                f"(start=${self._daily_start_balance:.2f}, current=${current:.2f})"
+            )
+            if not self.paused:
+                self.discord.send(content=(
+                    f"⚠️ **일일 손실 한도 도달**\n"
+                    f"일일 손실: {daily_loss:.1%} (한도: {limit:.1%})\n"
+                    f"시작 잔고: ${self._daily_start_balance:,.2f}\n"
+                    f"현재 잔고: ${current:,.2f}\n"
+                    f"→ 신규 진입 중단 (기존 포지션 모니터링 계속)"
+                ))
+                self.paused = True
+            return True
+
+        return False
+
     # ==================== Main Loop ====================
     
     def run_cycle(self):
@@ -1329,6 +1613,10 @@ class LivePairTrader:
         self._process_bot_commands()
         if self._stop_requested:
             return False  # run_continuous에서 루프 탈출
+
+        # 0.5. 드로다운 체크 (최우선 — 모니터링보다 먼저)
+        if self._check_drawdown():
+            return True  # 브레이커 발동 — 이번 사이클 스킵
 
         active = get_active_slots(self.slots)
         idle = get_idle_slots(self.slots)
@@ -1359,6 +1647,10 @@ class LivePairTrader:
         # 2.5. Paused 상태면 신규 진입 건너뛰기
         if self.paused:
             logger.info("Trading paused — monitoring only, skipping new entries")
+            return True
+
+        # 2.6. 일일 손실 한도 체크
+        if self._check_daily_loss():
             return True
 
         # 3. Get capital info (matches backtest pool model)
@@ -1520,6 +1812,11 @@ class LivePairTrader:
             wins = [t for t in self.trade_history if t['pnl'] > 0]
             win_rate = (len(wins) / len(self.trade_history) * 100) if self.trade_history else 0.0
             active_count = len(get_active_slots(self.slots))
+            # 실제 드로다운 계산
+            dd_pct = 0.0
+            if self._session_high_water_mark > 0:
+                dd_pct = (self._session_high_water_mark - total_bal) / self._session_high_water_mark * 100
+                dd_pct = max(0.0, dd_pct)
             self.discord.notify_daily_report(
                 total_balance=total_bal,
                 daily_pnl=session_pnl_dr,
@@ -1529,7 +1826,7 @@ class LivePairTrader:
                 n_trades_today=len(self.trade_history),
                 n_trades_total=len(self.trade_history),
                 win_rate=win_rate,
-                max_drawdown_pct=0.0,  # 라이브에선 별도 DD 트래킹 필요
+                max_drawdown_pct=dd_pct,
                 active_slots=active_count,
                 max_slots=self.max_traders,
                 leverage=self.config['leverage'],
@@ -1751,13 +2048,27 @@ class LivePairTrader:
         logger.info(f"Starting continuous trading loop (max {self.max_traders} slots)...")
         self.print_balance()
 
+        # ── 상태 복구 (크래시 후 재시작) ──
+        recovered = self._recover_state()
+        if recovered:
+            logger.info("Continuing from recovered state")
+
+        # ── Drawdown / Daily Loss 초기화 ──
+        balance = self.get_total_balance()
+        if self._initial_balance <= 0:
+            self._initial_balance = balance
+        if self._session_high_water_mark <= 0:
+            self._session_high_water_mark = balance
+        if self._daily_start_balance <= 0:
+            self._daily_start_balance = balance
+            self._daily_start_time = datetime.now(timezone.utc)
+
         # Discord Bot 시작 (토큰이 설정되어 있을 때만)
         if self._bot_runner:
             self._bot_runner.start()
             logger.info("Discord Bot started — remote commands enabled")
 
         # Discord 시작 알림
-        balance = self.get_available_balance()
         mode = "PAPER" if self.paper_mode else "LIVE"
         self.discord.notify_start(
             mode, balance,
@@ -1765,10 +2076,14 @@ class LivePairTrader:
             max_traders=self.max_traders,
         )
         
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 5  # 연속 5회 실패 시에만 전체 청산
+
         try:
             while True:
                 try:
                     result = self.run_cycle()
+                    consecutive_errors = 0  # 성공 시 카운터 리셋
                     if result is False:  # !stop 명령
                         logger.info("Stop requested via Discord")
                         break
@@ -1778,11 +2093,30 @@ class LivePairTrader:
                         break
                     
                 except Exception as e:
-                    logger.error(f"Error in trading cycle: {e}")
-                    self.discord.notify_error(str(e))
-                    # 에러 시 모든 포지션 청산 (안전 조치)
-                    self.close_all_positions()
-                    self._interruptible_sleep(60)
+                    consecutive_errors += 1
+                    logger.error(
+                        f"Error in trading cycle ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}",
+                        exc_info=True,
+                    )
+                    self.discord.notify_error(
+                        f"[{consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}] {e}"
+                    )
+
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        logger.critical(
+                            f"Consecutive errors reached {MAX_CONSECUTIVE_ERRORS} — "
+                            f"closing all positions and pausing"
+                        )
+                        self.discord.send(content=(
+                            f"🚨 **CRITICAL** 연속 {MAX_CONSECUTIVE_ERRORS}회 에러 발생\n"
+                            f"전체 포지션 청산 후 대기 (5분)\n"
+                            f"최근 에러: {e}"
+                        ))
+                        self.close_all_positions()
+                        consecutive_errors = 0
+                        self._interruptible_sleep(300)  # 5분 대기
+                    else:
+                        self._interruptible_sleep(60)  # 1분 대기 후 재시도
                     
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
@@ -1797,6 +2131,9 @@ class LivePairTrader:
         )
         self.close_all_positions()
         self.print_summary()
+
+        # 정상 종료: 상태 파일 삭제 (포지션 없으므로 복구 불필요)
+        clear_state()
 
         if self._bot_runner:
             self._bot_runner.stop()
