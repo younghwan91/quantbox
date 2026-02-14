@@ -181,6 +181,12 @@ STOP_LOSS_ZSCORE=3.5           # 손절 z-score
 # DYNAMIC_EXIT_BASE=0.3         # 빠른 페어 exit z-score (half_life=min)
 # DYNAMIC_EXIT_RANGE=0.7        # 느린 페어까지의 범위 (max exit = base + range = 1.0)
 
+# Adaptive Kalman & Regime Protection
+Z_SCORE_CAP=4.0                # |z| > cap 이면 진입 거부 (레짐 변화 방어)
+VOL_EXPANSION_GATE=2.0         # recent_std / formation_std > gate 이면 진입 거부
+KALMAN_DELTA=1e-5              # Kalman 상태 전이 노이즈 스케일
+KALMAN_OBS_NOISE=1e-3          # Kalman 관측 노이즈 분산
+
 # 비용 모델
 TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
 SLIPPAGE=0.001                 # 슬리피지 (0.10%)
@@ -221,6 +227,7 @@ quantbox/
 ├── strategy/               # 전략 계층
 │   ├── base.py             # 전략 베이스 클래스
 │   ├── filters.py          # 필터 구현
+│   ├── kalman_spread.py    # Online Kalman Filter (적응형 z-score)
 │   ├── pair_selector.py    # 페어 선택
 │   └── pair_strategy.py    # 페어 전략
 ├── backtest/               # 백테스팅

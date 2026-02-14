@@ -215,7 +215,9 @@ class TestLivePnlCostDeduction:
         
         # 가격 변동 없음 (raw PnL = 0) → 비용만 차감
         trader.get_price = MagicMock(side_effect=[100.0, 50.0])
-        trader.close_slot_positions = MagicMock()
+        trader.close_slot_positions = MagicMock(
+            return_value={'exit_price1': 100.0, 'exit_price2': 50.0}
+        )
         
         # z-score를 평균회귀 조건으로 (>= -exit_zscore → close)
         with patch.object(trader, 'calculate_zscore', return_value=0.0):
@@ -238,7 +240,9 @@ class TestLivePnlCostDeduction:
         # ETH 50 유지 → raw pnl2 = (50-50)*(-2) = 0
         # raw PnL = $2.0
         trader.get_price = MagicMock(side_effect=[102.0, 50.0])
-        trader.close_slot_positions = MagicMock()
+        trader.close_slot_positions = MagicMock(
+            return_value={'exit_price1': 102.0, 'exit_price2': 50.0}
+        )
         
         with patch.object(trader, 'calculate_zscore', return_value=0.0):
             trader.monitor_slot(0)
@@ -262,7 +266,11 @@ class TestLivePnlCostDeduction:
 
         # 가격 변동 없음 → raw PnL = 0, 비용만 차감
         trader.get_price = MagicMock(side_effect=[100.0, 50.0])
-        trader.close_slot_positions = MagicMock()
+        trader.close_slot_positions = MagicMock(
+            return_value={'exit_price1': 100.0, 'exit_price2': 50.0}
+        )
+        # Mock funding rate to avoid MagicMock client returning float(MagicMock)=1.0
+        trader._calculate_funding_cost = MagicMock(return_value=0.01)
 
         with patch.object(trader, 'calculate_zscore', return_value=0.0):
             trader.monitor_slot(0)
@@ -285,7 +293,9 @@ class TestLivePnlCostDeduction:
         self._open_position(trader, slot_id=0, hours_ago=2.0)
 
         trader.get_price = MagicMock(side_effect=[100.0, 50.0])
-        trader.close_slot_positions = MagicMock()
+        trader.close_slot_positions = MagicMock(
+            return_value={'exit_price1': 100.0, 'exit_price2': 50.0}
+        )
 
         with patch.object(trader, 'calculate_zscore', return_value=0.0):
             trader.monitor_slot(0)
