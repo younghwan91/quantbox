@@ -238,7 +238,7 @@ class TestDynamicExitParity:
         )
 
     def test_disabled_by_default(self):
-        """기본값은 비활성화 (기존 동작 변경 없음)."""
+        """BacktestConfig 기본값은 비활성화, Settings 기본값은 활성화."""
         config = ContinuousBacktestConfig()
         assert config.use_dynamic_exit is False
 
@@ -246,9 +246,10 @@ class TestDynamicExitParity:
         with patch.dict('os.environ', {
             'BINANCE_API_KEY': 'test',
             'BINANCE_API_SECRET': 'test',
-        }):
+        }, clear=True):
             settings = QuantBoxSettings()
-            assert settings.use_dynamic_exit is False
+            # settings.py 기본값은 True (라이브에서 동적 청산 활성)
+            assert settings.use_dynamic_exit is True
 
 
 # ════════════════════════════════════════════════════════════════

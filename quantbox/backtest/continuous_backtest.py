@@ -159,6 +159,16 @@ class ContinuousBacktestConfig:
     max_half_life: float = 50.0  # Maximum half-life in bars
     max_hurst: float = 0.5  # Maximum Hurst exponent (< 0.5 = mean-reverting)
     
+    # Regime protection gates (parity with live_trader)
+    z_score_cap: float = 4.0           # |z| > cap → regime anomaly, reject entry
+    vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate → reject entry
+    vol_expansion_window: int = 8      # Number of recent bars for vol gate
+
+    # BTC crash gate (parity with live_trader)
+    btc_crash_gate_enabled: bool = True   # Enable BTC crash gate in backtest
+    btc_crash_window: int = 8             # Number of bars to measure BTC return
+    btc_crash_threshold: float = 0.03    # |return| > 3% → block all entries
+
     # Risk management
     position_size_pct: float = -1.0  # Fraction of capital per trade (auto: 1/max_traders)
     leverage: int = 1  # Leverage multiplier (1=no leverage, 2=2x, etc.)
@@ -507,6 +517,55 @@ class ContinuousPairBacktest:
         if not entered_any:
             state.no_trade_periods += 1
 
+    def _check_btc_crash_gate(
+        self,
+        data: Dict[str, pd.DataFrame],
+        bar_idx: int,
+    ) -> tuple[bool, float]:
+        """BTC crash gate for backtest (parity with live_trader).
+
+        Checks if BTCUSDT (if present in data) moved more than
+        btc_crash_threshold over the last btc_crash_window bars.
+
+        Args:
+            data: Full price data dict.
+            bar_idx: Current bar index.
+
+        Returns:
+            (is_blocked, btc_return)
+        """
+        if not self.config.btc_crash_gate_enabled:
+            return False, 0.0
+
+        # Find BTC symbol in data
+        btc_sym = None
+        for sym in data:
+            if sym.startswith('BTC') and sym.endswith('USDT'):
+                btc_sym = sym
+                break
+
+        if btc_sym is None:
+            # No BTC data — fail-open (same as live on API error)
+            return False, 0.0
+
+        window = self.config.btc_crash_window
+        if bar_idx < window:
+            return False, 0.0
+
+        btc_df = data[btc_sym]
+        open_price = btc_df.iloc[bar_idx - window]['Close']
+        close_price = btc_df.iloc[bar_idx]['Close']
+
+        if open_price <= 0:
+            return False, 0.0
+
+        btc_return = (close_price - open_price) / open_price
+
+        if abs(btc_return) > self.config.btc_crash_threshold:
+            return True, btc_return
+
+        return False, btc_return
+
     def _enter_slot(
         self,
         state: BacktestState,
@@ -518,8 +577,9 @@ class ContinuousPairBacktest:
     ) -> bool:
         """Attempt to enter a position in a specific slot.
 
-        Checks z-score threshold at the CURRENT bar and allocates capital.
-        Returns True if entry succeeded, False otherwise.
+        Checks regime gates (BTC crash, z-cap, vol expansion) and
+        z-score threshold at the CURRENT bar, then allocates capital.
+        Gate logic is identical to live_trader.execute_pair_trade().
 
         Args:
             state: Current backtest state.
@@ -530,10 +590,19 @@ class ContinuousPairBacktest:
             timestamp: Current timestamp.
 
         Returns:
-            True if position was entered, False if z-score too weak.
+            True if position was entered, False if any gate blocked.
         """
         symbol1 = candidate['symbol1']
         symbol2 = candidate['symbol2']
+
+        # ── Gate 1: BTC Crash Gate (parity with live) ──
+        btc_blocked, btc_ret = self._check_btc_crash_gate(data, bar_idx)
+        if btc_blocked:
+            logger.debug(
+                f"Slot {slot.slot_id}: BTC crash gate blocked entry "
+                f"(BTC {btc_ret:+.2%}) at bar {bar_idx}"
+            )
+            return False
 
         # Get entry prices at current bar
         entry_price1 = data[symbol1].iloc[bar_idx]['Close']
@@ -549,6 +618,35 @@ class ContinuousPairBacktest:
 
         entry_z = (entry_spread - candidate['spread_mean']) / candidate['spread_std']
 
+        # ── Gate 2: Z-Score Cap (parity with live) ──
+        if abs(entry_z) > self.config.z_score_cap:
+            logger.debug(
+                f"Slot {slot.slot_id}: Z-Score {entry_z:.2f} exceeds cap "
+                f"|{self.config.z_score_cap}| — regime anomaly, skipping"
+            )
+            return False
+
+        # ── Gate 3: Vol Expansion Gate (parity with live) ──
+        if self.config.vol_expansion_gate > 0:
+            vol_window = self.config.vol_expansion_window
+            if bar_idx >= vol_window:
+                recent_prices1 = data[symbol1].iloc[bar_idx - vol_window + 1:bar_idx + 1]['Close'].values
+                recent_prices2 = data[symbol2].iloc[bar_idx - vol_window + 1:bar_idx + 1]['Close'].values
+                recent_spread = (
+                    np.log(recent_prices1)
+                    - candidate['hedge_ratio'] * np.log(recent_prices2)
+                )
+                recent_std = float(np.std(recent_spread))
+                formation_std = candidate['spread_std']
+                vol_ratio = recent_std / formation_std if formation_std > 0 else 999.0
+                if vol_ratio > self.config.vol_expansion_gate:
+                    logger.debug(
+                        f"Slot {slot.slot_id}: Vol expansion {vol_ratio:.2f}x > "
+                        f"gate {self.config.vol_expansion_gate:.1f}x — skipping"
+                    )
+                    return False
+
+        # ── Gate 4: Z-Score Threshold ──
         # Determine signal direction
         if entry_z <= -self.config.entry_zscore:
             signal = 1  # Long spread (expect z to increase)
