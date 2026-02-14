@@ -38,8 +38,14 @@
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
 - **Market Fallback 검증**: ACK 응답 감지 → 자동 재조회 (유령 체결 방지)
+- **State Persistence**: 포지션 상태 JSON 저장 → 크래시 후 자동 복구 + 거래소 대조
+- **Max Drawdown Breaker**: 세션 HWM 대비 10% 드로다운 시 전체 청산 + 자동 정지
+- **Daily Loss Limit**: 당일 잔고 대비 5% 손실 시 신규 진입 중단
+- **Consecutive Error Guard**: 연속 5회 에러 시에만 전체 청산 (일시적 API 에러에 과민 반응 방지)
+- **Close Failure Retention**: 청산 실패 시 슬롯 유지 → 다음 사이클 재시도 (유령 포지션 방지)
 - **알림 스로틀링**: 슬롯 포화/잔고 부족 알림 중복 전송 방지
 - **Discord Bot**: 원격 모니터링 및 명령 (포지션 조회, 강제 청산 등)
+- **Log Rotation**: 50MB/5파일 로테이션 (디스크 무한 성장 방지)
 
 ### 백테스팅
 - **롤링 윈도우**: Formation/Trading 기간 시뮬레이션
@@ -119,6 +125,7 @@ quantbox/
 │   ├── limit_chaser.py     # 지정가 추격 주문
 │   ├── settings.py         # 환경변수 검증 (pydantic-settings)
 │   └── trader_slot.py      # 트레이더 슬롯 관리 (Dynamic Leverage)
+│   └── state_persistence.py # 상태 영속화 (JSON, 크래시 복구)
 ├── data/                    # 데이터 처리
 │   ├── cache.py            # 2단계 캐싱 (LRU + gzip)
 │   ├── downloader.py       # 바이낸스 데이터 다운로드
@@ -144,7 +151,7 @@ scripts/                    # 스크립트
     ├── sweep_max_holding.py    # Max holding 스윕
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (572개)
+tests/                      # 유닛 테스트 (616개)
 \`\`\`
 
 ## 📈 성과 지표
