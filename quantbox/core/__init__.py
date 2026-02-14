@@ -1,12 +1,9 @@
 """
-Core module - Trading engine, execution, and configuration
+Core module - Configuration, events, and trading slots.
 """
 
-from quantbox.core.engine import TradingEngine
 from quantbox.core.config import Config
 from quantbox.core.events import Event, EventType, SignalEvent, OrderEvent, FillEvent
-from quantbox.core.portfolio import Portfolio
-from quantbox.core.execution import ExecutionHandler, BacktestExecutionHandler, LiveExecutionHandler
 from quantbox.core.trader_slot import (
     TraderSlotState,
     get_occupied_symbols,
@@ -20,17 +17,12 @@ from quantbox.core.trader_slot import (
 )
 
 __all__ = [
-    "TradingEngine",
     "Config",
     "Event",
-    "EventType", 
+    "EventType",
     "SignalEvent",
     "OrderEvent",
     "FillEvent",
-    "Portfolio",
-    "ExecutionHandler",
-    "BacktestExecutionHandler",
-    "LiveExecutionHandler",
     "TraderSlotState",
     "get_occupied_symbols",
     "get_idle_slots",
