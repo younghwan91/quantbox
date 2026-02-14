@@ -7,15 +7,15 @@
 
 ## 1. 시스템 개요
 
-QuantBox v1.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 트레이딩 시스템이다.
+QuantBox v1.5.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 트레이딩 시스템이다.
 
 | 구성 요소 | 역할 |
 |-----------|------|
 | **LivePairTrader** | 실거래 오케스트레이터. 15분 사이클로 페어 탐색 → 진입 → 모니터링 → 청산 |
 | **ContinuousPairBacktest** | 동일한 진입/청산/비용 로직을 과거 데이터에 적용 |
-| **OnlineKalmanSpread** | 실시간 적응형 스프레드 추적. 진입 후 모니터링에 사용 |
 | **LimitOrderChaser** | 메이커 지정가 추격 주문. 타임아웃 시 시장가 폴백 |
 | **FilterPipeline** | 통계적 페어 선별 (상관관계 → 공적분 → 반감기 → 허스트) |
+| **Vol-Inverse Sizing** | 변동성 반비례 포지션 사이징. 동일 달러 손절액 보장 |
 | **Discord Bot/Notifier** | 원격 제어(!status, !close all 등) 및 실시간 알림 |
 
 ---
@@ -25,7 +25,7 @@ QuantBox v1.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │  1. _process_bot_commands()   ← Discord 큐에서 명령 수신          │
-│  2. monitor_slot(i)           ← 활성 슬롯: Kalman z-score 업데이트│
+│  2. monitor_slot(i)           ← 활성 슬롯: Frozen z-score 모니터링 │
 │     → 평균회귀(|z| ≤ exit_z) / 손절(z > stop_z) / 최대보유 초과  │
 │  3. get_trading_coins(n)      ← 24h 거래량 상위 N개 코인          │
 │  4. download_multi_symbol_data()  ← 15m OHLCV 다운로드 + 캐시    │
@@ -55,7 +55,7 @@ QuantBox v1.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 
 
 | 조건 | 판정 | 비고 |
 |------|------|------|
-| **평균회귀** | \|adaptive_z\| ≤ exit_zscore | Kalman 적응형 z-score 사용 |
+| **평균회귀** | \|z\| ≤ exit_zscore | Frozen z-score (formation 기간 통계) 사용 |
 | **손절** | z가 진입 방향 반대로 > stop_loss_zscore | 3.5 기본값 |
 | **최대보유** | bars_held > max_holding_bars | 시간 기반 강제 청산 |
 
@@ -84,7 +84,28 @@ margin = min(slot_target, available_capital)
 notional = margin × leverage
 ```
 
-### 2.5 비용 모델
+### 2.5 Vol-Inverse Sizing (변동성 반비례 포지션 사이징)
+
+사이클 내 모든 후보 페어의 `spread_std` 중 최솟값을 `anchor_std`로 설정하고, 각 페어의 notional을 변동성에 반비례하여 조절한다:
+
+```
+anchor_std = min(spread_std for all candidates in cycle)
+vol_ratio  = min(anchor_std / spread_std, 1.0)
+notional   = base_notional × vol_ratio
+```
+
+**핵심 성질**: 모든 페어의 달러 손절액이 동일해진다:
+```
+stop_loss_dollar = stop_z × spread_std × notional
+                 = stop_z × spread_std × base × (anchor / spread_std)
+                 = stop_z × anchor × base   ← CONSTANT
+```
+
+- Low-vol 페어(anchor): 풀 자본 배분 (vol_ratio = 1.0)
+- High-vol 페어: 비례 축소 (vol_ratio < 1.0)
+- 실거래(`live_trader.py`)와 백테스트(`continuous_backtest.py`) 양쪽에 동일 로직 적용
+
+### 2.6 비용 모델
 
 | 비용 항목 | 공식 (레그당) | 비고 |
 |-----------|---------------|------|
@@ -110,7 +131,7 @@ notional = margin × leverage
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `kalman_spread.py` | `OnlineKalmanSpread`, `KalmanState` | 적응형 헤지비율 + z-score. predict→update 루프 |
+
 | `filters.py` | `FilterPipeline`, 8개 필터 | 통계적 페어 검증 파이프라인 |
 | `pair_selector.py` | `PairSelector`, `PairCandidate` | C(n,2) 페어 평가 + 가중 점수 랭킹 |
 | `base.py` | `Strategy(ABC)` | 전략 추상 기반 클래스 |
@@ -184,6 +205,7 @@ notional = margin × leverage
 - [x] Z-Score Cap — 백테스트 `_enter_slot()`에 구현 (v1.4.0)
 - [x] Vol Expansion Gate — 백테스트 `_enter_slot()`에 구현 (v1.4.0)
 - [x] Formation window 동기화 — `FORMATION_HOURS=60` (v1.4.0)
+- [x] Vol-Inverse Sizing — 양쪽 동일 anchor_std 기반 비율 적용 (v1.5.0)
 - [x] `test_backtest_live_parity.py`로 검증
 
 ---
@@ -200,7 +222,7 @@ notional = margin × leverage
 | `FilterPipeline` 수정 | `filters.py`, `pair_selector.py`, `test_filters.py` |
 | `LimitOrderChaser` 수정 | `limit_chaser.py`, `live_trader.py`, `test_limit_chaser.py` |
 | `TraderSlotState` 수정 | `trader_slot.py`, `live_trader.py`, `continuous_backtest.py`, `test_multi_trader.py` |
-| `OnlineKalmanSpread` 수정 | `kalman_spread.py`, `live_trader.py`, `test_kalman_spread.py` |
+| Vol-Inverse Sizing 수정 | `live_trader.py`, `continuous_backtest.py`, `test_vol_inverse_sizing.py` |
 | `TransactionCosts` 수정 | `costs.py`, `continuous_backtest.py`, `test_pnl_accuracy.py` |
 | numba 함수 수정 | `numba_ops.py`, `__pycache__/` 캐시 무효화 필요, `test_numba_ops.py` |
 | Discord 명령어 추가 | `bot.py`, `live_trader.py`의 `_handle_command()`, `test_discord_bot.py` |
@@ -224,8 +246,8 @@ notional = margin × leverage
 | `trading_fee` | 0.0005 (0.05%) | settings.py | 거래 수수료 |
 | `slippage` | 0.001 (0.1%) | settings.py | 슬리피지 추정치 |
 | `funding_rate_8h` | 0.0001 (0.01%) | settings.py | 8시간 펀딩비 |
-| `kalman_delta` | 1e-5 | settings.py | Kalman 프로세스 노이즈 |
-| `kalman_obs_noise` | 1e-3 | settings.py | Kalman 관측 노이즈 |
+| `vol_inverse_sizing` | True | backtest config | 변동성 반비례 사이징 활성화 |
+| `vol_sizing_max_multiplier` | 3.0 | backtest config | 사이징 최대 배율 제한 |
 | `max_holding_hours` | 16 | settings.py | 최대 보유 시간 |
 | `dynamic_exit_base` | 0.3 | settings.py | 동적 청산 기저값 |
 | `dynamic_exit_range` | 0.7 | settings.py | 동적 청산 범위 |
@@ -237,7 +259,7 @@ notional = margin × leverage
 
 ---
 
-## 7. 테스트 현황 (20파일, ~549 테스트)
+## 7. 테스트 현황 (20파일, ~534 테스트)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
@@ -250,7 +272,7 @@ notional = margin × leverage
 | `test_cached_pair_search` | 페어 캐싱 | select_pairs() 호출 횟수, 캐시 |
 | `test_blacklist` | 블랙리스트 | TTL 만료, Discord 명령, 지속성 |
 | `test_limit_chaser` | 주문 추격 | Paper/Live 체결, 시장가 폴백 |
-| `test_kalman_spread` | Kalman 필터 | predict, update, warmup, 수렴 |
+| `test_vol_inverse_sizing` | Vol-Inverse Sizing | 비율 공식, anchor_std, 달러 손절 균등화 |
 | `test_filters` | 통계 필터 | 개별 필터 + 파이프라인 조합 |
 | `test_events` | 이벤트 시스템 | 생성, FIFO, 핸들러 디스패치 |
 | `test_discord_bot` | Discord Bot | 명령어 파싱, 큐, 러너 생명주기 |

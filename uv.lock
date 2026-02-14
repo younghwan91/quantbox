@@ -1245,21 +1245,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pykalman"
-version = "0.10.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "scikit-base" },
-    { name = "scipy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/10/7a/b398d544dae2ece8556857f48cf02b30aef6b612e8adc98809f89fec7bbf/pykalman-0.10.2.tar.gz", hash = "sha256:0046d9ca7900207ca6f73b421476ba5f2e0f3e6ca1d472ff2223fd4dbd3ffdbe", size = 241164, upload-time = "2025-08-26T11:44:20.74Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/c5/2982675bc2665cb9489f236e2fb14ae3ecf408402c33eb514f9397ed67b8/pykalman-0.10.2-py2.py3-none-any.whl", hash = "sha256:4c04571959de89b207fed76b47b548acbc12eb104eb0563af18fb7c693516df9", size = 249371, upload-time = "2025-08-26T11:44:17.824Z" },
-]
-
-[[package]]
 name = "pyparsing"
 version = "3.2.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1474,15 +1459,6 @@ wheels = [
 ]
 
 [[package]]
-name = "scikit-base"
-version = "0.12.6"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/48/f4/1a194fc2dc6efbe5007f5a4cef6ea231947312760d1f569bd026ecaa6bd7/scikit_base-0.12.6.tar.gz", hash = "sha256:553e2bafaf30cd91d873bf424a9d16772d7638ea02ded6fb649b5d4b4c236d14", size = 125619, upload-time = "2025-09-18T23:36:55.654Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/d5/d4b2dd0821705b734c659ab165652afb9c5c0bc6e5abf361bbeabced1157/scikit_base-0.12.6-py3-none-any.whl", hash = "sha256:68369cf633502e7649c6e029a78e30063154ee2eaccad34a48e19e64272a820f", size = 149490, upload-time = "2025-09-18T23:36:53.738Z" },
-]
-
-[[package]]
 name = "scipy"
 version = "1.16.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1678,7 +1654,6 @@ dependencies = [
     { name = "pandas" },
     { name = "plotly" },
     { name = "pydantic-settings" },
-    { name = "pykalman" },
     { name = "python-binance" },
     { name = "python-dotenv" },
     { name = "requests" },
@@ -1697,7 +1672,6 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.3.2" },
     { name = "plotly", specifier = ">=6.5.2" },
     { name = "pydantic-settings", specifier = ">=2.12.0" },
-    { name = "pykalman", specifier = ">=0.10.2" },
     { name = "python-binance", specifier = ">=1.0.29" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.32.5" },
