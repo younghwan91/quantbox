@@ -1,47 +1,34 @@
 """
-QuantBox - Professional Cryptocurrency Pair Trading Framework
+QuantBox - Binance Futures Pair Trading Framework
 
-A comprehensive quantitative trading framework for cryptocurrency pair trading
-with unified backtesting and live trading capabilities.
+A quantitative trading framework for cryptocurrency pair trading
+on Binance Futures with continuous backtesting and live trading.
 
 Features:
-- Event-driven architecture for unified backtest/live trading
+- Kalman filter-based spread tracking with adaptive z-score
+- Multi-layer defense: Z-Score Cap, Vol Gate, BTC Crash Gate
+- Continuous pair backtesting with realistic cost modeling
 - Systematic multi-timeframe data caching
 - Flexible filter pipeline for pair selection
-- Multiple optimization algorithms (DE, Bayesian, Grid Search)
-- Walk-forward analysis and robustness testing
-- Interactive analysis dashboard
+- Discord bot for live monitoring and control
 
 Usage:
-    from quantbox import Config, TradingEngine
-    from quantbox.strategy import PairTradingStrategy
-    from quantbox.data import DataDownloader
-    
-    # Initialize
-    config = Config.load('config.yaml')
-    engine = TradingEngine(config)
-    
-    # Run backtest
-    results = engine.run_backtest(strategy, data)
-    
-    # Or live trading
-    engine.run_live(strategy)
+    from quantbox import Config, DataDownloader
+    from quantbox.backtest import run_continuous_backtest
 
 Author: QuantBox Team
-Version: 1.0.0
+Version: 1.3.0
 """
 
-__version__ = "1.0.0"
+__version__ = "1.3.0"
 __author__ = "QuantBox Team"
 
 # Core components
 from quantbox.core.config import Config, TradingMode
-from quantbox.core.engine import TradingEngine
 from quantbox.core.events import (
-    Event, EventType, MarketEvent, SignalEvent, 
+    Event, EventType, MarketEvent, SignalEvent,
     OrderEvent, FillEvent, EventQueue, SignalType
 )
-from quantbox.core.portfolio import Portfolio, Position, PairPosition
 
 # Data components
 from quantbox.data.cache import DataCache, TimeframedCache
@@ -55,7 +42,6 @@ from quantbox.strategy.filters import (
     HalfLifeFilter, HurstFilter
 )
 from quantbox.strategy.pair_selector import PairSelector, PairCandidate
-from quantbox.strategy.pair_strategy import PairTradingStrategy
 
 # Backtest components
 from quantbox.backtest.continuous_backtest import (
@@ -69,11 +55,10 @@ from quantbox.backtest.metrics import PerformanceMetrics, calculate_metrics
 __all__ = [
     # Version
     "__version__",
-    
+
     # Core
     "Config",
     "TradingMode",
-    "TradingEngine",
     "Event",
     "EventType",
     "MarketEvent",
@@ -82,17 +67,14 @@ __all__ = [
     "FillEvent",
     "EventQueue",
     "SignalType",
-    "Portfolio",
-    "Position",
-    "PairPosition",
-    
+
     # Data
     "DataCache",
     "TimeframedCache",
     "DataDownloader",
     "DataPreprocessor",
     "PairData",
-    
+
     # Strategy
     "Strategy",
     "StatefulStrategy",
@@ -103,8 +85,7 @@ __all__ = [
     "HurstFilter",
     "PairSelector",
     "PairCandidate",
-    "PairTradingStrategy",
-    
+
     # Backtest
     "ContinuousBacktestConfig",
     "ContinuousPairBacktest",
