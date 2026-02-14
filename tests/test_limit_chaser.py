@@ -1059,16 +1059,16 @@ class TestCloseSlotFailureHandling:
         trader.discord.send.assert_not_called()
 
     def test_one_leg_fails_sends_critical(self, trader):
-        """한쪽 레그 청산 실패 → CRITICAL 경고 + Discord 알림."""
+        """한쪽 레그 청산 실패 → CRITICAL 경고 + Discord 알림 + 슬롯 유지."""
         self._setup_active_slot(trader, 1)
         # 첫 번째 레그 성공, 두 번째 실패
         trader.close_position = MagicMock(side_effect=[True, False])
 
         trader.close_slot_positions(1)
 
-        # 슬롯은 리셋됨 (재시도 불가이므로)
-        assert trader.slots[1].position_open is False
-        assert 1 not in trader.slot_positions
+        # 슬롯은 유지 (재시도 가능하도록 — v1.8.0 버그 수정)
+        assert trader.slots[1].position_open is True
+        assert 1 in trader.slot_positions
         # Discord CRITICAL 알림 발송됨
         trader.discord.send.assert_called_once()
         call_kwargs = trader.discord.send.call_args
@@ -1076,12 +1076,15 @@ class TestCloseSlotFailureHandling:
                'CRITICAL' in call_kwargs.args[0] if call_kwargs.args else True
 
     def test_both_legs_fail_sends_critical(self, trader):
-        """양쪽 레그 모두 청산 실패 → CRITICAL 경고."""
+        """양쪽 레그 모두 청산 실패 → CRITICAL 경고 + 슬롯 유지."""
         self._setup_active_slot(trader, 2)
         trader.close_position = MagicMock(return_value=False)
 
         trader.close_slot_positions(2)
 
+        # 슬롯 유지 (v1.8.0 버그 수정)
+        assert trader.slots[2].position_open is True
+        assert 2 in trader.slot_positions
         trader.discord.send.assert_called_once()
         content = trader.discord.send.call_args.kwargs.get('content', '')
         assert 'BTCUSDT' in content
