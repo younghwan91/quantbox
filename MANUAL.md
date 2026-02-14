@@ -183,11 +183,9 @@ FORMATION_HOURS=60             # 페어 선별에 사용할 과거 데이터 길
 # DYNAMIC_EXIT_BASE=0.3         # 빠른 페어 exit z-score (half_life=min)
 # DYNAMIC_EXIT_RANGE=0.7        # 느린 페어까지의 범위 (max exit = base + range = 1.0)
 
-# Adaptive Kalman & Regime Protection
+# Regime Protection
 Z_SCORE_CAP=4.0                # |z| > cap 이면 진입 거부 (레짐 변화 방어)
 VOL_EXPANSION_GATE=2.0         # recent_std / formation_std > gate 이면 진입 거부
-KALMAN_DELTA=1e-5              # Kalman 상태 전이 노이즈 스케일
-KALMAN_OBS_NOISE=1e-3          # Kalman 관측 노이즈 분산
 
 # BTC Crash Gate (매크로 방어)
 BTC_CRASH_GATE_ENABLED=true    # BTC 급락/급등 시 진입 차단 활성화
@@ -234,7 +232,6 @@ quantbox/
 ├── strategy/               # 전략 계층
 │   ├── base.py             # 전략 베이스 클래스
 │   ├── filters.py          # 필터 구현
-│   ├── kalman_spread.py    # Online Kalman Filter (적응형 z-score)
 │   ├── pair_selector.py    # 페어 선택
 │   └── pair_strategy.py    # 페어 전략
 ├── backtest/               # 백테스팅
@@ -1547,33 +1544,22 @@ print(f"Expected Drawdown: {mc_results['expected_dd']:.2f}%")
 mc.plot_distribution()
 ```
 
-### 14.3 칼만 필터 헤지 비율
+### 14.3 Frozen 헤지 비율 (OLS)
 
 ```python
-from pykalman import KalmanFilter
+import numpy as np
 
-def kalman_hedge_ratio(price1, price2):
-    """칼만 필터를 이용한 동적 헤지 비율 추정"""
+def ols_hedge_ratio(price1, price2):
+    """OLS를 이용한 고정 헤지 비율 추정 (formation 기간에 1회 계산)"""
+    log_p1 = np.log(price1.values)
+    log_p2 = np.log(price2.values)
     
-    obs_mat = np.vstack([price2, np.ones(len(price2))]).T[:, np.newaxis, :]
+    # Simple OLS: log_p1 = gamma * log_p2 + mu + epsilon
+    A = np.column_stack([log_p2, np.ones(len(log_p2))])
+    result = np.linalg.lstsq(A, log_p1, rcond=None)
+    hedge_ratio, intercept = result[0]
     
-    kf = KalmanFilter(
-        n_dim_obs=1,
-        n_dim_state=2,
-        initial_state_mean=np.array([0, 0]),
-        initial_state_covariance=np.eye(2),
-        transition_matrices=np.eye(2),
-        observation_matrices=obs_mat,
-        observation_covariance=1,
-        transition_covariance=0.001 * np.eye(2)
-    )
-    
-    state_means, _ = kf.filter(price1.values)
-    
-    hedge_ratios = state_means[:, 0]
-    intercepts = state_means[:, 1]
-    
-    return hedge_ratios, intercepts
+    return hedge_ratio, intercept
 ```
 
 ### 14.4 다중 타임프레임 전략

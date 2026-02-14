@@ -172,6 +172,8 @@ class ContinuousBacktestConfig:
     # Risk management
     position_size_pct: float = -1.0  # Fraction of capital per trade (auto: 1/max_traders)
     leverage: int = 1  # Leverage multiplier (1=no leverage, 2=2x, etc.)
+    vol_inverse_sizing: bool = True   # Position size ∝ 1/spread_std (risk parity)
+    vol_sizing_max_multiplier: float = 3.0  # Cap: notional ≤ base × multiplier
     
     # Multi-trader
     max_traders: int = 5  # Maximum concurrent independent traders
@@ -508,10 +510,14 @@ class ContinuousPairBacktest:
             state.no_trade_periods += 1
             return
 
+        # Compute anchor spread_std for vol-inverse sizing: min across candidates
+        # Low-vol pair gets full slot capital, high-vol pairs get scaled down
+        anchor_std = min(c['spread_std'] for c in candidates) if self.config.vol_inverse_sizing else 0.0
+
         # Try to enter each candidate into an idle slot
         entered_any = False
         for slot, candidate in zip(idle_slots, candidates):
-            if self._enter_slot(state, slot, candidate, data, bar_idx, timestamp):
+            if self._enter_slot(state, slot, candidate, data, bar_idx, timestamp, anchor_std=anchor_std):
                 entered_any = True
 
         if not entered_any:
@@ -574,12 +580,17 @@ class ContinuousPairBacktest:
         data: Dict[str, pd.DataFrame],
         bar_idx: int,
         timestamp: datetime,
+        anchor_std: float = 0.0,
     ) -> bool:
         """Attempt to enter a position in a specific slot.
 
         Checks regime gates (BTC crash, z-cap, vol expansion) and
         z-score threshold at the CURRENT bar, then allocates capital.
         Gate logic is identical to live_trader.execute_pair_trade().
+
+        When vol_inverse_sizing is enabled, position notional is scaled by
+        anchor_std / spread_std so that stop-loss dollar amounts are equalized
+        across pairs with different volatilities.
 
         Args:
             state: Current backtest state.
@@ -588,6 +599,7 @@ class ContinuousPairBacktest:
             data: Full price data.
             bar_idx: Current bar index.
             timestamp: Current timestamp.
+            anchor_std: Min spread_std across candidates (for vol-inverse sizing).
 
         Returns:
             True if position was entered, False if any gate blocked.
@@ -669,6 +681,17 @@ class ContinuousPairBacktest:
         if notional <= 0:
             logger.debug(f"Slot {slot.slot_id}: no capital available")
             return False
+
+        # ── Vol-inverse sizing (risk parity) ──
+        # Scale notional so all pairs have equal dollar stop-loss:
+        #   loss = stop_z × spread_std × notional
+        #   With notional ∝ 1/spread_std: loss = stop_z × anchor_std (constant)
+        # Low-vol pair gets full capital, high-vol gets proportionally less.
+        if self.config.vol_inverse_sizing and anchor_std > 0 and candidate['spread_std'] > 0:
+            vol_ratio = anchor_std / candidate['spread_std']
+            vol_ratio = min(vol_ratio, self.config.vol_sizing_max_multiplier)  # cap
+            vol_ratio = min(vol_ratio, 1.0)  # anchor = min → ratio ≤ 1 always
+            notional = notional * vol_ratio
 
         # Margin is the actual cash consumed from the pool
         margin = calculate_margin_from_notional(notional, self.config.leverage)
@@ -886,7 +909,7 @@ class ContinuousPairBacktest:
             pos['intercept']
         )[0]
         
-        # Calculate current z-score using FROZEN statistics
+        # Calculate current z-score using frozen formation statistics
         current_z = (current_spread - pos['spread_mean']) / pos['spread_std']
         
         # Calculate bars held
