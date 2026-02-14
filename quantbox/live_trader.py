@@ -380,6 +380,59 @@ class LivePairTrader:
             logger.error(f"Failed to get price for {symbol}: {e}")
             return self.prev_prices.get(symbol, 0.0)
     
+    def check_btc_crash_gate(self) -> tuple[bool, float]:
+        """BTC 급락/급등 게이트: 최근 N봉 수익률이 임계값을 초과하면 진입 차단.
+
+        매크로 위험(시장 전체 상관관계 급등) 시 모든 알트 페어가 동시에
+        깨지는 것을 사전 차단하는 레이어.
+
+        Returns:
+            (is_blocked, btc_return):
+                is_blocked — True이면 진입 차단해야 함.
+                btc_return — 측정된 BTC 수익률 (로깅/모니터링용).
+        """
+        if not self.config.get('btc_crash_gate_enabled', True):
+            return False, 0.0
+
+        window = self.config.get('btc_crash_window', 8)
+        threshold = self.config.get('btc_crash_threshold', 0.03)
+
+        try:
+            klines = self.client.futures_klines(
+                symbol='BTCUSDT',
+                interval=self.config.get('interval', '15m'),
+                limit=window + 1,  # +1: 수익률 계산에 시작점 필요
+            )
+            if not klines or len(klines) < 2:
+                logger.warning("BTC crash gate: 캔들 데이터 부족, gate 통과")
+                return False, 0.0
+
+            # 가장 오래된 봉의 시가 vs 최신 봉의 종가
+            open_price = float(klines[0][1])   # Open of oldest candle
+            close_price = float(klines[-1][4])  # Close of newest candle
+
+            if open_price <= 0:
+                return False, 0.0
+
+            btc_return = (close_price - open_price) / open_price
+
+            if abs(btc_return) > threshold:
+                logger.warning(
+                    f"BTC crash gate BLOCKED: BTC {btc_return:+.2%} "
+                    f"over {window} candles (threshold ±{threshold:.1%})"
+                )
+                return True, btc_return
+
+            logger.debug(
+                f"BTC crash gate OK: BTC {btc_return:+.2%} "
+                f"(threshold ±{threshold:.1%})"
+            )
+            return False, btc_return
+
+        except Exception as e:
+            logger.error(f"BTC crash gate error: {e} — gate 통과 (fail-open)")
+            return False, 0.0
+
     def get_available_balance(self, asset: str = 'USDT') -> float:
         """사용 가능 잔고 조회 (미사용 마진)"""
         if self.paper_mode:
@@ -831,6 +884,15 @@ class LivePairTrader:
         symbol1, symbol2 = pair.symbol1, pair.symbol2
         hedge_ratio = pair_info['hedge_ratio']
         leverage = self.config['leverage']
+
+        # ── BTC Crash Gate (매크로 방어, 최우선) ──
+        btc_blocked, btc_ret = self.check_btc_crash_gate()
+        if btc_blocked:
+            logger.warning(
+                f"Slot {slot_id}: BTC crash gate blocked entry "
+                f"(BTC {btc_ret:+.2%}) — skipping {symbol1}/{symbol2}"
+            )
+            return False
         
         # Get current prices
         price1 = self.get_price(symbol1)
@@ -1510,7 +1572,12 @@ class LivePairTrader:
         total = self.get_total_balance()
         paused_str = " ⏸️ **PAUSED**" if self.paused else ""
 
-        lines = [f"📊 **QuantBox Status**{paused_str}"]
+        # BTC crash gate status
+        btc_blocked, btc_ret = self.check_btc_crash_gate()
+        btc_icon = "🔴" if btc_blocked else "🟢"
+        btc_str = f" | BTC {btc_icon} {btc_ret:+.2%}"
+
+        lines = [f"📊 **QuantBox Status**{paused_str}{btc_str}"]
         lines.append(f"잔고: ${available:,.2f} / ${total:,.2f}")
         lines.append(f"슬롯: {len(active)} active / {len(idle)} idle")
         lines.append("")
