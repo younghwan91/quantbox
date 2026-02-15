@@ -1214,6 +1214,8 @@ class LivePairTrader:
             'capital': margin,  # Margin (cash locked), matches backtest slot.position_info['capital']
             'notional': capital,  # Notional exposure (margin × leverage)
             'leverage': leverage,
+            'best_z': z_score,           # Trailing stop: best z-score seen (closest to 0)
+            'trailing_active': False,    # Trailing stop: activated when Δz >= threshold
         }
 
         # Update slot state
@@ -1319,11 +1321,39 @@ class LivePairTrader:
         should_close = False
         close_reason = ""
         
-        # Exit conditions
+        # ── Trailing stop: update best_z ──
+        if self.config.get('trailing_stop_enabled', False):
+            best_z = pos.get('best_z', entry_z)
+            if signal == 1:  # Long spread: z should increase (become less negative)
+                if z_score > best_z:
+                    pos['best_z'] = z_score
+                    best_z = z_score
+            else:  # Short spread: z should decrease (become less positive)
+                if z_score < best_z:
+                    pos['best_z'] = z_score
+                    best_z = z_score
+            
+            # Check activation
+            delta = abs(best_z - entry_z)
+            activate_delta = self.config.get('trailing_stop_activate_delta', 0.3)
+            if delta >= activate_delta:
+                pos['trailing_active'] = True
+
+        # Exit conditions (priority: mean_reversion > trailing_stop > stop_loss > max_holding)
         if signal == 1:  # Long spread
             if z_score >= -effective_exit_z:
                 should_close = True
                 close_reason = "mean_reversion"
+            elif self.config.get('trailing_stop_enabled', False) and pos.get('trailing_active', False):
+                buffer = self.config.get('trailing_stop_buffer', 0.1)
+                if z_score <= entry_z - buffer:
+                    should_close = True
+                    close_reason = "trailing_stop"
+                    logger.info(
+                        f"Slot {slot_id}: Trailing stop triggered: "
+                        f"z={z_score:+.3f}, best_z={pos['best_z']:+.3f}, "
+                        f"threshold={entry_z - buffer:+.3f}"
+                    )
             elif z_score < entry_z - self.config['stop_loss_zscore']:
                 should_close = True
                 close_reason = "stop_loss"
@@ -1331,6 +1361,16 @@ class LivePairTrader:
             if z_score <= effective_exit_z:
                 should_close = True
                 close_reason = "mean_reversion"
+            elif self.config.get('trailing_stop_enabled', False) and pos.get('trailing_active', False):
+                buffer = self.config.get('trailing_stop_buffer', 0.1)
+                if z_score >= entry_z + buffer:
+                    should_close = True
+                    close_reason = "trailing_stop"
+                    logger.info(
+                        f"Slot {slot_id}: Trailing stop triggered: "
+                        f"z={z_score:+.3f}, best_z={pos['best_z']:+.3f}, "
+                        f"threshold={entry_z + buffer:+.3f}"
+                    )
             elif z_score > entry_z + self.config['stop_loss_zscore']:
                 should_close = True
                 close_reason = "stop_loss"
