@@ -105,7 +105,7 @@ class QuantBoxSettings(BaseSettings):
     funding_rate_8h: float = 0.0001
 
     # ── 유니버스 & 페이퍼 ──
-    n_coins: int = 40
+    n_coins: int = 50
     paper_balance: float = 1000.0
 
     # ── 알림 ──
