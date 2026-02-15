@@ -61,6 +61,7 @@ QuantBox v1.8.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 
 | 조건 | 판정 | 비고 |
 |------|------|------|
 | **평균회귀** | \|z\| ≤ exit_zscore | Frozen z-score (formation 기간 통계) 사용 |
+| **Trailing Stop** | z가 activate_delta 이상 개선 후 entry±buffer로 역전 | "Revert-Then-Reverse" 패턴 방어 (v1.9.0) |
 | **손절** | z가 진입 방향 반대로 > stop_loss_zscore | 3.5 기본값 |
 | **최대보유** | bars_held > max_holding_bars | 시간 기반 강제 청산 |
 
@@ -228,6 +229,7 @@ return_pct = net_pnl / margin × 100
 - [ ] `close_slot_positions()` — 청산 실패 시 슬롯 유지 (재시도 보장, v1.8.0)
 - [ ] 블랙리스트 TTL (3600초) — 실패 심볼 재진입 방지
 - [ ] 동적 청산 z-score — 반감기 기반 적응형 청산
+- [ ] Trailing Stop (Ratchet Stop) — z 개선 후 entry 역전 시 조기 청산 (v1.9.0)
 - [ ] 최대 보유 기간 강제 청산
 - [ ] 연속 에러 카운터 — 5회 연속 실패 시에만 전체 청산 (v1.8.0)
 

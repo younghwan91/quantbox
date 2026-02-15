@@ -2,8 +2,8 @@
 
 **암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
 
-> 버전: 1.8.0  
-> 최종 업데이트: 2026년 2월 14일
+> 버전: 1.9.0  
+> 최종 업데이트: 2026년 2월 15일
 
 ---
 
@@ -799,6 +799,11 @@ if in_long_position and z_score <= entry_z - stop_loss_zscore:
 
 if in_short_position and z_score >= entry_z + stop_loss_zscore:
     exit_reason = "stop_loss"
+
+# Trailing Stop (Ratchet Stop)
+# z가 entry 대비 activate_delta 이상 개선 후 entry 수준으로 역전 시 청산
+if trailing_active and z reversed past entry_z ± buffer:
+    exit_reason = "trailing_stop"
 
 # 최대 보유 기간
 if bars_held >= max_holding_periods:
