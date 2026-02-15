@@ -534,6 +534,25 @@ class LivePairTrader:
             logger.error(f"Failed to get total balance: {e}")
             return 0.0
     
+    def get_binance_unrealized_pnl(self) -> dict[str, float]:
+        """바이낸스에서 심볼별 실제 미실현 PnL 조회.
+
+        Returns:
+            {symbol: unrealizedProfit} 딕셔너리. paper_mode 시 빈 딕셔너리.
+        """
+        if self.paper_mode:
+            return {}
+        try:
+            account = self.client.futures_account()
+            return {
+                p['symbol']: float(p['unrealizedProfit'])
+                for p in account['positions']
+                if float(p['positionAmt']) != 0.0
+            }
+        except Exception as e:
+            logger.debug(f"Failed to get Binance uPnL: {e}")
+            return {}
+
     def get_current_positions(self) -> List[Dict]:
         """현재 포지션 조회"""
         # Paper mode: use simulated positions
@@ -1304,10 +1323,15 @@ class LivePairTrader:
 
         # 주기적 INFO 스냅샷: 15사이클마다 (≈15분) 활성 포지션 상태 기록
         if self._cycle_count % 15 == 0:
-            # Unrealized PnL 추정
+            # Unrealized PnL: 바이낸스 실제 값 우선, fallback으로 자체 계산
             try:
-                upnl = (price1 - pos['entry_price1']) * pos.get('qty1', 0) + \
-                       (price2 - pos['entry_price2']) * pos.get('qty2', 0)
+                binance_upnl = self.get_binance_unrealized_pnl()
+                s1, s2 = pos['symbol1'], pos['symbol2']
+                if binance_upnl and (s1 in binance_upnl or s2 in binance_upnl):
+                    upnl = binance_upnl.get(s1, 0.0) + binance_upnl.get(s2, 0.0)
+                else:
+                    upnl = (price1 - pos['entry_price1']) * pos.get('qty1', 0) + \
+                           (price2 - pos['entry_price2']) * pos.get('qty2', 0)
             except Exception:
                 upnl = 0.0
             logger.info(
@@ -1487,6 +1511,8 @@ class LivePairTrader:
             슬롯별 상태 딕셔너리 리스트.
         """
         info: list[dict] = []
+        # 바이낸스 미실현 PnL 한 번에 조회 (슬롯별 API 호출 방지)
+        binance_upnl = self.get_binance_unrealized_pnl()
         for slot in self.slots:
             if slot.position_open and slot.slot_id in self.slot_positions:
                 pos = self.slot_positions[slot.slot_id]
@@ -1495,23 +1521,29 @@ class LivePairTrader:
                 if entry_time:
                     hours = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
 
-                # Unrealized PnL
+                # 현재 가격 + z-score (항상 필요)
+                p1 = p2 = 0.0
+                current_z = 0.0
                 try:
                     p1 = self.get_price(pos['symbol1'])
                     p2 = self.get_price(pos['symbol2'])
-                    pnl = (p1 - pos['entry_price1']) * pos['qty1'] + \
-                          (p2 - pos['entry_price2']) * pos['qty2']
-                except Exception:
-                    pnl = 0.0
-
-                # Current z-score using frozen formation statistics
-                try:
                     current_z = self.calculate_zscore(
                         p1, p2, pos['hedge_ratio'],
                         pos['spread_mean'], pos['spread_std'],
                     )
                 except Exception:
-                    current_z = 0.0
+                    pass
+
+                # Unrealized PnL: 바이낸스 실제 값 우선
+                try:
+                    s1, s2 = pos['symbol1'], pos['symbol2']
+                    if binance_upnl and (s1 in binance_upnl or s2 in binance_upnl):
+                        pnl = binance_upnl.get(s1, 0.0) + binance_upnl.get(s2, 0.0)
+                    else:
+                        pnl = (p1 - pos['entry_price1']) * pos['qty1'] + \
+                              (p2 - pos['entry_price2']) * pos['qty2']
+                except Exception:
+                    pnl = 0.0
 
                 info.append({
                     'slot_id': slot.slot_id,
