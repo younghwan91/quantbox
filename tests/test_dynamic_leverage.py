@@ -313,48 +313,123 @@ class TestDynamicLeverageIntegration:
 
         assert abs(R / balance - target_r) < 1e-8
 
-    def test_vol_inverse_preserves_risk(self):
-        """With vol-inverse sizing, R should stay ≤ target for non-anchor pairs."""
+    def test_leverage_based_risk_parity(self):
+        """With dynamic leverage ON, each pair uses its own spread_std.
+        No vol-inverse notional reduction: R = target exactly for all pairs
+        (when leverage is not clamped by min/max bounds).
+        """
         balance = 10000.0
         pct = 0.2
         target_r = 0.01
         stop_z = 3.5
-        anchor_std = 0.008
-        pair_spread_std = 0.016  # 2x anchor
         hr = 1.0
         cost_rate = 0.00325
+
+        for spread_std in [0.004, 0.008, 0.016]:
+            lev = calculate_dynamic_leverage(
+                target_r_pct=target_r,
+                position_size_pct=pct,
+                stop_loss_zscore=stop_z,
+                risk_std=spread_std,  # each pair's own spread_std
+                hedge_ratio=hr,
+                cost_rate=cost_rate,
+                max_leverage=20.0,
+            )
+
+            notional = calculate_slot_capital(
+                available_capital=balance,
+                active_slots=[],
+                max_traders=5,
+                position_size_pct=pct,
+                leverage=lev,
+            )
+
+            # No vol-inverse reduction — notional is NOT scaled down
+            stop_loss = stop_z * spread_std * notional / (1 + hr)
+            total_cost = cost_rate * notional
+            R = stop_loss + total_cost
+            R_pct = R / balance
+
+            # R = target exactly for ALL pairs (not just anchor)
+            assert abs(R_pct - target_r) < 1e-8, (
+                f"spread_std={spread_std}: R={R_pct:.6f} != target={target_r}"
+            )
+
+    def test_leverage_clamped_r_exceeds_target(self):
+        """When leverage is clamped at min (1.0), R may exceed target.
+        This is an inherent safety trade-off: we refuse to go below 1x.
+        """
+        balance = 10000.0
+        pct = 0.2
+        target_r = 0.01
+        stop_z = 3.5
+        hr = 1.0
+        cost_rate = 0.00325
+        spread_std = 0.032  # very high vol → raw lev < 1
 
         lev = calculate_dynamic_leverage(
             target_r_pct=target_r,
             position_size_pct=pct,
             stop_loss_zscore=stop_z,
-            risk_std=anchor_std,  # Use anchor_std when vol-inverse is ON
+            risk_std=spread_std,
             hedge_ratio=hr,
             cost_rate=cost_rate,
             max_leverage=20.0,
         )
 
-        base_notional = calculate_slot_capital(
-            available_capital=balance,
-            active_slots=[],
-            max_traders=5,
-            position_size_pct=pct,
-            leverage=lev,
+        # Leverage is clamped at 1.0
+        assert lev == 1.0
+
+        notional = calculate_slot_capital(
+            available_capital=balance, active_slots=[], max_traders=5,
+            position_size_pct=pct, leverage=lev,
+        )
+        stop_loss = stop_z * spread_std * notional / (1 + hr)
+        total_cost = cost_rate * notional
+        R_pct = (stop_loss + total_cost) / balance
+
+        # R exceeds target because we can't go below 1x
+        assert R_pct > target_r
+
+    def test_high_vol_pair_gets_lower_leverage_same_margin(self):
+        """High-vol pair → lower leverage, but margin per slot is identical."""
+        balance = 10000.0
+        pct = 0.2
+        target_r = 0.01
+        stop_z = 3.5
+        hr = 1.0
+        cost_rate = 0.00325
+
+        lev_low = calculate_dynamic_leverage(
+            target_r_pct=target_r, position_size_pct=pct,
+            stop_loss_zscore=stop_z, risk_std=0.005,
+            hedge_ratio=hr, cost_rate=cost_rate, max_leverage=20.0,
+        )
+        lev_high = calculate_dynamic_leverage(
+            target_r_pct=target_r, position_size_pct=pct,
+            stop_loss_zscore=stop_z, risk_std=0.020,
+            hedge_ratio=hr, cost_rate=cost_rate, max_leverage=20.0,
         )
 
-        # Vol-inverse scales down for higher-vol pair
-        vol_ratio = min(anchor_std / pair_spread_std, 1.0)
-        actual_notional = base_notional * vol_ratio
+        # Higher vol → lower leverage
+        assert lev_high < lev_low
 
-        # Stop-loss uses pair's spread_std but notional is reduced
-        stop_loss = stop_z * pair_spread_std * actual_notional / (1 + hr)
-        total_cost = cost_rate * actual_notional
-        R = stop_loss + total_cost
-        R_pct = R / balance
+        # But margin is the same (pct × balance) for both
+        notional_low = calculate_slot_capital(
+            available_capital=balance, active_slots=[], max_traders=5,
+            position_size_pct=pct, leverage=lev_low,
+        )
+        notional_high = calculate_slot_capital(
+            available_capital=balance, active_slots=[], max_traders=5,
+            position_size_pct=pct, leverage=lev_high,
+        )
 
-        # Non-anchor pair R should be ≤ target (vol-inverse normalizes stop-loss,
-        # but cost is also reduced by vol_ratio → R_non_anchor < R_anchor)
-        assert R_pct <= target_r + 1e-8
+        margin_low = calculate_margin_from_notional(notional_low, lev_low)
+        margin_high = calculate_margin_from_notional(notional_high, lev_high)
+
+        # Margin is identical = pct × balance
+        assert abs(margin_low - margin_high) < 1e-8
+        assert abs(margin_low - balance * pct) < 1e-8
 
 
 class TestDynamicLeverageDisabled:

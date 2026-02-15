@@ -105,7 +105,7 @@ class TestDefaultValues:
 
     def test_max_traders_default(self):
         s = _make_settings()
-        assert s.max_traders == 5
+        assert s.max_traders == 10
 
     def test_position_size_pct_default(self):
         s = _make_settings()

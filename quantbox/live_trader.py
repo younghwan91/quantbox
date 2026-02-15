@@ -608,10 +608,41 @@ class LivePairTrader:
             import math
             if leverage > 0 and not self.paper_mode:
                 exchange_leverage = int(math.ceil(leverage))
-                self.client.futures_change_leverage(
-                    symbol=symbol,
-                    leverage=exchange_leverage,
-                )
+                try:
+                    self.client.futures_change_leverage(
+                        symbol=symbol,
+                        leverage=exchange_leverage,
+                    )
+                except Exception as lev_err:
+                    err_msg = str(lev_err)
+                    # Binance returns max allowed leverage in error message
+                    # e.g. "leverage 36 is not valid" or contains max leverage info
+                    import re
+                    max_match = re.search(r'Max\s+leverage\s+(\d+)', err_msg, re.IGNORECASE)
+                    if not max_match:
+                        max_match = re.search(r'maximum.*?(\d+)', err_msg, re.IGNORECASE)
+                    if max_match:
+                        exchange_max = int(max_match.group(1))
+                        logger.warning(
+                            f"[{symbol}] Leverage {exchange_leverage}x exceeds exchange max "
+                            f"{exchange_max}x — using {exchange_max}x"
+                        )
+                        self.client.futures_change_leverage(
+                            symbol=symbol,
+                            leverage=exchange_max,
+                        )
+                    else:
+                        logger.warning(
+                            f"[{symbol}] Failed to set leverage {exchange_leverage}x: {err_msg} "
+                            f"— retrying with 20x fallback"
+                        )
+                        try:
+                            self.client.futures_change_leverage(
+                                symbol=symbol, leverage=20,
+                            )
+                        except Exception:
+                            logger.error(f"[{symbol}] Leverage fallback also failed")
+                            return None
 
             # Get tick_size for price rounding
             info = self.get_symbol_info(symbol)
@@ -1066,9 +1097,12 @@ class LivePairTrader:
         
         # capital is notional (leveraged). Use full notional for position sizing.
         # ── Vol-inverse sizing (risk parity) ──
-        # Scale capital so all pairs have equal dollar stop-loss
+        # When dynamic leverage is ON (target_r_pct > 0), risk parity is achieved
+        # through leverage variation, NOT notional reduction → full capital utilisation.
+        # Vol-inverse notional scaling only applies when dynamic leverage is OFF.
         spread_std = pair_info['spread_std']
-        if anchor_std > 0 and spread_std > 0:
+        target_r = self.config.get('target_r_pct', 0)
+        if target_r <= 0 and anchor_std > 0 and spread_std > 0:
             vol_ratio = min(anchor_std / spread_std, 1.0)  # anchor=min → ratio ≤ 1
             capital = capital * vol_ratio
             logger.info(
@@ -1843,7 +1877,9 @@ class LivePairTrader:
             # ── Dynamic leverage: target R = target_r_pct × balance ──
             target_r = self.config.get('target_r_pct', 0.01)
             if target_r > 0:
-                risk_std = anchor_std if anchor_std > 0 else pair_info.get('spread_std', 0.01)
+                # When dynamic leverage is ON, always use each pair's own spread_std.
+                # Risk parity is achieved through leverage variation, not notional reduction.
+                risk_std = pair_info.get('spread_std', 0.01)
                 cost_rate = estimate_cost_rate(
                     trading_fee=self.config['trading_fee'],
                     slippage=self.config['slippage'],

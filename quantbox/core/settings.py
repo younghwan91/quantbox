@@ -62,9 +62,9 @@ class QuantBoxSettings(BaseSettings):
 
     # ── 레버리지 및 포지션 사이징 ──
     leverage: int = 2  # max_leverage의 fallback (동적 레버리지 미사용 시)
-    max_leverage: int = 10  # 동적 레버리지 안전 상한
+    max_leverage: int = 125  # 동적 레버리지 안전 상한 (바이난스 절대 상한)
     target_r_pct: float = 0.02  # 트레이드당 목표 리스크 (밸런스의 2%)
-    max_traders: int = 5
+    max_traders: int = 10
     position_size_pct: float = -1.0  # -1 = auto (1/max_traders)
 
     # ── 전략 파라미터 ──
