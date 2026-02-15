@@ -137,7 +137,7 @@ class TestDefaultValues:
 
     def test_n_coins_default(self):
         s = _make_settings()
-        assert s.n_coins == 40
+        assert s.n_coins == 50
 
     def test_paper_balance_default(self):
         s = _make_settings()
