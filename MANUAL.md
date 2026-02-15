@@ -168,9 +168,9 @@ BINANCE_TESTNET=true          # 테스트넷 사용 시
 
 # 레버리지 및 포지션 사이징
 LEVERAGE=2                     # Fallback 레버리지 (동적 레버리지 미사용 시)
-TARGET_R_PCT=0.01              # 트레이드당 목표 리스크 (밸런스의 1%, 0=동적 비활성)
-MAX_LEVERAGE=10                # 동적 레버리지 안전 상한
-MAX_TRADERS=5                  # 최대 동시 트레이더 수 (기본값: 5)
+TARGET_R_PCT=0.02              # 트레이드당 목표 리스크 (밸런스의 2%, 0=동적 비활성)
+MAX_LEVERAGE=125               # 동적 레버리지 안전 상한
+MAX_TRADERS=10                 # 최대 동시 트레이더 수 (기본값: 10)
 POSITION_SIZE_PCT=-1           # 슬롯당 자본 비율 (-1=자동: 1/MAX_TRADERS)
 
 # 전략 파라미터
@@ -1348,8 +1348,8 @@ config.risk.max_position_size = 0.05    # 최대 포지션: 5%
 config.risk.max_drawdown = 0.15         # 최대 낙폭: 15%
 config.risk.stop_loss_pct = 0.03        # 손절: 3%
 config.risk.leverage = 2                 # Fallback 레버리지 (동적 미사용 시)
-config.risk.target_r_pct = 0.01         # 트레이드당 목표 리스크: 밸런스의 1%
-config.risk.max_leverage = 10           # 동적 레버리지 상한: 10x
+config.risk.target_r_pct = 0.02         # 트레이드당 목표 리스크: 밸런스의 2%
+config.risk.max_leverage = 125          # 동적 레버리지 상한: 125x (바이난스 절대 상한)
 config.risk.funding_rate_8h = 0.0001     # 8시간 펀딩비: 0.01%
 
 # 자동 리스크 관리
@@ -1832,8 +1832,8 @@ class RiskConfig:
     max_position_size: float = 0.1         # 최대 포지션 비율
     max_drawdown: float = 0.2              # 최대 낙폭
     leverage: int = 2                       # Fallback 레버리지 (동적 미사용 시)
-    target_r_pct: float = 0.01             # 트레이드당 목표 리스크 (밸런스의 1%)
-    max_leverage: int = 10                 # 동적 레버리지 안전 상한
+    target_r_pct: float = 0.02             # 트레이드당 목표 리스크 (밸런스의 2%)
+    max_leverage: int = 125                # 동적 레버리지 안전 상한 (바이난스 절대 상한)
     trading_fee: float = 0.0005            # 거래 수수료
     slippage: float = 0.001                # 슬리피지
     funding_rate_8h: float = 0.0001        # 8시간 펀딩비
