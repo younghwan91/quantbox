@@ -29,8 +29,8 @@
   - 거래량 필터
 - **페어 선택**: 통계적 페어 식별 및 순위화
 - **Dynamic Exit**: Half-life 기반 청산 z-score 자동 조절 (빠른 페어 → tight exit, 느린 페어 → loose exit)
-- **Vol-Inverse Sizing**: 변동성 반비례 포지션 사이징 (Risk Parity — 모든 페어의 손절 $loss 동일)
-- **Dynamic Leverage**: 트레이드당 R=target_r_pct(기본 1%)가 되도록 레버리지 자동 계산 (spread_std, HR, 비용 반영)
+- **Leverage-Based Risk Parity**: 페어별 spread_std에 따라 레버리지를 조절하여 R=target_r_pct(기본 2%)를 정확히 달성 (고변동 → 낮은 레버리지, 저변동 → 높은 레버리지)
+- **Dynamic Leverage**: 페어별 spread_std, HR, 비용을 반영하여 레버리지 자동 계산 (max 20x cap, 자본 100% 활용)
 - **Z-Score Cap**: |z| > 4.0 진입 거부 (레짐 변화 방어)
 - **Vol Expansion Gate**: 최근 변동성/포메이션 변동성 > 2.0 진입 거부
 - **BTC Crash Gate**: BTC 급락/급등(±3%) 감지 시 전체 진입 차단 (매크로 방어)
@@ -151,7 +151,7 @@ scripts/                    # 스크립트
     ├── sweep_max_holding.py    # Max holding 스윕
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (537개, 기본 실행 533 + slow 4)
+tests/                      # 유닛 테스트 (615개, 기본 실행 611 + slow 4)
 \`\`\`
 
 ## 📈 성과 지표
