@@ -34,6 +34,7 @@
 - **Z-Score Cap**: |z| > 4.0 진입 거부 (레짐 변화 방어)
 - **Vol Expansion Gate**: 최근 변동성/포메이션 변동성 > 2.0 진입 거부
 - **BTC Crash Gate**: BTC 급락/급등(±3%) 감지 시 전체 진입 차단 (매크로 방어)
+- **Trailing Stop (Ratchet Stop)**: z가 개선 후 entry 수준으로 역전 시 조기 청산 — "Revert-Then-Reverse" 패턴 방어 (Leung & Zhang 2021)
 
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
@@ -136,7 +137,7 @@ quantbox/
 │   ├── filters.py          # 필터 파이프라인
 │   └── pair_selector.py    # 페어 선택기
 ├── backtest/               # 백테스팅 프레임워크
-│   ├── continuous_backtest.py  # 연속 백테스트 엔진 (Vol-inverse sizing)
+│   ├── continuous_backtest.py  # 연속 백테스트 엔진 (Vol-inverse sizing, Trailing stop)
 │   └── metrics.py          # 성과 지표
 ├── notifications/          # 알림 시스템
 │   ├── bot.py              # Discord Bot (양방향)
@@ -151,7 +152,7 @@ scripts/                    # 스크립트
     ├── sweep_max_holding.py    # Max holding 스윕
     └── dynamic_exit_ab_test.py # Dynamic exit A/B 테스트
 
-tests/                      # 유닛 테스트 (615개, 기본 실행 611 + slow 4)
+tests/                      # 유닛 테스트 (648개, 기본 실행 644 + slow 4)
 \`\`\`
 
 ## 📈 성과 지표
