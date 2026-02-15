@@ -175,7 +175,7 @@ class ContinuousBacktestConfig:
     position_size_pct: float = -1.0  # Fraction of capital per trade (auto: 1/max_traders)
     leverage: int = 1  # Fallback leverage (used when target_r_pct=0, i.e. dynamic disabled)
     target_r_pct: float = 0.01  # Target risk per trade as fraction of balance (0.01=1%, 0=disable dynamic)
-    max_leverage: float = 10.0  # Safety cap for dynamic leverage
+    max_leverage: float = 125.0  # Safety cap for dynamic leverage (Binance absolute max)
     vol_inverse_sizing: bool = True   # Position size ∝ 1/spread_std (risk parity)
     vol_sizing_max_multiplier: float = 3.0  # Cap: notional ≤ base × multiplier
     
@@ -677,8 +677,10 @@ class ContinuousPairBacktest:
 
         # ── Dynamic leverage: target R = target_r_pct × balance ──
         if self.config.target_r_pct > 0:
-            # Determine effective std for stop-loss risk calculation
-            risk_std = anchor_std if (self.config.vol_inverse_sizing and anchor_std > 0) else candidate['spread_std']
+            # When dynamic leverage is ON, always use each pair's own spread_std.
+            # This achieves risk parity through leverage (high-vol → lower leverage)
+            # instead of through notional reduction, ensuring full capital utilisation.
+            risk_std = candidate['spread_std']
             cost_rate = estimate_cost_rate(
                 trading_fee=self.config.trading_fee,
                 slippage=self.config.slippage,
@@ -714,11 +716,11 @@ class ContinuousPairBacktest:
             return False
 
         # ── Vol-inverse sizing (risk parity) ──
-        # Scale notional so all pairs have equal dollar stop-loss:
-        #   loss = stop_z × spread_std × notional
-        #   With notional ∝ 1/spread_std: loss = stop_z × anchor_std (constant)
-        # Low-vol pair gets full capital, high-vol gets proportionally less.
-        if self.config.vol_inverse_sizing and anchor_std > 0 and candidate['spread_std'] > 0:
+        # When dynamic leverage is ON (target_r_pct > 0), risk parity is achieved
+        # through leverage variation (spread_std → leverage), NOT notional reduction.
+        # This ensures full capital utilisation while maintaining exact R = target_r_pct.
+        # Vol-inverse notional scaling is only used when dynamic leverage is OFF.
+        if self.config.target_r_pct <= 0 and self.config.vol_inverse_sizing and anchor_std > 0 and candidate['spread_std'] > 0:
             vol_ratio = anchor_std / candidate['spread_std']
             vol_ratio = min(vol_ratio, self.config.vol_sizing_max_multiplier)  # cap
             vol_ratio = min(vol_ratio, 1.0)  # anchor = min → ratio ≤ 1 always
