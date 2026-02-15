@@ -85,6 +85,11 @@ class QuantBoxSettings(BaseSettings):
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부
 
+    # ── Trailing Stop (ratchet stop) ──
+    trailing_stop_enabled: bool = True      # 트레일링 스톱 활성화
+    trailing_stop_activate_delta: float = 0.3  # z가 entry 대비 0.3 개선 시 활성화
+    trailing_stop_buffer: float = 0.1      # entry_z ± buffer에서 발동
+
     # ── BTC Crash Gate (매크로 방어) ──
     btc_crash_gate_enabled: bool = True    # BTC 급락 시 진입 차단 활성화
     btc_crash_window: int = 8              # 최근 N봉 (15분봉 기준 = 2시간)
@@ -173,6 +178,10 @@ class QuantBoxSettings(BaseSettings):
             # Regime Protection
             'z_score_cap': self.z_score_cap,
             'vol_expansion_gate': self.vol_expansion_gate,
+            # Trailing Stop
+            'trailing_stop_enabled': self.trailing_stop_enabled,
+            'trailing_stop_activate_delta': self.trailing_stop_activate_delta,
+            'trailing_stop_buffer': self.trailing_stop_buffer,
             # BTC Crash Gate
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,

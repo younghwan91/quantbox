@@ -42,6 +42,7 @@ class ExitReason(Enum):
     """Trade exit reasons"""
     MEAN_REVERSION = "mean_reversion"
     STOP_LOSS = "stop_loss"
+    TRAILING_STOP = "trailing_stop"
     MAX_HOLDING = "max_holding"
     END_OF_PERIOD = "end_of_period"
     PAIR_UNAVAILABLE = "pair_unavailable"
@@ -71,6 +72,7 @@ class TradeResult:
     spread_mean: float
     spread_std: float
     slot_id: int = 0  # Which trader slot executed this trade
+    best_z: float = 0.0  # Best (most favorable) z-score reached during trade
 
 
 @dataclass
@@ -165,6 +167,11 @@ class ContinuousBacktestConfig:
     z_score_cap: float = 4.0           # |z| > cap → regime anomaly, reject entry
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate → reject entry
     vol_expansion_window: int = 8      # Number of recent bars for vol gate
+
+    # Trailing stop (ratchet stop): z가 개선됐다가 entry 수준으로 역전 시 청산
+    trailing_stop_enabled: bool = False         # Trailing stop 활성화 여부
+    trailing_stop_activate_delta: float = 0.3   # entry 대비 Δz 이 이상 개선 시 활성화
+    trailing_stop_buffer: float = 0.1           # entry_z 기준 buffer (0이면 정확히 entry에서 발동)
 
     # BTC crash gate (parity with live_trader)
     btc_crash_gate_enabled: bool = True   # Enable BTC crash gate in backtest
@@ -752,6 +759,8 @@ class ContinuousPairBacktest:
             'spread_mean': candidate['spread_mean'],
             'spread_std': candidate['spread_std'],
             'half_life': candidate['half_life'],
+            'best_z': entry_z,  # Track best (most favorable) z for trailing stop
+            'trailing_active': False,  # Whether trailing stop has been activated
         }
 
         logger.debug(
@@ -948,6 +957,14 @@ class ContinuousPairBacktest:
         # Calculate bars held
         bars_held = bar_idx - pos['entry_bar']
         
+        # Update best_z (most favorable z reached)
+        if pos['signal'] == 1:  # Long spread: z should increase (become less negative)
+            if current_z > pos['best_z']:
+                pos['best_z'] = current_z
+        else:  # Short spread: z should decrease (become less positive)
+            if current_z < pos['best_z']:
+                pos['best_z'] = current_z
+
         # Check exit conditions
         exit_reason = None
 
@@ -962,7 +979,23 @@ class ContinuousPairBacktest:
             if current_z <= effective_exit_z:
                 exit_reason = ExitReason.MEAN_REVERSION
         
-        # 2. Stop loss
+        # 2. Trailing stop (ratchet stop)
+        # z가 entry 대비 충분히 개선된 후 다시 entry 수준으로 역전 → 레짐 변화 신호
+        if self.config.trailing_stop_enabled and exit_reason is None:
+            entry_z = pos['entry_z']
+            delta = abs(pos['best_z'] - entry_z)
+            if delta >= self.config.trailing_stop_activate_delta:
+                pos['trailing_active'] = True
+            if pos['trailing_active']:
+                # Check if z reversed back past entry + buffer
+                if pos['signal'] == 1:  # Long: z was improving (increasing), now worsened
+                    if current_z <= entry_z - self.config.trailing_stop_buffer:
+                        exit_reason = ExitReason.TRAILING_STOP
+                else:  # Short: z was improving (decreasing), now worsened
+                    if current_z >= entry_z + self.config.trailing_stop_buffer:
+                        exit_reason = ExitReason.TRAILING_STOP
+
+        # 3. Stop loss
         z_change = current_z - pos['entry_z']
         if pos['signal'] == 1:  # Long spread expects z to increase
             if z_change < -self.config.stop_loss_zscore:
@@ -971,7 +1004,7 @@ class ContinuousPairBacktest:
             if z_change > self.config.stop_loss_zscore:
                 exit_reason = ExitReason.STOP_LOSS
         
-        # 3. Max holding period
+        # 4. Max holding period
         if bars_held >= self.config.max_holding_bars:
             exit_reason = ExitReason.MAX_HOLDING
         
@@ -1066,6 +1099,7 @@ class ContinuousPairBacktest:
             spread_mean=pos['spread_mean'],
             spread_std=pos['spread_std'],
             slot_id=slot.slot_id,
+            best_z=pos.get('best_z', pos['entry_z']),
         )
         
         state.trades.append(trade)
