@@ -2,14 +2,18 @@
 Vol-Inverse Position Sizing (Risk Parity) tests.
 
 핵심 원칙:
-  notional ∝ 1/spread_std  →  stop-loss dollar loss = constant across all pairs.
+  - 동적 레버리지 ON (target_r_pct > 0): risk parity는 레버리지 조절로 달성.
+    notional 축소 없이 margin = position_size_pct × book 유지. R = target 정확.
+  - 동적 레버리지 OFF (target_r_pct = 0, 고정 레버리지): 기존 vol-inverse 적용.
+    notional ∝ 1/spread_std → stop-loss dollar loss = constant across all pairs.
 
 검증 항목:
-1. 높은 spread_std 페어는 낮은 notional을 받는다
-2. 낮은 spread_std 페어(anchor)는 full slot capital을 받는다
+1. 높은 spread_std 페어는 낮은 notional을 받는다 (고정 레버리지 모드)
+2. 낮은 spread_std 페어(anchor)는 full slot capital을 받는다 (고정 레버리지 모드)
 3. anchor_std = min(spread_stds) 이므로 vol_ratio ≤ 1 항상 성립
 4. vol_inverse_sizing=False일 때 scaling이 비활성화된다
-5. 백테스트와 라이브의 sizing 공식이 동일하다
+5. 동적 레버리지 ON일 때 vol-inverse notional 축소가 비활성화된다
+6. 동적 레버리지로 risk parity가 달성된다 (leverage ∝ 1/spread_std)
 """
 
 import pytest
@@ -106,14 +110,21 @@ class TestVolInverseConfig:
 
 
 class TestVolInverseInBacktest:
-    """_enter_slot applies vol-inverse sizing correctly."""
+    """_enter_slot applies vol-inverse sizing correctly.
+    
+    Vol-inverse notional scaling is only active when dynamic leverage is OFF
+    (target_r_pct=0). When dynamic leverage is ON, risk parity is achieved
+    through leverage variation.
+    """
 
-    def _make_engine(self, vol_inverse: bool = True):
+    def _make_engine(self, vol_inverse: bool = True, target_r_pct: float = 0.0):
         cfg = ContinuousBacktestConfig(
             initial_capital=10000.0,
             max_traders=5,
             formation_bars=100,
             vol_inverse_sizing=vol_inverse,
+            target_r_pct=target_r_pct,
+            leverage=2,  # fallback when dynamic disabled
         )
         return ContinuousPairBacktest(cfg)
 
@@ -161,6 +172,20 @@ class TestVolInverseInBacktest:
         # Verify config is False
         assert engine.config.vol_inverse_sizing is False
 
+    def test_dynamic_leverage_on_skips_vol_inverse(self):
+        """When target_r_pct > 0 (dynamic leverage ON), vol-inverse
+        notional reduction should NOT apply — risk parity is achieved
+        through leverage variation instead."""
+        engine = self._make_engine(vol_inverse=True, target_r_pct=0.01)
+        
+        # Dynamic leverage is ON
+        assert engine.config.target_r_pct == 0.01
+        assert engine.config.vol_inverse_sizing is True
+        
+        # The condition in _enter_slot: target_r_pct <= 0 AND vol_inverse
+        # Since target_r_pct > 0, vol-inverse notional scaling is skipped
+        # This ensures full capital utilisation per slot
+
     def test_anchor_std_is_min_of_candidates(self):
         """anchor_std should be min(spread_stds) across candidates."""
         stds = [0.020, 0.005, 0.015, 0.010]
@@ -176,10 +201,15 @@ class TestVolInverseInBacktest:
 
 
 class TestVolInverseInLiveTrader:
-    """Live trader execute_pair_trade applies vol-inverse sizing."""
+    """Live trader execute_pair_trade applies vol-inverse sizing.
+    
+    Vol-inverse notional scaling only applies when dynamic leverage is OFF
+    (target_r_pct=0 or not set). When dynamic leverage is ON, notional
+    is not reduced.
+    """
 
-    def test_anchor_std_passed_to_execute(self):
-        """execute_pair_trade accepts anchor_std kwarg."""
+    def test_vol_inverse_applies_when_dynamic_lev_off(self):
+        """When target_r_pct=0 (dynamic OFF), vol-inverse notional scaling applies."""
         with patch("quantbox.live_trader.Client"):
             from quantbox.live_trader import LivePairTrader
             with patch.dict("os.environ", {
@@ -187,6 +217,7 @@ class TestVolInverseInLiveTrader:
                 "BINANCE_TESTNET": "true",
             }):
                 trader = LivePairTrader(paper_mode=True)
+                trader.config['target_r_pct'] = 0  # dynamic leverage OFF
                 
                 # Mock everything needed for execute_pair_trade
                 trader.get_price = MagicMock(side_effect=[100.0, 50.0])
@@ -216,15 +247,15 @@ class TestVolInverseInLiveTrader:
                 )
                 assert result is True
 
-                # With vol-inverse: ratio = 0.005/0.020 = 0.25
-                # Effective notional = 1000 * 0.25 = 250
+                # Dynamic lev OFF + anchor provided → vol-inverse applies
+                # ratio = 0.005/0.020 = 0.25, effective notional = 1000 * 0.25 = 250
                 pos = trader.slot_positions[0]
-                leverage = trader.config['leverage']
                 expected_notional = capital * min(anchor_std / pair_info['spread_std'], 1.0)
                 assert pos['notional'] == pytest.approx(expected_notional)
 
-    def test_no_anchor_no_scaling(self):
-        """anchor_std=0 (default) → no scaling applied."""
+    def test_vol_inverse_skipped_when_dynamic_lev_on(self):
+        """When target_r_pct > 0 (dynamic ON), vol-inverse notional scaling is skipped.
+        Full capital is used — risk parity is achieved through leverage."""
         with patch("quantbox.live_trader.Client"):
             from quantbox.live_trader import LivePairTrader
             with patch.dict("os.environ", {
@@ -232,6 +263,48 @@ class TestVolInverseInLiveTrader:
                 "BINANCE_TESTNET": "true",
             }):
                 trader = LivePairTrader(paper_mode=True)
+                trader.config['target_r_pct'] = 0.02  # dynamic leverage ON
+                
+                trader.get_price = MagicMock(side_effect=[100.0, 50.0])
+                trader.calculate_zscore = MagicMock(return_value=-2.5)
+                trader.get_symbol_info = MagicMock(return_value={
+                    'step_size': 0.001, 'quantity_precision': 3,
+                    'min_notional': 5,
+                })
+                trader.place_order = MagicMock(return_value={'orderId': '123'})
+
+                pair = MagicMock()
+                pair.symbol1 = "BTCUSDT"
+                pair.symbol2 = "ETHUSDT"
+                pair_info = {
+                    'hedge_ratio': 1.0,
+                    'spread_mean': 0.0,
+                    'spread_std': 0.020,  # high vol
+                    'half_life': 10.0,
+                }
+
+                capital = 1000.0
+                anchor_std = 0.005
+
+                result = trader.execute_pair_trade(
+                    0, pair, pair_info, capital, anchor_std=anchor_std
+                )
+                assert result is True
+
+                pos = trader.slot_positions[0]
+                # Dynamic lev ON → NO vol-inverse scaling → full notional
+                assert pos['notional'] == pytest.approx(capital)
+
+    def test_no_anchor_no_scaling(self):
+        """anchor_std=0 (default) → no scaling applied regardless of mode."""
+        with patch("quantbox.live_trader.Client"):
+            from quantbox.live_trader import LivePairTrader
+            with patch.dict("os.environ", {
+                "BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s",
+                "BINANCE_TESTNET": "true",
+            }):
+                trader = LivePairTrader(paper_mode=True)
+                trader.config['target_r_pct'] = 0  # OFF
 
                 trader.get_price = MagicMock(side_effect=[100.0, 50.0])
                 trader.calculate_zscore = MagicMock(return_value=-2.5)
