@@ -1,8 +1,8 @@
 # QuantBox 실행 매뉴얼 📈
 
-**암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
+**암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 1.9.0  
+> 버전: 3.0.0  
 > 최종 업데이트: 2026년 2월 15일
 
 ---
@@ -11,20 +11,21 @@
 
 1. [개요](#1-개요)
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
-3. [아키텍처 이해](#3-아키텍처-이해)
-4. [핵심 모듈 상세](#4-핵심-모듈-상세)
-5. [데이터 관리](#5-데이터-관리)
-6. [페어 선택 시스템](#6-페어-선택-시스템)
-7. [전략 구현](#7-전략-구현)
-8. [백테스팅](#8-백테스팅)
-9. [파라미터 최적화](#9-파라미터-최적화)
-10. [Walk-Forward 분석](#10-walk-forward-분석)
-11. [실거래 연동](#11-실거래-연동)
-12. [Discord Bot (원격 제어)](#12-discord-bot-원격-제어)
-13. [성과 지표 해석](#13-성과-지표-해석)
-14. [고급 사용법](#14-고급-사용법)
-15. [트러블슈팅](#15-트러블슈팅)
-16. [API 레퍼런스](#16-api-레퍼런스)
+3. [🔥 Rubber Band Scalper (v2.0)](#3-rubber-band-scalper)
+4. [아키텍처 이해](#4-아키텍처-이해)
+5. [핵심 모듈 상세](#5-핵심-모듈-상세)
+6. [데이터 관리](#6-데이터-관리)
+7. [페어 선택 시스템](#7-페어-선택-시스템)
+8. [전략 구현](#8-전략-구현)
+9. [백테스팅](#9-백테스팅)
+10. [파라미터 최적화](#10-파라미터-최적화)
+11. [Walk-Forward 분석](#11-walk-forward-분석)
+12. [실거래 연동](#12-실거래-연동)
+13. [Discord Bot (원격 제어)](#13-discord-bot-원격-제어)
+14. [성과 지표 해석](#14-성과-지표-해석)
+15. [고급 사용법](#15-고급-사용법)
+16. [트러블슈팅](#16-트러블슈팅)
+17. [API 레퍼런스](#17-api-레퍼런스)
 
 ---
 
@@ -32,7 +33,87 @@
 
 ### 1.1 QuantBox란?
 
-QuantBox는 암호화폐 **페어 트레이딩(Pair Trading)** 을 위한 종합 퀀트 프레임워크입니다. 백테스팅과 실거래에서 동일한 코드를 사용할 수 있는 **이벤트 기반 아키텍처**를 채택하여 전략 개발부터 실제 운용까지 일관된 워크플로우를 제공합니다.
+QuantBox는 암호화폐 트레이딩을 위한 종합 퀀트 프레임워크입니다. **Rubber Band Scalper**(단일 자산 평균회귀)와 **페어 트레이딩** 두 가지 전략을 지원하며, 백테스팅과 실거래에서 동일한 코드를 사용합니다.
+
+---
+
+## 3. 🔥 Rubber Band Scalper (v3.0 — Volatility Selection)
+
+### 3.1 전략 개요
+
+Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. 2.5% 이상 급등/급락 후 발생하는 기계적 반등(snap-back)을 포착합니다.
+
+**v3.0 핵심 개선:**
+- **Volatility Selection**: 30일 실현변동성 Top-5 심볼 동적 선택 (10일 리밸런싱)
+- **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 신호 엔진
+- **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 결합
+- **성과**: +35.22% (90일), Sharpe 4.67, Walk-Forward OOS +34.31% (60일)
+
+**알파 소스:**
+- 청산 캐스케이드(liquidation cascades)로 인한 오버슈트
+- 스톱 헌팅 + 강제 청산 후 자연적 반등
+- 2시간(8×15m 봉) 내 50% 되돌림
+
+**검증 결과 (30 symbols, 90일, 15m 데이터):**
+- 포트폴리오 수익률: +5.82% (3개월)
+- Sharpe: 0.92
+- Max Drawdown: 16.63%
+- 63% 심볼 수익 (30개 중 19개)
+- Walk-forward 4-window 중 3/4 수익
+
+### 3.2 실행 방법
+
+```bash
+# Paper trading (시뮬레이션, 실제 주문 없음)
+python -m quantbox.scalper --paper
+
+# 한 사이클만 실행 후 종료
+python -m quantbox.scalper --paper --once
+
+# 커스텀 파라미터
+python -m quantbox.scalper --paper --lookback 10 --threshold 0.03 --max-slots 3
+
+# LIVE (실거래, 주의!)
+python -m quantbox.scalper
+```
+
+### 3.3 전략 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| lookback | 8 | 이동 측정 기간 (봉 수, 8×15m = 2시간) |
+| threshold | 0.025 | 최소 진입 이동 폭 (2.5%) |
+| target_retrace | 0.5 | 이익 실현: 이동 폭의 50% 되돌림 |
+| stop_mult | 1.0 | 손절: 이동 폭의 1배 |
+| max_hold | 8 | 최대 보유 기간 (봉 수) |
+| max_concurrent | 5 | 최대 동시 포지션 |
+| risk_per_trade | 0.01 | 트레이드당 리스크 (자본의 1%) |
+
+### 3.4 안전장치
+
+- **Max Drawdown Breaker**: 세션 HWM 대비 10% DD → 전체 청산
+- **Daily Loss Limit**: 당일 잔고 대비 5% 손실 → 신규 진입 중단
+- **Risk-Sized Positions**: 1% risk/trade, 최대 레버리지 20x
+- **LimitOrderChaser**: maker-only 체결로 수수료 0.02% (taker 0.05% 대비 60% 절감)
+- **Atomic State Persistence**: 크래시 후 자동 복구
+- **Discord 알림**: 진입/청산, 드로다운 경고 전송
+
+### 3.5 백테스트
+
+```python
+from quantbox.strategy.rubberband import compute_signals
+from quantbox.backtest.vectorized_backtest import VectorizedBacktest, BacktestConfig
+
+bt = VectorizedBacktest(BacktestConfig(
+    initial_capital=10000,
+    cost_per_side=0.0004,  # 0.04% per side
+))
+signals = compute_signals(close, 8, 0.025, 0.5, 1.0, 8)
+result = bt.run_single(close, signals, "BTCUSDT")
+print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
+```
+
+---
 
 ### 1.2 페어 트레이딩 개념
 
