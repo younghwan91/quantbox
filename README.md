@@ -10,7 +10,8 @@
 
 ### 🔥 Rubber Band Scalper (v3.2 — Multi-Timeframe)
 - **Alpha**: 2~3% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **MTF Confirmation**: 고시간프레임(12h SMA) 트렌드 필터로 역트렌드 진입 차단 (Calmar 7.6× 개선)
+- **MTF Confirmation**: 고시간프레임(12h SMA) 트렌드 필터로 역트렌드 진입 차단 (Calmar 4.47)
+- **MTF Enhanced Mode**: HTF 동의 시 진입 임계값 할인 + 타이트 스탑 (선택적, 기본 비활성)
 - **Volatility Selection**: 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일마다 리밸런싱)
 - **Time-Decaying Stop**: 보유 시간이 길어질수록 스탑 레벨을 점진적으로 타이트닝 (`stop_decay`)
 - **DD-Managed Portfolio**: 역변동성 가중 + 포트폴리오 DD 기반 노출 축소
@@ -125,21 +126,22 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (279개)
+tests/                      # 유닛 테스트 (284개)
 \`\`\`
 
-## 📈 성과 지표 (v3.2: MTF + decay=0.3, Top-3)
+## 📈 성과 지표 (v3.2: MTF block-only + decay=0.3, Top-3)
 
 | 지표 | 결과 |
 |------|------|
-| Portfolio Return (MTF) | +17.32% (90일, top-3 vol-selected) |
-| Sharpe Ratio | 3.41 |
-| Max Drawdown | 5.96% |
-| Calmar Ratio | 2.91 (baseline 0.38 대비 7.6× 개선) |
-| Win Rate | 58.9% |
-| Coins Profitable | 18/30 (60%) |
-| Total Trades (30코인) | 1,598 (baseline 4,409 대비 36%) |
-| Time Window Robustness | 3/5 windows MTF 우위 |
+| Portfolio Return (MTF) | +45.44% (90일, top-3 vol-selected) |
+| Sharpe Ratio | 5.29 |
+| Max Drawdown (post-warmup) | 10.17% |
+| Calmar Ratio | 4.47 |
+| Win Rate | 56.3% |
+| Avg Win / Avg Loss | 1.447% / 1.660% (RR 0.87) |
+| Profit Factor | 1.12 |
+| Total Trades (selected symbols) | 1,079 |
+| Trades/Day | ~12 |
 
 ## 🧪 테스트
 
