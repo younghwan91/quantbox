@@ -1,26 +1,26 @@
 """
-QuantBox - Binance Futures Pair Trading Framework
+QuantBox - Binance Futures Rubber Band Scalper
 
-A quantitative trading framework for cryptocurrency pair trading
-on Binance Futures with continuous backtesting and live trading.
+A quantitative trading framework for single-asset mean-reversion scalping
+on Binance USDT-M Perpetual Futures.
 
 Features:
-- Frozen z-score spread tracking with formation-period statistics
-- Multi-layer defense: Z-Score Cap, Vol Gate, BTC Crash Gate
-- Continuous pair backtesting with realistic cost modeling
-- Systematic multi-timeframe data caching
-- Flexible filter pipeline for pair selection
-- Discord bot for live monitoring and control
+- Rubber Band strategy: fade extreme 15m moves, ride the snap-back
+- Numba-compiled signal generation and vectorized backtesting
+- LimitOrderChaser for maker-only execution
+- Multi-layer risk management (drawdown, daily loss, position limits)
+- Discord notifications for live monitoring
+- Atomic state persistence for crash recovery
 
 Usage:
-    from quantbox import Config, DataDownloader
-    from quantbox.backtest import run_continuous_backtest
+    from quantbox.strategy import RubberBandConfig, RubberBandStrategy
+    from quantbox.backtest import VectorizedBacktest, BacktestConfig
 
 Author: QuantBox Team
-Version: 1.3.0
+Version: 2.0.0
 """
 
-__version__ = "1.3.0"
+__version__ = "2.0.0"
 __author__ = "QuantBox Team"
 
 # Core components
@@ -33,24 +33,21 @@ from quantbox.core.events import (
 # Data components
 from quantbox.data.cache import DataCache, TimeframedCache
 from quantbox.data.downloader import DataDownloader
-from quantbox.data.preprocessor import DataPreprocessor, PairData
 
 # Strategy components
-from quantbox.strategy.base import Strategy, StatefulStrategy
-from quantbox.strategy.filters import (
-    FilterPipeline, CorrelationFilter, CointegrationFilter,
-    HalfLifeFilter, HurstFilter
+from quantbox.strategy.rubberband import (
+    RubberBandConfig,
+    RubberBandStrategy,
+    compute_signals,
+    calculate_position_size,
 )
-from quantbox.strategy.pair_selector import PairSelector, PairCandidate
 
 # Backtest components
-from quantbox.backtest.continuous_backtest import (
-    ContinuousBacktestConfig,
-    ContinuousPairBacktest,
-    TradeResult,
-    run_continuous_backtest,
+from quantbox.backtest.vectorized_backtest import (
+    BacktestConfig,
+    BacktestResult,
+    VectorizedBacktest,
 )
-from quantbox.backtest.metrics import PerformanceMetrics, calculate_metrics
 
 __all__ = [
     # Version
@@ -72,25 +69,15 @@ __all__ = [
     "DataCache",
     "TimeframedCache",
     "DataDownloader",
-    "DataPreprocessor",
-    "PairData",
 
     # Strategy
-    "Strategy",
-    "StatefulStrategy",
-    "FilterPipeline",
-    "CorrelationFilter",
-    "CointegrationFilter",
-    "HalfLifeFilter",
-    "HurstFilter",
-    "PairSelector",
-    "PairCandidate",
+    "RubberBandConfig",
+    "RubberBandStrategy",
+    "compute_signals",
+    "calculate_position_size",
 
     # Backtest
-    "ContinuousBacktestConfig",
-    "ContinuousPairBacktest",
-    "TradeResult",
-    "run_continuous_backtest",
-    "PerformanceMetrics",
-    "calculate_metrics",
+    "BacktestConfig",
+    "BacktestResult",
+    "VectorizedBacktest",
 ]
