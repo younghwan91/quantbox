@@ -240,6 +240,8 @@ notional = per_slot_capital × leverage
 | `stop_decay` | 0.0 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성, 0.3 권장) |
 | `htf_period` | 0 | `RubberBandConfig` | MTF SMA lookback (0=비활성, 48=12h) |
 | `htf_block_threshold` | 0.02 | `RubberBandConfig` | HTF 트렌드 차단 임계값 (2%) |
+| `htf_agree_discount` | 1.0 | `RubberBandConfig` | HTF 동의 시 threshold 배수 (0.8=20% 낮춤, 1.0=비활성) |
+| `htf_agree_stop_mult` | 1.0 | `RubberBandConfig` | HTF 동의 시 stop 배수 (0.7=30% 타이트, 1.0=비활성) |
 
 ### 6.2 Alpha Engine 파라미터
 
@@ -282,11 +284,11 @@ notional = per_slot_capital × leverage
 
 ---
 
-## 7. 테스트 현황 (12파일, 279개)
+## 7. 테스트 현황 (12파일, 284개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
-| `test_rubberband` | 러버밴드 신호 생성 | compute_signals 정확성, 진입/청산 로직, **stop_decay**, **DD-managed portfolio**, **MTF confirmation** |
+| `test_rubberband` | 러버밴드 신호 생성 | compute_signals 정확성, 진입/청산 로직, **stop_decay**, **DD-managed portfolio**, **MTF confirmation**, **MTF enhanced (agree discount + tighter stop)** |
 | `test_alpha_engine` | Alpha Engine 멀티팩터 | 팩터 토글, 적응형 임계값, 트레일링 |
 | `test_vol_selector` | 변동성 선택기 | 랭킹, 리밸런싱, 실현변동성 계산 |
 | `test_scalper` | 라이브 스캘퍼 | 사이클, 포지션 관리, 상태 저장/복원 |
