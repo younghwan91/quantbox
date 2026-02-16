@@ -22,7 +22,16 @@ from quantbox.core.state_persistence import (
     _serialize_entry_times,
     _serialize_trade_history,
 )
-from quantbox.core.trader_slot import TraderSlotState
+from dataclasses import dataclass, field
+
+
+@dataclass
+class _MockSlot:
+    """Minimal slot mock for state persistence tests."""
+    slot_id: int = 0
+    position_open: bool = False
+    current_pair: tuple | None = None
+    position_info: dict = field(default_factory=dict)
 
 
 @pytest.fixture
@@ -34,7 +43,7 @@ def tmp_state_file(tmp_path):
 @pytest.fixture
 def sample_slots():
     """테스트용 슬롯 상태."""
-    slots = [TraderSlotState(slot_id=i) for i in range(3)]
+    slots = [_MockSlot(slot_id=i) for i in range(3)]
     slots[0].position_open = True
     slots[0].current_pair = ("BTCUSDT", "ETHUSDT")
     slots[0].position_info = {
