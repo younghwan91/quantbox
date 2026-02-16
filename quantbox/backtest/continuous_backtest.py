@@ -168,10 +168,10 @@ class ContinuousBacktestConfig:
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate → reject entry
     vol_expansion_window: int = 8      # Number of recent bars for vol gate
 
-    # Trailing stop (ratchet stop): z가 개선됐다가 entry 수준으로 역전 시 청산
+    # Trailing stop (ratchet stop): z가 best_z에서 trail_z만큼 되돌림 시 이익 보존 청산
     trailing_stop_enabled: bool = False         # Trailing stop 활성화 여부
     trailing_stop_activate_delta: float = 0.3   # entry 대비 Δz 이 이상 개선 시 활성화
-    trailing_stop_buffer: float = 0.1           # entry_z 기준 buffer (0이면 정확히 entry에서 발동)
+    trailing_stop_trail_z: float = 0.8          # best_z에서 trail_z만큼 되돌림 시 발동
 
     # BTC crash gate (parity with live_trader)
     btc_crash_gate_enabled: bool = True   # Enable BTC crash gate in backtest
@@ -980,19 +980,20 @@ class ContinuousPairBacktest:
                 exit_reason = ExitReason.MEAN_REVERSION
         
         # 2. Trailing stop (ratchet stop)
-        # z가 entry 대비 충분히 개선된 후 다시 entry 수준으로 역전 → 레짐 변화 신호
+        # z가 entry 대비 충분히 개선된 후, best_z에서 trail_z만큼 되돌림 → 이익 보존
         if self.config.trailing_stop_enabled and exit_reason is None:
             entry_z = pos['entry_z']
             delta = abs(pos['best_z'] - entry_z)
             if delta >= self.config.trailing_stop_activate_delta:
                 pos['trailing_active'] = True
             if pos['trailing_active']:
-                # Check if z reversed back past entry + buffer
+                best_z = pos['best_z']
+                trail_z = self.config.trailing_stop_trail_z
                 if pos['signal'] == 1:  # Long: z was improving (increasing), now worsened
-                    if current_z <= entry_z - self.config.trailing_stop_buffer:
+                    if current_z <= best_z - trail_z:
                         exit_reason = ExitReason.TRAILING_STOP
                 else:  # Short: z was improving (decreasing), now worsened
-                    if current_z >= entry_z + self.config.trailing_stop_buffer:
+                    if current_z >= best_z + trail_z:
                         exit_reason = ExitReason.TRAILING_STOP
 
         # 3. Stop loss

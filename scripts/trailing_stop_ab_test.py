@@ -123,7 +123,7 @@ def run_backtest(name: str, config: ContinuousBacktestConfig, data: dict) -> ABR
     print(f"  trailing_stop_enabled={config.trailing_stop_enabled}")
     if config.trailing_stop_enabled:
         print(f"  activate_delta={config.trailing_stop_activate_delta}, "
-              f"buffer={config.trailing_stop_buffer}")
+              f"trail_z={config.trailing_stop_trail_z}")
     print(f"{'='*60}")
 
     engine = ContinuousPairBacktest(config)
@@ -232,9 +232,9 @@ def main():
         **BASE_PARAMS,
         trailing_stop_enabled=True,
         trailing_stop_activate_delta=0.3,
-        trailing_stop_buffer=0.1,
+        trailing_stop_trail_z=0.8,
     )
-    result_b = run_backtest("[B] Trailing Stop ON (Δ=0.3, buf=0.1)", config_b, data)
+    result_b = run_backtest("[B] Trailing Stop ON (Δ=0.3, trail=0.8)", config_b, data)
 
     # ── Print comparison ──
     print_comparison(result_a, result_b)

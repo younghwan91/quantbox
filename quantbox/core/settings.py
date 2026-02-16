@@ -88,7 +88,7 @@ class QuantBoxSettings(BaseSettings):
     # ── Trailing Stop (ratchet stop) ──
     trailing_stop_enabled: bool = True      # 트레일링 스톱 활성화
     trailing_stop_activate_delta: float = 0.3  # z가 entry 대비 0.3 개선 시 활성화
-    trailing_stop_buffer: float = 0.1      # entry_z ± buffer에서 발동
+    trailing_stop_trail_z: float = 0.8      # best_z에서 trail_z만큼 되돌림 시 발동
 
     # ── BTC Crash Gate (매크로 방어) ──
     btc_crash_gate_enabled: bool = True    # BTC 급락 시 진입 차단 활성화
@@ -181,7 +181,7 @@ class QuantBoxSettings(BaseSettings):
             # Trailing Stop
             'trailing_stop_enabled': self.trailing_stop_enabled,
             'trailing_stop_activate_delta': self.trailing_stop_activate_delta,
-            'trailing_stop_buffer': self.trailing_stop_buffer,
+            'trailing_stop_trail_z': self.trailing_stop_trail_z,
             # BTC Crash Gate
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,
