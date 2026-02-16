@@ -74,6 +74,14 @@ class QuantBoxSettings(BaseSettings):
 
     # ── 홀딩 제한 ──
     max_holding_hours: int = 20
+    half_life_max_hold_multiplier: float = 0.0  # 0=disabled, e.g. 6 → max_hold=6×half_life
+    exit_zscore_decay: float = 0.0  # 0=disabled, e.g. 0.5 → exit_z halves by max_hold time
+    stale_trade_bars: int = 0  # 0=disabled, e.g. 40 → check at 40 bars if trade stale
+    stale_min_improvement: float = 0.3  # min z improvement to keep position
+    # ── Live cointegration check ──
+    live_coint_check_interval: int = 0  # 0=disabled, bars between checks (e.g. 30)
+    live_coint_check_window: int = 120  # bars of recent data for re-test
+    live_coint_check_max_pvalue: float = 0.10  # p-value threshold (looser than entry)
     # ── Formation window ──
     formation_hours: int = 60  # Formation period in hours (default: 60h = 240 bars @ 15m)
     # ── Dynamic exit ──
@@ -103,6 +111,13 @@ class QuantBoxSettings(BaseSettings):
     btc_crash_gate_enabled: bool = True    # BTC 급락 시 진입 차단 활성화
     btc_crash_window: int = 8              # 최근 N봉 (15분봉 기준 = 2시간)
     btc_crash_threshold: float = 0.03     # |수익률| > 3% 이면 진입 차단
+
+    # ── Alpha Filters (알파 필터) ──
+    zscore_velocity_enabled: bool = False      # Z-score 속도 확인: mean 방향 이동 시만 진입
+    zscore_velocity_lookback: int = 4          # Z 속도 측정용 lookback bars (15분봉 4개 = 1시간)
+    spread_autocorr_enabled: bool = False      # 스프레드 자기상관 확인: AC1 < 0 시만 진입
+    spread_autocorr_lookback: int = 40         # 자기상관 측정 lookback bars
+    spread_autocorr_max: float = 0.0           # 최대 허용 lag-1 자기상관 (< 0 = 평균회귀)
 
     # ── 드로다운 & 일일 손실 제한 ──
     max_drawdown_pct: float = 0.10         # 세션 최고 잔고 대비 10% 드로다운 시 전체 청산+일시정지
@@ -164,6 +179,13 @@ class QuantBoxSettings(BaseSettings):
             'dynamic_exit_base': self.dynamic_exit_base,
             'dynamic_exit_range': self.dynamic_exit_range,
             'max_holding_hours': self.max_holding_hours,
+            'half_life_max_hold_multiplier': self.half_life_max_hold_multiplier,
+            'exit_zscore_decay': self.exit_zscore_decay,
+            'stale_trade_bars': self.stale_trade_bars,
+            'stale_min_improvement': self.stale_min_improvement,
+            'live_coint_check_interval': self.live_coint_check_interval,
+            'live_coint_check_window': self.live_coint_check_window,
+            'live_coint_check_max_pvalue': self.live_coint_check_max_pvalue,
             # Risk
             'position_size_pct': pct,
             'trading_fee': self.trading_fee,
@@ -202,6 +224,12 @@ class QuantBoxSettings(BaseSettings):
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,
             'btc_crash_threshold': self.btc_crash_threshold,
+            # Alpha Filters
+            'zscore_velocity_enabled': self.zscore_velocity_enabled,
+            'zscore_velocity_lookback': self.zscore_velocity_lookback,
+            'spread_autocorr_enabled': self.spread_autocorr_enabled,
+            'spread_autocorr_lookback': self.spread_autocorr_lookback,
+            'spread_autocorr_max': self.spread_autocorr_max,
             # Drawdown & Daily Loss
             'max_drawdown_pct': self.max_drawdown_pct,
             'daily_loss_limit_pct': self.daily_loss_limit_pct,
