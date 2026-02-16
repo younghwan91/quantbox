@@ -8,10 +8,10 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v3.2 — Multi-Timeframe)
+### 🔥 Rubber Band Scalper (v3.3 — Enhanced MTF)
 - **Alpha**: 2~3% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **MTF Confirmation**: 고시간프레임(12h SMA) 트렌드 필터로 역트렌드 진입 차단 (Calmar 4.47)
-- **MTF Enhanced Mode**: HTF 동의 시 진입 임계값 할인 + 타이트 스탑 (선택적, 기본 비활성)
+- **MTF 3-Mode**: 16h SMA 트렌드 3단계 필터 (agree=더 많은 진입+타이트 스탑, neutral=정상, against=차단)
+- **Live/Backtest Parity**: entry_stop_mult 저장으로 실거래/백테스트 스탑 완전 일치
 - **Volatility Selection**: 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일마다 리밸런싱)
 - **Time-Decaying Stop**: 보유 시간이 길어질수록 스탑 레벨을 점진적으로 타이트닝 (`stop_decay`)
 - **DD-Managed Portfolio**: 역변동성 가중 + 포트폴리오 DD 기반 노출 축소
@@ -126,22 +126,22 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (284개)
+tests/                      # 유닛 테스트 (287개)
 \`\`\`
 
-## 📈 성과 지표 (v3.2: MTF block-only + decay=0.3, Top-3)
+## 📈 성과 지표 (v3.3: Enhanced MTF + decay=0.3, Top-3)
 
 | 지표 | 결과 |
 |------|------|
-| Portfolio Return (MTF) | +45.44% (90일, top-3 vol-selected) |
-| Sharpe Ratio | 5.29 |
-| Max Drawdown (post-warmup) | 10.17% |
-| Calmar Ratio | 4.47 |
-| Win Rate | 56.3% |
-| Avg Win / Avg Loss | 1.447% / 1.660% (RR 0.87) |
-| Profit Factor | 1.12 |
-| Total Trades (selected symbols) | 1,079 |
-| Trades/Day | ~12 |
+| Portfolio Return | +63.18% (90일, top-3 vol-selected) |
+| Sharpe Ratio | 6.52 |
+| Max Drawdown (post-warmup) | 7.08% |
+| Calmar Ratio | 8.92 |
+| Win Rate | 56.5% |
+| Avg Win / Avg Loss | 1.353% / 1.498% (RR 0.90) |
+| Profit Factor | 1.17 |
+| Total Trades (selected symbols) | 1,394 |
+| Trades/Day | ~15.5 |
 
 ## 🧪 테스트
 
