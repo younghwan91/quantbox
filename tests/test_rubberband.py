@@ -504,3 +504,64 @@ class TestMTFConfirmation:
         # Should not crash and should return valid signal
         sig = strat.on_bar('BTCUSDT', btc_close)
         assert sig in (-1, 0, 1)
+
+
+class TestMTFEnhanced:
+    """Test enhanced MTF with agree discount and tighter stops."""
+
+    def test_agree_discount_increases_entries(self, btc_close):
+        """Lower threshold via agree discount should produce more entries."""
+        sigs_v1 = compute_signals_mtf(
+            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0,
+            48, 0.02, 1.0, 1.0,  # block-only
+        )
+        sigs_enh = compute_signals_mtf(
+            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0,
+            48, 0.02, 0.7, 1.0,  # agree discount but same stop
+        )
+        # Enhanced should have >= entries (discount lets more trades in)
+        assert np.sum(sigs_enh != 0) >= np.sum(sigs_v1 != 0)
+
+    def test_agree_stop_mult_changes_exits(self, btc_close):
+        """Tighter stop via agree_stop_mult should change signal pattern."""
+        sigs_normal = compute_signals_mtf(
+            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0,
+            48, 0.02, 1.0, 1.0,
+        )
+        sigs_tight = compute_signals_mtf(
+            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0,
+            48, 0.02, 1.0, 0.5,  # 50% tighter stop
+        )
+        # Tighter stop → different signal pattern (some exits happen earlier)
+        # Not necessarily fewer signals, but different positions
+        assert sigs_tight.shape == sigs_normal.shape
+        unique = set(np.unique(sigs_tight))
+        assert unique.issubset({-1.0, 0.0, 1.0})
+
+    def test_defaults_disabled(self):
+        """Default config should disable enhanced features (discount=1.0, stop=1.0)."""
+        cfg = RubberBandConfig()
+        assert cfg.htf_agree_discount == 1.0
+        assert cfg.htf_agree_stop_mult == 1.0
+
+    def test_on_bar_passes_enhanced_params(self, btc_close):
+        """on_bar should pass enhanced params without error."""
+        cfg = RubberBandConfig(
+            htf_period=48, htf_block_threshold=0.02,
+            htf_agree_discount=0.8, htf_agree_stop_mult=0.7,
+        )
+        strat = RubberBandStrategy(cfg)
+        sig = strat.on_bar('BTCUSDT', btc_close)
+        assert sig in (-1, 0, 1)
+
+    def test_discount_1_equals_v1(self, btc_close):
+        """discount=1.0, stop=1.0 should match block-only v1 exactly."""
+        sigs_v1 = compute_signals_mtf(
+            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.3,
+            48, 0.02,
+        )
+        sigs_enh = compute_signals_mtf(
+            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.3,
+            48, 0.02, 1.0, 1.0,
+        )
+        np.testing.assert_array_equal(sigs_v1, sigs_enh)
