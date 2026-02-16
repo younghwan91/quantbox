@@ -1,9 +1,9 @@
 """
 Tests for trailing stop (ratchet stop) feature in backtest engine.
 
-Trailing stop detects "revert-then-reverse" pattern:
-z improves beyond activate_delta from entry → trailing activated →
-z reverses back past entry_z ± buffer → position closed at ~breakeven.
+best_z 기반 trailing stop:
+z가 entry 대비 activate_delta 이상 개선 → trailing 활성화 →
+이후 best_z에서 trail_z만큼 되돌림 발생 → 이익 보존 청산.
 
 학술 근거: Leung & Zhang (2021), Glover & Peskir (2024)
 """
@@ -30,7 +30,7 @@ class TestTrailingStopConfig:
         config = ContinuousBacktestConfig()
         assert hasattr(config, 'trailing_stop_enabled')
         assert hasattr(config, 'trailing_stop_activate_delta')
-        assert hasattr(config, 'trailing_stop_buffer')
+        assert hasattr(config, 'trailing_stop_trail_z')
 
     def test_trailing_stop_disabled_by_default(self):
         config = ContinuousBacktestConfig()
@@ -39,7 +39,7 @@ class TestTrailingStopConfig:
     def test_trailing_stop_default_values(self):
         config = ContinuousBacktestConfig()
         assert config.trailing_stop_activate_delta == 0.3
-        assert config.trailing_stop_buffer == 0.1
+        assert config.trailing_stop_trail_z == 0.8
 
     def test_exit_reason_has_trailing_stop(self):
         assert hasattr(ExitReason, 'TRAILING_STOP')
@@ -131,10 +131,11 @@ def _check_trailing_stop(
     pos: dict,
     current_z: float,
     activate_delta: float = 0.3,
-    buffer: float = 0.1,
+    trail_z: float = 0.8,
 ) -> bool:
-    """Replicate trailing stop check logic from _monitor_position.
+    """Replicate best_z based trailing stop check logic.
 
+    Threshold = best_z ± trail_z (not entry_z ± buffer).
     Returns True if trailing stop should fire.
     """
     entry_z = pos['entry_z']
@@ -142,11 +143,12 @@ def _check_trailing_stop(
     if delta >= activate_delta:
         pos['trailing_active'] = True
     if pos['trailing_active']:
-        if pos['signal'] == 1:
-            if current_z <= entry_z - buffer:
+        best_z = pos['best_z']
+        if pos['signal'] == 1:  # Long: best_z is high, z dropping
+            if current_z <= best_z - trail_z:
                 return True
-        else:
-            if current_z >= entry_z + buffer:
+        else:  # Short: best_z is low, z rising
+            if current_z >= best_z + trail_z:
                 return True
     return False
 
@@ -156,62 +158,63 @@ class TestTrailingStopLogicLongSpread:
 
     def test_activation_on_sufficient_improvement(self):
         """z가 entry 대비 0.3 이상 개선 시 trailing 활성화."""
-        pos = _make_position(entry_z=2.1, signal=1)
-        # z가 2.1 → 2.5로 상승 (Δz = 0.4 > 0.3)
-        _update_best_z(pos, 2.5)
-        assert pos['best_z'] == 2.5
-        _check_trailing_stop(pos, 2.5)
+        pos = _make_position(entry_z=-2.1, signal=1)
+        # z가 -2.1 → -1.7로 상승 (Δz = 0.4 > 0.3)
+        _update_best_z(pos, -1.7)
+        assert pos['best_z'] == -1.7
+        _check_trailing_stop(pos, -1.7)
         assert pos['trailing_active'] is True
 
     def test_no_activation_on_insufficient_improvement(self):
         """z가 entry 대비 0.3 미만 개선 시 trailing 비활성."""
-        pos = _make_position(entry_z=2.1, signal=1)
-        _update_best_z(pos, 2.3)  # Δz = 0.2 < 0.3
-        _check_trailing_stop(pos, 2.3)
+        pos = _make_position(entry_z=-2.1, signal=1)
+        _update_best_z(pos, -1.9)  # Δz = 0.2 < 0.3
+        _check_trailing_stop(pos, -1.9)
         assert pos['trailing_active'] is False
 
-    def test_trigger_on_reversal_past_entry(self):
-        """활성화 후 z가 entry 아래로 하락 시 발동."""
-        pos = _make_position(entry_z=2.1, signal=1)
+    def test_trigger_on_reversal_from_best_z(self):
+        """활성화 후 z가 best_z에서 trail_z만큼 하락 시 발동."""
+        pos = _make_position(entry_z=-2.5, signal=1)
         # Phase 1: z 개선 → 활성화
-        _update_best_z(pos, 2.5)
-        _check_trailing_stop(pos, 2.5)
+        _update_best_z(pos, -1.5)  # Δz = 1.0 > 0.3, best_z = -1.5
+        _check_trailing_stop(pos, -1.5)
         assert pos['trailing_active'] is True
-        # Phase 2: z 역전 → entry_z - buffer = 2.0 이하로 하락
-        _update_best_z(pos, 1.9)  # best_z stays at 2.5
-        result = _check_trailing_stop(pos, 1.9, buffer=0.1)
-        assert result is True
-        assert pos['best_z'] == 2.5  # best_z unchanged
+        # Phase 2: z 역전 → best_z - trail_z = -1.5 - 0.8 = -2.3
+        result = _check_trailing_stop(pos, -2.4, trail_z=0.8)
+        assert result is True  # -2.4 <= -2.3
+        assert pos['best_z'] == -1.5  # best_z unchanged
 
-    def test_no_trigger_when_z_stays_above_entry(self):
-        """활성화 후에도 z가 entry 위에 있으면 발동 안 함."""
-        pos = _make_position(entry_z=2.1, signal=1)
-        _update_best_z(pos, 2.5)
-        _check_trailing_stop(pos, 2.5)
+    def test_no_trigger_when_z_within_trail_distance(self):
+        """활성화 후에도 z가 best_z - trail_z 위에 있으면 발동 안 함."""
+        pos = _make_position(entry_z=-2.5, signal=1)
+        _update_best_z(pos, -1.5)  # best_z = -1.5, threshold = -2.3
+        _check_trailing_stop(pos, -1.5)
         assert pos['trailing_active'] is True
-        # z slightly below best but still above entry
-        result = _check_trailing_stop(pos, 2.2, buffer=0.1)
+        # z = -2.0 > -2.3 → no trigger
+        result = _check_trailing_stop(pos, -2.0, trail_z=0.8)
         assert result is False
 
     def test_no_trigger_when_not_activated(self):
-        """trailing 활성화 전에는 entry 아래로 하락해도 발동 안 함."""
-        pos = _make_position(entry_z=2.1, signal=1)
-        # z barely improves then reverses
-        _update_best_z(pos, 2.2)  # Δz = 0.1 < 0.3
-        result = _check_trailing_stop(pos, 1.9)
+        """trailing 활성화 전에는 어디로 하락해도 발동 안 함."""
+        pos = _make_position(entry_z=-2.1, signal=1)
+        # z barely improves (Δz = 0.1 < 0.3)
+        _update_best_z(pos, -2.0)
+        result = _check_trailing_stop(pos, -3.0)
         assert result is False
         assert pos['trailing_active'] is False
 
-    def test_buffer_zero_triggers_at_exact_entry(self):
-        """buffer=0이면 정확히 entry_z에서 발동."""
-        pos = _make_position(entry_z=2.1, signal=1)
-        _update_best_z(pos, 2.5)
-        _check_trailing_stop(pos, 2.5, buffer=0.0)
+    def test_trail_protects_profit(self):
+        """큰 개선 후 trail stop은 수익 대부분을 보존."""
+        pos = _make_position(entry_z=-3.0, signal=1)
+        # z가 -3.0 → -0.5 (2.5σ 개선)
+        _update_best_z(pos, -0.5)
+        _check_trailing_stop(pos, -0.5)
         assert pos['trailing_active'] is True
-        # At exactly entry_z
-        result = _check_trailing_stop(pos, 2.1, buffer=0.0)
-        # current_z <= entry_z - 0 → 2.1 <= 2.1 → True
-        assert result is True  # fires at exact entry with zero buffer
+        # threshold = -0.5 - 0.8 = -1.3
+        # z = -1.3이면 entry 대비 1.7σ 개선 상태에서 이익 보존
+        result = _check_trailing_stop(pos, -1.3, trail_z=0.8)
+        assert result is True
+        # 개선분의 68% (1.7/2.5) 보존
 
 
 class TestTrailingStopLogicShortSpread:
@@ -219,28 +222,28 @@ class TestTrailingStopLogicShortSpread:
 
     def test_activation_on_sufficient_improvement(self):
         """z가 entry 대비 0.3 이상 감소 시 trailing 활성화."""
-        pos = _make_position(entry_z=-2.1, signal=-1)
-        # z가 -2.1 → -2.5로 하강 (개선, Δz = 0.4 > 0.3)
-        _update_best_z(pos, -2.5)
-        assert pos['best_z'] == -2.5
-        _check_trailing_stop(pos, -2.5)
+        pos = _make_position(entry_z=2.1, signal=-1)
+        _update_best_z(pos, 1.7)  # Δz = 0.4 > 0.3
+        assert pos['best_z'] == 1.7
+        _check_trailing_stop(pos, 1.7)
         assert pos['trailing_active'] is True
 
-    def test_trigger_on_reversal_past_entry(self):
-        """활성화 후 z가 entry 위로 상승 시 발동."""
-        pos = _make_position(entry_z=-2.1, signal=-1)
-        _update_best_z(pos, -2.5)
-        _check_trailing_stop(pos, -2.5)
-        # z reverses past entry_z + buffer = -2.0
-        result = _check_trailing_stop(pos, -1.9, buffer=0.1)
+    def test_trigger_on_reversal_from_best_z(self):
+        """활성화 후 z가 best_z에서 trail_z만큼 상승 시 발동."""
+        pos = _make_position(entry_z=2.5, signal=-1)
+        _update_best_z(pos, 1.5)  # best_z = 1.5, Δz = 1.0
+        _check_trailing_stop(pos, 1.5)
+        assert pos['trailing_active'] is True
+        # threshold = 1.5 + 0.8 = 2.3
+        result = _check_trailing_stop(pos, 2.4, trail_z=0.8)
         assert result is True
 
-    def test_no_trigger_when_z_stays_below_entry(self):
-        """활성화 후에도 z가 entry 아래에 있으면 발동 안 함."""
-        pos = _make_position(entry_z=-2.1, signal=-1)
-        _update_best_z(pos, -2.5)
-        _check_trailing_stop(pos, -2.5)
-        result = _check_trailing_stop(pos, -2.3, buffer=0.1)
+    def test_no_trigger_when_z_within_trail_distance(self):
+        """활성화 후에도 z가 best_z + trail_z 아래면 발동 안 함."""
+        pos = _make_position(entry_z=2.5, signal=-1)
+        _update_best_z(pos, 1.5)  # threshold = 2.3
+        _check_trailing_stop(pos, 1.5)
+        result = _check_trailing_stop(pos, 2.0, trail_z=0.8)
         assert result is False
 
 
@@ -249,190 +252,139 @@ class TestTrailingStopLogicShortSpread:
 # ============================================================
 
 class TestRevertThenReverse:
-    """실제 세션 로그의 BTC/ETH, ADA/PENGU, SOL/LTC 패턴 재현."""
+    """실제 세션 로그 패턴 재현 (best_z 기반)."""
 
     def test_btc_eth_pattern(self):
-        """BTC/ETH: entry z=+2.10 → 0.8h에 1.698(개선) → 1.4h에 2.403(역전).
-
-        Trailing stop은 z=1.698(Δz=0.402)에서 활성화,
-        z=2.403(> 2.1+0.1=2.2이므로 NOT triggered... wait)
-        
-        Wait - for LONG spread (signal=1, entry_z=+2.10),
-        z improving means z DECREASING toward 0.
-        So best_z should track the minimum z (most toward 0).
-        
-        Actually the code says:
-        signal=1: if current_z > pos['best_z'] → update
-        
-        But wait: for a long spread entry at z=+2.10, the z should
-        decrease toward 0 for profit. So z going from 2.10 to 1.698
-        is GOOD. Higher z is BAD.
-        
-        Hmm, let me re-read the code...
-        
-        The entry happens because z >= entry_zscore (positive z = short spread?).
-        Actually looking at the backtest code:
-        signal = -1 if z > threshold (short spread, z is high)
-        signal = +1 if z < -threshold (long spread, z is low)
-        
-        BTC/ETH had entry_z=+2.10 and was presumably signal=-1 (short spread).
-        z decreasing from 2.10 toward 0 is improvement.
-        
-        Let me verify from the log:
-        BTC/ETH: entry_z=+2.100, z went 2.100 → 1.698 (improved) → 2.403 (reversed)
-        This means the trade expected z to decrease → signal=-1 (short spread).
-        """
-        # BTC/ETH: signal=-1, entry 2.10
+        """BTC/ETH: entry z=+2.10 → 1.698(개선) → 2.403(역전).
+        Short spread (signal=-1). best_z=1.698, threshold=1.698+0.8=2.498.
+        z=2.403 < 2.498 → NO trigger.
+        z=2.660 > 2.498 → trigger."""
         pos = _make_position(entry_z=2.10, signal=-1)
-        
-        # z-score trajectory: 2.10 → 2.06 → 1.82 → 1.698 → 1.792 → 2.403 → 2.660
         trajectory = [2.063, 1.820, 1.698, 1.792, 2.403, 2.660]
-        
+
         fired_at = None
         for i, z in enumerate(trajectory):
             _update_best_z(pos, z)
-            if _check_trailing_stop(pos, z, activate_delta=0.3, buffer=0.1):
+            if _check_trailing_stop(pos, z, trail_z=0.8):
                 fired_at = i
                 break
-        
-        # Should activate at z=1.698 (Δz = |1.698 - 2.10| = 0.402 > 0.3)
-        # Should fire at z=2.403 (z >= entry + buffer = 2.10 + 0.1 = 2.20): YES
-        # Actually z=2.403 >= 2.20 → True
-        assert fired_at is not None, "Trailing stop should have fired for BTC/ETH"
-        assert trajectory[fired_at] == 2.403, f"Should fire at z=2.403, not {trajectory[fired_at]}"
+
+        # best_z=1.698, threshold=2.498
+        # z=2.403 < 2.498 → no
+        # z=2.660 > 2.498 → yes
+        assert fired_at is not None
+        assert trajectory[fired_at] == 2.660
         
     def test_ada_pengu_pattern(self):
-        """ADA/PENGU: entry z=+2.161 → 1.827(개선) → 2.179(역전) → 3.677(stop)."""
+        """ADA/PENGU: entry z=+2.161 → 1.827(개선) → 역전.
+        Short spread, best_z=1.827, threshold=1.827+0.8=2.627.
+        z=2.841 > 2.627 → trigger."""
         pos = _make_position(entry_z=2.161, signal=-1)
         trajectory = [2.039, 1.827, 2.179, 2.841, 3.677]
-        
+
         fired_at = None
         for i, z in enumerate(trajectory):
             _update_best_z(pos, z)
-            if _check_trailing_stop(pos, z, activate_delta=0.3, buffer=0.1):
+            if _check_trailing_stop(pos, z, trail_z=0.8):
                 fired_at = i
                 break
-        
-        # best_z = 1.827 (Δz = 0.334 > 0.3 → activated)
-        # z=2.179: >= 2.161 + 0.1 = 2.261? NO (2.179 < 2.261)
-        # z=2.841: >= 2.261? YES → fired
+
+        # best_z = 1.827, threshold = 2.627
+        # z=2.179 < 2.627 → no
+        # z=2.841 > 2.627 → yes
         assert fired_at is not None
         assert trajectory[fired_at] == 2.841
 
     def test_sol_ltc_pattern(self):
-        """SOL/LTC: entry z=+2.109 → 1.795(개선) → 2.148(역전) → 3.900(stop)."""
+        """SOL/LTC: entry z=+2.109 → 1.795(개선) → 역전.
+        Short spread, best_z=1.795, threshold=1.795+0.8=2.595.
+        z=3.117 > 2.595 → trigger."""
         pos = _make_position(entry_z=2.109, signal=-1)
-        trajectory = [2.042, 2.176, 1.991, 2.249, 2.146, 2.731, 2.134, 1.795, 
+        trajectory = [2.042, 2.176, 1.991, 2.249, 2.146, 2.731, 2.134, 1.795,
                       2.148, 2.430, 3.117]
-        
+
         fired_at = None
         for i, z in enumerate(trajectory):
             _update_best_z(pos, z)
-            if _check_trailing_stop(pos, z, activate_delta=0.3, buffer=0.1):
+            if _check_trailing_stop(pos, z, trail_z=0.8):
                 fired_at = i
                 break
-        
-        # best_z tracks minimum for signal=-1
-        # At 1.795: Δz = |1.795 - 2.109| = 0.314 > 0.3 → activated
-        # z=2.148: >= 2.109 + 0.1 = 2.209? NO
-        # z=2.430: >= 2.209? YES → fired
+
+        # best_z tracks minimum for signal=-1: 1.795
+        # threshold = 1.795 + 0.8 = 2.595
+        # z=2.430 < 2.595 → no
+        # z=3.117 > 2.595 → yes
         assert fired_at is not None
-        assert trajectory[fired_at] == 2.430
+        assert trajectory[fired_at] == 3.117
 
     def test_winner_avax_pump_not_killed(self):
         """AVAX/PUMP (winner): z=+2.054 → 1.216 → 1.103 → exit.
-        Trailing stop이 winner를 죽이지 않는지 확인."""
+        계속 개선 방향이므로 trailing stop 미발동."""
         pos = _make_position(entry_z=2.054, signal=-1)
-        trajectory = [1.216, 1.103, 1.107]  # keeps improving
-        
-        fired = False
-        for z in trajectory:
-            _update_best_z(pos, z)
-            if _check_trailing_stop(pos, z, activate_delta=0.3, buffer=0.1):
-                fired = True
-                break
-        
-        assert not fired, "Trailing stop should NOT fire on AVAX/PUMP (winner)"
-        # z only improved, never reversed past entry
+        trajectory = [1.216, 1.103, 1.107]
 
-    def test_winner_fil_ena_not_killed(self):
-        """FIL/ENA (winner): z=-2.109 → -1.633 → -0.886 → exit.
-        Short spread that keeps improving."""
-        pos = _make_position(entry_z=-2.109, signal=1)
-        # signal=1 (long spread): entry was at z=-2.109, expect z to increase
-        trajectory = [-1.633, -1.222, -0.968, -0.886, -0.873, -1.235, -1.872, 
-                      -1.235, -0.515]
-        
         fired = False
         for z in trajectory:
             _update_best_z(pos, z)
-            if _check_trailing_stop(pos, z, activate_delta=0.3, buffer=0.1):
+            if _check_trailing_stop(pos, z, trail_z=0.8):
                 fired = True
                 break
-        
-        assert not fired, "Trailing stop should NOT fire on FIL/ENA (winner)"
+
+        assert not fired, "Trailing stop should NOT fire on AVAX/PUMP (winner)"
+
+    def test_winner_fil_ena_exits_with_profit(self):
+        """FIL/ENA: z=-2.109 → -0.873(best) → -1.872(reversal).
+        Long spread. best_z=-0.873, threshold=-0.873-0.8=-1.673.
+        z=-1.872 <= -1.673 → trailing stop 발동.
+        하지만 entry(-2.109) 대비 0.237σ 개선 상태 → 수익 보존 청산."""
+        pos = _make_position(entry_z=-2.109, signal=1)
+        trajectory = [-1.633, -1.222, -0.968, -0.886, -0.873, -1.235, -1.872,
+                      -1.235, -0.515]
+
+        fired_at = None
+        for i, z in enumerate(trajectory):
+            _update_best_z(pos, z)
+            if _check_trailing_stop(pos, z, trail_z=0.8):
+                fired_at = i
+                break
+
+        # best_z = -0.873, threshold = -1.673
+        # z = -1.872 <= -1.673 → fires at index 6
+        assert fired_at == 6
+        # entry(-2.109) → exit(-1.872) = 0.237σ 개선 → 수익 상태
+        assert trajectory[fired_at] > pos['entry_z']  # z improved from entry
 
     def test_winner_hype_link_not_killed(self):
-        """HYPE/LINK (winner): z=-2.180 → -2.301(악화) → -1.542(개선) → exit.
-        
-        Initial deterioration should not trigger trailing (not yet activated).
-        Then improvement activates trailing but z never reverses past entry.
-        """
+        """HYPE/LINK (winner): z=-2.180 → -1.542(개선) → exit.
+        Long spread, 초기 악화 후 개선. 역전이 trail_z 이내이므로 미발동."""
         pos = _make_position(entry_z=-2.180, signal=1)
-        # signal=1: z should increase toward 0
         trajectory = [-2.301, -2.084, -2.016, -1.845, -1.542, -1.760, -1.231]
-        
+
         fired = False
         for z in trajectory:
             _update_best_z(pos, z)
-            if _check_trailing_stop(pos, z, activate_delta=0.3, buffer=0.1):
+            if _check_trailing_stop(pos, z, trail_z=0.8):
                 fired = True
                 break
-        
-        assert not fired, "Trailing stop should NOT fire on HYPE/LINK (winner)"
-        # best_z = -1.231, Δz = |-1.231 - (-2.180)| = 0.949 → activated
-        # But z never drops back to entry_z - buffer = -2.180 - 0.1 = -2.28
-        assert pos['trailing_active'] is True  # it WAS activated
 
-    def test_sui_pump_not_affected(self):
-        """SUI/PUMP (loss): z=-2.043 → -2.052 → -2.396 → -3.593.
-        즉시 실패 케이스. z가 개선되지 않아 trailing 활성화 안 됨.
-        기존 stop_loss가 처리."""
-        pos = _make_position(entry_z=-2.043, signal=-1)
-        # signal=-1: z should increase toward 0 (wait... for short spread)
-        # Actually: entry at z=-2.043 with signal=-1 means short spread
-        # Short spread: z should decrease for profit... but z was -2.043 and went more negative
-        # That means it IMPROVED (more negative = better for short)
-        # Wait no. Let me re-check the log:
-        # SUI/PUMP: entry_z=-2.043, exit_z=-3.593, reason=stop_loss
-        # z went from -2.043 to -3.593 (more negative = worse)
-        # So the spread diverged further. For signal=-1, z increasing toward 0 = profit.
-        # But z went more negative = loss.
-        # So z not improving at all. Correct signal interpretation:
-        # signal=-1 → short spread → expect z to increase toward 0
-        # But z went from -2.043 to -3.593 (decrease = worse)
-        
-        # Hmm, but in backtest: signal=-1 for short spread means z>threshold (positive).
-        # In live trader, SUI/PUMP had z=-2.043 with presumably signal=1 (long spread at negative z)
-        # Let me re-check the log properly.
-        # Log says: "SUIUSDT BUY ... PUMPUSDT SELL" → signal relates to leg direction
-        # SUIUSDT BUY = long leg1 → long spread → signal=1
-        # But entry z was -2.043 (negative, matching signal=1 for long spread: z < -entry_threshold)
-        
-        # Correction: SUI/PUMP was signal=1 (long spread), entry z=-2.043
-        # For signal=1: z should increase toward 0 for profit
-        # z went -2.043 → -2.052 → -2.396 → -3.593 (kept decreasing = worse)
+        assert not fired, "Trailing stop should NOT fire on HYPE/LINK (winner)"
+        # best_z = -1.231, threshold = -1.231 - 0.8 = -2.031
+        # z never drops below -2.031 after best_z is set (worst is -1.760)
+        assert pos['trailing_active'] is True  # was activated (Δz=0.949)
+
+    def test_immediate_failure_not_triggered(self):
+        """즉시 실패 케이스. z가 개선 안 되므로 trailing 미활성 → stop_loss 처리."""
         pos = _make_position(entry_z=-2.043, signal=1)
         trajectory = [-2.052, -2.396, -3.593]
-        
+
         fired = False
         for z in trajectory:
             _update_best_z(pos, z)
-            if _check_trailing_stop(pos, z, activate_delta=0.3, buffer=0.1):
+            if _check_trailing_stop(pos, z, trail_z=0.8):
                 fired = True
                 break
-        
-        assert not fired, "Trailing stop should NOT fire (no improvement)"
+
+        assert not fired
         assert pos['trailing_active'] is False
 
 
@@ -482,17 +434,26 @@ class TestTrailingStopEdgeCases:
         _check_trailing_stop(pos, 1.8)
         assert pos['trailing_active'] is True
 
-    def test_large_buffer_prevents_premature_trigger(self):
-        """큰 buffer는 더 많은 역전을 허용한다."""
+    def test_large_trail_z_prevents_premature_trigger(self):
+        """큰 trail_z는 더 많은 되돌림을 허용."""
         pos = _make_position(entry_z=2.0, signal=-1)
-        _update_best_z(pos, 1.5)
-        _check_trailing_stop(pos, 1.5)
+        _update_best_z(pos, 1.0)  # best_z = 1.0
+        _check_trailing_stop(pos, 1.0)
         assert pos['trailing_active'] is True
-        
-        # With buffer=0.5: need z >= 2.0 + 0.5 = 2.5
-        result = _check_trailing_stop(pos, 2.3, buffer=0.5)
+
+        # trail_z=1.5: threshold = 1.0 + 1.5 = 2.5
+        result = _check_trailing_stop(pos, 2.3, trail_z=1.5)
         assert result is False
-        result = _check_trailing_stop(pos, 2.6, buffer=0.5)
+        result = _check_trailing_stop(pos, 2.6, trail_z=1.5)
+        assert result is True
+
+    def test_small_trail_z_triggers_quickly(self):
+        """작은 trail_z는 빠르게 발동 (이익 보존 공격적)."""
+        pos = _make_position(entry_z=2.0, signal=-1)
+        _update_best_z(pos, 1.0)  # best_z = 1.0
+        _check_trailing_stop(pos, 1.0)
+        # trail_z=0.3: threshold = 1.0 + 0.3 = 1.3
+        result = _check_trailing_stop(pos, 1.4, trail_z=0.3)
         assert result is True
 
     def test_activate_delta_sensitivity(self):
@@ -526,41 +487,32 @@ class TestTrailingStopEdgeCases:
 
 class TestGranularityBias:
     """백테스트(15분)가 실거래(1분)보다 보수적인지 검증.
-    
-    15분 봉에서는 z가 entry를 넘은 후 최대 15분간 더 악화된 가격에 청산.
+
+    15분 봉에서는 trailing stop threshold를 넘은 후 최대 15분간 더 악화된 가격에 청산.
     → 백테스트가 실거래보다 불리하게 나옴 = 안전 방향 바이어스.
     """
 
     def test_delayed_detection_worsens_exit_price(self):
         """15분 간격 체크 시 trailing stop 발동이 지연되어 더 나쁜 가격에 종료."""
         pos = _make_position(entry_z=2.0, signal=-1)
-        
-        # 1분 단위 z 시뮬레이션 (15분 봉 사이의 실제 path)
-        minute_zs = [
-            1.7, 1.65, 1.6, 1.55, 1.5,  # 5분: 개선 중
-            1.55, 1.6, 1.7, 1.8, 1.9,   # 10분: 역전 시작
-            2.0, 2.1, 2.15, 2.2, 2.3,   # 15분: entry 넘어감 → 15분봉 close = 2.3
-        ]
-        
-        # 1분 단위: z=2.10에서 이미 발동 (entry+0.1=2.1)
-        # 15분 단위: z=2.3에서야 발동 (더 나쁜 가격)
-        
+
         # Activate trailing with initial improvement
-        _update_best_z(pos, 1.5)
-        _check_trailing_stop(pos, 1.5)
+        _update_best_z(pos, 1.0)  # best_z = 1.0
+        _check_trailing_stop(pos, 1.0)
         assert pos['trailing_active'] is True
-        
-        # 1-minute check: fires at z=2.1
-        result_1m = _check_trailing_stop(pos, 2.1, buffer=0.1)
+
+        # threshold = 1.0 + 0.8 = 1.8
+        # 1분 단위: z=1.85에서 이미 발동
+        result_1m = _check_trailing_stop(pos, 1.85, trail_z=0.8)
         assert result_1m is True
-        
-        # Reset and check at 15-min close (z=2.3): also fires but at worse price
+
+        # 15분 단위: z=2.1에서야 발동 (더 나쁜 가격)
         pos2 = _make_position(entry_z=2.0, signal=-1)
-        _update_best_z(pos2, 1.5)
-        _check_trailing_stop(pos2, 1.5)
-        result_15m = _check_trailing_stop(pos2, 2.3, buffer=0.1)
+        _update_best_z(pos2, 1.0)
+        _check_trailing_stop(pos2, 1.0)
+        result_15m = _check_trailing_stop(pos2, 2.1, trail_z=0.8)
         assert result_15m is True
-        # 2.3 > 2.1 → 15분 봉 결과가 더 나쁨 (보수적)
+        # 2.1 > 1.85 → 15분 봉 결과가 더 나쁨 (보수적)
 
 
 # ============================================================
@@ -578,7 +530,7 @@ class TestLiveTraderTrailingStopConfig:
         params = sig.parameters
         assert 'trailing_stop_enabled' in params
         assert 'trailing_stop_activate_delta' in params
-        assert 'trailing_stop_buffer' in params
+        assert 'trailing_stop_trail_z' in params
 
     def test_to_trader_config_includes_trailing_stop(self):
         """to_trader_config()에 trailing stop 키가 포함되는지 확인."""
@@ -589,7 +541,7 @@ class TestLiveTraderTrailingStopConfig:
             'BINANCE_API_SECRET': 'test',
             'TRAILING_STOP_ENABLED': 'true',
             'TRAILING_STOP_ACTIVATE_DELTA': '0.4',
-            'TRAILING_STOP_BUFFER': '0.2',
+            'TRAILING_STOP_TRAIL_Z': '1.0',
         }
         with patch.dict(os.environ, env_vars, clear=False):
             from quantbox.core.settings import QuantBoxSettings
@@ -597,7 +549,7 @@ class TestLiveTraderTrailingStopConfig:
             cfg = s.to_trader_config()
             assert cfg['trailing_stop_enabled'] is True
             assert cfg['trailing_stop_activate_delta'] == 0.4
-            assert cfg['trailing_stop_buffer'] == 0.2
+            assert cfg['trailing_stop_trail_z'] == 1.0
 
     def test_default_trailing_stop_enabled(self):
         """기본값은 trailing_stop_enabled=True."""
@@ -627,7 +579,7 @@ class TestLiveTraderTrailingStopLogic:
         z_scores: list[float],
         elapsed_h: float = 1.0,
     ) -> str | None:
-        """live_trader.monitor_slot의 exit condition 로직을 재현.
+        """live_trader.monitor_slot의 exit condition 로직을 재현 (best_z 기반).
 
         Returns:
             close_reason 또는 None (유지).
@@ -636,20 +588,16 @@ class TestLiveTraderTrailingStopLogic:
         entry_z = pos['entry_zscore']
 
         for z_score in z_scores:
-            # Dynamic exit placeholder
             effective_exit_z = config.get('exit_zscore', 0.5)
-
-            should_close = False
-            close_reason = ""
 
             # Trailing stop: update best_z
             if config.get('trailing_stop_enabled', False):
                 best_z = pos.get('best_z', entry_z)
-                if signal == 1:  # Long: z should increase (become less negative)
+                if signal == 1:
                     if z_score > best_z:
                         pos['best_z'] = z_score
                         best_z = z_score
-                else:  # Short: z should decrease (become less positive)
+                else:
                     if z_score < best_z:
                         pos['best_z'] = z_score
                         best_z = z_score
@@ -659,13 +607,14 @@ class TestLiveTraderTrailingStopLogic:
                 if delta >= activate_delta:
                     pos['trailing_active'] = True
 
-            # Exit conditions
+            # Exit conditions (best_z 기반)
             if signal == 1:
                 if z_score >= -effective_exit_z:
                     return "mean_reversion"
                 elif config.get('trailing_stop_enabled', False) and pos.get('trailing_active', False):
-                    buffer = config.get('trailing_stop_buffer', 0.1)
-                    if z_score <= entry_z - buffer:
+                    trail_z = config.get('trailing_stop_trail_z', 0.8)
+                    best_z = pos.get('best_z', entry_z)
+                    if z_score <= best_z - trail_z:
                         return "trailing_stop"
                 elif z_score < entry_z - config['stop_loss_zscore']:
                     return "stop_loss"
@@ -673,8 +622,9 @@ class TestLiveTraderTrailingStopLogic:
                 if z_score <= effective_exit_z:
                     return "mean_reversion"
                 elif config.get('trailing_stop_enabled', False) and pos.get('trailing_active', False):
-                    buffer = config.get('trailing_stop_buffer', 0.1)
-                    if z_score >= entry_z + buffer:
+                    trail_z = config.get('trailing_stop_trail_z', 0.8)
+                    best_z = pos.get('best_z', entry_z)
+                    if z_score >= best_z + trail_z:
                         return "trailing_stop"
                 elif z_score > entry_z + config['stop_loss_zscore']:
                     return "stop_loss"
@@ -685,41 +635,39 @@ class TestLiveTraderTrailingStopLogic:
         return None
 
     def test_long_trailing_stop_fires(self):
-        """Long spread (signal=1, z<0): z가 개선됐다 entry 근처로 역전 시 trailing_stop."""
+        """Long spread: z 개선됐다가 best_z에서 trail_z 하락 시 trailing_stop."""
         config = {
             'trailing_stop_enabled': True,
             'trailing_stop_activate_delta': 0.3,
-            'trailing_stop_buffer': 0.1,
+            'trailing_stop_trail_z': 0.8,
             'exit_zscore': 0.5,
             'stop_loss_zscore': 1.5,
             'max_holding_hours': 20,
         }
         pos = {
-            'signal': 1, 'entry_zscore': -2.1,
-            'best_z': -2.1, 'trailing_active': False,
+            'signal': 1, 'entry_zscore': -2.5,
+            'best_z': -2.5, 'trailing_active': False,
         }
-        # z: -2.1 → -1.7 (improve toward 0, delta=0.4≥0.3 activates)
-        # → -2.3 (reverse past entry-buffer=-2.2)
-        reason = self._simulate_monitor_exit(config, pos, [-1.7, -1.8, -2.3])
+        # z: -2.5 → -1.5 (1.0σ 개선, best_z=-1.5) → -2.4 (0.9σ 역전 > 0.8 trail_z)
+        reason = self._simulate_monitor_exit(config, pos, [-1.5, -1.8, -2.4])
         assert reason == "trailing_stop"
 
     def test_short_trailing_stop_fires(self):
-        """Short spread (signal=-1, z>0): z가 개선됐다 entry 근처로 역전 시 trailing_stop."""
+        """Short spread: z 개선됐다가 best_z에서 trail_z 상승 시 trailing_stop."""
         config = {
             'trailing_stop_enabled': True,
             'trailing_stop_activate_delta': 0.3,
-            'trailing_stop_buffer': 0.1,
+            'trailing_stop_trail_z': 0.8,
             'exit_zscore': 0.5,
             'stop_loss_zscore': 1.5,
             'max_holding_hours': 20,
         }
         pos = {
-            'signal': -1, 'entry_zscore': 2.1,
-            'best_z': 2.1, 'trailing_active': False,
+            'signal': -1, 'entry_zscore': 2.5,
+            'best_z': 2.5, 'trailing_active': False,
         }
-        # z: 2.1 → 1.7 (improve toward 0, delta=0.4≥0.3 activates)
-        # → 2.3 (reverse past entry+buffer=2.2)
-        reason = self._simulate_monitor_exit(config, pos, [1.7, 1.8, 2.3])
+        # z: 2.5 → 1.5 (1.0σ 개선, best_z=1.5) → 2.4 (0.9σ 역전 > 0.8 trail_z)
+        reason = self._simulate_monitor_exit(config, pos, [1.5, 1.8, 2.4])
         assert reason == "trailing_stop"
 
     def test_trailing_disabled_no_trigger(self):
@@ -743,7 +691,7 @@ class TestLiveTraderTrailingStopLogic:
         config = {
             'trailing_stop_enabled': True,
             'trailing_stop_activate_delta': 0.3,
-            'trailing_stop_buffer': 0.1,
+            'trailing_stop_trail_z': 0.8,
             'exit_zscore': 0.5,
             'stop_loss_zscore': 1.5,
             'max_holding_hours': 20,
@@ -761,7 +709,7 @@ class TestLiveTraderTrailingStopLogic:
         config = {
             'trailing_stop_enabled': True,
             'trailing_stop_activate_delta': 0.3,
-            'trailing_stop_buffer': 0.1,
+            'trailing_stop_trail_z': 0.8,
             'exit_zscore': 0.5,
             'stop_loss_zscore': 1.5,
             'max_holding_hours': 20,
@@ -788,14 +736,13 @@ class TestLiveTraderTrailingStopLogic:
         assert pos['trailing_active'] is False
 
     def test_btc_eth_session_replay(self):
-        """세션 로그 BTC/ETH 실제 궤적: z=+2.1→+1.698→+4.330 stop.
-        
-        signal=-1 (Short spread, z>0). Trailing stop should fire at z≈2.0.
-        """
+        """세션 로그 BTC/ETH 실제 궤적: z=+2.1→+1.698→+4.330.
+        signal=-1, best_z=1.698, threshold=1.698+0.8=2.498.
+        z=2.660 > 2.498 → trailing_stop."""
         config = {
             'trailing_stop_enabled': True,
             'trailing_stop_activate_delta': 0.3,
-            'trailing_stop_buffer': 0.1,
+            'trailing_stop_trail_z': 0.8,
             'exit_zscore': 0.5,
             'stop_loss_zscore': 1.5,
             'max_holding_hours': 20,
