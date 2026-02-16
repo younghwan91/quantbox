@@ -7,19 +7,34 @@
 
 ## 1. 시스템 개요
 
-QuantBox v1.8.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 페어 트레이딩 시스템이다.
+QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 Rubber Band 스캘핑 시스템이다.
 
 | 구성 요소 | 역할 |
 |-----------|------|
-| **LivePairTrader** | 실거래 오케스트레이터. 15분 사이클로 페어 탐색 → 진입 → 모니터링 → 청산 |
-| **ContinuousPairBacktest** | 동일한 진입/청산/비용 로직을 과거 데이터에 적용 |
+| **LivePairTrader** | 실거래 오케스트레이터. 15분 사이클로 신호 생성 → 진입 → 모니터링 → 청산 |
+| **RubberBandStrategy** | 기본 평균회귀 신호 생성기 (Numba 가속, 2.5%+ 급등/급락 포착) |
+| **AlphaEngine** | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
+| **VolatilitySelector** | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
+| **VectorizedBacktest** | Numba 가속 백테스트, 비용/펀딩비 반영 |
 | **LimitOrderChaser** | 메이커 지정가 추격 주문. 타임아웃 시 시장가 폴백 |
-| **FilterPipeline** | 통계적 페어 선별 (상관관계 → 공적분 → 반감기 → 허스트) |
-| **Vol-Inverse Sizing** | 변동성 반비례 포지션 사이징. 동일 달러 손절액 보장 |
-| **Dynamic Leverage** | 트레이드당 R=target_r_pct(기본 1%)가 되도록 레버리지 자동 계산 |
 | **State Persistence** | JSON 기반 상태 영속화. 원자적 쓰기. 크래시 복구 지원 |
 | **Drawdown / Daily Loss Breaker** | 세션 HWM 10% / 당일 5% 초과 시 자동 포지션 청산 + 일시정지 |
 | **Discord Bot/Notifier** | 원격 제어(!status, !close all 등) 및 실시간 알림 |
+
+### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
+
+```
+전략:     RB_original (순수 러버밴드)
+심볼선택: 30일 실현변동성 Top-5 (10일마다 리밸런싱)
+파라미터: lookback=8, threshold=0.025, target=0.5, stop=1.0, max_hold=8
+비용:     0.04%/side + 펀딩비
+
+성과 (90일, 30개 심볼 유니버스):
+  Return:    +35.22%
+  Sharpe:    4.67
+  Max DD:    14.19%
+  WF OOS:    +34.31% (60일), 3/4 수익, 연환산 +502%
+```
 
 ---
 
