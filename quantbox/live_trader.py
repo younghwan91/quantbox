@@ -204,6 +204,9 @@ class LivePairTrader:
         self.BLACKLIST_TTL_SECONDS: int = 3600  # 1시간 후 자동 만료
         self._failed_symbols: dict[str, datetime] = {}
 
+        # 손실 페어 세션 블랙리스트 (세션 전체 지속, 재진입 방지)
+        self._session_loss_blacklist: set[str] = set()
+
         # 일시정지 플래그 (Discord !pause / !resume)
         self.paused: bool = False
         # 종료 요청 플래그 (Discord !stop)
@@ -1369,14 +1372,16 @@ class LivePairTrader:
                 should_close = True
                 close_reason = "mean_reversion"
             elif self.config.get('trailing_stop_enabled', False) and pos.get('trailing_active', False):
-                buffer = self.config.get('trailing_stop_buffer', 0.1)
-                if z_score <= entry_z - buffer:
+                trail_z = self.config.get('trailing_stop_trail_z', 0.8)
+                best_z = pos.get('best_z', entry_z)
+                threshold = best_z - trail_z
+                if z_score <= threshold:
                     should_close = True
                     close_reason = "trailing_stop"
                     logger.info(
                         f"Slot {slot_id}: Trailing stop triggered: "
-                        f"z={z_score:+.3f}, best_z={pos['best_z']:+.3f}, "
-                        f"threshold={entry_z - buffer:+.3f}"
+                        f"z={z_score:+.3f}, best_z={best_z:+.3f}, "
+                        f"threshold={threshold:+.3f}"
                     )
             elif z_score < entry_z - self.config['stop_loss_zscore']:
                 should_close = True
@@ -1386,14 +1391,16 @@ class LivePairTrader:
                 should_close = True
                 close_reason = "mean_reversion"
             elif self.config.get('trailing_stop_enabled', False) and pos.get('trailing_active', False):
-                buffer = self.config.get('trailing_stop_buffer', 0.1)
-                if z_score >= entry_z + buffer:
+                trail_z = self.config.get('trailing_stop_trail_z', 0.8)
+                best_z = pos.get('best_z', entry_z)
+                threshold = best_z + trail_z
+                if z_score >= threshold:
                     should_close = True
                     close_reason = "trailing_stop"
                     logger.info(
                         f"Slot {slot_id}: Trailing stop triggered: "
-                        f"z={z_score:+.3f}, best_z={pos['best_z']:+.3f}, "
-                        f"threshold={entry_z + buffer:+.3f}"
+                        f"z={z_score:+.3f}, best_z={best_z:+.3f}, "
+                        f"threshold={threshold:+.3f}"
                     )
             elif z_score > entry_z + self.config['stop_loss_zscore']:
                 should_close = True
@@ -1486,6 +1493,15 @@ class LivePairTrader:
 
             # 상태 저장 (크래시 복구용)
             self._save_state()
+
+            # 손실 거래 시 세션 블랙리스트에 추가 (동일 페어 재진입 방지)
+            if total_pnl < 0:
+                self._session_loss_blacklist.add(pos['symbol1'])
+                self._session_loss_blacklist.add(pos['symbol2'])
+                logger.info(
+                    f"Slot {slot_id}: Session blacklisted {pos['symbol1']}, "
+                    f"{pos['symbol2']} (loss=${total_pnl:.2f})"
+                )
 
             # Discord 알림
             elapsed_hours = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
@@ -1918,9 +1934,11 @@ class LivePairTrader:
         # 6. For each idle slot, find and enter a new pair
         #    Capital is calculated per-slot using the same function as backtest
         self._clean_expired_failures()
-        excluded = set(self.occupied_symbols) | set(self._failed_symbols.keys())
+        excluded = set(self.occupied_symbols) | set(self._failed_symbols.keys()) | self._session_loss_blacklist
         if self._failed_symbols:
             logger.info(f"Blacklisted symbols ({len(self._failed_symbols)}): {set(self._failed_symbols.keys())}")
+        if self._session_loss_blacklist:
+            logger.info(f"Session-blacklisted symbols ({len(self._session_loss_blacklist)}): {self._session_loss_blacklist}")
 
         # ── Vol-inverse sizing: compute anchor_std from all candidates ──
         # Low-vol pair gets full capital, high-vol gets proportionally less
@@ -2207,23 +2225,30 @@ class LivePairTrader:
 
     def _cmd_blacklist(self) -> str:
         """블랙리스트 현황 조회."""
-        if not self._failed_symbols:
+        lines = []
+        if self._failed_symbols:
+            now = datetime.now(timezone.utc)
+            lines.append(f"🚫 **체결실패 블랙리스트** ({len(self._failed_symbols)}개 심볼)")
+            for sym, ts in sorted(self._failed_symbols.items()):
+                elapsed = (now - ts).total_seconds()
+                remaining = max(0, self.BLACKLIST_TTL_SECONDS - elapsed)
+                lines.append(f"  `{sym}` — {remaining:.0f}초 남음")
+        if self._session_loss_blacklist:
+            lines.append(f"🔒 **세션 손실 블랙리스트** ({len(self._session_loss_blacklist)}개 심볼)")
+            for sym in sorted(self._session_loss_blacklist):
+                lines.append(f"  `{sym}` — 세션 종료까지")
+        if not lines:
             return "✅ 블랙리스트 비어있음"
-
-        now = datetime.now(timezone.utc)
-        lines = [f"🚫 **블랙리스트** ({len(self._failed_symbols)}개 심볼)"]
-        for sym, ts in sorted(self._failed_symbols.items()):
-            elapsed = (now - ts).total_seconds()
-            remaining = max(0, self.BLACKLIST_TTL_SECONDS - elapsed)
-            lines.append(f"  `{sym}` — {remaining:.0f}초 남음")
         return "\n".join(lines)
 
     def _cmd_blacklist_clear(self) -> str:
         """블랙리스트 수동 초기화."""
-        n = len(self._failed_symbols)
+        n_failed = len(self._failed_symbols)
+        n_session = len(self._session_loss_blacklist)
         self._failed_symbols.clear()
+        self._session_loss_blacklist.clear()
         logger.info("Blacklist cleared via Discord command")
-        return f"✅ 블랙리스트 초기화 ({n}개 심볼 제거)"
+        return f"✅ 블랙리스트 초기화 (체결실패 {n_failed}개 + 세션손실 {n_session}개 제거)"
 
     def _cmd_pnl(self) -> str:
         """세션 손익 요약."""
