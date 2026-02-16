@@ -271,6 +271,136 @@ class VectorizedBacktest:
             'per_asset': {r.symbol: r for r in per_asset},
         }
 
+    def run_dd_managed_portfolio(
+        self,
+        data: dict[str, pd.DataFrame],
+        signal_func: Callable[[np.ndarray], np.ndarray],
+        selected_symbols: list[str],
+        vol_lookback: int = 2880,
+        inverse_vol_weight: bool = True,
+        dd_dampening_threshold: float = 0.0,
+        dd_dampening_scale: float = 0.5,
+    ) -> dict:
+        """Run portfolio backtest with drawdown management.
+
+        Features:
+          - Inverse-volatility weighting (high vol → lower weight)
+          - DD dampening: when portfolio DD > threshold, reduce
+            exposure by dd_dampening_scale factor
+
+        Args:
+            data: Symbol -> DataFrame with 'Close' column.
+            signal_func: Function(close) -> signals.
+            selected_symbols: Pre-selected symbols to trade.
+            vol_lookback: Bars to compute realized vol for weighting.
+            inverse_vol_weight: Weight by inverse realized vol vs equal.
+            dd_dampening_threshold: Portfolio DD level to start reducing
+                exposure (0=disabled). E.g. 0.05 = dampen at 5% DD.
+            dd_dampening_scale: Exposure multiplier when DD exceeds
+                threshold. 0.5 = halve positions. Applied linearly:
+                full reduction at 2x threshold.
+
+        Returns:
+            Dict with portfolio metrics and equity curve.
+        """
+        from quantbox.strategy.vol_selector import compute_realized_vol
+
+        n_symbols = len(selected_symbols)
+        if n_symbols == 0:
+            return {'portfolio_return_pct': 0.0, 'portfolio_sharpe': 0.0,
+                    'portfolio_max_dd_pct': 0.0, 'portfolio_equity': np.ones(1)}
+
+        n_bars = min(len(data[s]) for s in selected_symbols)
+
+        # Pre-compute per-asset bar returns from equity curves
+        per_asset_results = {}
+        bar_rets = {}
+        for sym in selected_symbols:
+            close = data[sym]['Close'].values[:n_bars].astype(np.float64)
+            sigs = signal_func(close)
+            result = self.run_single(close, sigs, symbol=sym)
+            per_asset_results[sym] = result
+            eq = result.equity_curve[:n_bars]
+            r = np.zeros(n_bars)
+            for j in range(1, n_bars):
+                r[j] = eq[j] / eq[j - 1] - 1.0
+            bar_rets[sym] = r
+
+        # Compute inverse-vol weights
+        if inverse_vol_weight and n_symbols > 1:
+            vols = np.zeros(n_symbols)
+            for idx, sym in enumerate(selected_symbols):
+                close_arr = data[sym]['Close'].values[:n_bars].astype(np.float64)
+                start = max(0, n_bars - vol_lookback)
+                vols[idx] = compute_realized_vol(close_arr[start:n_bars], np.sqrt(96 * 365.25))
+            # Inverse-vol weight (avoid zero division)
+            inv_vols = np.where(vols > 1e-8, 1.0 / vols, 0.0)
+            total_inv = inv_vols.sum()
+            if total_inv > 0:
+                weights = inv_vols / total_inv
+            else:
+                weights = np.ones(n_symbols) / n_symbols
+        else:
+            weights = np.ones(n_symbols) / n_symbols
+
+        # Build portfolio equity with DD dampening
+        portfolio_eq = np.ones(n_bars)
+        peak = 1.0
+
+        for j in range(1, n_bars):
+            # Portfolio bar return (weighted sum)
+            port_bar_ret = 0.0
+            for idx, sym in enumerate(selected_symbols):
+                port_bar_ret += weights[idx] * bar_rets[sym][j]
+
+            # DD dampening: reduce exposure when in drawdown
+            if dd_dampening_threshold > 0 and peak > 0:
+                current_dd = (peak - portfolio_eq[j - 1]) / peak
+                if current_dd > dd_dampening_threshold:
+                    # Linear scale: full dampening at 2x threshold
+                    excess = min(current_dd - dd_dampening_threshold,
+                                 dd_dampening_threshold)
+                    dampening = 1.0 - (1.0 - dd_dampening_scale) * (
+                        excess / dd_dampening_threshold)
+                    port_bar_ret *= dampening
+
+            portfolio_eq[j] = portfolio_eq[j - 1] * (1.0 + port_bar_ret)
+            if portfolio_eq[j] > peak:
+                peak = portfolio_eq[j]
+
+        # Metrics
+        port_ret = (portfolio_eq[-1] - 1.0) * 100
+        port_peak = np.maximum.accumulate(portfolio_eq)
+        port_dd = np.max((port_peak - portfolio_eq) / port_peak) * 100
+
+        rets_arr = np.diff(portfolio_eq) / portfolio_eq[:-1]
+        port_sharpe = (
+            np.mean(rets_arr) / np.std(rets_arr) * np.sqrt(96 * 365.25)
+            if np.std(rets_arr) > 0 else 0.0
+        )
+
+        calmar = port_ret / port_dd if port_dd > 0 else 999.0
+        positive_count = sum(1 for s in selected_symbols
+                             if per_asset_results[s].total_return_pct > 0)
+        total_trades = sum(per_asset_results[s].n_trades
+                           for s in selected_symbols)
+
+        return {
+            'portfolio_return_pct': port_ret,
+            'portfolio_sharpe': port_sharpe,
+            'portfolio_max_dd_pct': port_dd,
+            'portfolio_equity': portfolio_eq,
+            'calmar': calmar,
+            'weights': {sym: float(weights[i])
+                        for i, sym in enumerate(selected_symbols)},
+            'pct_symbols_positive': positive_count / n_symbols * 100,
+            'n_symbols': n_symbols,
+            'total_trades': total_trades,
+            'avg_win_rate': np.mean([per_asset_results[s].win_rate
+                                     for s in selected_symbols]),
+            'per_asset': per_asset_results,
+        }
+
     def walk_forward(
         self,
         data: dict[str, pd.DataFrame],

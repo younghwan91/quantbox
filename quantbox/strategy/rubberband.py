@@ -46,6 +46,7 @@ class RubberBandConfig:
     target_retrace: float = 0.5  # Take profit at 50% retracement
     stop_mult: float = 1.0     # Stop at 1x the move size
     max_hold: int = 8          # Maximum holding period (bars)
+    stop_decay: float = 0.0    # Stop tightening rate (0=off, 0.5=halves by max_hold)
 
     # ── Regime filter ──
     regime_filter_enabled: bool = False   # Disabled: blocks the very moves that generate alpha
@@ -90,6 +91,7 @@ def compute_signals(
     target_retrace: float,
     stop_mult: float,
     max_hold: int,
+    stop_decay: float = 0.0,
 ) -> np.ndarray:
     """Compute rubber band signals from price data.
 
@@ -100,6 +102,8 @@ def compute_signals(
         target_retrace: Fraction of move to target for profit.
         stop_mult: Multiple of move size for stop loss.
         max_hold: Maximum holding period in bars.
+        stop_decay: Stop tightening rate over hold duration (0=no decay,
+            0.5=stop halves by max_hold). Cuts losers faster as time passes.
 
     Returns:
         Signal array: -1 (short), 0 (flat), +1 (long) for each bar.
@@ -139,12 +143,16 @@ def compute_signals(
                 best_pnl = gain
 
             # ── Exit conditions (priority order) ──
+            # Time-decaying stop: tightens as holding period grows
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+
             # 1. Target hit: take profit
             target = move_size * target_retrace
             if gain >= target:
                 position = 0
-            # 2. Stop loss
-            elif gain < -move_size * stop_mult:
+            # 2. Stop loss (time-decaying)
+            elif gain < -effective_stop:
                 position = 0
             # 3. Trailing stop: was up >50% of target, now lost 70% of gains
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
@@ -168,6 +176,7 @@ def compute_signals_with_regime(
     max_hold: int,
     regime_lookback: int,
     regime_threshold: float,
+    stop_decay: float = 0.0,
 ) -> np.ndarray:
     """Compute signals with BTC regime filter.
 
@@ -217,10 +226,13 @@ def compute_signals_with_regime(
             if gain > best_pnl:
                 best_pnl = gain
 
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+
             target = move_size * target_retrace
             if gain >= target:
                 position = 0
-            elif gain < -move_size * stop_mult:
+            elif gain < -effective_stop:
                 position = 0
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
@@ -310,6 +322,7 @@ class RubberBandStrategy:
                 cfg.target_retrace, cfg.stop_mult,
                 cfg.max_hold, cfg.regime_lookback,
                 cfg.regime_trend_threshold,
+                cfg.stop_decay,
             )
         else:
             sigs = compute_signals(
@@ -317,6 +330,7 @@ class RubberBandStrategy:
                 cfg.lookback, cfg.threshold,
                 cfg.target_retrace, cfg.stop_mult,
                 cfg.max_hold,
+                cfg.stop_decay,
             )
 
         return int(sigs[-1])
@@ -365,10 +379,14 @@ class RubberBandStrategy:
 
         target = pos['move_size'] * cfg.target_retrace
 
+        # Time-decaying stop (parity with compute_signals)
+        time_factor = 1.0 - cfg.stop_decay * (pos['bars_held'] / cfg.max_hold)
+        effective_stop = pos['move_size'] * cfg.stop_mult * time_factor
+
         # Exit conditions
         if gain >= target:
             return 'target'
-        if gain < -pos['move_size'] * cfg.stop_mult:
+        if gain < -effective_stop:
             return 'stop_loss'
         if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
             return 'trailing_stop'
