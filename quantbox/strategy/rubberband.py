@@ -49,8 +49,10 @@ class RubberBandConfig:
     stop_decay: float = 0.0    # Stop tightening rate (0=off, 0.5=halves by max_hold)
 
     # ── Multi-timeframe confirmation ──
-    htf_period: int = 0          # Higher TF trend lookback in 15m bars (0=disabled, 16=4h)
+    htf_period: int = 0          # Higher TF trend lookback in 15m bars (0=disabled, 48=12h)
     htf_block_threshold: float = 0.02  # Block entry if HTF trend > this against trade dir
+    htf_agree_discount: float = 1.0    # Threshold multiplier when HTF agrees (0.8=20% lower → more entries)
+    htf_agree_stop_mult: float = 1.0   # Stop multiplier when HTF agrees (0.7=tighter stop → better RR)
 
     # ── Regime filter ──
     regime_filter_enabled: bool = False   # Disabled: blocks the very moves that generate alpha
@@ -258,18 +260,20 @@ def compute_signals_mtf(
     stop_decay: float,
     htf_period: int,
     htf_block_threshold: float,
+    htf_agree_discount: float = 1.0,
+    htf_agree_stop_mult: float = 1.0,
 ) -> np.ndarray:
     """Compute rubber band signals with multi-timeframe confirmation.
 
-    Uses higher-timeframe trend (SMA slope) to filter entries.
-    If the HTF trend is strongly AGAINST the trade direction, the
-    entry is blocked. This prevents mean-reversion trades against
-    powerful trends visible on the higher timeframe.
+    Three modes based on HTF trend vs trade direction:
+      1. HTF AGREES with trade: lower threshold (more entries) +
+         tighter stop (better risk-reward)
+      2. HTF NEUTRAL: normal behavior
+      3. HTF strongly AGAINST trade: block entry entirely
 
-    The HTF trend is derived by comparing the current price to a
-    simple moving average over htf_period bars. This is equivalent
-    to checking where price sits relative to a higher-TF moving
-    average without needing separate timeframe data.
+    "HTF agrees" means the higher TF trend supports the mean-reversion:
+      - Long entry (fading drop): price is BELOW HTF SMA (oversold on HTF)
+      - Short entry (fading spike): price is ABOVE HTF SMA (overbought on HTF)
 
     Args:
         close: Array of close prices (15m bars).
@@ -279,10 +283,13 @@ def compute_signals_mtf(
         stop_mult: Stop loss as multiple of move.
         max_hold: Maximum holding bars.
         stop_decay: Stop tightening rate.
-        htf_period: Higher TF SMA lookback in bars (e.g. 16=4h of 15m).
-            Set to 0 to disable MTF filter.
-        htf_block_threshold: Block entry when HTF trend (price vs SMA)
-            exceeds this fraction against trade direction.
+        htf_period: Higher TF SMA lookback in bars (0=disabled, 48=12h).
+        htf_block_threshold: Block entry when HTF trend is strongly
+            against trade direction (as fraction, e.g. 0.02 = 2%).
+        htf_agree_discount: When HTF agrees, multiply threshold by this
+            (e.g. 0.8 = 20% lower threshold → more entries). 1.0 = off.
+        htf_agree_stop_mult: When HTF agrees, multiply stop_mult by this
+            (e.g. 0.7 = 30% tighter stop → better risk-reward). 1.0 = off.
 
     Returns:
         Signal array: -1 (short), 0 (flat), +1 (long).
@@ -294,6 +301,7 @@ def compute_signals_mtf(
     move_size = 0.0
     hold_count = 0
     best_pnl = 0.0
+    entry_stop_mult = stop_mult  # Effective stop for current position
 
     # Pre-compute running SMA for HTF filter (cumulative approach)
     htf_sma = np.zeros(n)
@@ -314,32 +322,47 @@ def compute_signals_mtf(
         ret = close[i] / close[i - lookback] - 1.0
 
         if position == 0:
-            # HTF confirmation: check if higher TF trend blocks this entry
+            # Determine HTF state for entry decisions
             htf_blocked = False
-            if htf_period > 0:
+            htf_agrees = False
+            eff_threshold = threshold
+            eff_stop = stop_mult
+
+            if htf_period > 0 and htf_sma[i] > 0:
                 htf_trend = (close[i] - htf_sma[i]) / htf_sma[i]
-                if ret < -threshold:
-                    # Want to go long — block if HTF strongly bearish
-                    if htf_trend < -htf_block_threshold:
-                        htf_blocked = True
-                elif ret > threshold:
-                    # Want to go short — block if HTF strongly bullish
+
+                if ret < -threshold * min(htf_agree_discount, 1.0):
+                    # Want to go long — HTF agrees if price below SMA (oversold)
                     if htf_trend > htf_block_threshold:
                         htf_blocked = True
+                    elif htf_trend < 0:
+                        htf_agrees = True
+                elif ret > threshold * min(htf_agree_discount, 1.0):
+                    # Want to go short — HTF agrees if price above SMA (overbought)
+                    if htf_trend < -htf_block_threshold:
+                        htf_blocked = True
+                    elif htf_trend > 0:
+                        htf_agrees = True
+
+            if htf_agrees:
+                eff_threshold = threshold * htf_agree_discount
+                eff_stop = stop_mult * htf_agree_stop_mult
 
             if not htf_blocked:
-                if ret < -threshold:
+                if ret < -eff_threshold:
                     position = 1
                     entry_price = close[i]
                     move_size = abs(ret)
                     hold_count = 0
                     best_pnl = 0.0
-                elif ret > threshold:
+                    entry_stop_mult = eff_stop
+                elif ret > eff_threshold:
                     position = -1
                     entry_price = close[i]
                     move_size = abs(ret)
                     hold_count = 0
                     best_pnl = 0.0
+                    entry_stop_mult = eff_stop
         else:
             hold_count += 1
             if position == 1:
@@ -351,7 +374,7 @@ def compute_signals_mtf(
                 best_pnl = gain
 
             time_factor = 1.0 - stop_decay * (hold_count / max_hold)
-            effective_stop = move_size * stop_mult * time_factor
+            effective_stop = move_size * entry_stop_mult * time_factor
 
             target = move_size * target_retrace
             if gain >= target:
@@ -458,6 +481,7 @@ class RubberBandStrategy:
                 cfg.max_hold,
                 cfg.stop_decay,
                 cfg.htf_period, cfg.htf_block_threshold,
+                cfg.htf_agree_discount, cfg.htf_agree_stop_mult,
             )
         else:
             sigs = compute_signals(
