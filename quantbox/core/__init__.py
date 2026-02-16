@@ -1,22 +1,12 @@
 """
-Core module - Configuration, events, and trading slots.
+Core module - Configuration, events, and settings.
 """
 
 from quantbox.core.config import Config
 from quantbox.core.events import Event, EventType, SignalEvent, OrderEvent, FillEvent
-from quantbox.core.trader_slot import (
-    TraderSlotState,
-    get_occupied_symbols,
-    get_idle_slots,
-    get_active_slots,
-    calculate_slot_capital,
-    is_pair_available,
-    calculate_margin_from_notional,
-    calculate_kelly_from_trades,
-    calculate_kelly_discrete,
-    calculate_dynamic_leverage,
-    estimate_cost_rate,
-)
+from quantbox.core.settings import QuantBoxSettings, get_settings
+from quantbox.core.limit_chaser import LimitOrderChaser
+from quantbox.core.state_persistence import save_state, load_state, clear_state
 
 __all__ = [
     "Config",
@@ -25,15 +15,10 @@ __all__ = [
     "SignalEvent",
     "OrderEvent",
     "FillEvent",
-    "TraderSlotState",
-    "get_occupied_symbols",
-    "get_idle_slots",
-    "get_active_slots",
-    "calculate_slot_capital",
-    "is_pair_available",
-    "calculate_margin_from_notional",
-    "calculate_kelly_from_trades",
-    "calculate_kelly_discrete",
-    "calculate_dynamic_leverage",
-    "estimate_cost_rate",
+    "QuantBoxSettings",
+    "get_settings",
+    "LimitOrderChaser",
+    "save_state",
+    "load_state",
+    "clear_state",
 ]
