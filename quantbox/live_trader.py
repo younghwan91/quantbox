@@ -1105,15 +1105,56 @@ class LivePairTrader:
             logger.info(f"Slot {slot_id}: Z-Score below entry threshold")
             return False
 
+        # Determine signal early (needed for direction gate)
+        signal = 1 if z_score < 0 else -1
+
+        # ── Direction Diversity Gate (동일 방향 편중 방지) ──
+        max_same_dir = self.config.get('max_same_direction_slots', 0)
+        if max_same_dir > 0:
+            same_dir_count = sum(
+                1 for pos in self.slot_positions.values()
+                if pos.get('signal') == signal
+            )
+            if same_dir_count >= max_same_dir:
+                dir_label = "LONG" if signal == 1 else "SHORT"
+                logger.warning(
+                    f"Slot {slot_id}: Direction diversity gate blocked — "
+                    f"{dir_label} slots={same_dir_count}/{max_same_dir}, "
+                    f"skipping {symbol1}/{symbol2}"
+                )
+                return False
+
+        # ── Asia Session Gate (아시아 세션 진입 제한) ──
+        asia_gate_enabled = self.config.get('asia_session_gate_enabled', False)
+        if asia_gate_enabled:
+            utc_hour = datetime.now(timezone.utc).hour
+            asia_start = self.config.get('asia_session_start_utc', 0)
+            asia_end = self.config.get('asia_session_end_utc', 8)
+            asia_max = self.config.get('asia_max_entry_slots', 1)
+            if asia_start <= utc_hour < asia_end:
+                # 현재 아시아 세션 중 활성 슬롯 수 카운트
+                active_count = sum(
+                    1 for sid, t in self.slot_entry_times.items()
+                    if sid in self.slot_positions
+                    and asia_start <= t.hour < asia_end
+                )
+                if active_count >= asia_max:
+                    logger.warning(
+                        f"Slot {slot_id}: Asia session gate blocked — "
+                        f"active entries={active_count}/{asia_max} "
+                        f"(UTC {utc_hour:02d}h), skipping {symbol1}/{symbol2}"
+                    )
+                    return False
+
         # ── Gate Summary (모든 게이트 통과 시 한 줄로 기록) ──
+        dir_label = "LONG" if signal == 1 else "SHORT"
         logger.info(
             f"Slot {slot_id}: Gates PASS — BTC={btc_ret:+.2%}, "
             f"|z|={abs(z_score):.2f}/{z_cap}, "
-            f"vol={vol_ratio_val:.2f}x/{vol_gate:.1f}x"
+            f"vol={vol_ratio_val:.2f}x/{vol_gate:.1f}x, "
+            f"dir={dir_label}"
         )
         
-        # Determine signal: z < 0 -> Long spread, z > 0 -> Short spread
-        signal = 1 if z_score < 0 else -1
         side1 = 'BUY' if signal == 1 else 'SELL'
         side2 = 'SELL' if signal == 1 else 'BUY'
         

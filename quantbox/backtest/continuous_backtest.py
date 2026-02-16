@@ -144,7 +144,7 @@ class ContinuousBacktestConfig:
     formation_bars: int = 240   # Bars to analyze for pair selection
     
     # Entry/Exit thresholds
-    entry_zscore: float = 2.0
+    entry_zscore: float = 2.2
     exit_zscore: float = 0.5    # Exit when z-score returns to this level
     stop_loss_zscore: float = 3.5  # Max adverse z-score movement
 
@@ -171,7 +171,16 @@ class ContinuousBacktestConfig:
     # Trailing stop (ratchet stop): z가 best_z에서 trail_z만큼 되돌림 시 이익 보존 청산
     trailing_stop_enabled: bool = False         # Trailing stop 활성화 여부
     trailing_stop_activate_delta: float = 0.3   # entry 대비 Δz 이 이상 개선 시 활성화
-    trailing_stop_trail_z: float = 0.8          # best_z에서 trail_z만큼 되돌림 시 발동
+    trailing_stop_trail_z: float = 1.2          # best_z에서 trail_z만큼 되돌림 시 발동
+
+    # Direction diversity gate (parity with live_trader)
+    max_same_direction_slots: int = 2  # 동일 방향(Long/Short) 최대 슬롯 수 (0=disable)
+
+    # Asia session gate (parity with live_trader)
+    asia_session_gate_enabled: bool = True
+    asia_session_start_utc: int = 0
+    asia_session_end_utc: int = 8
+    asia_max_entry_slots: int = 1
 
     # BTC crash gate (parity with live_trader)
     btc_crash_gate_enabled: bool = True   # Enable BTC crash gate in backtest
@@ -682,6 +691,43 @@ class ContinuousPairBacktest:
             # Z-score not extreme enough (market moved since formation end)
             return False
 
+        # ── Gate 5: Direction Diversity Gate ──
+        max_same_dir = self.config.max_same_direction_slots
+        if max_same_dir > 0:
+            same_dir_count = sum(
+                1 for s in self.state.active_slots
+                if s.position_info and s.position_info.get('signal') == signal
+            )
+            if same_dir_count >= max_same_dir:
+                logger.debug(
+                    f"Slot {slot.slot_id}: Direction diversity gate — "
+                    f"{'LONG' if signal == 1 else 'SHORT'} "
+                    f"slots={same_dir_count}/{max_same_dir}"
+                )
+                return False
+
+        # ── Gate 6: Asia Session Gate ──
+        if self.config.asia_session_gate_enabled:
+            current_time = data[symbol1].iloc[bar_idx].name
+            if hasattr(current_time, 'hour'):
+                utc_hour = current_time.hour
+                asia_start = self.config.asia_session_start_utc
+                asia_end = self.config.asia_session_end_utc
+                if asia_start <= utc_hour < asia_end:
+                    asia_entries = sum(
+                        1 for s in self.state.active_slots
+                        if s.position_info
+                        and hasattr(s, 'entry_bar_time')
+                        and hasattr(s.entry_bar_time, 'hour')
+                        and asia_start <= s.entry_bar_time.hour < asia_end
+                    )
+                    if asia_entries >= self.config.asia_max_entry_slots:
+                        logger.debug(
+                            f"Slot {slot.slot_id}: Asia session gate — "
+                            f"entries={asia_entries}/{self.config.asia_max_entry_slots}"
+                        )
+                        return False
+
         # ── Dynamic leverage: target R = target_r_pct × balance ──
         if self.config.target_r_pct > 0:
             # When dynamic leverage is ON, always use each pair's own spread_std.
@@ -741,6 +787,7 @@ class ContinuousPairBacktest:
 
         # Store position info in slot
         slot.position_open = True
+        slot.entry_bar_time = timestamp  # Asia session gate에서 사용
         slot.current_pair = (symbol1, symbol2)
         slot.position_info = {
             'entry_bar': bar_idx,
