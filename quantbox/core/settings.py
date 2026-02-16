@@ -68,7 +68,7 @@ class QuantBoxSettings(BaseSettings):
     position_size_pct: float = -1.0  # -1 = auto (1/max_traders)
 
     # ── 전략 파라미터 ──
-    entry_zscore: float = 2.0
+    entry_zscore: float = 2.2
     exit_zscore: float = 0.5
     stop_loss_zscore: float = 1.5  # entry에서 +1.5 이동 시 손절
 
@@ -88,7 +88,16 @@ class QuantBoxSettings(BaseSettings):
     # ── Trailing Stop (ratchet stop) ──
     trailing_stop_enabled: bool = True      # 트레일링 스톱 활성화
     trailing_stop_activate_delta: float = 0.3  # z가 entry 대비 0.3 개선 시 활성화
-    trailing_stop_trail_z: float = 0.8      # best_z에서 trail_z만큼 되돌림 시 발동
+    trailing_stop_trail_z: float = 1.2      # best_z에서 trail_z만큼 되돌림 시 발동
+
+    # ── Direction Diversity (방향 다양화) ──
+    max_same_direction_slots: int = 2  # 동일 방향(Long/Short) 최대 슬롯 수
+
+    # ── Asia Session Gate (아시아 세션 진입 제한) ──
+    asia_session_gate_enabled: bool = True    # 아시아 세션(00-08 UTC) 신규 진입 제한
+    asia_session_start_utc: int = 0           # 아시아 세션 시작 (UTC hour)
+    asia_session_end_utc: int = 8             # 아시아 세션 종료 (UTC hour)
+    asia_max_entry_slots: int = 1             # 아시아 세션 중 최대 신규 진입 슬롯 수
 
     # ── BTC Crash Gate (매크로 방어) ──
     btc_crash_gate_enabled: bool = True    # BTC 급락 시 진입 차단 활성화
@@ -182,6 +191,13 @@ class QuantBoxSettings(BaseSettings):
             'trailing_stop_enabled': self.trailing_stop_enabled,
             'trailing_stop_activate_delta': self.trailing_stop_activate_delta,
             'trailing_stop_trail_z': self.trailing_stop_trail_z,
+            # Direction Diversity
+            'max_same_direction_slots': self.max_same_direction_slots,
+            # Asia Session Gate
+            'asia_session_gate_enabled': self.asia_session_gate_enabled,
+            'asia_session_start_utc': self.asia_session_start_utc,
+            'asia_session_end_utc': self.asia_session_end_utc,
+            'asia_max_entry_slots': self.asia_max_entry_slots,
             # BTC Crash Gate
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,
