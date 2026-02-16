@@ -102,17 +102,3 @@ def config():
     """Sample configuration."""
     from quantbox.core.config import Config
     return Config()
-
-
-@pytest.fixture
-def backtest_config():
-    """Sample backtest configuration."""
-    from quantbox.backtest.continuous_backtest import ContinuousBacktestConfig
-    return ContinuousBacktestConfig(
-        initial_capital=10000.0,
-        trading_fee=0.0005,
-        slippage=0.001,
-        lookback_window=100,
-        zscore_entry=2.0,
-        zscore_exit=0.5
-    )

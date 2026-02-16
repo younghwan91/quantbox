@@ -7,19 +7,20 @@
 
 ## 1. 시스템 개요
 
-QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 Rubber Band 스캘핑 시스템이다.
+QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
+단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
 
 | 구성 요소 | 역할 |
 |-----------|------|
-| **LivePairTrader** | 실거래 오케스트레이터. 15분 사이클로 신호 생성 → 진입 → 모니터링 → 청산 |
-| **RubberBandStrategy** | 기본 평균회귀 신호 생성기 (Numba 가속, 2.5%+ 급등/급락 포착) |
-| **AlphaEngine** | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
-| **VolatilitySelector** | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
-| **VectorizedBacktest** | Numba 가속 백테스트, 비용/펀딩비 반영 |
-| **LimitOrderChaser** | 메이커 지정가 추격 주문. 타임아웃 시 시장가 폴백 |
-| **State Persistence** | JSON 기반 상태 영속화. 원자적 쓰기. 크래시 복구 지원 |
+| **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산 |
+| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 2.5%+ 급등/급락 포착) |
+| **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
+| **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
+| **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
+| **LimitOrderChaser** (`limit_chaser.py`) | 메이커 지정가 추격 주문. 타임아웃 시 시장가 폴백 |
+| **State Persistence** (`state_persistence.py`) | JSON 기반 상태 영속화. 원자적 쓰기. 크래시 복구 지원 |
 | **Drawdown / Daily Loss Breaker** | 세션 HWM 10% / 당일 5% 초과 시 자동 포지션 청산 + 일시정지 |
-| **Discord Bot/Notifier** | 원격 제어(!status, !close all 등) 및 실시간 알림 |
+| **Discord Bot/Notifier** (`bot.py`, `discord.py`) | 원격 제어(!status, !close all 등) 및 실시간 알림 |
 
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
@@ -38,52 +39,51 @@ QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 Rubber 
 
 ---
 
-## 2. 라이브 트레이딩 전체 흐름 (run_cycle)
+## 2. 라이브 트레이딩 전체 흐름 (RubberBandScalper._cycle)
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│  0. _check_drawdown()         ← 세션 HWM 대비 드로다운 체크       │
-│  0. _check_daily_loss()       ← 당일 잔고 대비 손실 제한 체크      │
-│  1. _process_bot_commands()   ← Discord 큐에서 명령 수신          │
-│  2. monitor_slot(i)           ← 활성 슬롯: Frozen z-score 모니터링 │
-│     → 평균회귀(|z| ≤ exit_z) / 손절(z > stop_z) / 최대보유 초과  │
-│  3. get_trading_coins(n)      ← 24h 거래량 상위 N개 코인          │
-│  4. download_multi_symbol_data()  ← 15m OHLCV 다운로드 + 캐시    │
-│  5. select_pairs() (1회/사이클 캐시) ← FilterPipeline 적용        │
-│  6. 유휴 슬롯마다:                                                │
-│     a. calculate_slot_capital()   → 풀 기반 자본 배분             │
-│     b. find_best_pair(cached)     → 점수순 정렬, 중복 심볼 제외   │
-│     c. execute_pair_trade()       → 5중 게이트 통과 후 4건 주문   │
-│  7. notify_cycle_summary()    → Discord 요약                     │
-│  8. 24시간마다 daily_report() → Discord 일간 리포트              │
-└────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  0. balance = get_balance()                                     │
+│  1. _check_risk_limits(balance)                                 │
+│     → HWM 대비 DD ≥ 10% → _drawdown_halt (전체 청산)           │
+│     → 당일 손실 ≥ 5% → _daily_halt (신규 진입 차단)             │
+│  2. If drawdown_halt: close ALL positions → return              │
+│  3. BTC klines 다운로드 (regime filter용)                       │
+│  4. 기존 포지션 관리:                                            │
+│     ∀ active position:                                          │
+│       → update_position(symbol, price) → exit?                  │
+│       → TARGET / STOP_LOSS / TRAILING / MAX_HOLD                │
+│  5. 신규 진입 스캔 (_scan_entries):                              │
+│     ∀ symbol in universe (not already held):                    │
+│       → download_klines(symbol) → on_bar(symbol, close, btc)   │
+│       → 신호 +1/-1 → candidates 수집 → move 크기 정렬          │
+│       → 상위 N개까지 _open_position()                           │
+│  6. _save_state() — 원자적 JSON 저장                            │
+│  7. 매 4사이클마다 _log_summary() → 시간별 요약                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 진입 5중 게이트 (execute_pair_trade)
+### 2.1 신호 생성 (RubberBandStrategy.on_bar)
 
-모든 진입은 아래 5개 게이트를 **순서대로** 통과해야 한다. 하나라도 실패하면 진입 불가:
+단일 자산의 15m close 배열을 받아 `compute_signals()` (Numba 컴파일)로 신호를 생성한다:
 
-| # | 게이트 | 조건 | 기본값 |
-|---|--------|------|--------|
-| 1 | **BTC Crash Gate** | BTC 15m 수익률 절대값 > threshold → 차단 | ±3%, 8캔들 |
-| 2 | **Z-Score Cap** | \|z\| > cap → 레짐 변화로 간주, 거부 | 4.0 |
-| 3 | **Vol Expansion Gate** | √S / formation_std > gate → 구조 변화, 거부 | 2.0 |
-| 4 | **Z-Score Threshold** | \|z\| < entry_zscore → 시그널 부족, 거부 | 2.0 |
-| 5 | **자본 충분성** | slot_capital < 최소 주문 크기 → 거부 | — |
+| 조건 | 값 | 의미 |
+|------|---|------|
+| `lookback` 바 수익률 < `-threshold` | +1 | 급락 → LONG (반등 포착) |
+| `lookback` 바 수익률 > `+threshold` | -1 | 급등 → SHORT (하락 포착) |
+| 그 외 | 0 | 진입 안 함 |
 
-### 2.2 청산 조건 (monitor_slot)
+- BTC crash gate: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
+- 기존 포지션 보유 심볼은 중복 신호 무시
+
+### 2.2 청산 조건 (update_position)
 
 | 조건 | 판정 | 비고 |
 |------|------|------|
-| **평균회귀** | \|z\| ≤ exit_zscore | Frozen z-score (formation 기간 통계) 사용 |
-| **Trailing Stop** | z가 activate_delta 이상 개선 후 entry±buffer로 역전 | "Revert-Then-Reverse" 패턴 방어 (v1.9.0) |
-| **손절** | z가 진입 방향 반대로 > stop_loss_zscore | 3.5 기본값 |
-| **최대보유** | bars_held > max_holding_bars | 시간 기반 강제 청산 |
-
-**동적 청산**: `use_dynamic_exit=True`일 때 exit_zscore는 반감기에 비례하여 조절됨:
-```
-exit_z = base + ((hl - hl_min) / (hl_max - hl_min)) × range
-```
+| **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 50% 되돌림 기본 |
+| **Stop Loss** | unrealized PnL < -stop_mult × move_size | 1x 무브 역전 |
+| **Trailing Stop** | best_pnl > 0 && PnL < best_pnl × (1 - trail_pct) | 이익 확보 후 역전 방어 |
+| **Max Hold** | bars_held ≥ max_hold | 타임아웃 강제 청산 (8 bars = 2h) |
 
 ### 2.3 주문 실행 (LimitOrderChaser)
 
@@ -96,76 +96,25 @@ exit_z = base + ((hl - hl_min) / (hl_max - hl_min)) × range
 6. 시장가 폴백 후 5회까지 체결 검증 (ACK 응답 대응)
 ```
 
-### 2.4 자본 배분 (calculate_slot_capital)
+### 2.4 포지션 사이징 (calculate_position_size)
 
-```
-total_book = available_capital + Σ(활성 슬롯 자본)
-slot_target = total_book × position_size_pct    (기본: 1/max_traders = 20%)
-margin = min(slot_target, available_capital)
-notional = margin × leverage
-```
-
-### 2.5 Vol-Inverse Sizing (변동성 반비례 포지션 사이징)
-
-사이클 내 모든 후보 페어의 `spread_std` 중 최솟값을 `anchor_std`로 설정하고, 각 페어의 notional을 변동성에 반비례하여 조절한다:
-
-```
-anchor_std = min(spread_std for all candidates in cycle)
-vol_ratio  = min(anchor_std / spread_std, 1.0)
-notional   = base_notional × vol_ratio
+```python
+per_slot_capital = balance / max_concurrent   # 균등 배분 (5슬롯)
+stop_distance = move_size × stop_mult         # 손절폭
+risk_amount = per_slot_capital × risk_per_trade  # 1% 리스크
+position_size = risk_amount / stop_distance   # 리스크 역산
+leverage = min(position_size / per_slot_capital, max_leverage)
+notional = per_slot_capital × leverage
 ```
 
-**핵심 성질**: 모든 페어의 달러 손절액이 동일해진다:
-```
-stop_loss_dollar = stop_z × spread_std × notional
-                 = stop_z × spread_std × base × (anchor / spread_std)
-                 = stop_z × anchor × base   ← CONSTANT
-```
+### 2.5 비용 모델
 
-- Low-vol 페어(anchor): 풀 자본 배분 (vol_ratio = 1.0)
-- High-vol 페어: 비례 축소 (vol_ratio < 1.0)
-- 실거래(`live_trader.py`)와 백테스트(`continuous_backtest.py`) 양쪽에 동일 로직 적용
-
-### 2.6 Dynamic Leverage (동적 레버리지)
-
-매 트레이드마다 레버리지를 자동 계산하여 **최대 손실(R)이 잔고의 target_r_pct**가 되도록 한다.
-
-```
-risk_per_unit = stop_z × risk_std / (1 + HR) + cost_rate
-leverage = target_r_pct / (position_size_pct × risk_per_unit)
-leverage = clamp(leverage, 1.0, max_leverage)
-```
-
-- `risk_std`: vol-inverse sizing ON → `anchor_std`, OFF → `spread_std`
-- `cost_rate = 2×(fee+slippage) + 2×funding×bars/bars_per_funding`
-- `target_r_pct=0`이면 동적 레버리지 비활성 → 고정 `leverage` 사용
-
-검증: dynamically computed leverage로 R을 역산하면 항상 `target_r_pct × balance`와 일치.
-
-### 2.7 PnL 공식 (백테스트/실거래 통일)
-
-```
-# 실거래 (leg-split 방식):
-s1_capital = notional / (1 + HR)
-s2_capital = HR × s1_capital
-pnl = qty1 × Δprice1 + qty2 × Δprice2
-
-# 백테스트 (spread-based 방식 — 수학적으로 동일):
-gross_pnl = signal × spread_change × notional / (1 + HR)
-```
-
-수익률 % 분모는 **margin** (= notional / leverage)으로 통일:
-```
-return_pct = net_pnl / margin × 100
-```
-
-### 2.7 비용 모델
-
-| 비용 항목 | 공식 (레그당) | 비고 |
-|-----------|---------------|------|
-| **수수료** | notional × fee × 2 (진입+청산) | 메이커 0.02%, 테이커 0.04% |
-| **슬리피지** | notional × slippage × 2 | 백테스트 0.1%, 실거래는 실제 체결가 |
-| **펀딩비** | notional × rate × (hours/8) × 2 | 실거래: API로 실시간 조회 |
+| 비용 항목 | 값 | 비고 |
+|-----------|---|------|
+| **수수료** | 0.02%/side (메이커) | LimitChaser로 메이커 체결 목표 |
+| **슬리피지** | 0.02%/side | 보수적 추정 |
+| **펀딩비** | 0.01%/8h | 15m 바 기준 1/32 |
+| **왕복 비용** | ~0.08% + 펀딩비 | 트레이드당 고정 차감 |
 
 ---
 
@@ -178,25 +127,22 @@ return_pct = net_pnl / margin × 100
 | `settings.py` | `QuantBoxSettings` | pydantic-settings 기반 환경변수 검증. `get_settings()` 싱글턴 |
 | `config.py` | `Config`, `StrategyConfig`, `RiskConfig` | YAML/dict 기반 설정. 백테스트에서 주로 사용 |
 | `events.py` | `SignalEvent`, `OrderEvent`, `FillEvent`, `EventQueue` | 이벤트 드리븐 아키텍처 기반 |
-| `trader_slot.py` | `TraderSlotState`, `calculate_slot_capital` | 멀티슬롯 상태 관리 + 자본 배분 |
 | `limit_chaser.py` | `LimitOrderChaser`, `ChaseResult` | 메이커 주문 추격 + 시장가 폴백 |
-| `state_persistence.py` | `save_state`, `load_state`, `clear_state` | JSON 원자적 쓰기/읽기. 슬롯·포지션 직렬화 |
+| `state_persistence.py` | `save_state`, `load_state`, `clear_state` | JSON 원자적 쓰기/읽기. 포지션 직렬화 |
 
 ### 3.2 `quantbox/strategy/`
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-
-| `filters.py` | `FilterPipeline`, 8개 필터 | 통계적 페어 검증 파이프라인 |
-| `pair_selector.py` | `PairSelector`, `PairCandidate` | C(n,2) 페어 평가 + 가중 점수 랭킹 |
-| `base.py` | `Strategy(ABC)` | 전략 추상 기반 클래스 |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals` | 기본 평균회귀 신호 (Numba 컴파일) |
+| `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
+| `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
 ### 3.3 `quantbox/backtest/`
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `continuous_backtest.py` | `ContinuousPairBacktest`, `BacktestState` | 연속 백테스트 엔진. 실거래와 동일한 로직 |
-| `metrics.py` | `PerformanceMetrics`, `monte_carlo_analysis` | Sharpe, Sortino, Calmar, MDD, Monte Carlo |
+| `vectorized_backtest.py` | `VectorizedBacktest`, `BacktestConfig`, `BacktestResult` | Numba 가속 백테스트. 단일/포트폴리오 지원 |
 
 ### 3.4 `quantbox/data/`
 
@@ -204,7 +150,6 @@ return_pct = net_pnl / margin × 100
 |------|------|
 | `downloader.py` | Binance API ← klines 다운로드. 1000개씩 배치 |
 | `cache.py` | Memory(LRU) + Disk(gzip pickle) 2계층 캐시 |
-| `preprocessor.py` | 헤지비율, 스프레드, 공적분, 허스트 계산 |
 | `real_data_loader.py` | 캐시된 parquet/csv 로딩. 백테스트 데이터 소스 |
 
 ### 3.5 `quantbox/notifications/`
@@ -214,12 +159,11 @@ return_pct = net_pnl / margin × 100
 | `discord.py` | Webhook 기반 알림 (진입/청산/에러/일일보고) |
 | `bot.py` | Discord Bot 기반 원격 제어 (!status, !close, !pause 등) |
 
-### 3.6 `quantbox/utils/`
+### 3.6 `quantbox/` (최상위)
 
 | 파일 | 역할 |
 |------|------|
-| `numba_ops.py` | `@numba.jit(nopython=True)` 최적화 함수 11개 |
-| `costs.py` | `TransactionCosts` 비용 모델. 왕복 비용 추정 |
+| `scalper.py` | `RubberBandScalper` 라이브 트레이더. CLI 진입점 (`python -m quantbox.scalper`) |
 
 ---
 
@@ -230,52 +174,33 @@ return_pct = net_pnl / margin × 100
 ### 4.1 주문 실행 안전
 - [ ] LimitOrderChaser의 시장가 폴백 + 5회 체결 검증 로직
 - [ ] ACK 응답(`executedQty=0`) 감지 및 재검증
-- [ ] `round_price()` / `round_quantity()` — tickSize, stepSize 정밀도 준수
-- [ ] 고아 포지션 감지 (`close_slot_positions` 후 `get_current_positions` 확인)
+- [ ] `_round_qty()` — step_size 정밀도 준수
+- [ ] 최소 notional 검증 ($10 이상)
 
-### 4.2 레짐 보호
-- [ ] BTC Crash Gate — `check_btc_crash_gate()`
-- [ ] Z-Score Cap (4.0) — 극단 z-score 진입 차단
-- [ ] Vol Expansion Gate (2.0) — 변동성 급변 차단
-- [ ] Hurst Filter (< 0.5) — 평균회귀 아닌 페어 필터링
+### 4.2 위험 관리
+- [ ] Max Drawdown Breaker — 세션 HWM 대비 10% DD 시 전체 청산 + 정지
+- [ ] Daily Loss Limit — 당일 잔고 대비 5% 손실 시 신규 진입 차단
+- [ ] BTC Crash Gate — regime filter로 극단적 시장 상황 시 진입 차단
+- [ ] Max Concurrent — 동시 포지션 수 제한 (기본 5개)
+- [ ] Risk per Trade — 트레이드당 1% 리스크 사이징
 
 ### 4.3 포지션 관리
-- [ ] `close_all_positions()` — 에러 시 전체 청산 (5연속 에러 트리거)
-- [ ] `close_slot_positions()` — 청산 실패 시 슬롯 유지 (재시도 보장, v1.8.0)
-- [ ] 블랙리스트 TTL (3600초) — 실패 심볼 재진입 방지
-- [ ] 동적 청산 z-score — 반감기 기반 적응형 청산
-- [ ] Trailing Stop (Ratchet Stop) — z 개선 후 entry 역전 시 조기 청산 (v1.9.0)
-- [ ] 최대 보유 기간 강제 청산
-- [ ] 연속 에러 카운터 — 5회 연속 실패 시에만 전체 청산 (v1.8.0)
+- [ ] Target/Stop/Trailing/MaxHold 4중 청산 조건
+- [ ] 청산 실패 시 포지션 재등록 → 다음 사이클 재시도
+- [ ] 동일 심볼 중복 진입 방지 (`has_position()`)
+- [ ] max_hold 강제 청산 (타임아웃)
 
-### 4.4 자본 보호
-- [ ] 풀 기반 자본 배분 — `calculate_slot_capital()`
-- [ ] available_capital 초과 배분 방지 (`min(target, available)`)
-- [ ] 잔고 부족 시 알림 + 진입 거부
-- [ ] Max Drawdown Breaker — 세션 HWM 대비 10% 초과 시 전체 청산 + 일시정지 (v1.8.0)
-- [ ] Daily Loss Limit — 당일 잔고 대비 5% 초과 시 신규 진입 차단 (v1.8.0)
-
-### 4.5 상태 영속화 & 복구 (v1.8.0)
-- [ ] `save_state()` — 포지션 진입/청산 시 JSON 원자적 저장 (tmpfile → os.replace)
-- [ ] `load_state()` — 시작 시 크래시 전 상태 복원
-- [ ] `clear_state()` — 정상 종료 시 상태 파일 삭제
-- [ ] 거래소 포지션 대조 (reconciliation) — 저장 상태 vs 실제 거래소 포지션 비교
-- [ ] 고아 포지션 감지 — 거래소에만 존재하는 포지션 Discord 경고
+### 4.4 상태 영속화 & 복구
+- [ ] `_save_scalper_state()` — tmpfile → os.replace 원자적 쓰기
+- [ ] `_load_scalper_state()` — 시작 시 크래시 전 상태 복원
+- [ ] 포지션 + 잔고 + 거래 히스토리 직렬화
 - [ ] 로그 파일 로테이션 — RotatingFileHandler 50MB/5백업
 
-### 4.6 실거래-백테스트 패리티
-- [x] `_get_effective_exit_zscore()` — 양쪽 동일 공식
-- [x] `ExitReason` enum 공유
+### 4.5 실거래-백테스트 패리티
+- [x] 동일 신호 로직 (`compute_signals`)
 - [x] 동일 비용 모델 (수수료 + 슬리피지 + 펀딩비)
-- [x] 동일 자본 배분 로직
-- [x] 동일 필터 파이프라인
-- [x] BTC Crash Gate — 백테스트에 `_check_btc_crash_gate()` 구현 (v1.4.0)
-- [x] Z-Score Cap — 백테스트 `_enter_slot()`에 구현 (v1.4.0)
-- [x] Vol Expansion Gate — 백테스트 `_enter_slot()`에 구현 (v1.4.0)
-- [x] Formation window 동기화 — `FORMATION_HOURS=60` (v1.4.0)
-- [x] Vol-Inverse Sizing — 양쪽 동일 anchor_std 기반 비율 적용 (v1.5.0)
-- [x] Dynamic Leverage — target_r_pct 기반 동적 레버리지 (v1.7.0)
-- [x] `test_backtest_live_parity.py`로 검증
+- [x] 동일 포지션 사이징 (1% risk per trade)
+- [x] `vectorized_backtest.py`의 `_backtest_core`가 실거래 PnL 로직과 동일
 
 ---
 
@@ -285,83 +210,88 @@ return_pct = net_pnl / margin × 100
 
 | 수정 대상 | 반드시 함께 확인 |
 |----------|-----------------|
-| `settings.py` 파라미터 추가 | `.env.example`, `MANUAL.md`, `to_trader_config()`, `live_trader.py`에서 해당 값 사용 여부 |
-| 진입/청산 로직 변경 | `live_trader.py` **AND** `continuous_backtest.py` 양쪽 동기화 |
-| `_get_effective_exit_zscore()` | `live_trader.py`, `continuous_backtest.py`, `test_dynamic_exit.py`, `test_backtest_live_parity.py` |
-| `FilterPipeline` 수정 | `filters.py`, `pair_selector.py`, `test_filters.py` |
-| `LimitOrderChaser` 수정 | `limit_chaser.py`, `live_trader.py`, `test_limit_chaser.py` |
-| `TraderSlotState` 수정 | `trader_slot.py`, `live_trader.py`, `continuous_backtest.py`, `test_multi_trader.py` |
-| Vol-Inverse Sizing 수정 | `live_trader.py`, `continuous_backtest.py`, `test_vol_inverse_sizing.py` |
-| Dynamic Leverage 수정 | `trader_slot.py`, `live_trader.py`, `continuous_backtest.py`, `settings.py`, `test_dynamic_leverage.py` |
-| State Persistence 수정 | `state_persistence.py`, `live_trader.py`, `test_state_persistence.py` |
-| Drawdown/Daily Loss 수정 | `live_trader.py`, `settings.py`, `test_safety_features.py` |
-| `TransactionCosts` 수정 | `costs.py`, `continuous_backtest.py`, `test_pnl_accuracy.py` |
-| numba 함수 수정 | `numba_ops.py`, `__pycache__/` 캐시 무효화 필요, `test_numba_ops.py` |
-| Discord 명령어 추가 | `bot.py`, `live_trader.py`의 `_handle_command()`, `test_discord_bot.py` |
-| 새 모듈/파일 추가 | `README.md` 프로젝트 구조 트리, 해당 `__init__.py`, 테스트 파일 |
+| `settings.py` 파라미터 추가 | `.env.example`, `.env`, `MANUAL.md` |
+| `rubberband.py` 신호 로직 변경 | `scalper.py`, `vectorized_backtest.py`, `test_rubberband.py` |
+| `alpha_engine.py` 수정 | `test_alpha_engine.py`, `vectorized_backtest.py` |
+| `vol_selector.py` 수정 | `test_vol_selector.py`, 백테스트 스크립트들 |
+| `LimitOrderChaser` 수정 | `limit_chaser.py`, `scalper.py`, `test_limit_chaser.py` |
+| `scalper.py` 트레이딩 로직 | `vectorized_backtest.py` 동기화 확인, `test_scalper.py` |
+| `vectorized_backtest.py` 수정 | 모든 `scripts/` 백테스트, `scalper.py`와 패리티 확인 |
+| State Persistence 수정 | `state_persistence.py`, `scalper.py`, `test_state_persistence.py` |
+| Discord 명령어 추가 | `bot.py`, `test_discord_bot.py` |
+| 새 모듈/파일 추가 | `README.md` 프로젝트 구조, 해당 `__init__.py`, 테스트 파일 |
 
 ---
 
 ## 6. 핵심 상수 & 기본값 참조
 
+### 6.1 Rubber Band 전략 파라미터
+
 | 파라미터 | 기본값 | 소스 | 용도 |
 |---------|--------|------|------|
-| `entry_zscore` | 2.0 | settings.py | 진입 임계값 |
-| `exit_zscore` | 0.5 | settings.py | 청산 임계값 (동적 청산 시 base) |
-| `stop_loss_zscore` | 3.5 | settings.py | 손절 임계값 |
-| `z_score_cap` | 4.0 | settings.py | 극단 z-score 차단 |
-| `vol_expansion_gate` | 2.0 | settings.py | 변동성 급변 차단 |
-| `btc_crash_threshold` | 0.03 (3%) | settings.py | BTC 급락 게이트 |
-| `btc_crash_window` | 8 | settings.py | BTC 게이트 관찰 캔들 수 |
-| `max_traders` | 5 | settings.py | 동시 거래 슬롯 수 |
-| `leverage` | 2 | settings.py | Fallback 레버리지 (동적 미사용 시) |
-| `target_r_pct` | 0.01 (1%) | settings.py | 트레이드당 목표 리스크 (밸런스 비율) |
-| `max_leverage` | 10 | settings.py | 동적 레버리지 안전 상한 |
-| `trading_fee` | 0.0005 (0.05%) | settings.py | 거래 수수료 |
-| `slippage` | 0.001 (0.1%) | settings.py | 슬리피지 추정치 |
-| `funding_rate_8h` | 0.0001 (0.01%) | settings.py | 8시간 펀딩비 |
-| `vol_inverse_sizing` | True | backtest config | 변동성 반비례 사이징 활성화 |
-| `vol_sizing_max_multiplier` | 3.0 | backtest config | 사이징 최대 배율 제한 |
-| `max_holding_hours` | 20 | settings.py | 최대 보유 시간 (80bars@15m) |
-| `max_drawdown_pct` | 0.10 (10%) | settings.py | 세션 HWM 대비 최대 드로다운 |
-| `daily_loss_limit_pct` | 0.05 (5%) | settings.py | 당일 잔고 대비 최대 손실 |
-| `dynamic_exit_base` | 0.3 | settings.py | 동적 청산 기저값 |
-| `dynamic_exit_range` | 0.7 | settings.py | 동적 청산 범위 |
-| `BLACKLIST_TTL_SECONDS` | 3600 | live_trader.py | 실패 심볼 블랙리스트 TTL |
-| `max_chase_ticks` | 10 | limit_chaser.py | 지정가 추격 최대 횟수 |
-| `chase_timeout` | 30초 | limit_chaser.py | 추격 타임아웃 |
-| `formation_hours` | 60 | settings.py | 페어 선별용 과거 데이터 길이 (60h = 240 bars @ 15m) |
-| `formation_bars` | 240 | backtest | 형성 구간 (60시간 @ 15m) |
-| `MAX_CONSECUTIVE_ERRORS` | 5 | live_trader.py | 연속 에러 전체 청산 임계값 |
+| `lookback` | 8 bars (2h) | `RubberBandConfig` | 급등/급락 측정 기간 |
+| `threshold` | 0.025 (2.5%) | `RubberBandConfig` | 최소 무브 크기 |
+| `target_retrace` | 0.5 (50%) | `RubberBandConfig` | 이익 실현 목표 |
+| `stop_mult` | 1.0 | `RubberBandConfig` | 손절 배수 (무브 크기 대비) |
+| `max_hold` | 8 bars (2h) | `RubberBandConfig` | 최대 보유 기간 |
+
+### 6.2 Alpha Engine 파라미터
+
+| 파라미터 | 기본값 | 소스 | 용도 |
+|---------|--------|------|------|
+| `vol_filter` | True | `AlphaConfig` | 볼륨 확인 필터 |
+| `vol_mult` | 1.5× | `AlphaConfig` | 평균 대비 최소 볼륨 배율 |
+| `momentum_filter` | True | `AlphaConfig` | 모멘텀 방향 필터 |
+| `adaptive_threshold` | True | `AlphaConfig` | ATR 기반 적응형 임계값 |
+| `trailing_stop` | True | `AlphaConfig` | 동적 트레일링 스탑 |
+
+### 6.3 Volatility Selector 파라미터
+
+| 파라미터 | 기본값 | 소스 | 용도 |
+|---------|--------|------|------|
+| `top_n` | 5 | `VolSelectorConfig` | 선택 심볼 수 |
+| `vol_lookback_bars` | 2880 (30일) | `VolSelectorConfig` | 변동성 계산 기간 |
+| `rebalance_interval_bars` | 960 (10일) | `VolSelectorConfig` | 리밸런싱 주기 |
+
+### 6.4 위험 관리 파라미터
+
+| 파라미터 | 기본값 | 소스 | 용도 |
+|---------|--------|------|------|
+| `risk_per_trade` | 0.01 (1%) | `RubberBandConfig` | 트레이드당 리스크 |
+| `max_concurrent` | 5 | `RubberBandConfig` | 최대 동시 포지션 |
+| `max_drawdown_pct` | 0.10 (10%) | `RubberBandConfig` | 세션 DD 서킷 브레이커 |
+| `daily_loss_limit_pct` | 0.05 (5%) | `RubberBandConfig` | 일일 손실 제한 |
+| `fee_rate` | 0.0002 (0.02%) | `RubberBandConfig` | 메이커 수수료/side |
+| `slippage_rate` | 0.0002 (0.02%) | `RubberBandConfig` | 슬리피지/side |
+| `funding_rate_8h` | 0.0001 (0.01%) | `RubberBandConfig` | 8h 펀딩비 |
+
+### 6.5 LimitOrderChaser 파라미터
+
+| 파라미터 | 기본값 | 소스 | 용도 |
+|---------|--------|------|------|
+| `max_chase_ticks` | 10 | `ChaseConfig` | 지정가 추격 최대 횟수 |
+| `chase_interval_seconds` | 1.0 | `ChaseConfig` | 추격 간격 |
+| `timeout_seconds` | 30.0 | `ChaseConfig` | 추격 타임아웃 |
+| `fallback_to_market` | True | `ChaseConfig` | 시장가 폴백 허용 |
 
 ---
 
-## 7. 테스트 현황 (23파일, ~616 테스트)
+## 7. 테스트 현황 (12파일)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
-| `test_backtest_live_parity` | 실거래-백테스트 로직 일치 | Hurst 필터, 청산 로직 동기화 |
-| `test_pnl_accuracy` | PnL 계산 정확성 | 체결가, 비용 차감, 수익 계산 |
-| `test_aggressive_sizing` | 자본 배분 | 레버리지, Kelly, slot_capital |
-| `test_dynamic_leverage` | 동적 레버리지 | 공식 검증, 클램핑, R=target, 비용율 |
-| `test_btc_crash_gate` | BTC 게이트 | 차단/통과, 임계값, 에지 케이스 |
-| `test_dynamic_exit` | 동적 청산 | 반감기 기반 exit_zscore 계산 |
-| `test_multi_trader` | 멀티슬롯 | 상태 관리, 자본 배분, 심볼 비중복 |
-| `test_cached_pair_search` | 페어 캐싱 | select_pairs() 호출 횟수, 캐시 |
-| `test_blacklist` | 블랙리스트 | TTL 만료, Discord 명령, 지속성 |
+| `test_rubberband` | 러버밴드 신호 생성 | compute_signals 정확성, 진입/청산 로직 |
+| `test_alpha_engine` | Alpha Engine 멀티팩터 | 팩터 토글, 적응형 임계값, 트레일링 |
+| `test_vol_selector` | 변동성 선택기 | 랭킹, 리밸런싱, 실현변동성 계산 |
+| `test_scalper` | 라이브 스캘퍼 | 사이클, 포지션 관리, 상태 저장/복원 |
 | `test_limit_chaser` | 주문 추격 | Paper/Live 체결, 시장가 폴백 |
-| `test_vol_inverse_sizing` | Vol-Inverse Sizing | 비율 공식, anchor_std, 달러 손절 균등화 |
-| `test_filters` | 통계 필터 | 개별 필터 + 파이프라인 조합 |
 | `test_events` | 이벤트 시스템 | 생성, FIFO, 핸들러 디스패치 |
 | `test_discord_bot` | Discord Bot | 명령어 파싱, 큐, 러너 생명주기 |
 | `test_discord_notifications` | Discord 알림 | 웹훅 페이로드, 색상 코딩, 에러 복원 |
-| `test_numba_ops` | Numba 함수 | z-score, half-life, Hurst, OLS |
-| `test_metrics` | 성과 지표 | Sharpe, MDD, Monte Carlo, 월간 수익 |
 | `test_settings` | 설정 검증 | 환경변수, 기본값, 별칭, 타입 에러 |
 | `test_config` | Config | 생성, 검증, 직렬화 |
 | `test_cache` | 캐시 | Memory LRU, Disk, 만료, Timeframed |
-| `test_state_persistence` | 상태 영속화 | 직렬화, 원자적 쓰기, 라운드트립, 역직렬화 |
-| `test_safety_features` | 안전장치 | 드로다운, 일일손실, 청산실패, 연속에러, 로그 로테이션 |
+| `test_state_persistence` | 상태 영속화 | 직렬화, 원자적 쓰기, 라운드트립 |
 
 ---
 
@@ -369,7 +299,7 @@ return_pct = net_pnl / margin × 100
 
 ### 8.1 코드 수정 전 필수 확인
 
-1. **패리티 위반 금지**: 진입/청산/비용 로직을 한쪽만 수정하면 안 된다. `live_trader.py` ↔ `continuous_backtest.py` 양쪽을 반드시 동기화.
+1. **패리티 위반 금지**: 신호/비용/사이징 로직을 한쪽만 수정하면 안 된다. `scalper.py` ↔ `vectorized_backtest.py` 양쪽을 반드시 동기화.
 2. **안전장치 제거 금지**: 섹션 4의 체크리스트 항목을 제거하거나, 조건을 완화하는 코드는 사용자 명시 승인 없이 작성하지 않는다.
 3. **테스트 동반 필수**: 새 함수/클래스 작성 시 pytest 테스트를 반드시 함께 작성한다. 테스트 없는 코드는 미완성이다.
 4. **실제 데이터만 사용**: `np.random` 등을 사용한 합성 가격 데이터 생성은 절대 금지. 테스트에서의 mock은 구조적 mock(API 응답 형태)만 허용.
@@ -387,7 +317,6 @@ return_pct = net_pnl / margin × 100
 - 개발 원칙/워크플로우 변경 → `copilot-instructions.md` 갱신
 - 아키텍처/모듈/안전장치/파라미터/트레이딩 흐름 변경 → `agents.md` 갱신
 - 두 문서 중 하나만 수정하고 다른 하나를 방치하는 것은 **금지**한다.
-- 코드 변경이 두 문서 모두에 영향을 줄 경우, 반드시 두 문서를 동시에 업데이트한다.
 
 ### 8.4 Git 작업
 
@@ -402,5 +331,5 @@ return_pct = net_pnl / margin × 100
 |----------|------|-------------|
 | 🟢 낮음 | 로그 메시지 변경, docstring 수정 | 즉시 실행 |
 | 🟡 중간 | 새 필터 추가, 알림 메시지 변경 | 실행 + 테스트 확인 |
-| 🔴 높음 | 진입/청산 로직, 비용 계산, 자본 배분 변경 | 사용자 확인 요청 후 실행. 패리티 검증 필수 |
+| 🔴 높음 | 신호/청산 로직, 비용 계산, 포지션 사이징 변경 | 사용자 확인 요청 후 실행. 패리티 검증 필수 |
 | ⛔ 금지 | 안전장치 제거, 실데이터 규칙 위반, 패리티 파괴 | 절대 실행 불가. 사용자에게 위험성 경고 |

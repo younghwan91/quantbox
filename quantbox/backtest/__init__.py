@@ -1,26 +1,15 @@
 """
-Backtesting module - Simulation and performance analysis
+Backtesting module - Vectorized backtester for Rubber Band strategy.
 """
 
-from quantbox.backtest.continuous_backtest import (
-    ContinuousBacktestConfig,
-    ContinuousPairBacktest,
-    TradeResult,
-    BacktestState,
-    ExitReason,
-    run_continuous_backtest,
-    compute_kelly_from_backtest,
+from quantbox.backtest.vectorized_backtest import (
+    BacktestConfig,
+    BacktestResult,
+    VectorizedBacktest,
 )
-from quantbox.backtest.metrics import PerformanceMetrics, calculate_metrics
 
 __all__ = [
-    "ContinuousBacktestConfig",
-    "ContinuousPairBacktest",
-    "TradeResult",
-    "BacktestState",
-    "ExitReason",
-    "run_continuous_backtest",
-    "compute_kelly_from_backtest",
-    "PerformanceMetrics",
-    "calculate_metrics",
+    "BacktestConfig",
+    "BacktestResult",
+    "VectorizedBacktest",
 ]
