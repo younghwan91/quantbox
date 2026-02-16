@@ -9,6 +9,7 @@ from quantbox.strategy.rubberband import (
     RubberBandConfig,
     RubberBandStrategy,
     compute_signals,
+    compute_signals_mtf,
     calculate_position_size,
 )
 from quantbox.strategy.alpha_engine import (

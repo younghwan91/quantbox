@@ -13,6 +13,7 @@ from quantbox.strategy.rubberband import (
     RubberBandStrategy,
     calculate_position_size,
     compute_signals,
+    compute_signals_mtf,
     compute_signals_with_regime,
 )
 from quantbox.backtest.vectorized_backtest import (
@@ -453,3 +454,53 @@ class TestDDManagedPortfolio:
             'n_symbols', 'total_trades', 'avg_win_rate', 'per_asset',
         }
         assert expected_keys.issubset(set(result.keys()))
+
+
+# ══════════════════ 8. Multi-Timeframe Confirmation Tests ══════════════════
+
+class TestMTFConfirmation:
+    """Test multi-timeframe entry confirmation filter."""
+
+    def test_mtf_disabled_matches_baseline(self, btc_close):
+        """htf_period=0 must produce identical signals to compute_signals."""
+        sigs_base = compute_signals(btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0)
+        sigs_mtf = compute_signals_mtf(btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0, 0, 0.02)
+        np.testing.assert_array_equal(sigs_base, sigs_mtf)
+
+    def test_mtf_reduces_entries(self, btc_close):
+        """Active MTF filter should block some entries → fewer signals."""
+        sigs_base = compute_signals(btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0)
+        sigs_mtf = compute_signals_mtf(btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0, 48, 0.02)
+        # MTF should have fewer or equal non-zero signals
+        assert np.sum(sigs_mtf != 0) <= np.sum(sigs_base != 0)
+
+    def test_mtf_signal_values_valid(self, btc_close):
+        """MTF signals must be in {-1, 0, +1}."""
+        sigs = compute_signals_mtf(btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0, 48, 0.02)
+        unique = set(np.unique(sigs))
+        assert unique.issubset({-1.0, 0.0, 1.0})
+
+    def test_mtf_output_shape(self, btc_close):
+        """Output shape must match input."""
+        sigs = compute_signals_mtf(btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0, 48, 0.02)
+        assert sigs.shape == btc_close.shape
+
+    def test_mtf_with_stop_decay(self, btc_close):
+        """MTF + stop_decay must work together."""
+        sigs = compute_signals_mtf(btc_close, 8, 0.025, 0.3, 1.0, 8, 0.3, 48, 0.02)
+        unique = set(np.unique(sigs))
+        assert unique.issubset({-1.0, 0.0, 1.0})
+
+    def test_mtf_config_defaults(self):
+        """Config should have MTF defaults."""
+        cfg = RubberBandConfig()
+        assert cfg.htf_period == 0  # disabled by default
+        assert cfg.htf_block_threshold == 0.02
+
+    def test_on_bar_uses_mtf(self, btc_close):
+        """on_bar should use MTF when htf_period > 0."""
+        cfg = RubberBandConfig(htf_period=48, htf_block_threshold=0.02)
+        strat = RubberBandStrategy(cfg)
+        # Should not crash and should return valid signal
+        sig = strat.on_bar('BTCUSDT', btc_close)
+        assert sig in (-1, 0, 1)
