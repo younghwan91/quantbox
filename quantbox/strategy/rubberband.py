@@ -46,6 +46,11 @@ class RubberBandConfig:
     target_retrace: float = 0.5  # Take profit at 50% retracement
     stop_mult: float = 1.0     # Stop at 1x the move size
     max_hold: int = 8          # Maximum holding period (bars)
+    stop_decay: float = 0.0    # Stop tightening rate (0=off, 0.5=halves by max_hold)
+
+    # ── Multi-timeframe confirmation ──
+    htf_period: int = 0          # Higher TF trend lookback in 15m bars (0=disabled, 16=4h)
+    htf_block_threshold: float = 0.02  # Block entry if HTF trend > this against trade dir
 
     # ── Regime filter ──
     regime_filter_enabled: bool = False   # Disabled: blocks the very moves that generate alpha
@@ -90,6 +95,7 @@ def compute_signals(
     target_retrace: float,
     stop_mult: float,
     max_hold: int,
+    stop_decay: float = 0.0,
 ) -> np.ndarray:
     """Compute rubber band signals from price data.
 
@@ -100,6 +106,8 @@ def compute_signals(
         target_retrace: Fraction of move to target for profit.
         stop_mult: Multiple of move size for stop loss.
         max_hold: Maximum holding period in bars.
+        stop_decay: Stop tightening rate over hold duration (0=no decay,
+            0.5=stop halves by max_hold). Cuts losers faster as time passes.
 
     Returns:
         Signal array: -1 (short), 0 (flat), +1 (long) for each bar.
@@ -139,12 +147,16 @@ def compute_signals(
                 best_pnl = gain
 
             # ── Exit conditions (priority order) ──
+            # Time-decaying stop: tightens as holding period grows
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+
             # 1. Target hit: take profit
             target = move_size * target_retrace
             if gain >= target:
                 position = 0
-            # 2. Stop loss
-            elif gain < -move_size * stop_mult:
+            # 2. Stop loss (time-decaying)
+            elif gain < -effective_stop:
                 position = 0
             # 3. Trailing stop: was up >50% of target, now lost 70% of gains
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
@@ -168,6 +180,7 @@ def compute_signals_with_regime(
     max_hold: int,
     regime_lookback: int,
     regime_threshold: float,
+    stop_decay: float = 0.0,
 ) -> np.ndarray:
     """Compute signals with BTC regime filter.
 
@@ -217,10 +230,133 @@ def compute_signals_with_regime(
             if gain > best_pnl:
                 best_pnl = gain
 
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+
             target = move_size * target_retrace
             if gain >= target:
                 position = 0
-            elif gain < -move_size * stop_mult:
+            elif gain < -effective_stop:
+                position = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+            elif hold_count >= max_hold:
+                position = 0
+
+        sig[i] = position
+    return sig
+
+
+@numba.jit(nopython=True, cache=True)
+def compute_signals_mtf(
+    close: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    max_hold: int,
+    stop_decay: float,
+    htf_period: int,
+    htf_block_threshold: float,
+) -> np.ndarray:
+    """Compute rubber band signals with multi-timeframe confirmation.
+
+    Uses higher-timeframe trend (SMA slope) to filter entries.
+    If the HTF trend is strongly AGAINST the trade direction, the
+    entry is blocked. This prevents mean-reversion trades against
+    powerful trends visible on the higher timeframe.
+
+    The HTF trend is derived by comparing the current price to a
+    simple moving average over htf_period bars. This is equivalent
+    to checking where price sits relative to a higher-TF moving
+    average without needing separate timeframe data.
+
+    Args:
+        close: Array of close prices (15m bars).
+        lookback: Bars to measure the move.
+        threshold: Minimum move to trigger entry.
+        target_retrace: Take profit target as fraction of move.
+        stop_mult: Stop loss as multiple of move.
+        max_hold: Maximum holding bars.
+        stop_decay: Stop tightening rate.
+        htf_period: Higher TF SMA lookback in bars (e.g. 16=4h of 15m).
+            Set to 0 to disable MTF filter.
+        htf_block_threshold: Block entry when HTF trend (price vs SMA)
+            exceeds this fraction against trade direction.
+
+    Returns:
+        Signal array: -1 (short), 0 (flat), +1 (long).
+    """
+    n = len(close)
+    sig = np.zeros(n)
+    position = 0
+    entry_price = 0.0
+    move_size = 0.0
+    hold_count = 0
+    best_pnl = 0.0
+
+    # Pre-compute running SMA for HTF filter (cumulative approach)
+    htf_sma = np.zeros(n)
+    if htf_period > 0:
+        cumsum = 0.0
+        for i in range(n):
+            cumsum += close[i]
+            if i >= htf_period:
+                cumsum -= close[i - htf_period]
+                htf_sma[i] = cumsum / htf_period
+            elif i >= htf_period - 1:
+                htf_sma[i] = cumsum / htf_period
+            else:
+                htf_sma[i] = close[i]
+
+    start = max(lookback, htf_period)
+    for i in range(start, n):
+        ret = close[i] / close[i - lookback] - 1.0
+
+        if position == 0:
+            # HTF confirmation: check if higher TF trend blocks this entry
+            htf_blocked = False
+            if htf_period > 0:
+                htf_trend = (close[i] - htf_sma[i]) / htf_sma[i]
+                if ret < -threshold:
+                    # Want to go long — block if HTF strongly bearish
+                    if htf_trend < -htf_block_threshold:
+                        htf_blocked = True
+                elif ret > threshold:
+                    # Want to go short — block if HTF strongly bullish
+                    if htf_trend > htf_block_threshold:
+                        htf_blocked = True
+
+            if not htf_blocked:
+                if ret < -threshold:
+                    position = 1
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+                elif ret > threshold:
+                    position = -1
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+        else:
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+
+            target = move_size * target_retrace
+            if gain >= target:
+                position = 0
+            elif gain < -effective_stop:
                 position = 0
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
@@ -310,6 +446,18 @@ class RubberBandStrategy:
                 cfg.target_retrace, cfg.stop_mult,
                 cfg.max_hold, cfg.regime_lookback,
                 cfg.regime_trend_threshold,
+                cfg.stop_decay,
+            )
+        elif cfg.htf_period > 0:
+            if len(close_prices) < max(cfg.lookback, cfg.htf_period) + 1:
+                return 0
+            sigs = compute_signals_mtf(
+                close_prices,
+                cfg.lookback, cfg.threshold,
+                cfg.target_retrace, cfg.stop_mult,
+                cfg.max_hold,
+                cfg.stop_decay,
+                cfg.htf_period, cfg.htf_block_threshold,
             )
         else:
             sigs = compute_signals(
@@ -317,6 +465,7 @@ class RubberBandStrategy:
                 cfg.lookback, cfg.threshold,
                 cfg.target_retrace, cfg.stop_mult,
                 cfg.max_hold,
+                cfg.stop_decay,
             )
 
         return int(sigs[-1])
@@ -365,10 +514,14 @@ class RubberBandStrategy:
 
         target = pos['move_size'] * cfg.target_retrace
 
+        # Time-decaying stop (parity with compute_signals)
+        time_factor = 1.0 - cfg.stop_decay * (pos['bars_held'] / cfg.max_hold)
+        effective_stop = pos['move_size'] * cfg.stop_mult * time_factor
+
         # Exit conditions
         if gain >= target:
             return 'target'
-        if gain < -pos['move_size'] * cfg.stop_mult:
+        if gain < -effective_stop:
             return 'stop_loss'
         if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
             return 'trailing_stop'

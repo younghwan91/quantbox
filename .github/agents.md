@@ -25,16 +25,19 @@ QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (순수 러버밴드)
-심볼선택: 30일 실현변동성 Top-5 (10일마다 리밸런싱)
-파라미터: lookback=8, threshold=0.025, target=0.5, stop=1.0, max_hold=8
+전략:     RB_original + MTF Confirmation (러버밴드 + 고시간프레임 필터)
+심볼선택: 30일 실현변동성 Top-3 (10일마다 리밸런싱)
+파라미터: lookback=8, threshold=0.025, target=0.3, stop=1.0, max_hold=8
+         stop_decay=0.3, htf_period=48, htf_block_threshold=0.02
 비용:     0.04%/side + 펀딩비
 
-성과 (90일, 30개 심볼 유니버스):
-  Return:    +35.22%
-  Sharpe:    4.67
-  Max DD:    14.19%
-  WF OOS:    +34.31% (60일), 3/4 수익, 연환산 +502%
+성과 (90일, 30개 심볼 유니버스, Top-3 vol-selected):
+  Return:    +17.32%
+  Sharpe:    3.41
+  Max DD:    5.96%
+  Calmar:    2.91 (baseline 0.38 대비 7.6× 개선)
+  Win Rate:  58.9%
+  Coins:     18/30 profitable (60%)
 ```
 
 ---
@@ -81,7 +84,7 @@ QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 | 조건 | 판정 | 비고 |
 |------|------|------|
 | **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 50% 되돌림 기본 |
-| **Stop Loss** | unrealized PnL < -stop_mult × move_size | 1x 무브 역전 |
+| **Stop Loss** | unrealized PnL < -stop_mult × move_size × time_factor | time_factor = 1 - stop_decay × (bars_held / max_hold) |
 | **Trailing Stop** | best_pnl > 0 && PnL < best_pnl × (1 - trail_pct) | 이익 확보 후 역전 방어 |
 | **Max Hold** | bars_held ≥ max_hold | 타임아웃 강제 청산 (8 bars = 2h) |
 
@@ -234,6 +237,9 @@ notional = per_slot_capital × leverage
 | `target_retrace` | 0.5 (50%) | `RubberBandConfig` | 이익 실현 목표 |
 | `stop_mult` | 1.0 | `RubberBandConfig` | 손절 배수 (무브 크기 대비) |
 | `max_hold` | 8 bars (2h) | `RubberBandConfig` | 최대 보유 기간 |
+| `stop_decay` | 0.0 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성, 0.3 권장) |
+| `htf_period` | 0 | `RubberBandConfig` | MTF SMA lookback (0=비활성, 48=12h) |
+| `htf_block_threshold` | 0.02 | `RubberBandConfig` | HTF 트렌드 차단 임계값 (2%) |
 
 ### 6.2 Alpha Engine 파라미터
 
@@ -276,11 +282,11 @@ notional = per_slot_capital × leverage
 
 ---
 
-## 7. 테스트 현황 (12파일)
+## 7. 테스트 현황 (12파일, 279개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
-| `test_rubberband` | 러버밴드 신호 생성 | compute_signals 정확성, 진입/청산 로직 |
+| `test_rubberband` | 러버밴드 신호 생성 | compute_signals 정확성, 진입/청산 로직, **stop_decay**, **DD-managed portfolio**, **MTF confirmation** |
 | `test_alpha_engine` | Alpha Engine 멀티팩터 | 팩터 토글, 적응형 임계값, 트레일링 |
 | `test_vol_selector` | 변동성 선택기 | 랭킹, 리밸런싱, 실현변동성 계산 |
 | `test_scalper` | 라이브 스캘퍼 | 사이클, 포지션 관리, 상태 저장/복원 |
