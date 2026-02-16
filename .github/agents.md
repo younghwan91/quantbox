@@ -25,19 +25,22 @@ QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original + MTF Confirmation (러버밴드 + 고시간프레임 필터)
+전략:     RB_original + Enhanced MTF (러버밴드 + HTF 3-mode 필터)
 심볼선택: 30일 실현변동성 Top-3 (10일마다 리밸런싱)
-파라미터: lookback=8, threshold=0.025, target=0.3, stop=1.0, max_hold=8
-         stop_decay=0.3, htf_period=48, htf_block_threshold=0.02
+파라미터: lookback=8, threshold=0.025, target=0.5, stop=1.0, max_hold=8
+         stop_decay=0.3, htf_period=64, htf_block_threshold=0.01
+         htf_agree_discount=0.85, htf_agree_stop_mult=0.95
 비용:     0.04%/side + 펀딩비
 
 성과 (90일, 30개 심볼 유니버스, Top-3 vol-selected):
-  Return:    +17.32%
-  Sharpe:    3.41
-  Max DD:    5.96%
-  Calmar:    2.91 (baseline 0.38 대비 7.6× 개선)
-  Win Rate:  58.9%
-  Coins:     18/30 profitable (60%)
+  Return:    +63.18%
+  Sharpe:    6.52
+  Max DD:    7.08% (post-warmup)
+  Calmar:    8.92
+  Win Rate:  56.5%
+  Avg Win:   1.353%, Avg Loss: 1.498% (RR 0.90)
+  Profit Factor: 1.17
+  Trades/Day: ~15.5
 ```
 
 ---
@@ -200,10 +203,13 @@ notional = per_slot_capital × leverage
 - [ ] 로그 파일 로테이션 — RotatingFileHandler 50MB/5백업
 
 ### 4.5 실거래-백테스트 패리티
-- [x] 동일 신호 로직 (`compute_signals`)
+- [x] 동일 신호 로직 (`compute_signals_mtf`)
 - [x] 동일 비용 모델 (수수료 + 슬리피지 + 펀딩비)
 - [x] 동일 포지션 사이징 (1% risk per trade)
 - [x] `vectorized_backtest.py`의 `_backtest_core`가 실거래 PnL 로직과 동일
+- [x] `entry_stop_mult` 패리티: Numba의 HTF agree 시 `stop_mult * htf_agree_stop_mult`가 live `update_position()`에서도 동일 적용
+- [x] `get_effective_stop_mult()`: 진입 시점의 HTF 상태를 미러링하여 정확한 stop 배수 계산
+- [x] `settings.py` → `scalper.py main()` 완전 연동: `.env`의 10개 RB 파라미터가 라이브에 자동 적용
 
 ---
 
@@ -237,11 +243,11 @@ notional = per_slot_capital × leverage
 | `target_retrace` | 0.5 (50%) | `RubberBandConfig` | 이익 실현 목표 |
 | `stop_mult` | 1.0 | `RubberBandConfig` | 손절 배수 (무브 크기 대비) |
 | `max_hold` | 8 bars (2h) | `RubberBandConfig` | 최대 보유 기간 |
-| `stop_decay` | 0.0 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성, 0.3 권장) |
-| `htf_period` | 0 | `RubberBandConfig` | MTF SMA lookback (0=비활성, 48=12h) |
-| `htf_block_threshold` | 0.02 | `RubberBandConfig` | HTF 트렌드 차단 임계값 (2%) |
-| `htf_agree_discount` | 1.0 | `RubberBandConfig` | HTF 동의 시 threshold 배수 (0.8=20% 낮춤, 1.0=비활성) |
-| `htf_agree_stop_mult` | 1.0 | `RubberBandConfig` | HTF 동의 시 stop 배수 (0.7=30% 타이트, 1.0=비활성) |
+| `stop_decay` | 0.3 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성, 0.3=30% 감쇠) |
+| `htf_period` | 64 (16h) | `RubberBandConfig` | MTF SMA lookback (0=비활성) |
+| `htf_block_threshold` | 0.01 (1%) | `RubberBandConfig` | HTF 트렌드 차단 임계값 |
+| `htf_agree_discount` | 0.85 | `RubberBandConfig` | HTF 동의 시 threshold 배수 (15% 낮춤) |
+| `htf_agree_stop_mult` | 0.95 | `RubberBandConfig` | HTF 동의 시 stop 배수 (5% 타이트) |
 
 ### 6.2 Alpha Engine 파라미터
 
@@ -284,11 +290,11 @@ notional = per_slot_capital × leverage
 
 ---
 
-## 7. 테스트 현황 (12파일, 284개)
+## 7. 테스트 현황 (12파일, 287개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
-| `test_rubberband` | 러버밴드 신호 생성 | compute_signals 정확성, 진입/청산 로직, **stop_decay**, **DD-managed portfolio**, **MTF confirmation**, **MTF enhanced (agree discount + tighter stop)** |
+| `test_rubberband` | 러버밴드 신호 생성 | compute_signals 정확성, 진입/청산 로직, **stop_decay**, **DD-managed portfolio**, **MTF confirmation**, **MTF enhanced (agree discount + tighter stop)**, **entry_stop_mult 패리티 (3개)** |
 | `test_alpha_engine` | Alpha Engine 멀티팩터 | 팩터 토글, 적응형 임계값, 트레일링 |
 | `test_vol_selector` | 변동성 선택기 | 랭킹, 리밸런싱, 실현변동성 계산 |
 | `test_scalper` | 라이브 스캘퍼 | 사이클, 포지션 관리, 상태 저장/복원 |

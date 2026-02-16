@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 3.0.0  
-> 최종 업데이트: 2026년 2월 15일
+> 버전: 3.3.0  
+> 최종 업데이트: 2025년 7월 14일
 
 ---
 
@@ -37,29 +37,32 @@ QuantBox는 암호화폐 트레이딩을 위한 종합 퀀트 프레임워크입
 
 ---
 
-## 3. 🔥 Rubber Band Scalper (v3.0 — Volatility Selection)
+## 3. 🔥 Rubber Band Scalper (v3.3 — Enhanced MTF)
 
 ### 3.1 전략 개요
 
 Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. 2.5% 이상 급등/급락 후 발생하는 기계적 반등(snap-back)을 포착합니다.
 
-**v3.0 핵심 개선:**
-- **Volatility Selection**: 30일 실현변동성 Top-5 심볼 동적 선택 (10일 리밸런싱)
-- **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 신호 엔진
-- **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 결합
-- **성과**: +35.22% (90일), Sharpe 4.67, Walk-Forward OOS +34.31% (60일)
+**v3.3 핵심 개선:**
+- **Enhanced MTF Confirmation**: 16h SMA 기반 3-mode HTF 필터 (block/neutral/agree)
+- **HTF Agree Discount**: HTF 동의 시 15% 더 쉬운 진입 (0.85×) + 5% 타이트한 스톱 (0.95×)
+- **Stop Decay**: 보유 시간에 따른 30% 스톱 감쇠
+- **entry_stop_mult 패리티**: Numba 백테스트와 라이브 트레이딩 간 정확한 스톱 일치
+- **성과**: +63.18% (90일), Sharpe 6.52, Max DD 7.08%, Calmar 8.92
 
 **알파 소스:**
 - 청산 캐스케이드(liquidation cascades)로 인한 오버슈트
 - 스톱 헌팅 + 강제 청산 후 자연적 반등
 - 2시간(8×15m 봉) 내 50% 되돌림
+- HTF 트렌드 동의 시 진입 확률 증가 + 스톱 조기 잘림
 
-**검증 결과 (30 symbols, 90일, 15m 데이터):**
-- 포트폴리오 수익률: +5.82% (3개월)
-- Sharpe: 0.92
-- Max Drawdown: 16.63%
-- 63% 심볼 수익 (30개 중 19개)
-- Walk-forward 4-window 중 3/4 수익
+**검증 결과 (30 symbols, 90일, 15m 데이터, Vol Top-3):**
+- 포트폴리오 수익률: +63.18%
+- Sharpe: 6.52
+- Max Drawdown: 7.08%
+- Calmar: 8.92
+- Win Rate: 56.5%, Profit Factor: 1.17
+- Trades/Day: ~15.5
 
 ### 3.2 실행 방법
 
@@ -86,6 +89,11 @@ python -m quantbox.scalper
 | target_retrace | 0.5 | 이익 실현: 이동 폭의 50% 되돌림 |
 | stop_mult | 1.0 | 손절: 이동 폭의 1배 |
 | max_hold | 8 | 최대 보유 기간 (봉 수) |
+| stop_decay | 0.3 | 시간감쇠 계수 (30% 감쇠 by max_hold) |
+| htf_period | 64 | MTF SMA 기간 (16시간, 0=비활성) |
+| htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%) |
+| htf_agree_discount | 0.85 | HTF 동의 시 진입 임계값 할인 (15% 낮춤) |
+| htf_agree_stop_mult | 0.95 | HTF 동의 시 스톱 배수 (5% 타이트) |
 | max_concurrent | 5 | 최대 동시 포지션 |
 | risk_per_trade | 0.01 | 트레이드당 리스크 (자본의 1%) |
 

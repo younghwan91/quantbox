@@ -292,10 +292,10 @@ class TestRubberBandConfig:
         cfg = RubberBandConfig()
         assert cfg.regime_filter_enabled is False
 
-    def test_stop_decay_default_zero(self):
-        """stop_decay defaults to 0 (no decay)."""
+    def test_stop_decay_default(self):
+        """stop_decay defaults to 0.3 (production setting)."""
         cfg = RubberBandConfig()
-        assert cfg.stop_decay == 0.0
+        assert cfg.stop_decay == 0.3
 
 
 # ══════════════════ 6. Time-Decaying Stop Tests ══════════════════
@@ -492,10 +492,10 @@ class TestMTFConfirmation:
         assert unique.issubset({-1.0, 0.0, 1.0})
 
     def test_mtf_config_defaults(self):
-        """Config should have MTF defaults."""
+        """Config should have MTF production defaults."""
         cfg = RubberBandConfig()
-        assert cfg.htf_period == 0  # disabled by default
-        assert cfg.htf_block_threshold == 0.02
+        assert cfg.htf_period == 64       # 16h SMA
+        assert cfg.htf_block_threshold == 0.01  # 1% block
 
     def test_on_bar_uses_mtf(self, btc_close):
         """on_bar should use MTF when htf_period > 0."""
@@ -538,11 +538,11 @@ class TestMTFEnhanced:
         unique = set(np.unique(sigs_tight))
         assert unique.issubset({-1.0, 0.0, 1.0})
 
-    def test_defaults_disabled(self):
-        """Default config should disable enhanced features (discount=1.0, stop=1.0)."""
+    def test_defaults_production(self):
+        """Default config should have production-optimized enhanced MTF."""
         cfg = RubberBandConfig()
-        assert cfg.htf_agree_discount == 1.0
-        assert cfg.htf_agree_stop_mult == 1.0
+        assert cfg.htf_agree_discount == 0.85   # 15% easier entry
+        assert cfg.htf_agree_stop_mult == 0.95  # 5% tighter stop
 
     def test_on_bar_passes_enhanced_params(self, btc_close):
         """on_bar should pass enhanced params without error."""
@@ -565,3 +565,47 @@ class TestMTFEnhanced:
             48, 0.02, 1.0, 1.0,
         )
         np.testing.assert_array_equal(sigs_v1, sigs_enh)
+
+    def test_entry_stop_mult_stored_in_position(self):
+        """open_position must store entry_stop_mult for parity."""
+        cfg = RubberBandConfig(stop_mult=1.0)
+        strat = RubberBandStrategy(cfg)
+
+        # Without explicit entry_stop_mult → defaults to cfg.stop_mult
+        strat.open_position("SYM1", 1, 100.0, 1000.0, 2.0, 0.03)
+        assert strat._positions["SYM1"]["entry_stop_mult"] == 1.0
+
+        # With explicit entry_stop_mult (HTF agree case)
+        strat.open_position("SYM2", -1, 200.0, 1000.0, 2.0, 0.03,
+                            entry_stop_mult=0.7)
+        assert strat._positions["SYM2"]["entry_stop_mult"] == 0.7
+
+    def test_update_position_uses_entry_stop_mult(self):
+        """update_position must use entry_stop_mult, not cfg.stop_mult."""
+        cfg = RubberBandConfig(stop_mult=1.0, max_hold=8, stop_decay=0.0)
+        strat = RubberBandStrategy(cfg)
+
+        # Open position with tighter stop (HTF agree simulation)
+        strat.open_position("TESTUSDT", 1, 100.0, 1000.0, 2.0, 0.03,
+                            entry_stop_mult=0.5)
+
+        # With cfg.stop_mult=1.0, stop would be at 3% → price 97.0
+        # With entry_stop_mult=0.5, stop is at 1.5% → price 98.5
+        # Price 98.0 should trigger stop with tighter stop
+        reason = strat.update_position("TESTUSDT", 98.0)
+        assert reason == "stop_loss", (
+            f"Should stop at 98.0 with entry_stop_mult=0.5 (stop at 98.5), "
+            f"got {reason}"
+        )
+
+    def test_update_position_no_false_stop_without_entry_stop(self):
+        """Default entry_stop_mult should use cfg.stop_mult (no false stops)."""
+        cfg = RubberBandConfig(stop_mult=1.0, max_hold=8, stop_decay=0.0)
+        strat = RubberBandStrategy(cfg)
+
+        # Open with default stop
+        strat.open_position("TESTUSDT", 1, 100.0, 1000.0, 2.0, 0.03)
+
+        # Price 98.0 → loss of 2% < stop of 3% → should NOT stop
+        reason = strat.update_position("TESTUSDT", 98.0)
+        assert reason is None, f"Should not stop at 98.0 with stop_mult=1.0"
