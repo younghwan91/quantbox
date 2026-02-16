@@ -113,7 +113,7 @@ class TestDefaultValues:
 
     def test_entry_zscore_default(self):
         s = _make_settings()
-        assert s.entry_zscore == 2.0
+        assert s.entry_zscore == 2.2
 
     def test_exit_zscore_default(self):
         s = _make_settings()
