@@ -168,12 +168,12 @@ class TestBlacklistDiscordCommands:
 
         result = trader._cmd_blacklist_clear()
         assert trader._failed_symbols == {}
-        assert '2개 심볼 제거' in result
+        assert '체결실패 2개' in result
 
     def test_cmd_blacklist_clear_empty(self, trader):
         """이미 비어있는 블랙리스트 초기화."""
         result = trader._cmd_blacklist_clear()
-        assert '0개 심볼 제거' in result
+        assert '체결실패 0개' in result
 
     def test_handle_command_routes_blacklist(self, trader):
         """_handle_command가 BLACKLIST 명령을 올바르게 라우팅한다."""
