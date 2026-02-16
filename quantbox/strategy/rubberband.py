@@ -46,13 +46,13 @@ class RubberBandConfig:
     target_retrace: float = 0.5  # Take profit at 50% retracement
     stop_mult: float = 1.0     # Stop at 1x the move size
     max_hold: int = 8          # Maximum holding period (bars)
-    stop_decay: float = 0.0    # Stop tightening rate (0=off, 0.5=halves by max_hold)
+    stop_decay: float = 0.3    # Stop tightening rate (0=off, 0.3=tightens 30% by max_hold)
 
     # ── Multi-timeframe confirmation ──
-    htf_period: int = 0          # Higher TF trend lookback in 15m bars (0=disabled, 48=12h)
-    htf_block_threshold: float = 0.02  # Block entry if HTF trend > this against trade dir
-    htf_agree_discount: float = 1.0    # Threshold multiplier when HTF agrees (0.8=20% lower → more entries)
-    htf_agree_stop_mult: float = 1.0   # Stop multiplier when HTF agrees (0.7=tighter stop → better RR)
+    htf_period: int = 64         # Higher TF trend lookback in 15m bars (64=16h SMA)
+    htf_block_threshold: float = 0.01  # Block entry if HTF trend > 1% against trade dir
+    htf_agree_discount: float = 0.85   # Threshold multiplier when HTF agrees (0.85=15% lower → more entries)
+    htf_agree_stop_mult: float = 0.95  # Stop multiplier when HTF agrees (0.95=5% tighter stop)
 
     # ── Regime filter ──
     regime_filter_enabled: bool = False   # Disabled: blocks the very moves that generate alpha
@@ -497,11 +497,62 @@ class RubberBandStrategy:
     def has_position(self, symbol: str) -> bool:
         return symbol in self._positions
 
+    def get_effective_stop_mult(
+        self, close_prices: np.ndarray,
+    ) -> float:
+        """Compute the effective stop multiplier for the current bar.
+
+        Mirrors the HTF agree logic in compute_signals_mtf to ensure
+        live trading uses the same stop as the backtest.
+
+        Returns:
+            Effective stop multiplier (cfg.stop_mult * htf_agree_stop_mult
+            when HTF agrees, else cfg.stop_mult).
+        """
+        cfg = self.config
+        if cfg.htf_period <= 0 or cfg.htf_agree_stop_mult >= 1.0:
+            return cfg.stop_mult
+
+        if len(close_prices) < max(cfg.lookback, cfg.htf_period) + 1:
+            return cfg.stop_mult
+
+        # Compute HTF SMA at current bar (same as Numba function)
+        htf_window = close_prices[-cfg.htf_period:]
+        htf_sma = float(np.mean(htf_window))
+        if htf_sma <= 0:
+            return cfg.stop_mult
+
+        current = float(close_prices[-1])
+        htf_trend = (current - htf_sma) / htf_sma
+
+        # Compute the move (same as Numba: close[i]/close[i-lookback] - 1)
+        lookback_price = float(close_prices[-cfg.lookback - 1])
+        ret = current / lookback_price - 1.0
+
+        # Check if HTF agrees with the trade direction
+        min_disc = min(cfg.htf_agree_discount, 1.0)
+        if ret < -cfg.threshold * min_disc:
+            # Long entry — HTF agrees if below SMA
+            if htf_trend < 0 and htf_trend <= cfg.htf_block_threshold:
+                return cfg.stop_mult * cfg.htf_agree_stop_mult
+        elif ret > cfg.threshold * min_disc:
+            # Short entry — HTF agrees if above SMA
+            if htf_trend > 0 and htf_trend >= -cfg.htf_block_threshold:
+                return cfg.stop_mult * cfg.htf_agree_stop_mult
+
+        return cfg.stop_mult
+
     def open_position(
         self, symbol: str, signal: int, entry_price: float,
         notional: float, leverage: float, move_size: float,
+        entry_stop_mult: float | None = None,
     ):
-        """Record a new position."""
+        """Record a new position.
+
+        Args:
+            entry_stop_mult: Effective stop multiplier at entry (for
+                HTF agree parity). If None, uses cfg.stop_mult.
+        """
         self._positions[symbol] = {
             'signal': signal,
             'entry_price': entry_price,
@@ -510,6 +561,7 @@ class RubberBandStrategy:
             'move_size': move_size,
             'bars_held': 0,
             'best_pnl': 0.0,
+            'entry_stop_mult': entry_stop_mult if entry_stop_mult is not None else self.config.stop_mult,
         }
 
     def close_position(self, symbol: str) -> dict | None:
@@ -538,9 +590,11 @@ class RubberBandStrategy:
 
         target = pos['move_size'] * cfg.target_retrace
 
-        # Time-decaying stop (parity with compute_signals)
+        # Time-decaying stop (parity with compute_signals_mtf)
+        # Uses entry_stop_mult stored at open time (accounts for HTF agree)
+        entry_sm = pos.get('entry_stop_mult', cfg.stop_mult)
         time_factor = 1.0 - cfg.stop_decay * (pos['bars_held'] / cfg.max_hold)
-        effective_stop = pos['move_size'] * cfg.stop_mult * time_factor
+        effective_stop = pos['move_size'] * entry_sm * time_factor
 
         # Exit conditions
         if gain >= target:
