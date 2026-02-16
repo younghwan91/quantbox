@@ -89,6 +89,20 @@ class QuantBoxSettings(BaseSettings):
     dynamic_exit_base: float = 0.1  # 빠른 페어 exit z-score (half_life=min)
     dynamic_exit_range: float = 0.9  # max exit = base + range = 1.0
 
+    # ── Rubber Band Signal Parameters ──
+    rb_lookback: int = 8               # Bars to measure move (2h at 15m)
+    rb_threshold: float = 0.025        # Minimum move to trigger (2.5%)
+    rb_target_retrace: float = 0.5     # Take profit at 50% retracement
+    rb_stop_mult: float = 1.0          # Stop at 1x the move size
+    rb_max_hold: int = 8               # Maximum holding period (bars)
+    rb_stop_decay: float = 0.3         # Stop tightening rate (30% by max_hold)
+
+    # ── Multi-timeframe Confirmation ──
+    rb_htf_period: int = 64            # HTF trend lookback in 15m bars (64=16h)
+    rb_htf_block_threshold: float = 0.01  # Block entry if HTF trend > 1% against dir
+    rb_htf_agree_discount: float = 0.85   # Threshold discount when HTF agrees (15% easier)
+    rb_htf_agree_stop_mult: float = 0.95  # Stop multiplier when HTF agrees (5% tighter)
+
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부

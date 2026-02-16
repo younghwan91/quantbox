@@ -499,6 +499,9 @@ class RubberBandScalper:
         fill_price = float(result['avgPrice'])
         fill_qty = float(result['executedQty'])
 
+        # Compute effective stop (HTF agree parity)
+        eff_stop = self.strategy.get_effective_stop_mult(close_prices)
+
         # Record in strategy
         self.strategy.open_position(
             symbol=symbol,
@@ -507,6 +510,7 @@ class RubberBandScalper:
             notional=fill_qty * fill_price,
             leverage=lev_int,
             move_size=move_size,
+            entry_stop_mult=eff_stop,
         )
 
         # Paper balance adjustment
@@ -564,6 +568,7 @@ class RubberBandScalper:
                 notional=pos['notional'],
                 leverage=pos['leverage'],
                 move_size=pos['move_size'],
+                entry_stop_mult=pos.get('entry_stop_mult'),
             )
             return False
 
@@ -802,6 +807,7 @@ class RubberBandScalper:
                 notional=pos['notional'],
                 leverage=pos.get('leverage', 1),
                 move_size=pos.get('move_size', 0.03),
+                entry_stop_mult=pos.get('entry_stop_mult'),
             )
             # Restore bars_held
             if sym in self.strategy._positions:
@@ -962,9 +968,19 @@ def main():
     )
     args = parser.parse_args()
 
+    # Build config from .env settings (pydantic-settings) + CLI overrides
+    settings = get_settings()
     config = RubberBandConfig(
-        lookback=args.lookback,
-        threshold=args.threshold,
+        lookback=args.lookback or settings.rb_lookback,
+        threshold=args.threshold or settings.rb_threshold,
+        target_retrace=settings.rb_target_retrace,
+        stop_mult=settings.rb_stop_mult,
+        max_hold=settings.rb_max_hold,
+        stop_decay=settings.rb_stop_decay,
+        htf_period=settings.rb_htf_period,
+        htf_block_threshold=settings.rb_htf_block_threshold,
+        htf_agree_discount=settings.rb_htf_agree_discount,
+        htf_agree_stop_mult=settings.rb_htf_agree_stop_mult,
         max_concurrent=args.max_slots,
     )
 
