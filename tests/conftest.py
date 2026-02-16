@@ -12,6 +12,18 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
+@pytest.fixture(autouse=True)
+def _clear_settings_cache():
+    """매 테스트마다 get_settings() 캐시를 초기화.
+
+    @lru_cache 싱글턴이 테스트 간 환경변수 오염을 일으키는 것을 방지한다.
+    """
+    from quantbox.core.settings import get_settings
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 def _get_real_data_loader():
     """Get the real data loader instance."""
     from quantbox.data.real_data_loader import RealDataLoader
@@ -90,17 +102,3 @@ def config():
     """Sample configuration."""
     from quantbox.core.config import Config
     return Config()
-
-
-@pytest.fixture
-def backtest_config():
-    """Sample backtest configuration."""
-    from quantbox.backtest.runner import BacktestConfig
-    return BacktestConfig(
-        initial_capital=10000.0,
-        trading_fee=0.0005,
-        slippage=0.001,
-        formation_periods=100,
-        trading_periods=50,
-        window_shift=25
-    )

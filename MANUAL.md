@@ -1,9 +1,9 @@
 # QuantBox 실행 매뉴얼 📈
 
-**암호화폐 페어 트레이딩 프레임워크 완벽 가이드**
+**암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 1.0.0  
-> 최종 업데이트: 2026년 2월
+> 버전: 3.0.0  
+> 최종 업데이트: 2026년 2월 15일
 
 ---
 
@@ -11,19 +11,21 @@
 
 1. [개요](#1-개요)
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
-3. [아키텍처 이해](#3-아키텍처-이해)
-4. [핵심 모듈 상세](#4-핵심-모듈-상세)
-5. [데이터 관리](#5-데이터-관리)
-6. [페어 선택 시스템](#6-페어-선택-시스템)
-7. [전략 구현](#7-전략-구현)
-8. [백테스팅](#8-백테스팅)
-9. [파라미터 최적화](#9-파라미터-최적화)
-10. [Walk-Forward 분석](#10-walk-forward-분석)
-11. [실거래 연동](#11-실거래-연동)
-12. [성과 지표 해석](#12-성과-지표-해석)
-13. [고급 사용법](#13-고급-사용법)
-14. [트러블슈팅](#14-트러블슈팅)
-15. [API 레퍼런스](#15-api-레퍼런스)
+3. [🔥 Rubber Band Scalper (v2.0)](#3-rubber-band-scalper)
+4. [아키텍처 이해](#4-아키텍처-이해)
+5. [핵심 모듈 상세](#5-핵심-모듈-상세)
+6. [데이터 관리](#6-데이터-관리)
+7. [페어 선택 시스템](#7-페어-선택-시스템)
+8. [전략 구현](#8-전략-구현)
+9. [백테스팅](#9-백테스팅)
+10. [파라미터 최적화](#10-파라미터-최적화)
+11. [Walk-Forward 분석](#11-walk-forward-분석)
+12. [실거래 연동](#12-실거래-연동)
+13. [Discord Bot (원격 제어)](#13-discord-bot-원격-제어)
+14. [성과 지표 해석](#14-성과-지표-해석)
+15. [고급 사용법](#15-고급-사용법)
+16. [트러블슈팅](#16-트러블슈팅)
+17. [API 레퍼런스](#17-api-레퍼런스)
 
 ---
 
@@ -31,7 +33,87 @@
 
 ### 1.1 QuantBox란?
 
-QuantBox는 암호화폐 **페어 트레이딩(Pair Trading)** 을 위한 종합 퀀트 프레임워크입니다. 백테스팅과 실거래에서 동일한 코드를 사용할 수 있는 **이벤트 기반 아키텍처**를 채택하여 전략 개발부터 실제 운용까지 일관된 워크플로우를 제공합니다.
+QuantBox는 암호화폐 트레이딩을 위한 종합 퀀트 프레임워크입니다. **Rubber Band Scalper**(단일 자산 평균회귀)와 **페어 트레이딩** 두 가지 전략을 지원하며, 백테스팅과 실거래에서 동일한 코드를 사용합니다.
+
+---
+
+## 3. 🔥 Rubber Band Scalper (v3.0 — Volatility Selection)
+
+### 3.1 전략 개요
+
+Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. 2.5% 이상 급등/급락 후 발생하는 기계적 반등(snap-back)을 포착합니다.
+
+**v3.0 핵심 개선:**
+- **Volatility Selection**: 30일 실현변동성 Top-5 심볼 동적 선택 (10일 리밸런싱)
+- **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 신호 엔진
+- **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 결합
+- **성과**: +35.22% (90일), Sharpe 4.67, Walk-Forward OOS +34.31% (60일)
+
+**알파 소스:**
+- 청산 캐스케이드(liquidation cascades)로 인한 오버슈트
+- 스톱 헌팅 + 강제 청산 후 자연적 반등
+- 2시간(8×15m 봉) 내 50% 되돌림
+
+**검증 결과 (30 symbols, 90일, 15m 데이터):**
+- 포트폴리오 수익률: +5.82% (3개월)
+- Sharpe: 0.92
+- Max Drawdown: 16.63%
+- 63% 심볼 수익 (30개 중 19개)
+- Walk-forward 4-window 중 3/4 수익
+
+### 3.2 실행 방법
+
+```bash
+# Paper trading (시뮬레이션, 실제 주문 없음)
+python -m quantbox.scalper --paper
+
+# 한 사이클만 실행 후 종료
+python -m quantbox.scalper --paper --once
+
+# 커스텀 파라미터
+python -m quantbox.scalper --paper --lookback 10 --threshold 0.03 --max-slots 3
+
+# LIVE (실거래, 주의!)
+python -m quantbox.scalper
+```
+
+### 3.3 전략 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| lookback | 8 | 이동 측정 기간 (봉 수, 8×15m = 2시간) |
+| threshold | 0.025 | 최소 진입 이동 폭 (2.5%) |
+| target_retrace | 0.5 | 이익 실현: 이동 폭의 50% 되돌림 |
+| stop_mult | 1.0 | 손절: 이동 폭의 1배 |
+| max_hold | 8 | 최대 보유 기간 (봉 수) |
+| max_concurrent | 5 | 최대 동시 포지션 |
+| risk_per_trade | 0.01 | 트레이드당 리스크 (자본의 1%) |
+
+### 3.4 안전장치
+
+- **Max Drawdown Breaker**: 세션 HWM 대비 10% DD → 전체 청산
+- **Daily Loss Limit**: 당일 잔고 대비 5% 손실 → 신규 진입 중단
+- **Risk-Sized Positions**: 1% risk/trade, 최대 레버리지 20x
+- **LimitOrderChaser**: maker-only 체결로 수수료 0.02% (taker 0.05% 대비 60% 절감)
+- **Atomic State Persistence**: 크래시 후 자동 복구
+- **Discord 알림**: 진입/청산, 드로다운 경고 전송
+
+### 3.5 백테스트
+
+```python
+from quantbox.strategy.rubberband import compute_signals
+from quantbox.backtest.vectorized_backtest import VectorizedBacktest, BacktestConfig
+
+bt = VectorizedBacktest(BacktestConfig(
+    initial_capital=10000,
+    cost_per_side=0.0004,  # 0.04% per side
+))
+signals = compute_signals(close, 8, 0.025, 0.5, 1.0, 8)
+result = bt.run_single(close, signals, "BTCUSDT")
+print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
+```
+
+---
 
 ### 1.2 페어 트레이딩 개념
 
@@ -155,6 +237,67 @@ dependencies = [
 mkdir -p data/cache data/raw data/processed
 ```
 
+### 2.6 환경변수 설정 (.env)
+
+실거래/페이퍼 트레이딩 시 `.env` 파일에 아래 환경변수를 설정합니다:
+
+```bash
+# 필수: 바이낸스 API
+BINANCE_API_KEY=your_api_key
+BINANCE_API_SECRET=your_api_secret
+BINANCE_TESTNET=true          # 테스트넷 사용 시
+
+# 레버리지 및 포지션 사이징
+LEVERAGE=2                     # Fallback 레버리지 (동적 레버리지 미사용 시)
+TARGET_R_PCT=0.02              # 트레이드당 목표 리스크 (밸런스의 2%, 0=동적 비활성)
+MAX_LEVERAGE=125               # 동적 레버리지 안전 상한
+MAX_TRADERS=10                 # 최대 동시 트레이더 수 (기본값: 10)
+POSITION_SIZE_PCT=-1           # 슬롯당 자본 비율 (-1=자동: 1/MAX_TRADERS)
+
+# 전략 파라미터
+ENTRY_ZSCORE=2.0               # 진입 z-score 임계값
+EXIT_ZSCORE=0.5                # 청산 z-score 임계값 (dynamic_exit 비활성 시)
+STOP_LOSS_ZSCORE=3.5           # 손절 z-score
+MAX_HOLDING_HOURS=20           # 최대 보유 시간 (초과 시 강제 청산, 백테스트 80bars@15m과 동일)
+FORMATION_HOURS=60             # 페어 선별에 사용할 과거 데이터 길이 (60h = 240 bars @ 15m)
+
+# Dynamic Exit: half-life 기반 청산 z-score 자동 조절
+# USE_DYNAMIC_EXIT=true         # 활성화 시 EXIT_ZSCORE 대신 half-life 기반 동적 값 사용
+# DYNAMIC_EXIT_BASE=0.3         # 빠른 페어 exit z-score (half_life=min)
+# DYNAMIC_EXIT_RANGE=0.7        # 느린 페어까지의 범위 (max exit = base + range = 1.0)
+
+# Regime Protection
+Z_SCORE_CAP=4.0                # |z| > cap 이면 진입 거부 (레짐 변화 방어)
+VOL_EXPANSION_GATE=2.0         # recent_std / formation_std > gate 이면 진입 거부
+
+# BTC Crash Gate (매크로 방어)
+BTC_CRASH_GATE_ENABLED=true    # BTC 급락/급등 시 진입 차단 활성화
+BTC_CRASH_WINDOW=8             # 최근 N봉 체크 (15분봉 기준 = 2시간)
+BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 진입 차단
+
+# 드로다운 & 손실 제한
+MAX_DRAWDOWN_PCT=0.10          # 세션 HWM 대비 최대 허용 드로다운 (10%)
+DAILY_LOSS_LIMIT_PCT=0.05      # 당일 시작 잔고 대비 최대 허용 손실 (5%)
+
+# 비용 모델
+TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
+SLIPPAGE=0.001                 # 슬리피지 (0.10%)
+FUNDING_RATE_8H=0.0001         # 8시간 펀딩비 (0.01%)
+
+# 유니버스 & 페이퍼 트레이딩
+N_COINS=30                     # 상위 N개 코인 사용
+PAPER_BALANCE=1000             # 페이퍼 트레이딩 시 가상 잔고 ($)
+
+# 알림 (Discord Webhook - 단방향 알림)
+DISCORD_WEBHOOK_URL=           # 미설정 시 알림 비활성화
+
+# Discord Bot (양방향 원격 명령)
+DISCORD_BOT_TOKEN=             # Bot 토큰 (미설정 시 봇 비활성화)
+DISCORD_CHANNEL_ID=            # 명령 수신 채널 ID (숫자)
+```
+
+> **팁**: `.env.example` 파일을 복사하여 시작하세요: `cp .env.example .env`
+
 ---
 
 ## 3. 아키텍처 이해
@@ -187,6 +330,9 @@ quantbox/
 │   ├── optimizer.py        # 최적화 알고리즘
 │   ├── objective.py        # 목적 함수
 │   └── sensitivity.py      # 민감도 분석
+├── notifications/          # 알림 & 원격 제어
+│   ├── discord.py          # Discord 웹훅 (단방향 알림)
+│   └── bot.py              # Discord 봇 (양방향 명령)
 └── utils/                  # 유틸리티
     ├── numba_ops.py        # Numba 가속 함수
     └── costs.py            # 거래 비용 모델
@@ -256,7 +402,7 @@ config = Config(
 config.strategy.entry_zscore = 2.0
 config.strategy.exit_zscore = 0.5
 config.strategy.stop_loss_zscore = 3.5
-config.strategy.max_holding_periods = 100
+config.strategy.max_holding_periods = 80
 config.strategy.formation_periods = 240
 config.strategy.trading_periods = 24
 
@@ -674,7 +820,7 @@ strategy = PairTradingStrategy(
         'entry_zscore': 2.0,        # 진입 Z-Score
         'exit_zscore': 0.5,         # 청산 Z-Score
         'stop_loss_zscore': 3.5,    # 손절 Z-Score
-        'max_holding_periods': 100,  # 최대 보유 기간
+        'max_holding_periods': 80,  # 최대 보유 기간 (20h @ 15m)
         'lookback_periods': 240,     # 통계 계산 기간
         'recalculate_hedge': True,   # 동적 헤지 비율
         'use_dynamic_zscore': False, # 동적 Z-Score 사용
@@ -735,12 +881,80 @@ if in_long_position and z_score <= entry_z - stop_loss_zscore:
 if in_short_position and z_score >= entry_z + stop_loss_zscore:
     exit_reason = "stop_loss"
 
+# Trailing Stop (Ratchet Stop)
+# z가 entry 대비 activate_delta 이상 개선 후 entry 수준으로 역전 시 청산
+if trailing_active and z reversed past entry_z ± buffer:
+    exit_reason = "trailing_stop"
+
 # 최대 보유 기간
 if bars_held >= max_holding_periods:
     exit_reason = "max_holding"
 ```
 
-### 7.4 커스텀 전략 구현 예시
+### 7.4 Dynamic Exit (Half-Life 기반 청산)
+
+진입 시 계산된 **half-life**를 활용하여 청산 z-score를 페어별로 자동 조절합니다.
+
+**원리:**
+- **빠른 페어** (낮은 half-life): 평균 회귀가 빠르므로 tight exit (z=0.3) → 더 깊은 수익 포착
+- **느린 페어** (높은 half-life): 전부 돌아올 때까지 기다리면 스탑에 걸림 → loose exit (z=1.0) → 부분 수익 확정
+
+**계산식:**
+```
+exit_z = base + clamp((hl - min_hl) / (max_hl - min_hl), 0, 1) × range
+```
+
+**기본값:** `base=0.3`, `range=0.7` → 출력 범위 [0.3, 1.0]
+
+**A/B 백테스트 결과 (35심볼, 2877봉):**
+
+| Metric | Static (exit=0.5) | Dynamic (hl-based) |
+|--------|------------------:|-------------------:|
+| Total Return | 0.25% | **3.38%** |
+| Sharpe Ratio | 0.98 | **4.06** |
+| Max Drawdown | 24.69% | **23.92%** |
+| Stop Loss 횟수 | 11 | **10** |
+
+**활성화:**
+```bash
+# .env
+USE_DYNAMIC_EXIT=true
+DYNAMIC_EXIT_BASE=0.3
+DYNAMIC_EXIT_RANGE=0.7
+```
+
+> **주의**: 기본적으로 비활성화 상태입니다 (`USE_DYNAMIC_EXIT=false`). 활성화 시 `EXIT_ZSCORE` 값은 무시됩니다.
+
+### 7.5 진입 방어 레이어 (Entry Gates)
+
+진입 시 5개 레이어가 순서대로 실행됩니다. 하나라도 차단되면 진입하지 않습니다.
+**라이브와 백테스트 모두 동일한 게이트를 적용합니다** (v1.4.0부터 패리티 달성).
+
+| # | Gate | 대상 | 설정 | 기본값 |
+|---|------|------|------|--------|
+| 1 | **BTC Crash Gate** | 시장 전체 | `BTC_CRASH_THRESHOLD` | ±3% |
+| 2 | **Z-Score Cap** | 개별 페어 | `Z_SCORE_CAP` | \|z\| > 4.0 |
+| 3 | **Vol Expansion Gate** | 개별 페어 | `VOL_EXPANSION_GATE` | ratio > 2.0x |
+| 4 | **Entry Z-Score Threshold** | 개별 페어 | `ENTRY_ZSCORE` | \|z\| >= 2.0 |
+| 5 | **자본 충분성** | 슬롯 | - | min notional 이상 |
+
+**BTC Crash Gate 상세:**
+
+BTC가 최근 N봉(기본 8봉 = 2시간) 동안 ±3% 이상 움직이면 **모든 페어의 신규 진입을 차단**합니다.
+
+- **목적**: 시장 전체 상관관계 급등 시 페어 스프레드의 평균회귀 전제 자체가 깨지는 것을 방어
+- **실전 사례**: 2026-02-13 BTC $70K→$65K (-7.1%), AI 공포 + 테크 셀오프 → 7연속 SL 방지
+- **Fail-open**: API 에러 시 차단하지 않음 (보수적 안전장치)
+- **기존 포지션**: 영향 없음 (모니터링/청산은 정상 동작)
+- **Discord 상태**: `!status` 명령에 BTC 🟢/🔴 표시
+
+```bash
+BTC_CRASH_GATE_ENABLED=true    # 활성화/비활성화
+BTC_CRASH_WINDOW=8             # 최근 N봉 (15분봉 기준)
+BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 차단
+```
+
+### 7.6 커스텀 전략 구현 예시
 
 ```python
 from quantbox.strategy.base import StatefulStrategy
@@ -819,7 +1033,7 @@ config = BacktestConfig(
     entry_zscore=2.0,
     exit_zscore=0.5,
     stop_loss_zscore=3.5,
-    max_holding_periods=100,
+    max_holding_periods=80,
     
     # 페어 선택
     max_pairs_per_window=10,
@@ -1219,7 +1433,10 @@ engine.run_live(strategy)
 config.risk.max_position_size = 0.05    # 최대 포지션: 5%
 config.risk.max_drawdown = 0.15         # 최대 낙폭: 15%
 config.risk.stop_loss_pct = 0.03        # 손절: 3%
-config.risk.leverage = 1                 # 레버리지: 1x
+config.risk.leverage = 2                 # Fallback 레버리지 (동적 미사용 시)
+config.risk.target_r_pct = 0.02         # 트레이드당 목표 리스크: 밸런스의 2%
+config.risk.max_leverage = 125          # 동적 레버리지 상한: 125x (바이난스 절대 상한)
+config.risk.funding_rate_8h = 0.0001     # 8시간 펀딩비: 0.01%
 
 # 자동 리스크 관리
 if portfolio.current_drawdown > config.risk.max_drawdown:
@@ -1229,7 +1446,85 @@ if portfolio.current_drawdown > config.risk.max_drawdown:
 
 ---
 
-## 12. 성과 지표 해석
+## 12. Discord Bot (원격 제어)
+
+### 12.1 개요
+
+Discord Bot을 통해 실거래 중인 시스템을 채팅으로 원격 제어할 수 있습니다. Webhook(단방향 알림)과 달리, Bot은 **양방향 통신**이 가능하여 상태 조회, 포지션 청산, 시스템 정지 등의 명령을 실행할 수 있습니다.
+
+**아키텍처:**
+```
+메인 스레드 (트레이딩 루프)     데몬 스레드 (Discord Bot)
+┌──────────────────┐          ┌──────────────────┐
+│  run_cycle()     │◀─Queue──│  on_message()    │
+│  _process_cmds() │──Reply──▶│  send response   │
+└──────────────────┘          └──────────────────┘
+```
+
+### 12.2 Bot 생성 및 설정
+
+**1단계: Discord Developer Portal에서 Bot 생성**
+
+1. https://discord.com/developers/applications 접속
+2. "New Application" → 이름 입력 → 생성
+3. 좌측 "Bot" 메뉴 → "Reset Token" → **토큰 복사**
+4. "Privileged Gateway Intents" → **Message Content Intent** 활성화
+
+**2단계: Bot을 서버에 초대**
+
+1. 좌측 "OAuth2" → "URL Generator"
+2. Scopes: `bot` 선택
+3. Bot Permissions: `Send Messages`, `Read Message History` 선택
+4. 생성된 URL로 서버에 초대
+
+**3단계: 채널 ID 확인**
+
+1. Discord 설정 → 고급 → "개발자 모드" 활성화
+2. 명령용 채널 우클릭 → "ID 복사"
+
+**4단계: .env 설정**
+
+```dotenv
+DISCORD_BOT_TOKEN=your_bot_token_here
+DISCORD_CHANNEL_ID=1234567890123456789
+```
+
+### 12.3 사용 가능한 명령어
+
+| 명령어 | 설명 | 응답 예시 |
+|--------|------|----------|
+| `!status` | 전체 시스템 상태 | 슬롯별 페어, PnL, z-score |
+| `!pnl` | 손익 요약 | 총 PnL, 슬롯별 수익률 |
+| `!pause` | 신규 진입 일시 정지 | 기존 포지션은 유지, 새 진입만 차단 |
+| `!resume` | 일시 정지 해제 | 정상 운영 복귀 |
+| `!close all` | 전체 포지션 청산 | 모든 슬롯 즉시 청산 |
+| `!close N` | N번 슬롯 청산 | 특정 슬롯만 청산 (0부터 시작) |
+| `!stop` | 시스템 종료 | 전체 포지션 청산 후 안전 종료 |
+| `!help` | 명령어 목록 | 위 명령어 안내 |
+
+> **안전장치**: `!close`와 `!stop`은 실제 바이낸스 주문을 트리거합니다. 반드시 의도한 것인지 확인하세요.
+
+### 12.4 작동 방식
+
+- Bot은 `run_continuous()` 호출 시 **데몬 스레드**로 자동 시작
+- `DISCORD_BOT_TOKEN`과 `DISCORD_CHANNEL_ID`가 모두 설정된 경우에만 활성화
+- 미설정 시 기존과 동일하게 봇 없이 운영 (하위 호환)
+- 매 `run_cycle()` 시작 시 큐에 쌓인 명령을 처리
+- 명령 응답은 3초 타임아웃 (봇 → 트레이딩 스레드 응답 대기)
+
+```python
+# 코드에서 직접 사용 (자동으로 통합됨)
+from quantbox.live_trader import LivePairTrader
+from quantbox.core.settings import Settings
+
+settings = Settings()  # .env에서 자동 로드
+trader = LivePairTrader(settings)
+trader.run_continuous()  # Bot 자동 시작 (토큰 설정 시)
+```
+
+---
+
+## 13. 성과 지표 해석
 
 ### 12.1 수익 지표
 
@@ -1288,9 +1583,9 @@ print(f"Expectancy per Trade: ${expectancy:.2f}")
 
 ---
 
-## 13. 고급 사용법
+## 14. 고급 사용법
 
-### 13.1 Numba 가속 함수
+### 14.1 Numba 가속 함수
 
 ```python
 from quantbox.utils.numba_ops import (
@@ -1321,7 +1616,7 @@ position_size = optimal_position_sizing(
 )
 ```
 
-### 13.2 몬테카를로 시뮬레이션
+### 14.2 몬테카를로 시뮬레이션
 
 ```python
 from quantbox.backtest import MonteCarloSimulation
@@ -1343,36 +1638,25 @@ print(f"Expected Drawdown: {mc_results['expected_dd']:.2f}%")
 mc.plot_distribution()
 ```
 
-### 13.3 칼만 필터 헤지 비율
+### 14.3 Frozen 헤지 비율 (OLS)
 
 ```python
-from pykalman import KalmanFilter
+import numpy as np
 
-def kalman_hedge_ratio(price1, price2):
-    """칼만 필터를 이용한 동적 헤지 비율 추정"""
+def ols_hedge_ratio(price1, price2):
+    """OLS를 이용한 고정 헤지 비율 추정 (formation 기간에 1회 계산)"""
+    log_p1 = np.log(price1.values)
+    log_p2 = np.log(price2.values)
     
-    obs_mat = np.vstack([price2, np.ones(len(price2))]).T[:, np.newaxis, :]
+    # Simple OLS: log_p1 = gamma * log_p2 + mu + epsilon
+    A = np.column_stack([log_p2, np.ones(len(log_p2))])
+    result = np.linalg.lstsq(A, log_p1, rcond=None)
+    hedge_ratio, intercept = result[0]
     
-    kf = KalmanFilter(
-        n_dim_obs=1,
-        n_dim_state=2,
-        initial_state_mean=np.array([0, 0]),
-        initial_state_covariance=np.eye(2),
-        transition_matrices=np.eye(2),
-        observation_matrices=obs_mat,
-        observation_covariance=1,
-        transition_covariance=0.001 * np.eye(2)
-    )
-    
-    state_means, _ = kf.filter(price1.values)
-    
-    hedge_ratios = state_means[:, 0]
-    intercepts = state_means[:, 1]
-    
-    return hedge_ratios, intercepts
+    return hedge_ratio, intercept
 ```
 
-### 13.4 다중 타임프레임 전략
+### 14.4 다중 타임프레임 전략
 
 ```python
 class MultiTimeframeStrategy(StatefulStrategy):
@@ -1400,7 +1684,7 @@ class MultiTimeframeStrategy(StatefulStrategy):
         return self.generate_signal(z_score, trend=daily_trend)
 ```
 
-### 13.5 포트폴리오 레벨 리스크 관리
+### 14.5 포트폴리오 레벨 리스크 관리
 
 ```python
 class PortfolioRiskManager:
@@ -1439,9 +1723,9 @@ class PortfolioRiskManager:
 
 ---
 
-## 14. 트러블슈팅
+## 15. 트러블슈팅
 
-### 14.1 일반적인 오류
+### 15.1 일반적인 오류
 
 #### API 연결 오류
 ```python
@@ -1484,7 +1768,7 @@ def process_in_chunks(data, chunk_size=10000):
         yield process_chunk(chunk)
 ```
 
-### 14.2 성능 최적화
+### 15.2 성능 최적화
 
 ```python
 # 1. Numba 캐시 활용
@@ -1502,7 +1786,7 @@ df['result'] = df.apply(calculate, axis=1)
 df = pd.read_csv('data.csv', usecols=['Open', 'High', 'Low', 'Close'])
 ```
 
-### 14.3 디버깅 팁
+### 15.3 디버깅 팁
 
 ```python
 import logging
@@ -1524,9 +1808,9 @@ logging.getLogger('BacktestRunner').setLevel(logging.INFO)
 
 ---
 
-## 15. API 레퍼런스
+## 16. API 레퍼런스
 
-### 15.1 주요 클래스
+### 16.1 주요 클래스
 
 ```python
 # Core
@@ -1611,7 +1895,7 @@ from quantbox.utils.numba_ops import (
 )
 ```
 
-### 15.2 설정 옵션 전체 목록
+### 16.2 설정 옵션 전체 목록
 
 ```python
 @dataclass
@@ -1625,7 +1909,7 @@ class StrategyConfig:
     entry_zscore: float = 2.0              # 진입 Z-Score
     exit_zscore: float = 0.0               # 청산 Z-Score
     stop_loss_zscore: float = 3.5          # 손절 Z-Score
-    max_holding_periods: int = 100         # 최대 보유 기간
+    max_holding_periods: int = 80          # 최대 보유 기간 (20h @ 15m)
     formation_periods: int = 240           # 형성 기간
     trading_periods: int = 24              # 거래 기간
 
@@ -1633,9 +1917,12 @@ class StrategyConfig:
 class RiskConfig:
     max_position_size: float = 0.1         # 최대 포지션 비율
     max_drawdown: float = 0.2              # 최대 낙폭
-    leverage: int = 1                       # 레버리지
+    leverage: int = 2                       # Fallback 레버리지 (동적 미사용 시)
+    target_r_pct: float = 0.02             # 트레이드당 목표 리스크 (밸런스의 2%)
+    max_leverage: int = 125                # 동적 레버리지 안전 상한 (바이난스 절대 상한)
     trading_fee: float = 0.0005            # 거래 수수료
     slippage: float = 0.001                # 슬리피지
+    funding_rate_8h: float = 0.0001        # 8시간 펀딩비
     stop_loss_pct: float = 0.05            # 손절 비율
     take_profit_pct: float = 0.10          # 익절 비율
 
@@ -1718,6 +2005,7 @@ $$
 - [ ] Walk-Forward 검증
 - [ ] 파라미터 최적화
 - [ ] Paper Trading 테스트
+- [ ] Discord Bot 설정 (선택사항)
 
 ---
 
@@ -1727,4 +2015,4 @@ $$
 
 ---
 
-*이 문서는 QuantBox 1.0.0 기준으로 작성되었습니다.*
+*이 문서는 QuantBox 1.1.0 기준으로 작성되었습니다.*

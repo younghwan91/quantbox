@@ -4,16 +4,18 @@
 /saved_plots/*
 temp
 *.log
+logs/
 *.json
 # Python cache
 __pycache__/
 *.pyc
 .venv/
-
+/reports
 
 # Secrets & Environment
 .env
 .env.*
+!.env.example
 *.env
 .secrets
 *.pem
@@ -22,3 +24,6 @@ __pycache__/
 # API Keys
 config.local.json
 secrets.json
+trading_code.egg-info/
+# Dev diary (local only)
+devlog/

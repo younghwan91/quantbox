@@ -1,16 +1,15 @@
 """
-Backtesting module - Simulation and performance analysis
+Backtesting module - Vectorized backtester for Rubber Band strategy.
 """
 
-from quantbox.backtest.runner import BacktestRunner
-from quantbox.backtest.metrics import PerformanceMetrics, calculate_metrics
-from quantbox.backtest.analyzer import BacktestAnalyzer
-from quantbox.backtest.walk_forward import WalkForwardAnalysis
+from quantbox.backtest.vectorized_backtest import (
+    BacktestConfig,
+    BacktestResult,
+    VectorizedBacktest,
+)
 
 __all__ = [
-    "BacktestRunner",
-    "PerformanceMetrics",
-    "calculate_metrics",
-    "BacktestAnalyzer",
-    "WalkForwardAnalysis",
+    "BacktestConfig",
+    "BacktestResult",
+    "VectorizedBacktest",
 ]
