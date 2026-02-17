@@ -7,14 +7,15 @@
 
 ## 1. 시스템 개요
 
-QuantBox v7.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
+QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
+**v8.0: Dynamic Target (Confluence-Gated)** — 컨피던스 ≥3일 때 타겟 40%→45/50/55% 스케일링. DD 불변(4.3%), Calmar +9.3%.
 **v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
 
 | 구성 요소 | 역할 |
 |-----------|------|
 | **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산 |
-| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 4.5%+ 급등/급락 포착) + MTF 확인 + 독립 4H 트레이딩 |
+| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 4.5%+ 급등/급락 포착) + Dynamic Target (v8.0) + MTF 확인 + 독립 4H 트레이딩 |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -26,7 +27,7 @@ QuantBox v7.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0)
+전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Dynamic Target v8.0)
 심볼선택: Top-10 curated (FETUSDT, FILUSDT, ICPUSDT, HBARUSDT, DOTUSDT,
                         OPUSDT, SHIBUSDT, DOGEUSDT, LTCUSDT, ATOMUSDT)
 파라미터: lookback=8, threshold=0.045, target=0.4, stop=0.9, max_hold=10
@@ -37,6 +38,9 @@ QuantBox v7.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
          btc_directional_period=32 (8h BTC momentum for sympathy)
          base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
          partial_exit_enabled=false
+         # v8.0 Dynamic Target (Confluence-Gated)
+         dynamic_target_enabled=true
+         target_conf3=0.45, target_conf4=0.50, target_conf5=0.55
          # v7.0 MTF Confirmation
          mtf_confirmation_enabled=true
          mtf_sma_period=12 (4h SMA, 2일)
@@ -173,6 +177,8 @@ else:
 > **핵심 발견 (v6.0)**: Confidence-Scored Entry가 v5.0 대비 Calmar 8.76 (vs 8.03). min_confidence=2로 34개 저품질 트레이드 필터링 → 동일 DD(16.9%)에서 Sharpe 2.05, WR 63.3%. 모멘텀 전략 5종 테스트 결과 15m 크립토에서 모멘텀은 비효과적임을 확인. 졸업 레버리지(base=1.0, step=1.0, max=2.0) 적용 시 Calmar 9.99까지 상승 가능하나 DD 22.4%로 상승. 보수적 flat 1.5x가 라이브 트레이딩 기본값.
 
 > **핵심 발견 (v7.0)**: MTF Confirmation(4h SMA12)이 v6.0 대비 MDD 16.5% → 4.3% (-74%), Calmar 32.42 (+275%), Sharpe 5.23 (+153%). 수익률은 -2.2% 소폭 감소하나 위험조정 수익 극적 개선. Walk-forward Q3 DD 16.5% → 3.0% (-82%). 독립 4H 트레이딩 단독으로 Ret +52.2%, DD 4.8%, Calmar 10.87. 15m+4h 하이브리드가 최적 구성.
+
+> **핵심 발견 (v8.0)**: Dynamic Target — 컨피던스 ≥3일 때 타겟을 40%→45/50/55%로 확대하여 비대칭 R:R 확보. DD 불변(4.3%), Calmar +9.3% (27.71→30.29), Sharpe 안정. 10000% 대회 우승자의 "확실할 때 파도를 타라" 원칙 적용. **A/B 테스트 후 기각된 전략**: RSI Divergence, Volatility Squeeze, Reversal Confirmation — 15m 크립토에서 데이터가 지지하지 않음. 이 3가지를 재테스트하지 말 것.
 
 ### 2.5 비용 모델
 
@@ -387,7 +393,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (30+파일, 385개)
+## 7. 테스트 현황 (30+파일, 395개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
@@ -404,6 +410,7 @@ else:
 | `test_config` | Config | 생성, 검증, 직렬화 |
 | `test_cache` | 캐시 | Memory LRU, Disk, 만료, Timeframed |
 | `test_state_persistence` | 상태 영속화 | 직렬화, 원자적 쓰기, 라운드트립 |
+| `test_dynamic_target` | Dynamic Target (v8.0) | 컨피던스별 타겟 스케일링, 파라미터 검증, 기각된 전략 확인 (10개) |
 | `test_partial_exit` | 부분 청산 + R:R 레버리지 | Partial exit 신호, Break-even stop, R:R-gate, delta-based 비용, 라이브 패리티 (23개) |
 
 ---
