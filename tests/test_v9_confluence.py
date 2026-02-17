@@ -222,7 +222,7 @@ class TestV9ConfigDefaults:
     def test_stoch_defaults(self):
         cfg = RubberBandConfig()
         assert cfg.stoch_enabled is True
-        assert cfg.stoch_k_period == 5
+        assert cfg.stoch_k_period == 3  # v10.0: faster stochastic
         assert cfg.stoch_d_period == 3
 
 
