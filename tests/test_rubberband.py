@@ -293,9 +293,9 @@ class TestRubberBandConfig:
         assert cfg.regime_filter_enabled is False
 
     def test_stop_decay_default(self):
-        """stop_decay defaults to 0.3 (production setting)."""
+        """stop_decay defaults to 0.0 (disabled for long-term robustness)."""
         cfg = RubberBandConfig()
-        assert cfg.stop_decay == 0.3
+        assert cfg.stop_decay == 0.0
 
 
 # ══════════════════ 6. Time-Decaying Stop Tests ══════════════════
@@ -492,10 +492,10 @@ class TestMTFConfirmation:
         assert unique.issubset({-1.0, 0.0, 1.0})
 
     def test_mtf_config_defaults(self):
-        """Config should have MTF production defaults."""
+        """Config should have MTF disabled by default (hurts long-term perf)."""
         cfg = RubberBandConfig()
-        assert cfg.htf_period == 64       # 16h SMA
-        assert cfg.htf_block_threshold == 0.01  # 1% block
+        assert cfg.htf_period == 0         # DISABLED
+        assert cfg.htf_block_threshold == 0.01  # 1% block (unused when disabled)
 
     def test_on_bar_uses_mtf(self, btc_close):
         """on_bar should use MTF when htf_period > 0."""
