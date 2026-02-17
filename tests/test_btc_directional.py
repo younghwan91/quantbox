@@ -114,7 +114,10 @@ class TestBtcDirectionalNumba:
 
     def test_no_btc_data_returns_flat(self):
         """When btc_close is too short, on_bar returns 0."""
-        cfg = RubberBandConfig(btc_directional_enabled=True, btc_directional_period=32)
+        cfg = RubberBandConfig(
+            entry_mode='btc_directional',
+            btc_directional_enabled=True, btc_directional_period=32,
+        )
         strategy = RubberBandStrategy(cfg)
         close = _make_crash(100, 50, 0.06)
         btc_short = np.ones(10)  # Too short
@@ -127,7 +130,10 @@ class TestOnBarRouting:
 
     def test_enabled_uses_btc_directional(self):
         """When enabled + btc data available, uses BTC directional."""
-        cfg = RubberBandConfig(btc_directional_enabled=True, btc_directional_period=32)
+        cfg = RubberBandConfig(
+            entry_mode='btc_directional',
+            btc_directional_enabled=True, btc_directional_period=32,
+        )
         strategy = RubberBandStrategy(cfg)
         close = _make_crash(100, 50, 0.06)
         btc_falling = _make_btc(100, 50, -0.02)
@@ -141,7 +147,7 @@ class TestOnBarRouting:
 
     def test_disabled_ignores_btc_direction(self):
         """When disabled, falls back to plain compute_signals."""
-        cfg = RubberBandConfig(btc_directional_enabled=False)
+        cfg = RubberBandConfig(entry_mode='raw', btc_directional_enabled=False)
         strategy = RubberBandStrategy(cfg)
         close = _make_crash(100, 50, 0.06)
         btc_rising = _make_btc(100, 50, +0.02)
@@ -151,7 +157,7 @@ class TestOnBarRouting:
 
     def test_no_btc_data_falls_through(self):
         """When btc_close is None, uses plain compute_signals."""
-        cfg = RubberBandConfig(btc_directional_enabled=True)
+        cfg = RubberBandConfig(entry_mode='btc_directional', btc_directional_enabled=True)
         strategy = RubberBandStrategy(cfg)
         close = _make_crash(100, 50, 0.06)
 
@@ -162,8 +168,12 @@ class TestOnBarRouting:
 class TestConfigDefaults:
     """Test config defaults and settings propagation."""
 
-    def test_default_enabled(self):
+    def test_default_regime_switch(self):
+        """Default entry_mode is regime_switch (v5.0)."""
         cfg = RubberBandConfig()
+        assert cfg.entry_mode == 'regime_switch'
+        assert cfg.btc_regime_period == 96
+        assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_enabled is True
         assert cfg.btc_directional_period == 32
 

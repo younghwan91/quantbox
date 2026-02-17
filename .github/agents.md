@@ -7,8 +7,9 @@
 
 ## 1. 시스템 개요
 
-QuantBox v4.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
+QuantBox v5.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
+**v5.0: Regime-Switch Dual Entry** — BTC 레짐에 따라 다른 진입 알고리즘을 사용한다.
 
 | 구성 요소 | 역할 |
 |-----------|------|
@@ -25,22 +26,28 @@ QuantBox v4.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (러버밴드, MTF 비활성화)
-심볼선택: EW All-30 (균등 가중, 365일 검증)
+전략:     RB_original (러버밴드, Regime-Switch Dual Entry v5.0)
+심볼선택: Top-10 curated (FETUSDT, FILUSDT, ICPUSDT, HBARUSDT, DOTUSDT,
+                        OPUSDT, SHIBUSDT, DOGEUSDT, LTCUSDT, ATOMUSDT)
 파라미터: lookback=8, threshold=0.045, target=0.4, stop=0.9, max_hold=10
          stop_decay=0.0, htf_period=0 (MTF DISABLED)
+         entry_mode='regime_switch'
+         btc_regime_period=96 (24h SMA for regime detection)
+         asset_trend_period=192 (48h SMA for classic pullback)
+         btc_directional_period=32 (8h BTC momentum for sympathy)
          base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
-         partial_exit_enabled=false (tighter stop이 DD 충분히 억제)
+         partial_exit_enabled=false
 비용:     0.04%/side + 펀딩비
 
-성과 (365일, 30개 심볼 유니버스, EW All-30):
-  Return:    +18.40%
-  Sharpe:    0.81
-  Max DD:    16.29%
-  Calmar:    1.13
-  Rolling Windows: 9/10 profitable (90%)
-  Neighbor Stability: 62/63 profitable (98%)
-  Robustness Score: 7/7
+성과 (365일, 10개 심볼 유니버스):
+  Return:    +116.8%
+  Sharpe:    1.89
+  Max DD:    17.4%
+  Calmar:    6.70
+  Win Rate:  61.7%
+  R:R:       1.25
+  Trades:    832
+  Rolling Windows: 13/13 profitable (100%)
 ```
 
 ---
@@ -71,17 +78,18 @@ QuantBox v4.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 
 ### 2.1 신호 생성 (RubberBandStrategy.on_bar)
 
-단일 자산의 15m close 배열을 받아 `compute_signals()` (Numba 컴파일)로 신호를 생성한다:
+단일 자산의 15m close 배열과 BTC close를 받아 `compute_signals_regime_switch()` (Numba 컴파일)로 신호를 생성한다:
 
-| 조건 | 값 | 의미 |
-|------|---|------|
-| `lookback` 바 수익률 < `-threshold` | +1 | 급락 → LONG (반등 포착) |
-| `lookback` 바 수익률 > `+threshold` | -1 | 급등 → SHORT (하락 포착) |
-| 그 외 | 0 | 진입 안 함 |
+**Regime-Switch Dual Entry (v5.0):**
 
-- **BTC Directional Alignment (v4.2)**: Long 진입 시 BTC도 하락 중이어야, Short 진입 시 BTC도 상승 중이어야 진입 허용 (시장 전체 움직임과 상관된 되돌림만 포착)
-- **Partial Exit (v4.3, v4.4에서 비활성화)**: `compute_signals_partial_exit_btc_directional()` — stop=0.9에서 오히려 성능 저하 (Calmar 3.75 vs 4.96). Tighter stop이 DD를 충분히 억제.
-- BTC crash gate: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
+| BTC 레짐 | 감지 방법 | 알고리즘 | 진입 조건 |
+|----------|----------|---------|----------|
+| **Risk-On** (BTC > SMA96) | BTC price > SMA(96) | Classic Pullback | 자산 dip + 자산 uptrend (price > SMA192) |
+| **Risk-Off** (BTC < SMA96) | BTC price < SMA(96) | Sympathy Pullback | 자산 dip + BTC 단기 하락 (btc_mom < 0) |
+
+- **Risk-On**: BTC 상승장 → 자산이 자체 상승추세에서 조정 → 매수 (클래식 풀백)
+- **Risk-Off**: BTC 하락장 → BTC와 동반 하락하는 자산 → 매수 (동조 풀백, v4.4과 동일)
+- **BTC crash gate**: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
 - 기존 포지션 보유 심볼은 중복 신호 무시
 
 ### 2.2 청산 조건 (update_position)
@@ -133,7 +141,7 @@ else:
     notional = per_slot_capital × leverage
 ```
 
-> **핵심 발견 (v4.4)**: stop=0.9, target=0.4로 최적화 시 실현 R:R=1.10, DD 12.7%. Flat 1.5x에서 Calmar 4.98 ★ (레버리지가 리스크 대비 수익 개선). 2x부터 DD 급증, 5x BLOWUP.
+> **핵심 발견 (v5.0)**: Regime-Switch Dual Entry가 단일 BTC directional 대비 Calmar 6.70 (vs 4.98). 두 레짐에서 각각 최적의 알고리즘을 사용하여 832 trades, WR 61.7%, R:R 1.25로 안정적 수익. 레버리지는 flat 1.5x가 최적 (2.5x에서 Calmar 6.94지만 리스크 상승).
 
 ### 2.5 비용 모델
 
@@ -162,7 +170,7 @@ else:
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage` | 기본 평균회귀 신호 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 (Numba 컴파일) |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage` | 기본 평균회귀 신호 + BTC 레짐 스위치 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 (Numba 컴파일) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
@@ -277,8 +285,11 @@ else:
 | `base_leverage` | 1.5 | `RubberBandConfig` | flat 1.5x 레버리지 |
 | `leverage_scale` | 0.0 | `RubberBandConfig` | 컨피던스 스케일링 비활성화 |
 | `max_leverage` | 1.5 | `RubberBandConfig` | 레버리지 안전 상한 |
-| `btc_directional_enabled` | True | `RubberBandConfig` | BTC 방향 정렬 필터 활성화 |
+| `btc_directional_enabled` | True | `RubberBandConfig` | BTC 방향 정렬 필터 활성화 (Risk-Off에서 사용) |
 | `btc_directional_period` | 32 (8h) | `RubberBandConfig` | BTC 모멘텀 lookback (봉 수) |
+| `entry_mode` | 'regime_switch' | `RubberBandConfig` | 진입 모드: regime_switch / btc_directional / raw |
+| `btc_regime_period` | 96 (24h) | `RubberBandConfig` | BTC SMA period for regime detection |
+| `asset_trend_period` | 192 (48h) | `RubberBandConfig` | Asset SMA period for classic pullback |
 | `partial_exit_enabled` | False | `RubberBandConfig` | 부분 청산 비활성화 (v4.4) |
 | `partial_exit_fraction` | 0.5 (50%) | `RubberBandConfig` | 부분 청산 비율 |
 | `rr_leverage_enabled` | True | `RubberBandConfig` | R:R-Gated 레버리지 활성화 |
@@ -325,7 +336,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (30+파일, 338개)
+## 7. 테스트 현황 (30+파일, 352개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|

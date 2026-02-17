@@ -284,7 +284,12 @@ RB_BASE_LEVERAGE=1.5              # 전 트레이드 1.5x 고정 (최적 sweet s
 RB_LEVERAGE_SCALE=0.0             # 컨피던스 스케일링 비활성화 (고정 레버리지)
 RB_MAX_LEVERAGE=1.5               # base와 동일 (안전 상한)
 
-# BTC Directional Alignment (v4.2, 365일 A/B 검증)
+# Regime-Switch Dual Entry (v5.0, 365일 A/B 검증)
+RB_ENTRY_MODE=regime_switch        # 진입 모드: regime_switch | btc_directional | raw
+RB_BTC_REGIME_PERIOD=96            # BTC SMA period for regime detection (96봉 = 24시간)
+RB_ASSET_TREND_PERIOD=192          # Asset SMA period for classic pullback (192봉 = 48시간)
+
+# BTC Directional Alignment (v4.2, Risk-Off 모드에서 사용)
 RB_BTC_DIRECTIONAL_ENABLED=true   # BTC 방향 정렬: Long→BTC하락, Short→BTC상승 시만 진입
 RB_BTC_DIRECTIONAL_PERIOD=32      # BTC 모멘텀 lookback (32봉 = 8시간)
 
