@@ -49,6 +49,9 @@ from quantbox.core.limit_chaser import (
     ChaseConfig, ChaseFillStatus, ChaseResult, LimitOrderChaser,
 )
 from quantbox.core.settings import get_settings
+from quantbox.notifications.bot import (
+    BotCommand, CommandType, DiscordBotRunner,
+)
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.rubberband import (
     RubberBandConfig, RubberBandStrategy, calculate_position_size,
@@ -160,6 +163,14 @@ class RubberBandScalper:
         # Notifications
         self.discord = DiscordNotifier(webhook_url=settings.discord_webhook_url)
 
+        # Discord Bot (interactive commands)
+        self._bot_runner: DiscordBotRunner | None = None
+        if settings.discord_bot_token and settings.discord_channel_id:
+            self._bot_runner = DiscordBotRunner(
+                token=settings.discord_bot_token,
+                channel_id=settings.discord_channel_id,
+            )
+
         # Paper trading state
         self._paper_balance = settings.paper_balance
 
@@ -176,8 +187,9 @@ class RubberBandScalper:
         self._trade_history: list[dict] = []
         self._cycle_count: int = 0
 
-        # Stop flag (for testing)
+        # Control flags
         self._stop_requested: bool = False
+        self._paused: bool = False
 
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"RubberBandScalper initialized ({mode_str})")
@@ -539,15 +551,94 @@ class RubberBandScalper:
             ))
             return None
 
-    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
-        """Cancel the server-side stop-loss when closing a position normally.
+    def _place_server_take_profit(
+        self, symbol: str, signal: int, quantity: float,
+        entry_price: float, move_size: float, target_retrace: float,
+    ) -> str | None:
+        """Place a server-side take-profit order on Binance.
 
-        Must be called BEFORE placing the close order to avoid the stop
-        triggering while we're trying to close.
+        This captures intra-bar TP moves that would otherwise be missed
+        by the 15m polling cycle. Combined with the server stop-loss,
+        this creates an OCO-like bracket around the position.
+
+        v11.2: Reduces fat tail exposure by executing TP at exact target
+        without waiting for bar close.
 
         Args:
             symbol: Trading symbol.
-            order_id: The stop-loss order ID to cancel.
+            signal: +1 (long) or -1 (short).
+            quantity: Position quantity.
+            entry_price: Fill price.
+            move_size: Magnitude of the triggering move.
+            target_retrace: Fraction of move to target (e.g. 0.382).
+
+        Returns:
+            Order ID string, or None on failure.
+        """
+        if self.paper_mode:
+            return f"paper_tp_{int(time.time() * 1000)}"
+
+        # TP price: entry ± (move_size * target_retrace)
+        target_distance = move_size * target_retrace
+        buffer = 0.002  # 0.2% inside target to ensure fill
+
+        if signal == 1:  # Long: TP above entry
+            stop_price = entry_price * (1.0 + target_distance)
+            limit_price = stop_price * (1.0 - buffer)  # Sell limit slightly below trigger
+            close_side = 'SELL'
+        else:  # Short: TP below entry
+            stop_price = entry_price * (1.0 - target_distance)
+            limit_price = stop_price * (1.0 + buffer)  # Buy limit slightly above trigger
+            close_side = 'BUY'
+
+        info = self.get_symbol_info(symbol)
+        tick_size = info.get('tick_size', 0.01)
+        price_precision = info.get('price_precision', 2)
+
+        # Round prices to tick size
+        stop_price = round(
+            round(stop_price / tick_size) * tick_size, price_precision
+        )
+        limit_price = round(
+            round(limit_price / tick_size) * tick_size, price_precision
+        )
+
+        try:
+            order = self.client.futures_create_order(
+                symbol=symbol,
+                side=close_side,
+                type='TAKE_PROFIT',
+                timeInForce='GTC',
+                quantity=quantity,
+                price=str(limit_price),
+                stopPrice=str(stop_price),
+                reduceOnly=True,
+            )
+            order_id = str(order['orderId'])
+            logger.info(
+                f"[{symbol}] SERVER TAKE-PROFIT placed: "
+                f"{close_side} {quantity:.6f} @ trigger=${stop_price:.4f} "
+                f"limit=${limit_price:.4f} (orderId={order_id})"
+            )
+            return order_id
+        except Exception as e:
+            logger.error(
+                f"[{symbol}] SERVER TAKE-PROFIT FAILED: {e}. "
+                f"Will rely on client-side TP check."
+            )
+            return None
+
+    def _cancel_server_order(self, symbol: str, order_id: str,
+                             label: str = 'order') -> None:
+        """Cancel a server-side order (stop-loss or take-profit).
+
+        Must be called BEFORE placing a close order to avoid the server
+        order triggering while we're trying to close.
+
+        Args:
+            symbol: Trading symbol.
+            order_id: The order ID to cancel.
+            label: Description for logging (e.g. 'stop-loss', 'take-profit').
         """
         if self.paper_mode or not order_id or order_id.startswith('paper_'):
             return
@@ -556,17 +647,157 @@ class RubberBandScalper:
             self.client.futures_cancel_order(
                 symbol=symbol, orderId=int(order_id),
             )
-            logger.debug(f"[{symbol}] Server stop-loss cancelled: {order_id}")
+            logger.debug(f"[{symbol}] Server {label} cancelled: {order_id}")
         except BinanceAPIException as e:
             if 'Unknown order' in str(e) or '-2011' in str(e):
                 # Already cancelled or filled — OK
                 logger.debug(
-                    f"[{symbol}] Server stop-loss already gone: {order_id}"
+                    f"[{symbol}] Server {label} already gone: {order_id}"
                 )
             else:
                 logger.warning(
-                    f"[{symbol}] Failed to cancel server stop-loss: {e}"
+                    f"[{symbol}] Failed to cancel server {label}: {e}"
                 )
+
+    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
+        """Cancel the server-side stop-loss."""
+        self._cancel_server_order(symbol, order_id, 'stop-loss')
+
+    def _cancel_server_take_profit(self, symbol: str, order_id: str) -> None:
+        """Cancel the server-side take-profit."""
+        self._cancel_server_order(symbol, order_id, 'take-profit')
+
+    def _check_order_filled(self, symbol: str, order_id: str) -> dict | None:
+        """Check if a server-side order has been filled.
+
+        Returns the order info dict if FILLED, None otherwise.
+        """
+        if self.paper_mode or not order_id or order_id.startswith('paper_'):
+            return None
+
+        try:
+            order = self.client.futures_get_order(
+                symbol=symbol, orderId=int(order_id),
+            )
+            if order.get('status') == 'FILLED':
+                return order
+        except Exception as e:
+            logger.debug(f"[{symbol}] Order status check failed: {e}")
+        return None
+
+    def _sync_server_orders(self) -> None:
+        """Check if any server-side TP/SL orders filled between cycles.
+
+        v11.2: Reconciles internal state with exchange reality.
+        Called at the start of each cycle before processing positions.
+        If a server TP/SL fired intra-bar, we record the trade and cancel
+        the counterpart order.
+        """
+        if self.paper_mode:
+            return
+
+        for sym in list(self.strategy.active_positions):
+            pos = self.strategy._positions.get(sym)
+            if not pos:
+                continue
+
+            # Check TP order first (the happy path)
+            tp_oid = pos.get('server_tp_order_id')
+            if tp_oid:
+                filled = self._check_order_filled(sym, tp_oid)
+                if filled:
+                    fill_price = float(filled['avgPrice'])
+                    fill_qty = float(filled['executedQty'])
+                    # Cancel the counterpart SL
+                    sl_oid = pos.get('server_sl_order_id')
+                    if sl_oid:
+                        self._cancel_server_stop_loss(sym, sl_oid)
+                    self._record_server_fill(
+                        sym, fill_price, fill_qty, 'server_tp',
+                    )
+                    continue
+
+            # Check SL order
+            sl_oid = pos.get('server_sl_order_id')
+            if sl_oid:
+                filled = self._check_order_filled(sym, sl_oid)
+                if filled:
+                    fill_price = float(filled['avgPrice'])
+                    fill_qty = float(filled['executedQty'])
+                    # Cancel the counterpart TP
+                    if tp_oid:
+                        self._cancel_server_take_profit(sym, tp_oid)
+                    self._record_server_fill(
+                        sym, fill_price, fill_qty, 'server_sl',
+                    )
+
+    def _record_server_fill(
+        self, symbol: str, fill_price: float, fill_qty: float, reason: str,
+    ) -> None:
+        """Record a trade closed by a server-side order (TP or SL).
+
+        Removes the position from internal tracking and logs the PnL.
+        """
+        pos = self.strategy.close_position(symbol)
+        if not pos:
+            return
+
+        # PnL calculation
+        if pos['signal'] == 1:
+            pnl_pct = (fill_price - pos['entry_price']) / pos['entry_price']
+        else:
+            pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
+
+        notional = fill_qty * fill_price
+        pnl_usd = pnl_pct * notional
+        cost = notional * self.config.round_trip_cost
+        net_pnl = pnl_usd - cost
+
+        trade = {
+            'symbol': symbol,
+            'signal': pos['signal'],
+            'entry_price': pos['entry_price'],
+            'exit_price': fill_price,
+            'pnl_pct': pnl_pct * 100,
+            'pnl_usd': net_pnl,
+            'notional': notional,
+            'bars_held': pos['bars_held'],
+            'reason': reason,
+            'time': datetime.now(timezone.utc).isoformat(),
+        }
+        self._trade_history.append(trade)
+
+        emoji = '🎯' if reason == 'server_tp' else '🛑'
+        logger.info(
+            f"[{symbol}] {emoji} {reason.upper()} FILLED: "
+            f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
+            f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+            f"held={pos['bars_held']} bars"
+        )
+        cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        n_trades = len(self._trade_history)
+        wins_total = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+        wr = wins_total / n_trades * 100 if n_trades > 0 else 0
+        hold_time = pos['bars_held'] * 15
+
+        self.discord.send(embed={
+            'title': f"{emoji} {symbol} {reason.upper().replace('_', ' ')} FILLED",
+            'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
+            'description': (
+                'Server-side TP hit intra-bar!' if reason == 'server_tp'
+                else 'Server-side SL triggered (safety net).'
+            ),
+            'fields': [
+                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
+                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': 'Hold Time', 'value': f'{hold_time}m ({pos["bars_held"]} bars)', 'inline': True},
+                {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades}T, {wr:.0f}%WR)', 'inline': False},
+            ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+        })
 
     # ==================== Position Management ====================
 
@@ -691,6 +922,17 @@ class RubberBandScalper:
             stop_mult=eff_stop,
         )
 
+        # ═══ v11.2: Place server-side take-profit ═══
+        # Captures intra-bar TP hits that 15m polling would miss.
+        tp_order_id = self._place_server_take_profit(
+            symbol=symbol,
+            signal=signal,
+            quantity=fill_qty,
+            entry_price=fill_price,
+            move_size=move_size,
+            target_retrace=cfg.target_retrace,
+        )
+
         # Record in strategy
         self.strategy.open_position(
             symbol=symbol,
@@ -701,6 +943,7 @@ class RubberBandScalper:
             move_size=move_size,
             entry_stop_mult=eff_stop,
             server_sl_order_id=sl_order_id,
+            server_tp_order_id=tp_order_id,
         )
 
         # Paper balance adjustment
@@ -715,17 +958,34 @@ class RubberBandScalper:
             f"lev={lev_int}x, move={move_size*100:.2f}%)"
         )
 
+        # Compute TP/SL prices for notification
+        tp_distance = move_size * cfg.target_retrace
+        sl_distance = move_size * eff_stop
+        if signal == 1:
+            tp_price = fill_price * (1.0 + tp_distance)
+            sl_price = fill_price * (1.0 - sl_distance)
+        else:
+            tp_price = fill_price * (1.0 - tp_distance)
+            sl_price = fill_price * (1.0 + sl_distance)
+
+        balance_after = self.get_balance()
+        n_active = self.strategy.n_active
         self.discord.send(embed={
             'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} "
                      f"{'LONG' if signal == 1 else 'SHORT'}",
             'color': 0x00C853 if signal == 1 else 0xFF1744,
             'fields': [
-                {'name': 'Price', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': 'Entry', 'value': f'${fill_price:.4f}', 'inline': True},
                 {'name': 'Size', 'value': f'${fill_qty * fill_price:.2f}',
                  'inline': True},
                 {'name': 'Leverage', 'value': f'{lev_int}x', 'inline': True},
                 {'name': 'Move', 'value': f'{move_size*100:.2f}%', 'inline': True},
+                {'name': 'TP', 'value': f'${tp_price:.4f}', 'inline': True},
+                {'name': 'SL', 'value': f'${sl_price:.4f}', 'inline': True},
+                {'name': 'Slots', 'value': f'{n_active}/{cfg.max_concurrent}', 'inline': True},
+                {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
         return True
 
@@ -748,6 +1008,11 @@ class RubberBandScalper:
         sl_oid = pos.get('server_sl_order_id')
         if sl_oid:
             self._cancel_server_stop_loss(symbol, sl_oid)
+
+        # v11.2: Cancel old server TP (quantity will change)
+        tp_oid = pos.get('server_tp_order_id')
+        if tp_oid:
+            self._cancel_server_take_profit(symbol, tp_oid)
 
         fraction = self.config.partial_exit_fraction
         full_quantity = pos['notional'] / pos['entry_price']
@@ -795,6 +1060,17 @@ class RubberBandScalper:
             )
             pos['server_sl_order_id'] = new_sl_oid
 
+            # v11.2: Place new TP for remaining half at same target
+            new_tp_oid = self._place_server_take_profit(
+                symbol=symbol,
+                signal=pos['signal'],
+                quantity=remaining_qty,
+                entry_price=pos['entry_price'],
+                move_size=pos['move_size'],
+                target_retrace=self.config.target_retrace,
+            )
+            pos['server_tp_order_id'] = new_tp_oid
+
         # Paper mode
         if self.paper_mode:
             self._paper_balance += pnl_usd - cost
@@ -823,13 +1099,18 @@ class RubberBandScalper:
         self.discord.send(embed={
             'title': f"🔒 {symbol} PARTIAL CLOSE ({fraction*100:.0f}%)",
             'color': 0xFFC107,
+            'description': 'Capital secured. Remaining rides with break-even stop.',
             'fields': [
+                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
                 {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Remaining', 'value': f'${pos["notional"]:.2f}',
-                 'inline': True},
+                {'name': 'Locked $', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': 'Remaining', 'value': f'${pos["notional"]:.2f}', 'inline': True},
                 {'name': 'Stop', 'value': 'Break-even', 'inline': True},
+                {'name': 'Bars Held', 'value': str(pos['bars_held']), 'inline': True},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
         return True
 
@@ -854,13 +1135,18 @@ class RubberBandScalper:
         if sl_oid:
             self._cancel_server_stop_loss(symbol, sl_oid)
 
+        # v11.2: Cancel server-side take-profit BEFORE closing
+        tp_oid = pos.get('server_tp_order_id')
+        if tp_oid:
+            self._cancel_server_take_profit(symbol, tp_oid)
+
         # Reverse the entry side
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
         result = self._place_order(symbol, side, quantity)
         if result is None:
-            # Failed to close — re-add position for retry (SL already cancelled,
-            # so we need to re-place it)
+            # Failed to close — re-add position for retry (SL/TP already
+            # cancelled, so we need to re-place them)
             new_sl_oid = self._place_server_stop_loss(
                 symbol=symbol,
                 signal=pos['signal'],
@@ -868,6 +1154,14 @@ class RubberBandScalper:
                 entry_price=pos['entry_price'],
                 move_size=pos['move_size'],
                 stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
+            )
+            new_tp_oid = self._place_server_take_profit(
+                symbol=symbol,
+                signal=pos['signal'],
+                quantity=quantity,
+                entry_price=pos['entry_price'],
+                move_size=pos['move_size'],
+                target_retrace=self.config.target_retrace,
             )
             self.strategy.open_position(
                 symbol=symbol,
@@ -878,6 +1172,7 @@ class RubberBandScalper:
                 move_size=pos['move_size'],
                 entry_stop_mult=pos.get('entry_stop_mult'),
                 server_sl_order_id=new_sl_oid,
+                server_tp_order_id=new_tp_oid,
             )
             return False
 
@@ -921,17 +1216,29 @@ class RubberBandScalper:
             f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
             f"held={pos['bars_held']} bars"
         )
+        # Session stats for notification
+        cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        n_trades = len(self._trade_history)
+        wins_total = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+        wr = wins_total / n_trades * 100 if n_trades > 0 else 0
+        balance_after = self.get_balance()
+        hold_time = pos['bars_held'] * 15  # minutes
+
         self.discord.send(embed={
-            'title': f"{emoji} {symbol} CLOSED ({reason})",
+            'title': f"{emoji} {symbol} CLOSED — {reason.upper().replace('_', ' ')}",
             'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
             'fields': [
+                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
                 {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
                 {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Bars', 'value': str(pos['bars_held']), 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}',
-                 'inline': True},
+                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
                 {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': 'Hold Time', 'value': f'{hold_time}m ({pos["bars_held"]} bars)', 'inline': True},
+                {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades} trades)', 'inline': True},
+                {'name': 'Win Rate', 'value': f'{wr:.0f}%', 'inline': True},
+                {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
         return True
 
@@ -940,13 +1247,19 @@ class RubberBandScalper:
     def _cycle(self, symbols: list[str]) -> None:
         """Process one 15m bar across all symbols.
 
-        1. Get BTC klines for regime filter
-        2. Manage existing positions
-        3. Check for new entries
-        4. Save state
+        1. Process bot commands (pause/stop/close)
+        2. Get BTC klines for regime filter
+        3. Manage existing positions
+        4. Check for new entries (skip if paused)
+        5. Save state
         """
         self._cycle_count += 1
         balance = self.get_balance()
+
+        # 0. Process interactive bot commands
+        self._process_bot_commands()
+        if self._stop_requested:
+            return
 
         logger.info(
             f"── Cycle #{self._cycle_count} | "
@@ -974,7 +1287,10 @@ class RubberBandScalper:
         if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
             btc_close_4h = self.download_klines('BTCUSDT', 100, interval='4h')
 
-        # 4. Process existing positions
+        # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
+        self._sync_server_orders()
+
+        # 4. Process existing positions (always, even when paused)
         for sym in list(self.strategy.active_positions):
             close = self.download_klines(sym, 200)
             if close is None:
@@ -984,13 +1300,14 @@ class RubberBandScalper:
             exit_reason = self.strategy.update_position(sym, current_price)
             if exit_reason:
                 if exit_reason == 'partial_close':
-                    # v4.3: partial close 50%, keep remaining with BE stop
                     self._partial_close_position(sym, current_price)
                 else:
                     self._close_position(sym, exit_reason, current_price)
 
-        # 5. Look for new entries (skip if risk blocked)
-        if not risk_blocked:
+        # 5. Look for new entries (skip if risk blocked or paused)
+        if self._paused:
+            logger.info("⏸️ Paused — skipping new entries")
+        elif not risk_blocked:
             available_slots = (
                 self.config.max_concurrent - self.strategy.n_active
             )
@@ -1093,6 +1410,223 @@ class RubberBandScalper:
                 f"best_pnl={pos['best_pnl']*100:.2f}%"
             )
 
+    # ==================== Discord Bot Commands ====================
+
+    def _process_bot_commands(self) -> None:
+        """Poll the bot command queue and handle all pending commands.
+
+        Called at the start of each cycle. Non-blocking.
+        """
+        if self._bot_runner is None:
+            return
+
+        for cmd in self._bot_runner.get_all_commands():
+            try:
+                result = self._handle_command(cmd)
+                cmd.set_response(result)
+            except Exception as e:
+                logger.error(f"Bot command error: {e}")
+                cmd.set_response(f"❌ Internal error: {e}")
+
+    def _handle_command(self, cmd: BotCommand) -> str:
+        """Dispatch a BotCommand to the appropriate handler.
+
+        Args:
+            cmd: The parsed bot command.
+
+        Returns:
+            Response text to send back to Discord.
+        """
+        handlers = {
+            CommandType.STATUS: lambda: self._cmd_status(),
+            CommandType.CLOSE_ALL: lambda: self._cmd_close_all(),
+            CommandType.CLOSE_SLOT: lambda: self._cmd_close_slot(
+                cmd.args.get('slot_id', -1) if cmd.args else -1,
+            ),
+            CommandType.PAUSE: lambda: self._cmd_pause(),
+            CommandType.RESUME: lambda: self._cmd_resume(),
+            CommandType.STOP: lambda: self._cmd_stop(),
+            CommandType.PNL: lambda: self._cmd_pnl(),
+            CommandType.BLACKLIST: lambda: self._cmd_blacklist(cmd.args),
+        }
+        handler = handlers.get(cmd.command)
+        if handler is None:
+            return "❓ Unknown command"
+        return handler()
+
+    def _cmd_status(self) -> str:
+        """!status — Show balance, positions, and active state."""
+        balance = self.get_balance()
+        positions = self.strategy.active_positions
+        n_trades = len(self._trade_history)
+        total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+
+        status = "⏸️ PAUSED" if self._paused else "▶️ ACTIVE"
+        if self._drawdown_halt:
+            status = "🛑 DD HALT"
+
+        lines = [
+            f"```",
+            f"📊 QuantBox Status — {status}",
+            f"{'─' * 40}",
+            f"Balance:    ${balance:,.2f}",
+            f"Session PnL: ${total_pnl:+,.2f} ({n_trades} trades)",
+            f"Positions:  {len(positions)}/{self.config.max_concurrent}",
+            f"Cycle:      #{self._cycle_count}",
+            f"{'─' * 40}",
+        ]
+
+        if positions:
+            for sym, pos in positions.items():
+                direction = "L" if pos['signal'] == 1 else "S"
+                bars = pos.get('bars_held', 0)
+                best = pos.get('best_pnl', 0) * 100
+                notional = pos.get('notional', 0)
+                lines.append(
+                    f"  {direction} {sym}: "
+                    f"${pos['entry_price']:.4f} | "
+                    f"${notional:.0f} | "
+                    f"{bars}bars | best={best:+.1f}%"
+                )
+        else:
+            lines.append("  No open positions")
+
+        lines.append("```")
+        return '\n'.join(lines)
+
+    def _cmd_close_all(self) -> str:
+        """!close all — Close all open positions."""
+        positions = list(self.strategy.active_positions.keys())
+        if not positions:
+            return "📭 No positions to close"
+
+        closed = 0
+        for sym in positions:
+            price_arr = self.download_klines(sym, 2)
+            price = price_arr[-1] if price_arr is not None else 0
+            if self._close_position(sym, 'bot_close_all', price):
+                closed += 1
+
+        self._save_state()
+        return f"✅ Closed {closed}/{len(positions)} positions"
+
+    def _cmd_close_slot(self, slot_id: int) -> str:
+        """!close <N> — Close the Nth active position (0-indexed).
+
+        Since the scalper uses symbol names instead of fixed slots,
+        positions are numbered in order of their dict keys.
+
+        Args:
+            slot_id: 0-based index of the position to close.
+        """
+        positions = list(self.strategy.active_positions.items())
+        if not positions:
+            return "📭 No positions to close"
+
+        if slot_id < 0 or slot_id >= len(positions):
+            symbols = [f"{i}: {s}" for i, (s, _) in enumerate(positions)]
+            return (
+                f"❌ Invalid index {slot_id}. "
+                f"Active positions:\n" + '\n'.join(symbols)
+            )
+
+        sym, pos = positions[slot_id]
+        price_arr = self.download_klines(sym, 2)
+        price = price_arr[-1] if price_arr is not None else 0
+        if self._close_position(sym, 'bot_close', price):
+            self._save_state()
+            return f"✅ Closed position {slot_id}: {sym}"
+        return f"❌ Failed to close {sym}"
+
+    def _cmd_pause(self) -> str:
+        """!pause — Stop new entries, keep monitoring existing."""
+        if self._paused:
+            return "⏸️ Already paused"
+        self._paused = True
+        logger.info("Bot command: PAUSED (no new entries)")
+        return "⏸️ New entries paused. Existing positions still monitored."
+
+    def _cmd_resume(self) -> str:
+        """!resume — Resume normal operation."""
+        if not self._paused:
+            return "▶️ Already active"
+        self._paused = False
+        logger.info("Bot command: RESUMED")
+        return "▶️ Trading resumed"
+
+    def _cmd_stop(self) -> str:
+        """!stop — Close all positions and shut down."""
+        self._stop_requested = True
+        # Close all positions first
+        positions = list(self.strategy.active_positions.keys())
+        closed = 0
+        for sym in positions:
+            price_arr = self.download_klines(sym, 2)
+            price = price_arr[-1] if price_arr is not None else 0
+            if self._close_position(sym, 'bot_stop', price):
+                closed += 1
+        self._save_state()
+        logger.info(f"Bot command: STOP (closed {closed} positions)")
+        return (
+            f"🛑 Stopping... Closed {closed} positions. "
+            f"Scalper will exit after this cycle."
+        )
+
+    def _cmd_pnl(self) -> str:
+        """!pnl — Session PnL summary."""
+        trades = self._trade_history
+        if not trades:
+            return "📭 No trades this session"
+
+        total_pnl = sum(t['pnl_usd'] for t in trades)
+        wins = [t for t in trades if t['pnl_usd'] > 0]
+        losses = [t for t in trades if t['pnl_usd'] <= 0]
+        wr = len(wins) / len(trades) * 100 if trades else 0
+        avg_win = (sum(t['pnl_usd'] for t in wins) / len(wins)) if wins else 0
+        avg_loss = (
+            sum(t['pnl_usd'] for t in losses) / len(losses)
+        ) if losses else 0
+        best = max(trades, key=lambda t: t['pnl_usd'])
+        worst = min(trades, key=lambda t: t['pnl_usd'])
+
+        balance = self.get_balance()
+        session_return = (
+            (balance - self._initial_balance) / self._initial_balance * 100
+            if self._initial_balance > 0 else 0
+        )
+
+        return (
+            f"```\n"
+            f"📈 Session PnL Summary\n"
+            f"{'─' * 36}\n"
+            f"Total PnL:    ${total_pnl:+,.2f}\n"
+            f"Session ROI:  {session_return:+.2f}%\n"
+            f"Trades:       {len(trades)} "
+            f"(W:{len(wins)} / L:{len(losses)})\n"
+            f"Win Rate:     {wr:.1f}%\n"
+            f"Avg Win:      ${avg_win:+,.2f}\n"
+            f"Avg Loss:     ${avg_loss:+,.2f}\n"
+            f"Best Trade:   {best['symbol']} ${best['pnl_usd']:+,.2f}\n"
+            f"Worst Trade:  {worst['symbol']} ${worst['pnl_usd']:+,.2f}\n"
+            f"Balance:      ${balance:,.2f}\n"
+            f"```"
+        )
+
+    def _cmd_blacklist(self, args: dict | None = None) -> str:
+        """!blacklist — View or clear the exclude list.
+
+        Args:
+            args: Optional dict with 'action': 'clear' to reset.
+        """
+        if args and args.get('action') == 'clear':
+            self.config.exclude_symbols.clear()
+            return "✅ Blacklist cleared"
+
+        excludes = self.config.exclude_symbols
+        if not excludes:
+            return "📭 Blacklist is empty"
+        return f"🚫 Blacklist ({len(excludes)}): " + ', '.join(sorted(excludes))
+
     # ==================== State Persistence ====================
 
     def _save_state(self) -> None:
@@ -1142,6 +1676,8 @@ class RubberBandScalper:
                 leverage=pos.get('leverage', 1),
                 move_size=pos.get('move_size', 0.03),
                 entry_stop_mult=pos.get('entry_stop_mult'),
+                server_sl_order_id=pos.get('server_sl_order_id'),
+                server_tp_order_id=pos.get('server_tp_order_id'),
             )
             # Restore bars_held
             if sym in self.strategy._positions:
@@ -1150,6 +1686,9 @@ class RubberBandScalper:
                 )
                 self.strategy._positions[sym]['best_pnl'] = pos.get(
                     'best_pnl', 0.0
+                )
+                self.strategy._positions[sym]['partial_closed'] = pos.get(
+                    'partial_closed', False
                 )
 
         logger.info(
@@ -1178,6 +1717,7 @@ class RubberBandScalper:
         """Run the scalper continuously, cycling every 15 minutes.
 
         Waits for bar close, processes all symbols, repeats.
+        Starts/stops the Discord bot for interactive commands.
         """
         # Setup
         balance = self.get_balance()
@@ -1190,15 +1730,37 @@ class RubberBandScalper:
         logger.info(f"Starting continuous trading ({mode_str})")
         logger.info(f"Initial balance: ${balance:.2f}")
 
+        # Start Discord bot for interactive commands
+        if self._bot_runner:
+            self._bot_runner.start()
+            logger.info("Discord Bot started for interactive commands")
+
+        n_symbols = len(self.config.symbol_whitelist) if self.config.symbol_whitelist else 0
         self.discord.send(embed={
-            'title': '🚀 Scalper Started',
+            'title': '🚀 QuantBox Scalper Started',
             'color': 0x2979FF,
+            'description': (
+                f"Rubber Band mean-reversion scalper initialized.\n"
+                f"Use `!help` for interactive commands."
+            ),
             'fields': [
-                {'name': 'Mode', 'value': mode_str, 'inline': True},
-                {'name': 'Balance', 'value': f'${balance:.2f}', 'inline': True},
-                {'name': 'Max Slots',
-                 'value': str(self.config.max_concurrent), 'inline': True},
+                {'name': 'Mode', 'value': f"**{mode_str}**", 'inline': True},
+                {'name': 'Balance', 'value': f'${balance:,.2f}', 'inline': True},
+                {'name': 'Slots', 'value': f'{self.strategy.n_active}/{self.config.max_concurrent}', 'inline': True},
+                {'name': 'Strategy', 'value': (
+                    f"LB={self.config.lookback} | "
+                    f"Thr={self.config.threshold} | "
+                    f"TP={self.config.target_retrace} | "
+                    f"SL={self.config.stop_mult}x"
+                ), 'inline': False},
+                {'name': 'Universe', 'value': f'{n_symbols} symbols', 'inline': True},
+                {'name': 'Max Hold', 'value': f'{self.config.max_hold} bars', 'inline': True},
+                {'name': 'Leverage', 'value': (
+                    f'Base {self.config.base_leverage}x, '
+                    f'MTF {self.config.mtf_leverage_mult}x'
+                ), 'inline': True},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
 
         # Pre-fetch exchange info
@@ -1231,34 +1793,56 @@ class RubberBandScalper:
                 break
             except Exception as e:
                 logger.error(f"Cycle error: {e}", exc_info=True)
-                time.sleep(60)  # Wait before retry
+                self.discord.send(embed={
+                    'title': '🚨 Cycle Error',
+                    'color': 0xFF1744,
+                    'description': str(e)[:500],
+                    'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+                })
+                time.sleep(60)
 
         # Clean shutdown
         logger.info("Shutting down...")
         self._save_state()
 
+        # Stop Discord bot
+        if self._bot_runner:
+            self._bot_runner.stop()
+
         total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        n_trades = len(self._trade_history)
+        wins = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+        wr = wins / n_trades * 100 if n_trades > 0 else 0
+        balance_now = self.get_balance()
+        session_return = (
+            (balance_now - self._initial_balance) / self._initial_balance * 100
+            if self._initial_balance > 0 else 0
+        )
+
+        fields = [
+            {'name': 'Cycles', 'value': str(self._cycle_count), 'inline': True},
+            {'name': 'Trades', 'value': f'{n_trades} (WR {wr:.0f}%)', 'inline': True},
+            {'name': 'Total PnL', 'value': f'${total_pnl:+,.2f}', 'inline': True},
+            {'name': 'Balance', 'value': f'${balance_now:,.2f}', 'inline': True},
+            {'name': 'Session ROI', 'value': f'{session_return:+.2f}%', 'inline': True},
+        ]
+        if self._trade_history:
+            best = max(self._trade_history, key=lambda t: t['pnl_usd'])
+            worst = min(self._trade_history, key=lambda t: t['pnl_usd'])
+            fields.append({'name': 'Best', 'value': f"{best['symbol']} ${best['pnl_usd']:+,.2f}", 'inline': True})
+            fields.append({'name': 'Worst', 'value': f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", 'inline': True})
+
         self.discord.send(embed={
-            'title': '🛑 Scalper Stopped',
-            'color': 0xFF1744,
-            'fields': [
-                {'name': 'Cycles', 'value': str(self._cycle_count),
-                 'inline': True},
-                {'name': 'Trades', 'value': str(len(self._trade_history)),
-                 'inline': True},
-                {'name': 'PnL', 'value': f'${total_pnl:+.2f}',
-                 'inline': True},
-            ],
+            'title': '🛑 QuantBox Scalper Stopped',
+            'color': 0xFF1744 if total_pnl < 0 else 0x00C853,
+            'fields': fields,
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
 
-    def _wait_for_bar(self) -> None:
-        """Sleep until the next 15-minute bar closes (+5s buffer)."""
+    def _next_bar_time(self) -> datetime:
+        """Calculate the next 15-minute bar close time (+5s buffer)."""
         now = datetime.now(timezone.utc)
-        minute = now.minute
-        second = now.second
-
-        # Next 15m boundary
-        next_boundary = ((minute // 15) + 1) * 15
+        next_boundary = ((now.minute // 15) + 1) * 15
         if next_boundary >= 60:
             target = now.replace(
                 minute=0, second=5, microsecond=0
@@ -1267,10 +1851,37 @@ class RubberBandScalper:
             target = now.replace(
                 minute=next_boundary, second=5, microsecond=0
             )
+        return target
 
-        sleep_secs = (target - now).total_seconds()
-        if sleep_secs > 0:
-            logger.debug(f"Waiting {sleep_secs:.0f}s for next bar close")
+    def _wait_for_bar(self) -> None:
+        """Wait for the next 15m bar close, polling every 60s.
+
+        While waiting:
+        - Process bot commands (<1 min latency vs 15 min)
+        - Sync server-side TP/SL order fills
+        - Check for stop requests
+        """
+        target = self._next_bar_time()
+        remaining = (target - datetime.now(timezone.utc)).total_seconds()
+        if remaining > 0:
+            logger.debug(f"Waiting {remaining:.0f}s for next bar close")
+
+        while True:
+            now = datetime.now(timezone.utc)
+            remaining = (target - now).total_seconds()
+            if remaining <= 0:
+                break
+
+            # Process bot commands while waiting
+            self._process_bot_commands()
+            if self._stop_requested:
+                break
+
+            # Sync server-side TP/SL fills between bars
+            self._sync_server_orders()
+
+            # Sleep at most 60s, or until bar close (whichever is sooner)
+            sleep_secs = min(60.0, remaining)
             time.sleep(sleep_secs)
 
 
