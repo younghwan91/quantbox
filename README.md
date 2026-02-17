@@ -69,10 +69,14 @@
 
 ### 전략 프레임워크
 - **Rubber Band Mean-Reversion (v11.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-20 심볼 화이트리스트
-- **Elliott Wave Strategy (v11.4)**: 매옥남 챔피언십 메소드 — ZigZag ABC 패턴 + Fibonacci 비율 검증 + 탐색적/확인 2단계 포지셔닝 + 50% 부분 익절 + 브레이크이븐 스탑
+- **Elliott Wave Strategy (v11.5)**: 매옥남 챔피언십 메소드 — ZigZag ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
   - 4h 타임프레임, EMA(20/50/100/200/500), RSI(14/9), MACD(12/26/9), Stochastic(14/3)
-  - 자본 관리: 2% 탐색적 진입 → 8% 확인 후 추가 → 미실현 이익 피라미딩, 레버리지 20x
+  - **Quality Scoring (v11.5)**: W2 retrace/W3 extension/B retrace/C:A ratio/구조적 규칙 5차원 0-100점 (임계: 40점)
+  - **Risk-Sized Leverage (v11.5)**: `lev = min(2.0, 2%/stop_dist)` — 트레이드당 최대 2% 자기자본 위험으로 일관된 리스크 관리
+  - **Tight Stops at C (v11.5)**: 정정파 C 완료 지점 ±0.5% — 틀리면 즉시 소규모 손절, 맞으면 높은 RR
+  - **adj_close (v11.5)**: 정밀한 백테스트를 위한 인트라바 체결가 보정
   - BTC 매크로 바이어스: 200/500 EMA 기반 롱/숏 필터링
+  - 백테스트 (365일, 20심볼): 12 trades, WR 66.7%, +1.24%, MaxDD 1.55%, Sharpe 0.59, Calmar 0.80
   - Numba 가속 지표: EMA, RSI, MACD, Stochastic, ATR, ZigZag
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
@@ -175,7 +179,7 @@ scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
 ├── download_extended_data.py # 365일 확장 데이터 다운로드
 └── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
-tests/                      # 유닛 테스트 (502개)
+tests/                      # 유닛 테스트 (503개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
