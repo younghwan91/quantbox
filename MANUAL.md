@@ -2,7 +2,7 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 4.3.0  
+> 버전: 4.4.0  
 > 최종 업데이트: 2025년 7월 20일
 
 ---
@@ -86,8 +86,8 @@ python -m quantbox.scalper
 |----------|--------|------|
 | lookback | 8 | 이동 측정 기간 (봉 수, 8×15m = 2시간) |
 | threshold | 0.045 | 최소 진입 이동 폭 (4.5% — 노이즈 필터링) |
-| target_retrace | 0.3 | 이익 실현: 이동 폭의 30% 되돌림 (빠른 청산) |
-| stop_mult | 1.0 | 손절: 이동 폭의 1배 |
+| target_retrace | 0.4 | 이익 실현: 이동 폭의 40% 되돌림 (R:R 1.10) |
+| stop_mult | 0.9 | 손절: 이동 폭의 0.9배 (DD 12.7%) |
 | max_hold | 10 | 최대 보유 기간 (봉 수, 2.5시간) |
 | stop_decay | 0.0 | 시간감쇠 비활성화 (장기 안정성 확보) |
 | htf_period | 0 | MTF SMA 기간 (0=비활성화 — 장기 성능 저하) |
@@ -278,21 +278,21 @@ FORMATION_HOURS=60             # 페어 선별에 사용할 과거 데이터 길
 Z_SCORE_CAP=4.0                # |z| > cap 이면 진입 거부 (레짐 변화 방어)
 VOL_EXPANSION_GATE=2.0         # recent_std / formation_std > gate 이면 진입 거부
 
-# Dynamic Leverage (move-confidence, 365일 A/B 검증)
-RB_DYNAMIC_LEVERAGE_ENABLED=true  # 동적 레버리지 활성화 (move-confidence)
-RB_BASE_LEVERAGE=3.0              # 최소 레버리지 (threshold 수준 움직임)
-RB_LEVERAGE_SCALE=10.0            # 100% 초과 움직임당 레버리지 증가
-RB_MAX_LEVERAGE=7.0               # 최대 레버리지 안전 상한
+# Dynamic Leverage (v4.4: flat 1.5x, 365일 A/B 검증)
+RB_DYNAMIC_LEVERAGE_ENABLED=true  # 레버리지 파이프라인 활성화
+RB_BASE_LEVERAGE=1.5              # 전 트레이드 1.5x 고정 (최적 sweet spot)
+RB_LEVERAGE_SCALE=0.0             # 컨피던스 스케일링 비활성화 (고정 레버리지)
+RB_MAX_LEVERAGE=1.5               # base와 동일 (안전 상한)
 
 # BTC Directional Alignment (v4.2, 365일 A/B 검증)
 RB_BTC_DIRECTIONAL_ENABLED=true   # BTC 방향 정렬: Long→BTC하락, Short→BTC상승 시만 진입
 RB_BTC_DIRECTIONAL_PERIOD=32      # BTC 모멘텀 lookback (32봉 = 8시간)
 
-# Capital Preservation (v4.3, 365일 A/B 검증)
-RB_PARTIAL_EXIT_ENABLED=true      # 50% 부분 청산: 수익 발생 즉시 절반 청산
+# Capital Preservation (v4.4: 부분 청산 비활성화 — tighter stop이 DD 충분히 억제)
+RB_PARTIAL_EXIT_ENABLED=false     # 부분 청산 비활성화 (stop=0.9에서 오히려 손해)
 RB_PARTIAL_EXIT_FRACTION=0.5      # 부분 청산 비율 (0.5 = 50%)
 
-# R:R-Gated Leverage (v4.3, 365일 A/B 검증)
+# R:R-Gated Leverage (v4.4, 365일 A/B 검증)
 RB_RR_LEVERAGE_ENABLED=true       # R:R 기준 레버리지 게이트: 손익비 높을 때만 레버리지
 RB_MIN_RR_FOR_LEVERAGE=0.30       # 레버리지 허용 최소 R:R 비율
 

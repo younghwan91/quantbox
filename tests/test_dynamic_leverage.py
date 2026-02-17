@@ -90,12 +90,12 @@ class TestComputeConfidenceLeverage:
         assert lev == pytest.approx(expected)
 
     def test_conservative_defaults(self):
-        """Default config produces base=3, scale=10, max=7."""
+        """Default config produces v4.4 flat leverage: base=1.5, scale=0, max=1.5."""
         cfg = RubberBandConfig()
         assert cfg.dynamic_leverage_enabled is True
-        assert cfg.base_leverage == 3.0
-        assert cfg.leverage_scale == 10.0
-        assert cfg.max_leverage == 7.0
+        assert cfg.base_leverage == 1.5
+        assert cfg.leverage_scale == 0.0
+        assert cfg.max_leverage == 1.5
 
 
 class TestApplyConfidenceLeverage:

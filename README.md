@@ -8,15 +8,15 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v4.3 — Capital Preservation Framework)
+### 🔥 Rubber Band Scalper (v4.4 — Optimized R:R + Flat Leverage)
 - **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **Capital Preservation (NEW)**: 수익 즉시 50% 부분 청산 + 손익분기 스톱 → 하방 리스크 제거
-  - 남은 절반은 손익분기 스톱으로 보호: 최악의 경우 0% 손실
-  - 레버리지를 전략적 자산으로 전환: 하방 리스크 없이 상방만 추구
-  - 365일 검증: DD 75%→15%, Calmar 0.84→3.72, 10/10 롤링 90일 수익
-- **R:R-Gated Leverage (NEW)**: "손익비가 높아야 레버리지를 쓴다"
-  - R:R ≥ 0.30일 때만 레버리지 허용, 그 외 1x (무레버리지)
-  - 365일 검증: DD 75%→15%, Calmar 0.84→4.47, Sharpe 0.97→1.73
+- **Optimized Stop/Target (v4.4)**: stop=0.9x, target=40% → 실현 R:R 1.10, DD 12.7%
+  - 타이트한 스톱(0.9x)이 DD를 15.4%→12.7%로 자연 억제
+  - 넓은 타겟(40%)이 더 많은 리버전 수익 포착
+  - Partial exit 비활성화: 타이트 스톱에서 오히려 성능 저하 (Calmar 3.75 vs 4.96)
+- **Flat 1.5x Leverage (v4.4)**: R:R 1.10으로 레버리지 정당화
+  - 1.5x에서 Calmar 최대 (4.98 ★), 2x부터 DD 급증
+  - R:R ≥ 0.30 안전 게이트 유지 (현재 R:R=0.44, 항상 통과)
 - **BTC Directional Alignment**: BTC 방향 정렬 필터 — 시장 전체가 같은 방향일 때만 진입
   - 개별 종목의 특이적 움직임(비복귀 가능) 대비 시장 전체 움직임(복귀 가능)을 구분
 - **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (R:R 게이트와 연동)
@@ -138,16 +138,17 @@ scripts/                    # 연구/분석 스크립트
 tests/                      # 유닛 테스트 (338개)
 \`\`\`
 
-## 📈 성과 지표 (v4.3: Capital Preservation, 365일 검증)
+## 📈 성과 지표 (v4.4: Optimized R:R + Flat 1.5x Leverage, 365일 검증)
 
-| 지표 | v4.2 Baseline | Partial Exit | R:R-Gated Lev | Combined (v4.3) |
-|------|--------------|-------------|---------------|-----------------|
-| Portfolio Return (Top-10) | +63.3% | +317.1% | +65.8% | +56.9% |
-| Max Drawdown | **75.4%** | 74.7% | **14.7%** | **15.3%** |
-| Calmar Ratio | 0.84 | 4.24 | **4.47** | 3.72 |
-| Sharpe Ratio | 0.97 | 1.42 | **1.73** | 1.64 |
-| Win Rate | 52.9% | 57.2% | 62.5% | **65.4%** |
-| Rolling 90-day | 5/10 | 6/10 | **10/10** | **10/10** |
+| 지표 | v4.2 Baseline | v4.3 (Partial) | v4.4 1x | v4.4 1.5x ★ |
+|------|--------------|----------------|---------|-------------|
+| Portfolio Return (Top-10) | +58.1% | +50.4% | +62.9% | **+95.0%** |
+| Max Drawdown | 15.4% | 15.9% | **12.7%** | 19.1% |
+| Calmar Ratio | 3.78 | 3.17 | 4.96 | **4.98** |
+| Sharpe Ratio | 1.63 | 1.54 | **1.67** | 1.61 |
+| Win Rate | 61.6% | 65.0% | 59.3% | 59.2% |
+| R:R (Realized) | 0.99 | 0.90 | **1.10** | **1.10** |
+| Rolling 90-day | 12/13 | 11/13 | **12/13** | **12/13** |
 
 ## 🧪 테스트
 
