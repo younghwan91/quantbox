@@ -355,11 +355,12 @@ def test_live_mtf_blocks_counter_trend():
 # ── Test 7: btc_directional_period matches backtest ──
 
 def test_btc_directional_period_default_matches_backtest():
-    """btc_directional_period must be 0 to match v10 A/B test validation.
+    """btc_directional_period must be 48 (v11.0 Maeoknam A/B winner).
 
-    With period=0, btc_mom=close[i]/close[i]-1=0 always → Risk-Off
-    entries never fire. The v10 winning params were validated this way.
+    With period=48, BTC momentum over 12h enables Risk-Off entries
+    (sympathy pullback). A/B tested: Calmar 5.14 → 19.65 (+282%).
+    Robust across all periods (16-96).
     """
     cfg = RubberBandConfig()
-    assert cfg.btc_directional_period == 0, \
-        f"btc_directional_period={cfg.btc_directional_period}, should be 0 (backtest parity)"
+    assert cfg.btc_directional_period == 48, \
+        f"btc_directional_period={cfg.btc_directional_period}, should be 48 (v11.0)"
