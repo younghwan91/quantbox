@@ -377,9 +377,9 @@ class TestConfigIntegration:
     """Verify new config fields work correctly."""
 
     def test_default_config_values(self):
-        """Default config has v4.3 features enabled."""
+        """Default config has v4.4 settings: partial exit disabled, R:R gate enabled."""
         cfg = RubberBandConfig()
-        assert cfg.partial_exit_enabled is True
+        assert cfg.partial_exit_enabled is False
         assert cfg.partial_exit_fraction == 0.5
         assert cfg.rr_leverage_enabled is True
         assert cfg.min_rr_for_leverage == 0.30
