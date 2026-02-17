@@ -55,6 +55,10 @@ class ElliottConfig:
     # ── ZigZag swing detection ──
     zigzag_threshold: float = 0.03       # 3% min swing on 4h
     zigzag_threshold_15m: float = 0.015  # 1.5% on 15m (divergence check)
+    # Multi-scale zigzag for fractal structure (winning_strategy §1)
+    zigzag_thresholds: tuple[float, ...] = (0.03, 0.05, 0.07)
+    # How many bars back a pattern's C can be and still be actionable
+    pattern_lookback_bars: int = 5
 
     # ── EMA periods (winning_strategy §2.1) ──
     ema_periods: tuple[int, ...] = (20, 50, 100, 200, 500)
@@ -80,8 +84,9 @@ class ElliottConfig:
     # Wave 2 retraces Wave 1: doc says 0.5, 0.618, 0.764
     w2_retrace_min: float = 0.382
     w2_retrace_max: float = 0.886
-    # Wave 3 extends Wave 1: doc says 1.618, 2.618
-    w3_extension_min: float = 1.272
+    # Wave 3 extends Wave 1: doc says 1.618, 2.618 (targets)
+    # Hard rule: W3 cannot be shortest of 1,3,5. Min 1.0 = W3 ≥ W1.
+    w3_extension_min: float = 1.0
     w3_extension_max: float = 4.236
     # Wave 4 retraces Wave 3: doc says 0.236, 0.382
     w4_retrace_min: float = 0.146
@@ -92,10 +97,12 @@ class ElliottConfig:
     fib_b_retrace_min: float = 0.382
     fib_b_retrace_max: float = 0.786
     # Wave C extends Wave A: doc says 1.0, 1.618
-    fib_c_vs_a_min: float = 0.786
-    fib_c_vs_a_max: float = 2.000
-    # C termination near 0.618 Fib of entire impulse: distance tolerance
-    fib_c_impulse_tolerance: float = 0.20
+    fib_c_vs_a_min: float = 0.618
+    fib_c_vs_a_max: float = 2.618
+    # C termination near key Fib levels (0.382, 0.5, 0.618, 0.786)
+    # Tolerance = max distance from NEAREST Fib level, as fraction of impulse
+    fib_c_impulse_tolerance: float = 0.15
+    fib_c_levels: tuple[float, ...] = (0.382, 0.500, 0.618, 0.786)
 
     # ── Capital management (winning_strategy §4) ──
     max_margin_pct: float = 0.10     # 10% max of total capital
@@ -127,8 +134,9 @@ class ElliottConfig:
     # ── Risk limits ──
     max_concurrent: int = 3
 
-    # ── Divergence lookback (bars of 15m for failure swing detection) ──
-    divergence_lookback: int = 30
+    # ── Divergence lookback (bars for failure swing detection) ──
+    # On 4h backtest: 60 bars ≈ 10 days. On 15m live: 30 bars ≈ 7.5h.
+    divergence_lookback: int = 60
 
     # ── Wedge/triangle detection ──
     wedge_min_pivots: int = 6    # Minimum alternating pivots for wedge
@@ -765,10 +773,17 @@ def _validate_bullish_impulse_abc(
     if not (config.fib_c_vs_a_min <= c_vs_a <= config.fib_c_vs_a_max):
         return None
 
-    # C near 0.618 Fib of ENTIRE impulse (W0 to W5)
+    # C near a key Fibonacci level of ENTIRE impulse (W0 to W5)
+    # Check proximity to multiple Fib levels; take the closest one
     total_impulse = W5 - W0
-    fib_618 = W5 - 0.618 * total_impulse
-    c_fib_dist = abs(C - fib_618) / total_impulse if total_impulse > 0 else 1.0
+    if total_impulse <= 0:
+        return None
+    c_fib_dist = 1.0
+    for fib_level in config.fib_c_levels:
+        fib_price = W5 - fib_level * total_impulse
+        dist = abs(C - fib_price) / total_impulse
+        if dist < c_fib_dist:
+            c_fib_dist = dist
     if c_fib_dist > config.fib_c_impulse_tolerance:
         return None
 
@@ -871,10 +886,16 @@ def _validate_bearish_impulse_abc(
     if not (config.fib_c_vs_a_min <= c_vs_a <= config.fib_c_vs_a_max):
         return None
 
-    # C near 0.618 Fib of entire impulse
+    # C near a key Fibonacci level of entire impulse
     total_impulse = W0 - W5
-    fib_618 = W5 + 0.618 * total_impulse
-    c_fib_dist = abs(C - fib_618) / total_impulse if total_impulse > 0 else 1.0
+    if total_impulse <= 0:
+        return None
+    c_fib_dist = 1.0
+    for fib_level in config.fib_c_levels:
+        fib_price = W5 + fib_level * total_impulse
+        dist = abs(C - fib_price) / total_impulse
+        if dist < c_fib_dist:
+            c_fib_dist = dist
     if c_fib_dist > config.fib_c_impulse_tolerance:
         return None
 
@@ -903,6 +924,56 @@ def _validate_bearish_impulse_abc(
 
 # Keep backward compatibility alias
 detect_abc_patterns = detect_impulse_abc_patterns
+
+
+def scan_multi_scale_patterns(
+    high: np.ndarray,
+    low: np.ndarray,
+    config: ElliottConfig,
+    thresholds: tuple[float, ...] | None = None,
+) -> list[dict]:
+    """Scan for impulse+ABC patterns at multiple zigzag scales.
+
+    Winning_strategy §1: "Fractal Structure Verification — operate on the
+    premise that all market movements consist of repetitive sequences
+    (fractals). Adopt a 'Top-Down' approach."
+
+    Different zigzag thresholds capture patterns at different degrees
+    of trend (micro, minor, intermediate, major).
+
+    Args:
+        high: High price array.
+        low: Low price array.
+        config: Strategy configuration.
+        thresholds: Zigzag thresholds to scan. Defaults to config.zigzag_thresholds.
+
+    Returns:
+        Deduplicated list of pattern dicts (by c_idx proximity).
+    """
+    if thresholds is None:
+        thresholds = config.zigzag_thresholds
+
+    all_patterns: list[dict] = []
+    seen_c_indices: list[int] = []
+
+    for thresh in thresholds:
+        pidx, pprice, ptype, n_piv = zigzag_pivots(high, low, thresh)
+        if n_piv < 9:
+            continue
+        patterns = detect_impulse_abc_patterns(pidx, pprice, ptype, n_piv, config)
+        for p in patterns:
+            c_idx = p['c_idx']
+            # Deduplicate: skip if we already have a pattern within 3 bars
+            is_dup = False
+            for seen in seen_c_indices:
+                if abs(c_idx - seen) <= 3:
+                    is_dup = True
+                    break
+            if not is_dup:
+                all_patterns.append(p)
+                seen_c_indices.append(c_idx)
+
+    return all_patterns
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1153,9 +1224,9 @@ class ElliottStrategy:
 
         Execution flow (winning_strategy §5):
           1. Check macro bias (BTC vs 200/500 EMA) — directional filter
-          2. ZigZag on 4h → detect ABC corrective wave completion
-          3. Fibonacci validation (B retrace, C extension, C near 0.618 Fib)
-          4. Triangle filter (skip if contracting triangle detected)
+          2. Get 4h data for wave detection
+          3. Multi-scale ZigZag → 5-wave impulse + ABC detection
+          4. Macro bias alignment check
           5. Exploratory entry signal ±1
 
         Divergence confirmation happens post-entry in update_position()
@@ -1187,39 +1258,27 @@ class ElliottStrategy:
         if len(close_4h) < 100:
             return 0
 
-        # 3. ZigZag on 4h data
-        pidx, pprice, ptype, n_piv = zigzag_pivots(
-            high_4h, low_4h, cfg.zigzag_threshold,
-        )
-        if n_piv < 9:
-            return 0
-
-        # 4. Triangle filter (winning_strategy §3.2)
-        if detect_triangle(pprice, ptype, n_piv):
-            logger.debug(f"[{symbol}] Triangle detected — skipping entry")
-            return 0
-
-        # 5. Detect ABC patterns with Fibonacci validation
-        patterns = detect_abc_patterns(pidx, pprice, ptype, n_piv, cfg)
+        # 3. Multi-scale ZigZag pattern detection (§1 fractal top-down)
+        patterns = scan_multi_scale_patterns(high_4h, low_4h, cfg)
         if not patterns:
             return 0
 
-        # Only consider patterns where C completed recently (last 3 bars of 4h)
+        # Only consider patterns where C completed recently
         n_4h = len(close_4h)
-        recent = [p for p in patterns if p['c_idx'] >= n_4h - 3]
+        recent = [p for p in patterns if p['c_idx'] >= n_4h - cfg.pattern_lookback_bars]
         if not recent:
             return 0
 
         # Pick the most recent pattern
         pattern = recent[-1]
 
-        # 6. Check macro bias alignment
+        # 4. Check macro bias alignment
         if bias == 'long' and pattern['signal'] != 1:
             return 0
         if bias == 'short' and pattern['signal'] != -1:
             return 0
 
-        # 7. Store for position creation
+        # 5. Store for position creation
         self._pending_patterns[symbol] = pattern
         self._mtf_confirmed[symbol] = True
 
@@ -1660,11 +1719,69 @@ def compute_elliott_signals(
     )
 
     lev = cfg.effective_leverage
-
-    # Walk-forward: at each bar, detect patterns on data up to that bar
     min_start = cfg.ema_macro_slow + 50
+    lookback_bars = cfg.pattern_lookback_bars
+
+    # ── Pre-compute: multi-scale pattern detection on full data (O(n)) ──
+    all_patterns = scan_multi_scale_patterns(high_4h, low_4h, cfg)
+    all_patterns.sort(key=lambda p: p['c_idx'])
+
+    # ── Pre-compute: divergence arrays for O(1) lookup ──
+    # Divergence = momentum exhaustion; often forms DURING wave C (before
+    # the zigzag formalises the C pivot).  We precompute for every bar and
+    # then check whether ANY bar in [c_idx - div_margin, bar] had divergence.
+    div_lookback = cfg.divergence_lookback
+    bull_div = np.zeros(n, dtype=np.bool_)
+    bear_div = np.zeros(n, dtype=np.bool_)
+    for i in range(min_start, n):
+        lb = min(div_lookback, i)
+        bull_div[i] = detect_bullish_divergence(
+            close_4h[:i + 1], rsi_4h[:i + 1], lb,
+        )
+        bear_div[i] = detect_bearish_divergence(
+            close_4h[:i + 1], rsi_4h[:i + 1], lb,
+        )
+
+    # Prefix-sum for O(1) range-any query: "any divergence in [a, b]?"
+    bull_cum = np.cumsum(bull_div.astype(np.int32))
+    bear_cum = np.cumsum(bear_div.astype(np.int32))
+
+    def _any_in_range(cum: np.ndarray, lo: int, hi: int) -> bool:
+        """True if any element in cum[lo..hi] is positive."""
+        if hi < lo or lo < 0:
+            return False
+        total = int(cum[hi])
+        if lo > 0:
+            total -= int(cum[lo - 1])
+        return total > 0
+
+    div_margin = 10  # bars before c_idx to search for divergence
+
+    # ── Walk-forward: check each bar for recently completed patterns ──
+    pat_ptr = 0
+    signalled_patterns: set[int] = set()  # c_idx of patterns that already fired
 
     for bar in range(min_start, n):
+        while pat_ptr < len(all_patterns) and all_patterns[pat_ptr]['c_idx'] < bar - lookback_bars:
+            pat_ptr += 1
+
+        recent = []
+        for j in range(pat_ptr, len(all_patterns)):
+            p = all_patterns[j]
+            if p['c_idx'] > bar:
+                break
+            if p['c_idx'] >= bar - lookback_bars:
+                recent.append(p)
+
+        if not recent:
+            continue
+
+        pattern = recent[-1]
+
+        # Skip if this pattern already emitted a signal (one entry per pattern)
+        if pattern['c_idx'] in signalled_patterns:
+            continue
+
         # 1. Macro bias at this bar
         btc_price = float(btc_close_4h[bar])
         above_200 = btc_price > float(btc_ema200[bar])
@@ -1677,63 +1794,37 @@ def compute_elliott_signals(
         else:
             bias = 'neutral'
 
-        # 2. ZigZag on data up to this bar
-        pidx, pprice, ptype, n_piv = zigzag_pivots(
-            high_4h[:bar + 1], low_4h[:bar + 1], cfg.zigzag_threshold,
-        )
-        if n_piv < 9:
-            continue
-
-        # 3. Triangle filter (§3.2)
-        if detect_triangle(pprice, ptype, n_piv):
-            continue
-
-        # 4. 5-wave impulse + ABC detection with Fibonacci validation
-        patterns = detect_impulse_abc_patterns(pidx, pprice, ptype, n_piv, cfg)
-        if not patterns:
-            continue
-
-        # Only consider patterns completing at or near the current bar
-        recent = [p for p in patterns if p['c_idx'] >= bar - 2]
-        if not recent:
-            continue
-
-        pattern = recent[-1]
-
-        # 5. Macro bias filter
+        # 2. Macro bias filter (neutral allows both directions)
         if bias == 'long' and pattern['signal'] != 1:
             continue
         if bias == 'short' and pattern['signal'] != -1:
             continue
 
-        # 6. Confirmation Protocol (§2.2):
-        #    Divergence (REQUIRED) + at least 1 corroboration (MACD or Stoch)
+        # 3. Confirmation Protocol (§2.2):
+        #    Divergence REQUIRED + at least 1 corroboration {MACD, Stoch}
+        #    Check divergence in [c_idx - div_margin, bar] window
         direction = pattern['signal']
-        lookback = min(30, bar)
+        c_idx = pattern['c_idx']
+        div_lo = max(min_start, c_idx - div_margin)
 
-        # Check divergence (mandatory)
         if direction == 1:
-            has_div = detect_bullish_divergence(
-                close_4h[:bar + 1], rsi_4h[:bar + 1], lookback,
-            )
+            has_div = _any_in_range(bull_cum, div_lo, bar)
         else:
-            has_div = detect_bearish_divergence(
-                close_4h[:bar + 1], rsi_4h[:bar + 1], lookback,
-            )
+            has_div = _any_in_range(bear_cum, div_lo, bar)
 
         if not has_div:
-            continue  # Divergence is mandatory
+            continue
 
-        # Check corroboration (at least 1 of MACD or Stoch)
         has_macd = check_macd_reversal(macd_hist_4h[:bar + 1], direction)
         has_stoch = check_stoch_cross(
             stoch_k_4h[:bar + 1], stoch_d_4h[:bar + 1], direction,
         )
 
         if not (has_macd or has_stoch):
-            continue  # Corroboration is mandatory
+            continue
 
-        # 7. Signal with effective leverage
+        # 4. Signal with effective leverage
         signals[bar] = float(direction) * lev
+        signalled_patterns.add(pattern['c_idx'])
 
     return signals
