@@ -11,6 +11,8 @@ from quantbox.strategy.rubberband import (
     compute_signals,
     compute_signals_mtf,
     calculate_position_size,
+    compute_confidence_leverage,
+    apply_confidence_leverage,
 )
 from quantbox.strategy.alpha_engine import (
     AlphaConfig,
@@ -31,6 +33,8 @@ __all__ = [
     "RubberBandStrategy",
     "compute_signals",
     "calculate_position_size",
+    "compute_confidence_leverage",
+    "apply_confidence_leverage",
     # Alpha engine (enhanced + hybrid)
     "AlphaConfig",
     "AlphaStrategy",
