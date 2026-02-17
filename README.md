@@ -8,8 +8,11 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v4.1 — Dynamic Leverage)
+### 🔥 Rubber Band Scalper (v4.2 — BTC Directional Alignment)
 - **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
+- **BTC Directional Alignment (NEW)**: BTC 방향 정렬 필터 — 시장 전체가 같은 방향(`Long→BTC 하락, Short→BTC 상승`)일 때만 진입
+  - 개별 종목의 특이적 움직임(비복귀 가능) 대비 시장 전체 움직임(복귀 가능)을 구분
+  - 365일 검증: Top-10 Calmar 4.04 vs 3.74 baseline (+8%), 100% 롤링 90일 윈도우 수익
 - **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (큰 움직임 = 높은 확신 = 더 높은 레버리지)
   - 보수적 모드: Base=3x, Max=7x (기본값, +132% 365일 검증)
   - 경쟁 모드: Base=5x, Max=15x (Top-10, +20,012% 365일 검증, Sharpe 2.25)
@@ -128,18 +131,18 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (303개)
+tests/                      # 유닛 테스트 (315개)
 \`\`\`
 
-## 📈 성과 지표 (v4.1: Dynamic Leverage, 365일 검증)
+## 📈 성과 지표 (v4.2: BTC Directional + Dynamic Leverage, 365일 검증)
 
-| 지표 | 1x (기준선) | 보수적 (3-7x) | 경쟁모드 (5-15x, Top-10) |
-|------|------------|---------------|------------------------|
-| Portfolio Return | +18.4% | +132% | +20,012% |
-| Max Drawdown | 16.3% | 49.9% | 62.8% |
-| Calmar Ratio | 1.13 | 2.65 | 318.58 |
-| Sharpe Ratio | 0.81 | 1.14 | 2.25 |
-| Rolling Window (90d) | 9/10 수익 | - | 9/10 수익 |
+| 지표 | 1x (기준선) | BTC Dir (1x, Top-10) | 보수적 (3-7x) | 경쟁모드 (5-15x, Top-10) |
+|------|------------|---------------------|---------------|------------------------|
+| Portfolio Return | +17.6% | +63.2% | +132% | +20,012% |
+| Max Drawdown | 16.9% | 15.7% | 49.9% | 62.8% |
+| Calmar Ratio | 1.04 | 4.04 | 2.65 | 318.58 |
+| Sharpe Ratio | 0.76 | 1.62 | 1.14 | 2.25 |
+| Rolling Window (90d) | 9/10 수익 | **10/10 수익** | - | 9/10 수익 |
 
 ## 🧪 테스트
 
