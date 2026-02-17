@@ -100,15 +100,25 @@ QuantBox v4.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 6. 시장가 폴백 후 5회까지 체결 검증 (ACK 응답 대응)
 ```
 
-### 2.4 포지션 사이징 (calculate_position_size)
+### 2.4 포지션 사이징 (calculate_position_size + compute_confidence_leverage)
 
 ```python
 per_slot_capital = balance / max_concurrent   # 균등 배분 (5슬롯)
-stop_distance = move_size × stop_mult         # 손절폭
-risk_amount = per_slot_capital × risk_per_trade  # 1% 리스크
-position_size = risk_amount / stop_distance   # 리스크 역산
-leverage = min(position_size / per_slot_capital, max_leverage)
-notional = per_slot_capital × leverage
+
+# ── Dynamic Leverage (move-confidence, v4.1) ──
+# 기본 리스크 기반 사이징 → 동적 레버리지로 오버라이드
+if dynamic_leverage_enabled:
+    excess = (move_size - threshold) / threshold
+    leverage = base_leverage + leverage_scale * max(excess, 0)
+    leverage = min(leverage, max_leverage)
+    notional = per_slot_capital × leverage
+else:
+    # Fallback: 리스크 역산 방식
+    stop_distance = move_size × stop_mult
+    risk_amount = per_slot_capital × risk_per_trade
+    position_size = risk_amount / stop_distance
+    leverage = min(position_size / per_slot_capital, max_leverage)
+    notional = per_slot_capital × leverage
 ```
 
 ### 2.5 비용 모델
@@ -138,7 +148,7 @@ notional = per_slot_capital × leverage
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals` | 기본 평균회귀 신호 (Numba 컴파일) |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_confidence_leverage`, `apply_confidence_leverage` | 기본 평균회귀 신호 + 동적 레버리지 (Numba 컴파일) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
@@ -237,15 +247,19 @@ notional = per_slot_capital × leverage
 | 파라미터 | 기본값 | 소스 | 용도 |
 |---------|--------|------|------|
 | `lookback` | 8 bars (2h) | `RubberBandConfig` | 급등/급락 측정 기간 |
-| `threshold` | 0.025 (2.5%) | `RubberBandConfig` | 최소 무브 크기 |
-| `target_retrace` | 0.5 (50%) | `RubberBandConfig` | 이익 실현 목표 |
+| `threshold` | 0.045 (4.5%) | `RubberBandConfig` | 최소 무브 크기 |
+| `target_retrace` | 0.3 (30%) | `RubberBandConfig` | 이익 실현 목표 |
 | `stop_mult` | 1.0 | `RubberBandConfig` | 손절 배수 (무브 크기 대비) |
-| `max_hold` | 8 bars (2h) | `RubberBandConfig` | 최대 보유 기간 |
-| `stop_decay` | 0.3 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성, 0.3=30% 감쇠) |
-| `htf_period` | 64 (16h) | `RubberBandConfig` | MTF SMA lookback (0=비활성) |
+| `max_hold` | 10 bars (2.5h) | `RubberBandConfig` | 최대 보유 기간 |
+| `stop_decay` | 0.0 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성) |
+| `htf_period` | 0 (비활성) | `RubberBandConfig` | MTF SMA lookback (0=비활성) |
 | `htf_block_threshold` | 0.01 (1%) | `RubberBandConfig` | HTF 트렌드 차단 임계값 |
 | `htf_agree_discount` | 0.85 | `RubberBandConfig` | HTF 동의 시 threshold 배수 (15% 낮춤) |
 | `htf_agree_stop_mult` | 0.95 | `RubberBandConfig` | HTF 동의 시 stop 배수 (5% 타이트) |
+| `dynamic_leverage_enabled` | True | `RubberBandConfig` | Move-confidence 동적 레버리지 활성화 |
+| `base_leverage` | 3.0 | `RubberBandConfig` | 최소 레버리지 (threshold 수준 움직임) |
+| `leverage_scale` | 10.0 | `RubberBandConfig` | 100% 초과 움직임당 레버리지 증가 |
+| `max_leverage` | 7.0 | `RubberBandConfig` | 레버리지 안전 상한 |
 
 ### 6.2 Alpha Engine 파라미터
 
