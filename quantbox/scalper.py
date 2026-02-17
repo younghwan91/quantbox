@@ -1150,6 +1150,11 @@ def main():
         mtf_confirmation_enabled=settings.rb_mtf_confirmation_enabled,
         mtf_sma_period=settings.rb_mtf_sma_period,
         mtf_leverage_mult=settings.rb_mtf_leverage_mult,
+        # v8.0: Dynamic target (scale target by confidence)
+        dynamic_target_enabled=settings.rb_dynamic_target_enabled,
+        target_conf3=settings.rb_target_conf3,
+        target_conf4=settings.rb_target_conf4,
+        target_conf5=settings.rb_target_conf5,
         # v7.0: Independent 4H rubber band
         htf_independent_enabled=settings.rb_htf_independent_enabled,
         htf_rb_lookback=settings.rb_htf_rb_lookback,

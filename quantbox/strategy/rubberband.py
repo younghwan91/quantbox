@@ -1,5 +1,5 @@
 """
-Rubber Band Scalper Strategy (v6.0 — Confidence-Scored Multi-Evidence)
+Rubber Band Scalper Strategy (v8.0 — Dynamic Target + Confidence-Scored)
 
 Fades extreme short-term moves in crypto futures, profiting from the
 mechanical snap-back after liquidation cascades overshoot.
@@ -8,6 +8,12 @@ Alpha source:
   - After a 4.5%+ move in 2 hours, liquidation cascades overshoot
   - The overshoot gets corrected within ~2.5 hours (10 bars at 15m)
   - This is a market-microstructure edge: stop hunts + forced liquidations
+
+v8.0: Dynamic Target (Confluence-Gated)
+  - Scale target by confidence: conf<=2→40%, conf3→45%, conf4→50%, conf5→55%
+  - "When certain, ride the wave" — winning strategy's asymmetric R:R principle
+  - DD unchanged (4.3%), Calmar +9.3% (27.71→30.29)
+  - Tested & rejected: RSI Divergence, Vol Squeeze, Reversal Confirmation
 
 v6.0: Confidence-Scored Multi-Evidence
   - Same regime-switch entry as v5.0 + multi-evidence confidence scoring
@@ -96,6 +102,16 @@ class RubberBandConfig:
     mtf_confirmation_enabled: bool = True    # Enable 4h trend confirmation
     mtf_sma_period: int = 12                 # 4h SMA period (12 bars = 2 days)
     mtf_leverage_mult: float = 2.0           # Leverage multiplier for confirmed trades (2.0x → 3.0x effective)
+
+    # ── v8.0 Dynamic Target (A/B validated, winning strategy insight) ──
+    # "When certain, ride the wave" — scale target by confidence level.
+    # Higher confidence → wider target → capture more of the snap-back.
+    # DD unchanged (4.3%), Calmar +9.3% (27.71 → 30.29).
+    # Inspired by competition winner: "ride 3rd/5th waves at high conviction."
+    dynamic_target_enabled: bool = True      # Scale target by confidence
+    target_conf3: float = 0.45              # Target at confidence=3 (vs 0.4 default)
+    target_conf4: float = 0.50              # Target at confidence=4
+    target_conf5: float = 0.55              # Target at confidence≥5
 
     # ── v7.0 Independent 4H Rubber Band (A/B validated) ──
     # Trades rubber band signals on 4h timeframe independently.
@@ -647,13 +663,18 @@ def compute_signals_confidence(
     max_leverage: float,
     rsi_period: int,
     vol_period: int,
+    dynamic_target_enabled: bool = False,
+    target_conf3: float = 0.45,
+    target_conf4: float = 0.5,
+    target_conf5: float = 0.55,
 ) -> np.ndarray:
-    """v6.0: Regime-switch MR with confidence scoring + graduated leverage.
+    """v6.0→v8.0: Regime-switch MR with confidence scoring + graduated leverage.
 
     Same regime-switch entry logic as v5.0, enhanced with:
       1. Multi-evidence confidence scoring (RSI, volume, taker ratio, price/SMA)
       2. Minimum confidence filter — reject low-quality entries
       3. Graduated leverage — more evidence → bigger position
+      4. Dynamic target (v8.0) — higher confidence → wider target (ride the wave)
 
     Evidence for LONG entries:
       +1 BTC regime confirmed (always, since regime check passes)
@@ -666,10 +687,13 @@ def compute_signals_confidence(
 
     Leverage = min(base_leverage + confidence_leverage_step * (conf - 1), max_leverage)
 
-    Conservative default (DD ≈ 16.9%): min_conf=2, flat 1.5x (same as v5.0 DD)
-    Moderate (DD ≈ 22%): min_conf=2, base=1.0 step=1.0 max=2.0
-    Calmar at conservative: 8.76 (+9% vs v5.0's 8.03)
-    Calmar at moderate: 9.99 (+24% vs v5.0)
+    v8.0 Dynamic Target (A/B validated, winning strategy insight):
+      When confident, ride the wave — scale target by confidence level:
+        conf ≤ 2: target_retrace (default 0.4)
+        conf = 3: target_conf3 (default 0.45)
+        conf = 4: target_conf4 (default 0.50)
+        conf ≥ 5: target_conf5 (default 0.55)
+      DD=4.3% (unchanged), Calmar +9.3% (27.71 → 30.29)
 
     365-day validated across 500+ configurations.
 
@@ -693,6 +717,10 @@ def compute_signals_confidence(
         max_leverage: Maximum leverage cap.
         rsi_period: RSI calculation period.
         vol_period: Volume SMA period for comparison.
+        dynamic_target_enabled: Scale target by confidence (v8.0).
+        target_conf3: Target retrace for confidence=3 (default 0.45).
+        target_conf4: Target retrace for confidence=4 (default 0.50).
+        target_conf5: Target retrace for confidence≥5 (default 0.55).
 
     Returns:
         Signal array with leverage encoded: e.g., +1.5 = long at 1.5x leverage.
@@ -717,6 +745,7 @@ def compute_signals_confidence(
     hold_count = 0
     best_pnl = 0.0
     lev = base_leverage
+    trade_target_retrace = target_retrace  # per-trade target (may scale by confidence)
     start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period,
                     rsi_period, vol_period)
 
@@ -804,11 +833,23 @@ def compute_signals_confidence(
                     best_pnl = 0.0
                     lev = min(base_leverage + confidence_leverage_step * (confidence - 1),
                               max_leverage)
+                    # v8.0: Scale target by confidence (ride the wave when certain)
+                    if dynamic_target_enabled:
+                        if confidence >= 5:
+                            trade_target_retrace = target_conf5
+                        elif confidence >= 4:
+                            trade_target_retrace = target_conf4
+                        elif confidence >= 3:
+                            trade_target_retrace = target_conf3
+                        else:
+                            trade_target_retrace = target_retrace
+                    else:
+                        trade_target_retrace = target_retrace
                     sig[i] = position * lev
                     continue
 
         else:
-            # ═══ EXIT LOGIC (same as v5.0) ═══
+            # ═══ EXIT LOGIC ═══
             hold_count += 1
             if position == 1:
                 gain = (close[i] - entry_price) / entry_price
@@ -820,7 +861,7 @@ def compute_signals_confidence(
 
             time_factor = 1.0 - stop_decay * (hold_count / max_hold)
             effective_stop = move_size * stop_mult * time_factor
-            target = move_size * target_retrace
+            target = move_size * trade_target_retrace
 
             if gain >= target:
                 position = 0
@@ -1785,6 +1826,10 @@ class RubberBandStrategy:
                 cfg.max_leverage,
                 cfg.rsi_period,
                 cfg.vol_period,
+                cfg.dynamic_target_enabled,
+                cfg.target_conf3,
+                cfg.target_conf4,
+                cfg.target_conf5,
             )
 
             # ═══ v7.0 MTF Confirmation ═══
