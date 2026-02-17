@@ -166,10 +166,7 @@ class RubberBandScalper:
         # Risk tracking
         self._initial_balance: float = 0.0
         self._high_water_mark: float = 0.0
-        self._daily_start_balance: float = 0.0
-        self._daily_start_time: datetime = datetime.now(timezone.utc)
         self._drawdown_halt: bool = False
-        self._daily_halt: bool = False
 
         # Symbol info cache (avoid repeated exchange_info calls)
         self._symbol_info_cache: dict[str, dict] = {}
@@ -208,7 +205,7 @@ class RubberBandScalper:
         return 0.0
 
     def _check_risk_limits(self, balance: float) -> bool:
-        """Check drawdown and daily loss limits.
+        """Check session drawdown limit.
 
         Returns True if trading should be blocked.
         """
@@ -232,27 +229,6 @@ class RubberBandScalper:
                         f"Closing all positions."
                     ))
                     self._drawdown_halt = True
-                return True
-
-        # Daily loss check (reset at UTC midnight)
-        now = datetime.now(timezone.utc)
-        if now.date() > self._daily_start_time.date():
-            self._daily_start_balance = balance
-            self._daily_start_time = now
-            self._daily_halt = False
-
-        if self._daily_start_balance > 0:
-            daily_loss = (
-                (self._daily_start_balance - balance)
-                / self._daily_start_balance
-            )
-            if daily_loss >= self.config.daily_loss_limit_pct:
-                if not self._daily_halt:
-                    logger.warning(
-                        f"DAILY LOSS LIMIT: {daily_loss*100:.1f}% "
-                        f"(start=${self._daily_start_balance:.2f})"
-                    )
-                    self._daily_halt = True
                 return True
 
         return False
@@ -831,7 +807,7 @@ class RubberBandScalper:
                     self._close_position(sym, exit_reason, current_price)
 
         # 5. Look for new entries (skip if risk blocked)
-        if not risk_blocked and not self._daily_halt:
+        if not risk_blocked:
             available_slots = (
                 self.config.max_concurrent - self.strategy.n_active
             )
@@ -945,8 +921,7 @@ class RubberBandScalper:
             'paper_balance': self._paper_balance,
             'initial_balance': self._initial_balance,
             'high_water_mark': self._high_water_mark,
-            'daily_start_balance': self._daily_start_balance,
-            'daily_start_time': self._daily_start_time.isoformat(),
+
             'positions': self.strategy.active_positions,
             'trade_history': self._trade_history[-100:],  # Keep last 100
             'cycle_count': self._cycle_count,
@@ -969,7 +944,7 @@ class RubberBandScalper:
         self._paper_balance = state.get('paper_balance', self._paper_balance)
         self._initial_balance = state.get('initial_balance', 0)
         self._high_water_mark = state.get('high_water_mark', 0)
-        self._daily_start_balance = state.get('daily_start_balance', 0)
+
         self._trade_history = state.get('trade_history', [])
         self._cycle_count = state.get('cycle_count', 0)
 

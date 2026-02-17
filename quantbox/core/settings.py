@@ -184,17 +184,6 @@ class QuantBoxSettings(BaseSettings):
     # ── Direction Diversity (방향 다양화) ──
     max_same_direction_slots: int = 2  # 동일 방향(Long/Short) 최대 슬롯 수
 
-    # ── Asia Session Gate (아시아 세션 진입 제한) ──
-    asia_session_gate_enabled: bool = True    # 아시아 세션(00-08 UTC) 신규 진입 제한
-    asia_session_start_utc: int = 0           # 아시아 세션 시작 (UTC hour)
-    asia_session_end_utc: int = 8             # 아시아 세션 종료 (UTC hour)
-    asia_max_entry_slots: int = 1             # 아시아 세션 중 최대 신규 진입 슬롯 수
-
-    # ── BTC Crash Gate (매크로 방어) ──
-    btc_crash_gate_enabled: bool = True    # BTC 급락 시 진입 차단 활성화
-    btc_crash_window: int = 8              # 최근 N봉 (15분봉 기준 = 2시간)
-    btc_crash_threshold: float = 0.03     # |수익률| > 3% 이면 진입 차단
-
     # ── Alpha Filters (알파 필터) ──
     zscore_velocity_enabled: bool = False      # Z-score 속도 확인: mean 방향 이동 시만 진입
     zscore_velocity_lookback: int = 4          # Z 속도 측정용 lookback bars (15분봉 4개 = 1시간)
@@ -202,9 +191,8 @@ class QuantBoxSettings(BaseSettings):
     spread_autocorr_lookback: int = 40         # 자기상관 측정 lookback bars
     spread_autocorr_max: float = 0.0           # 최대 허용 lag-1 자기상관 (< 0 = 평균회귀)
 
-    # ── 드로다운 & 일일 손실 제한 ──
+    # ── 드로다운 제한 ──
     max_drawdown_pct: float = 0.10         # 세션 최고 잔고 대비 10% 드로다운 시 전체 청산+일시정지
-    daily_loss_limit_pct: float = 0.05     # 당일 시작 잔고 대비 5% 손실 시 진입 중단
 
     # ── 비용 모델 ──
     trading_fee: float = 0.0005
@@ -298,15 +286,6 @@ class QuantBoxSettings(BaseSettings):
             'trailing_stop_trail_z': self.trailing_stop_trail_z,
             # Direction Diversity
             'max_same_direction_slots': self.max_same_direction_slots,
-            # Asia Session Gate
-            'asia_session_gate_enabled': self.asia_session_gate_enabled,
-            'asia_session_start_utc': self.asia_session_start_utc,
-            'asia_session_end_utc': self.asia_session_end_utc,
-            'asia_max_entry_slots': self.asia_max_entry_slots,
-            # BTC Crash Gate
-            'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
-            'btc_crash_window': self.btc_crash_window,
-            'btc_crash_threshold': self.btc_crash_threshold,
             # Regime-Switch Dual Entry (v5.0) + Confidence (v6.0)
             'entry_mode': self.rb_entry_mode,
             'btc_regime_period': self.rb_btc_regime_period,
@@ -349,9 +328,8 @@ class QuantBoxSettings(BaseSettings):
             'spread_autocorr_enabled': self.spread_autocorr_enabled,
             'spread_autocorr_lookback': self.spread_autocorr_lookback,
             'spread_autocorr_max': self.spread_autocorr_max,
-            # Drawdown & Daily Loss
+            # Drawdown Halt
             'max_drawdown_pct': self.max_drawdown_pct,
-            'daily_loss_limit_pct': self.daily_loss_limit_pct,
         }
 
 
