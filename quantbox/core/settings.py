@@ -109,10 +109,16 @@ class QuantBoxSettings(BaseSettings):
     rb_leverage_scale: float = 0.0            # No confidence scaling (flat leverage)
     rb_max_leverage: float = 1.5              # Aligned with base (safety cap)
 
-    # ── Regime-Switch Dual Entry (v5.0, 365-day A/B validated) ──
-    rb_entry_mode: str = 'regime_switch'      # Entry mode: 'regime_switch' | 'btc_directional' | 'raw'
+    # ── Regime-Switch Dual Entry (v5.0) + Confidence Scoring (v6.0) ──
+    rb_entry_mode: str = 'confidence'         # Entry mode: 'confidence' | 'regime_switch' | 'btc_directional' | 'raw'
     rb_btc_regime_period: int = 96            # BTC SMA period for regime detection (96봉 = 24시간)
     rb_asset_trend_period: int = 192          # Asset SMA period for classic pullback (192봉 = 48시간)
+
+    # ── Confidence Scoring (v6.0, 365-day A/B validated) ──
+    rb_min_confidence: int = 2                # 최소 엔트리 증거 점수 (1-5, 2=최적)
+    rb_confidence_leverage_step: float = 0.0  # 컨피던스당 추가 레버리지 (0=고정)
+    rb_rsi_period: int = 14                   # RSI 계산 기간
+    rb_vol_period: int = 20                   # 거래량 SMA 기간 (스파이크 감지)
 
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
@@ -261,10 +267,14 @@ class QuantBoxSettings(BaseSettings):
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,
             'btc_crash_threshold': self.btc_crash_threshold,
-            # Regime-Switch Dual Entry (v5.0)
+            # Regime-Switch Dual Entry (v5.0) + Confidence (v6.0)
             'entry_mode': self.rb_entry_mode,
             'btc_regime_period': self.rb_btc_regime_period,
             'asset_trend_period': self.rb_asset_trend_period,
+            'min_confidence': self.rb_min_confidence,
+            'confidence_leverage_step': self.rb_confidence_leverage_step,
+            'rsi_period': self.rb_rsi_period,
+            'vol_period': self.rb_vol_period,
             # BTC Directional Alignment
             'btc_directional_enabled': self.rb_btc_directional_enabled,
             'btc_directional_period': self.rb_btc_directional_period,
