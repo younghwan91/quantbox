@@ -109,6 +109,11 @@ class QuantBoxSettings(BaseSettings):
     rb_leverage_scale: float = 0.0            # No confidence scaling (flat leverage)
     rb_max_leverage: float = 1.5              # Aligned with base (safety cap)
 
+    # ── Regime-Switch Dual Entry (v5.0, 365-day A/B validated) ──
+    rb_entry_mode: str = 'regime_switch'      # Entry mode: 'regime_switch' | 'btc_directional' | 'raw'
+    rb_btc_regime_period: int = 96            # BTC SMA period for regime detection (96봉 = 24시간)
+    rb_asset_trend_period: int = 192          # Asset SMA period for classic pullback (192봉 = 48시간)
+
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
     rb_btc_directional_period: int = 32       # BTC 모멘텀 lookback (32봉 = 8시간)
@@ -256,6 +261,10 @@ class QuantBoxSettings(BaseSettings):
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,
             'btc_crash_threshold': self.btc_crash_threshold,
+            # Regime-Switch Dual Entry (v5.0)
+            'entry_mode': self.rb_entry_mode,
+            'btc_regime_period': self.rb_btc_regime_period,
+            'asset_trend_period': self.rb_asset_trend_period,
             # BTC Directional Alignment
             'btc_directional_enabled': self.rb_btc_directional_enabled,
             'btc_directional_period': self.rb_btc_directional_period,
