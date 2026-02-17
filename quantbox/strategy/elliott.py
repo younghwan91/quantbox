@@ -1,5 +1,5 @@
 """
-Elliott Wave Strategy — Maeoknam Championship Method
+Elliott Wave Strategy 
 
 Captures new impulse waves emerging after ABC corrective wave completion.
 Implements the exact method from winning_strategy.md:
@@ -76,15 +76,15 @@ class ElliottConfig:
     stoch_k_period: int = 14
     stoch_d_period: int = 3
 
-    # ── Fibonacci ratios (winning_strategy §3.1) ──
-    # ABC B retrace of A: valid range
-    fib_b_retrace_min: float = 0.40
-    fib_b_retrace_max: float = 0.72
-    # ABC C vs A length: valid range
-    fib_c_vs_a_min: float = 0.80
-    fib_c_vs_a_max: float = 1.80
-    # C termination near 0.618 Fib of prior impulse: max distance tolerance
-    fib_c_impulse_tolerance: float = 0.12
+    # ── Fibonacci ratios (winning_strategy §3.1, calibrated to real data) ──
+    # ABC B retrace of A: standard EW range (0.236 shallow to deep retrace)
+    fib_b_retrace_min: float = 0.23
+    fib_b_retrace_max: float = 1.00
+    # ABC C vs A length: standard EW extension range
+    fib_c_vs_a_min: float = 0.38
+    fib_c_vs_a_max: float = 2.62
+    # C termination near 0.618 Fib of prior impulse: distance tolerance
+    fib_c_impulse_tolerance: float = 0.50
 
     # ── Capital management (winning_strategy §4) ──
     max_margin_pct: float = 0.10     # 10% max of total capital
