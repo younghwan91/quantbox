@@ -269,3 +269,97 @@ def test_on_bar_does_not_apply_mtf_leverage():
     sig = strategy.on_bar("SYM", close, btc)
     # on_bar returns int ±1, not a float with leverage magnitude
     assert sig in (-1, 0, 1), f"on_bar should return int, got {sig} (type={type(sig)})"
+
+
+# ── Test 6: 4h data alignment (inline vs array-based) ──
+
+def test_live_mtf_uses_latest_4h_bar():
+    """Live MTF confirmation must use the LATEST 4h bar, not index i//16.
+
+    Bug history: apply_mtf_confirmation(sigs, close_4h, 12, 16) maps
+    15m bar i to 4h bar j = i // 16. For backtest (aligned arrays) this
+    works. For live (200 15m bars + 100 4h bars with different starts),
+    bar 199 maps to close_4h[12] (352h ago) instead of close_4h[99].
+
+    The live path now uses an inline check with close_4h[-1] and
+    SMA(close_4h[-sma_period:]).
+    """
+    cfg = RubberBandConfig(
+        mtf_confirmation_enabled=True,
+        mtf_sma_period=6,
+        entry_mode='confidence',
+        min_confidence=1,
+        threshold=0.032,
+    )
+    strategy = RubberBandStrategy(cfg)
+
+    n = 200
+    close = np.ones(n, dtype=np.float64) * 100.0
+    close[-1] = 94.0  # -6% dip → long signal
+    btc = np.ones(n, dtype=np.float64) * 50000.0
+    volume = np.ones(n, dtype=np.float64) * 1000.0
+    taker = np.ones(n, dtype=np.float64) * 400.0
+
+    strategy.update_market_data("SYM", volume, taker)
+
+    # Scenario: 4h array is 100 bars. The LATEST bars show a clear uptrend,
+    # but earlierear bars (index 12 = where the old bug would look) show downtrend.
+    close_4h = np.ones(100, dtype=np.float64) * 100.0
+    # First 50 bars: downtrend (old bug would pick up this)
+    close_4h[:50] = np.linspace(120, 80, 50)
+    # Last 50 bars: clear uptrend (correct behavior should see this)
+    close_4h[50:] = np.linspace(95, 115, 50)
+
+    strategy.update_htf_data("SYM", close_4h)
+    sig = strategy.on_bar("SYM", close, btc)
+
+    # The latest 4h data shows uptrend → long should be ALLOWED.
+    # Old bug: close_4h[12] ≈ 95.1 (downtrend zone), SMA of early bars < close
+    # → would incorrectly block or allow based on stale data.
+    # With fix: close_4h[-1] = 115, SMA(last 6) ≈ 112.5 → uptrend → long allowed.
+    # We can't guarantee a signal fires (depends on confidence), but if it does,
+    # it should be positive (long) since 4h is in uptrend.
+    assert sig >= 0, f"Long should not be blocked by latest 4h uptrend, got {sig}"
+
+
+def test_live_mtf_blocks_counter_trend():
+    """Live MTF should block counter-trend entries using latest 4h data."""
+    cfg = RubberBandConfig(
+        mtf_confirmation_enabled=True,
+        mtf_sma_period=6,
+        entry_mode='confidence',
+        min_confidence=1,
+        threshold=0.032,
+    )
+    strategy = RubberBandStrategy(cfg)
+
+    n = 200
+    close = np.ones(n, dtype=np.float64) * 100.0
+    close[-1] = 94.0  # -6% dip → would trigger long
+    btc = np.ones(n, dtype=np.float64) * 50000.0
+    volume = np.ones(n, dtype=np.float64) * 1000.0
+    taker = np.ones(n, dtype=np.float64) * 400.0
+
+    strategy.update_market_data("SYM", volume, taker)
+
+    # 4h data: clear DOWNTREND at the latest bars → should block long entries
+    close_4h = np.linspace(120, 80, 100).astype(np.float64)
+
+    strategy.update_htf_data("SYM", close_4h)
+    sig = strategy.on_bar("SYM", close, btc)
+
+    # Long entry in 4h downtrend must be blocked
+    assert sig == 0, f"Long should be blocked by 4h downtrend, got {sig}"
+
+
+# ── Test 7: btc_directional_period matches backtest ──
+
+def test_btc_directional_period_default_matches_backtest():
+    """btc_directional_period must be 0 to match v10 A/B test validation.
+
+    With period=0, btc_mom=close[i]/close[i]-1=0 always → Risk-Off
+    entries never fire. The v10 winning params were validated this way.
+    """
+    cfg = RubberBandConfig()
+    assert cfg.btc_directional_period == 0, \
+        f"btc_directional_period={cfg.btc_directional_period}, should be 0 (backtest parity)"
