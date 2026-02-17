@@ -178,7 +178,8 @@ class TestZigZagPivots:
 
     def test_flat_market_few_pivots(self):
         """Flat market with 3% threshold → very few pivots."""
-        prices = np.full(100, 100.0) + np.random.randn(100) * 0.5
+        rng = np.random.RandomState(42)
+        prices = np.full(100, 100.0) + rng.randn(100) * 0.5
         high = prices + 0.2
         low = prices - 0.2
 
