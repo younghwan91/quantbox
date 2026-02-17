@@ -539,15 +539,94 @@ class RubberBandScalper:
             ))
             return None
 
-    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
-        """Cancel the server-side stop-loss when closing a position normally.
+    def _place_server_take_profit(
+        self, symbol: str, signal: int, quantity: float,
+        entry_price: float, move_size: float, target_retrace: float,
+    ) -> str | None:
+        """Place a server-side take-profit order on Binance.
 
-        Must be called BEFORE placing the close order to avoid the stop
-        triggering while we're trying to close.
+        This captures intra-bar TP moves that would otherwise be missed
+        by the 15m polling cycle. Combined with the server stop-loss,
+        this creates an OCO-like bracket around the position.
+
+        v11.2: Reduces fat tail exposure by executing TP at exact target
+        without waiting for bar close.
 
         Args:
             symbol: Trading symbol.
-            order_id: The stop-loss order ID to cancel.
+            signal: +1 (long) or -1 (short).
+            quantity: Position quantity.
+            entry_price: Fill price.
+            move_size: Magnitude of the triggering move.
+            target_retrace: Fraction of move to target (e.g. 0.382).
+
+        Returns:
+            Order ID string, or None on failure.
+        """
+        if self.paper_mode:
+            return f"paper_tp_{int(time.time() * 1000)}"
+
+        # TP price: entry ± (move_size * target_retrace)
+        target_distance = move_size * target_retrace
+        buffer = 0.002  # 0.2% inside target to ensure fill
+
+        if signal == 1:  # Long: TP above entry
+            stop_price = entry_price * (1.0 + target_distance)
+            limit_price = stop_price * (1.0 - buffer)  # Sell limit slightly below trigger
+            close_side = 'SELL'
+        else:  # Short: TP below entry
+            stop_price = entry_price * (1.0 - target_distance)
+            limit_price = stop_price * (1.0 + buffer)  # Buy limit slightly above trigger
+            close_side = 'BUY'
+
+        info = self.get_symbol_info(symbol)
+        tick_size = info.get('tick_size', 0.01)
+        price_precision = info.get('price_precision', 2)
+
+        # Round prices to tick size
+        stop_price = round(
+            round(stop_price / tick_size) * tick_size, price_precision
+        )
+        limit_price = round(
+            round(limit_price / tick_size) * tick_size, price_precision
+        )
+
+        try:
+            order = self.client.futures_create_order(
+                symbol=symbol,
+                side=close_side,
+                type='TAKE_PROFIT',
+                timeInForce='GTC',
+                quantity=quantity,
+                price=str(limit_price),
+                stopPrice=str(stop_price),
+                reduceOnly=True,
+            )
+            order_id = str(order['orderId'])
+            logger.info(
+                f"[{symbol}] SERVER TAKE-PROFIT placed: "
+                f"{close_side} {quantity:.6f} @ trigger=${stop_price:.4f} "
+                f"limit=${limit_price:.4f} (orderId={order_id})"
+            )
+            return order_id
+        except Exception as e:
+            logger.error(
+                f"[{symbol}] SERVER TAKE-PROFIT FAILED: {e}. "
+                f"Will rely on client-side TP check."
+            )
+            return None
+
+    def _cancel_server_order(self, symbol: str, order_id: str,
+                             label: str = 'order') -> None:
+        """Cancel a server-side order (stop-loss or take-profit).
+
+        Must be called BEFORE placing a close order to avoid the server
+        order triggering while we're trying to close.
+
+        Args:
+            symbol: Trading symbol.
+            order_id: The order ID to cancel.
+            label: Description for logging (e.g. 'stop-loss', 'take-profit').
         """
         if self.paper_mode or not order_id or order_id.startswith('paper_'):
             return
@@ -556,17 +635,149 @@ class RubberBandScalper:
             self.client.futures_cancel_order(
                 symbol=symbol, orderId=int(order_id),
             )
-            logger.debug(f"[{symbol}] Server stop-loss cancelled: {order_id}")
+            logger.debug(f"[{symbol}] Server {label} cancelled: {order_id}")
         except BinanceAPIException as e:
             if 'Unknown order' in str(e) or '-2011' in str(e):
                 # Already cancelled or filled — OK
                 logger.debug(
-                    f"[{symbol}] Server stop-loss already gone: {order_id}"
+                    f"[{symbol}] Server {label} already gone: {order_id}"
                 )
             else:
                 logger.warning(
-                    f"[{symbol}] Failed to cancel server stop-loss: {e}"
+                    f"[{symbol}] Failed to cancel server {label}: {e}"
                 )
+
+    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
+        """Cancel the server-side stop-loss."""
+        self._cancel_server_order(symbol, order_id, 'stop-loss')
+
+    def _cancel_server_take_profit(self, symbol: str, order_id: str) -> None:
+        """Cancel the server-side take-profit."""
+        self._cancel_server_order(symbol, order_id, 'take-profit')
+
+    def _check_order_filled(self, symbol: str, order_id: str) -> dict | None:
+        """Check if a server-side order has been filled.
+
+        Returns the order info dict if FILLED, None otherwise.
+        """
+        if self.paper_mode or not order_id or order_id.startswith('paper_'):
+            return None
+
+        try:
+            order = self.client.futures_get_order(
+                symbol=symbol, orderId=int(order_id),
+            )
+            if order.get('status') == 'FILLED':
+                return order
+        except Exception as e:
+            logger.debug(f"[{symbol}] Order status check failed: {e}")
+        return None
+
+    def _sync_server_orders(self) -> None:
+        """Check if any server-side TP/SL orders filled between cycles.
+
+        v11.2: Reconciles internal state with exchange reality.
+        Called at the start of each cycle before processing positions.
+        If a server TP/SL fired intra-bar, we record the trade and cancel
+        the counterpart order.
+        """
+        if self.paper_mode:
+            return
+
+        for sym in list(self.strategy.active_positions):
+            pos = self.strategy._positions.get(sym)
+            if not pos:
+                continue
+
+            # Check TP order first (the happy path)
+            tp_oid = pos.get('server_tp_order_id')
+            if tp_oid:
+                filled = self._check_order_filled(sym, tp_oid)
+                if filled:
+                    fill_price = float(filled['avgPrice'])
+                    fill_qty = float(filled['executedQty'])
+                    # Cancel the counterpart SL
+                    sl_oid = pos.get('server_sl_order_id')
+                    if sl_oid:
+                        self._cancel_server_stop_loss(sym, sl_oid)
+                    self._record_server_fill(
+                        sym, fill_price, fill_qty, 'server_tp',
+                    )
+                    continue
+
+            # Check SL order
+            sl_oid = pos.get('server_sl_order_id')
+            if sl_oid:
+                filled = self._check_order_filled(sym, sl_oid)
+                if filled:
+                    fill_price = float(filled['avgPrice'])
+                    fill_qty = float(filled['executedQty'])
+                    # Cancel the counterpart TP
+                    if tp_oid:
+                        self._cancel_server_take_profit(sym, tp_oid)
+                    self._record_server_fill(
+                        sym, fill_price, fill_qty, 'server_sl',
+                    )
+
+    def _record_server_fill(
+        self, symbol: str, fill_price: float, fill_qty: float, reason: str,
+    ) -> None:
+        """Record a trade closed by a server-side order (TP or SL).
+
+        Removes the position from internal tracking and logs the PnL.
+        """
+        pos = self.strategy.close_position(symbol)
+        if not pos:
+            return
+
+        # PnL calculation
+        if pos['signal'] == 1:
+            pnl_pct = (fill_price - pos['entry_price']) / pos['entry_price']
+        else:
+            pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
+
+        notional = fill_qty * fill_price
+        pnl_usd = pnl_pct * notional
+        cost = notional * self.config.round_trip_cost
+        net_pnl = pnl_usd - cost
+
+        trade = {
+            'symbol': symbol,
+            'signal': pos['signal'],
+            'entry_price': pos['entry_price'],
+            'exit_price': fill_price,
+            'pnl_pct': pnl_pct * 100,
+            'pnl_usd': net_pnl,
+            'notional': notional,
+            'bars_held': pos['bars_held'],
+            'reason': reason,
+            'time': datetime.now(timezone.utc).isoformat(),
+        }
+        self._trade_history.append(trade)
+
+        emoji = '🎯' if reason == 'server_tp' else '🛑'
+        logger.info(
+            f"[{symbol}] {emoji} {reason.upper()} FILLED: "
+            f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
+            f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+            f"held={pos['bars_held']} bars"
+        )
+        self.discord.send(embed={
+            'title': f"{emoji} {symbol} {reason.upper().replace('_', ' ')}",
+            'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
+            'fields': [
+                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%',
+                 'inline': True},
+                {'name': 'Net $', 'value': f'${net_pnl:+.2f}',
+                 'inline': True},
+                {'name': 'Bars', 'value': str(pos['bars_held']),
+                 'inline': True},
+                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}',
+                 'inline': True},
+                {'name': 'Exit', 'value': f'${fill_price:.4f}',
+                 'inline': True},
+            ],
+        })
 
     # ==================== Position Management ====================
 
@@ -691,6 +902,17 @@ class RubberBandScalper:
             stop_mult=eff_stop,
         )
 
+        # ═══ v11.2: Place server-side take-profit ═══
+        # Captures intra-bar TP hits that 15m polling would miss.
+        tp_order_id = self._place_server_take_profit(
+            symbol=symbol,
+            signal=signal,
+            quantity=fill_qty,
+            entry_price=fill_price,
+            move_size=move_size,
+            target_retrace=cfg.target_retrace,
+        )
+
         # Record in strategy
         self.strategy.open_position(
             symbol=symbol,
@@ -701,6 +923,7 @@ class RubberBandScalper:
             move_size=move_size,
             entry_stop_mult=eff_stop,
             server_sl_order_id=sl_order_id,
+            server_tp_order_id=tp_order_id,
         )
 
         # Paper balance adjustment
@@ -749,6 +972,11 @@ class RubberBandScalper:
         if sl_oid:
             self._cancel_server_stop_loss(symbol, sl_oid)
 
+        # v11.2: Cancel old server TP (quantity will change)
+        tp_oid = pos.get('server_tp_order_id')
+        if tp_oid:
+            self._cancel_server_take_profit(symbol, tp_oid)
+
         fraction = self.config.partial_exit_fraction
         full_quantity = pos['notional'] / pos['entry_price']
         close_qty = self._round_qty(full_quantity * fraction, symbol)
@@ -794,6 +1022,17 @@ class RubberBandScalper:
                 stop_mult=0.0001,  # Break-even stop (tiny distance)
             )
             pos['server_sl_order_id'] = new_sl_oid
+
+            # v11.2: Place new TP for remaining half at same target
+            new_tp_oid = self._place_server_take_profit(
+                symbol=symbol,
+                signal=pos['signal'],
+                quantity=remaining_qty,
+                entry_price=pos['entry_price'],
+                move_size=pos['move_size'],
+                target_retrace=self.config.target_retrace,
+            )
+            pos['server_tp_order_id'] = new_tp_oid
 
         # Paper mode
         if self.paper_mode:
@@ -854,13 +1093,18 @@ class RubberBandScalper:
         if sl_oid:
             self._cancel_server_stop_loss(symbol, sl_oid)
 
+        # v11.2: Cancel server-side take-profit BEFORE closing
+        tp_oid = pos.get('server_tp_order_id')
+        if tp_oid:
+            self._cancel_server_take_profit(symbol, tp_oid)
+
         # Reverse the entry side
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
         result = self._place_order(symbol, side, quantity)
         if result is None:
-            # Failed to close — re-add position for retry (SL already cancelled,
-            # so we need to re-place it)
+            # Failed to close — re-add position for retry (SL/TP already
+            # cancelled, so we need to re-place them)
             new_sl_oid = self._place_server_stop_loss(
                 symbol=symbol,
                 signal=pos['signal'],
@@ -868,6 +1112,14 @@ class RubberBandScalper:
                 entry_price=pos['entry_price'],
                 move_size=pos['move_size'],
                 stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
+            )
+            new_tp_oid = self._place_server_take_profit(
+                symbol=symbol,
+                signal=pos['signal'],
+                quantity=quantity,
+                entry_price=pos['entry_price'],
+                move_size=pos['move_size'],
+                target_retrace=self.config.target_retrace,
             )
             self.strategy.open_position(
                 symbol=symbol,
@@ -878,6 +1130,7 @@ class RubberBandScalper:
                 move_size=pos['move_size'],
                 entry_stop_mult=pos.get('entry_stop_mult'),
                 server_sl_order_id=new_sl_oid,
+                server_tp_order_id=new_tp_oid,
             )
             return False
 
@@ -973,6 +1226,9 @@ class RubberBandScalper:
         btc_close_4h = None
         if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
             btc_close_4h = self.download_klines('BTCUSDT', 100, interval='4h')
+
+        # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
+        self._sync_server_orders()
 
         # 4. Process existing positions
         for sym in list(self.strategy.active_positions):
@@ -1142,6 +1398,8 @@ class RubberBandScalper:
                 leverage=pos.get('leverage', 1),
                 move_size=pos.get('move_size', 0.03),
                 entry_stop_mult=pos.get('entry_stop_mult'),
+                server_sl_order_id=pos.get('server_sl_order_id'),
+                server_tp_order_id=pos.get('server_tp_order_id'),
             )
             # Restore bars_held
             if sym in self.strategy._positions:
@@ -1150,6 +1408,9 @@ class RubberBandScalper:
                 )
                 self.strategy._positions[sym]['best_pnl'] = pos.get(
                     'best_pnl', 0.0
+                )
+                self.strategy._positions[sym]['partial_closed'] = pos.get(
+                    'partial_closed', False
                 )
 
         logger.info(
