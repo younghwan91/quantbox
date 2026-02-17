@@ -1839,14 +1839,10 @@ class RubberBandScalper:
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
 
-    def _wait_for_bar(self) -> None:
-        """Sleep until the next 15-minute bar closes (+5s buffer)."""
+    def _next_bar_time(self) -> datetime:
+        """Calculate the next 15-minute bar close time (+5s buffer)."""
         now = datetime.now(timezone.utc)
-        minute = now.minute
-        second = now.second
-
-        # Next 15m boundary
-        next_boundary = ((minute // 15) + 1) * 15
+        next_boundary = ((now.minute // 15) + 1) * 15
         if next_boundary >= 60:
             target = now.replace(
                 minute=0, second=5, microsecond=0
@@ -1855,10 +1851,37 @@ class RubberBandScalper:
             target = now.replace(
                 minute=next_boundary, second=5, microsecond=0
             )
+        return target
 
-        sleep_secs = (target - now).total_seconds()
-        if sleep_secs > 0:
-            logger.debug(f"Waiting {sleep_secs:.0f}s for next bar close")
+    def _wait_for_bar(self) -> None:
+        """Wait for the next 15m bar close, polling every 60s.
+
+        While waiting:
+        - Process bot commands (<1 min latency vs 15 min)
+        - Sync server-side TP/SL order fills
+        - Check for stop requests
+        """
+        target = self._next_bar_time()
+        remaining = (target - datetime.now(timezone.utc)).total_seconds()
+        if remaining > 0:
+            logger.debug(f"Waiting {remaining:.0f}s for next bar close")
+
+        while True:
+            now = datetime.now(timezone.utc)
+            remaining = (target - now).total_seconds()
+            if remaining <= 0:
+                break
+
+            # Process bot commands while waiting
+            self._process_bot_commands()
+            if self._stop_requested:
+                break
+
+            # Sync server-side TP/SL fills between bars
+            self._sync_server_orders()
+
+            # Sleep at most 60s, or until bar close (whichever is sooner)
+            sleep_secs = min(60.0, remaining)
             time.sleep(sleep_secs)
 
 

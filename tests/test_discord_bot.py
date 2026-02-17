@@ -11,9 +11,10 @@ Tests for Discord Bot command system.
 
 import asyncio
 import queue
+import time
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from quantbox.notifications.bot import (
     BotCommand,
@@ -364,3 +365,137 @@ class TestScalperCommandHandlers:
 
         scalper._process_bot_commands()
         assert scalper._paused is True
+
+
+# ============================================================
+# Polling loop (_wait_for_bar / _next_bar_time) tests
+# ============================================================
+
+
+class TestPollingLoop:
+    """_wait_for_bar의 1분 폴링 루프 테스트."""
+
+    @pytest.fixture
+    def scalper(self, monkeypatch):
+        monkeypatch.setenv("BINANCE_API_KEY", "test_key")
+        monkeypatch.setenv("BINANCE_API_SECRET", "test_secret")
+        monkeypatch.setenv("BINANCE_TESTNET", "true")
+        with patch("quantbox.scalper.Client"):
+            from quantbox.scalper import RubberBandScalper
+            s = RubberBandScalper(paper_mode=True)
+            s.discord = MagicMock()
+            s._bot_runner = None
+            return s
+
+    def test_next_bar_time_aligned(self):
+        """14:03 → 다음 바 14:15:05."""
+        from quantbox.scalper import RubberBandScalper
+        fake_now = datetime(2026, 2, 17, 14, 3, 0, tzinfo=timezone.utc)
+        with patch("quantbox.scalper.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            # We need a scalper instance; create minimal mock
+            s = MagicMock(spec=RubberBandScalper)
+            s._next_bar_time = RubberBandScalper._next_bar_time.__get__(s)
+            target = s._next_bar_time()
+        assert target.minute == 15
+        assert target.second == 5
+
+    def test_next_bar_time_near_hour(self):
+        """14:47 → 다음 바 15:00:05."""
+        from quantbox.scalper import RubberBandScalper
+        fake_now = datetime(2026, 2, 17, 14, 47, 0, tzinfo=timezone.utc)
+        with patch("quantbox.scalper.datetime") as mock_dt:
+            mock_dt.now.return_value = fake_now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            s = MagicMock(spec=RubberBandScalper)
+            s._next_bar_time = RubberBandScalper._next_bar_time.__get__(s)
+            target = s._next_bar_time()
+        assert target.hour == 15
+        assert target.minute == 0
+        assert target.second == 5
+
+    def test_wait_for_bar_polls_bot_commands(self, scalper):
+        """_wait_for_bar가 대기 중 봇 명령을 처리하는지 확인."""
+        # Set up bot runner with a PAUSE command queued
+        runner = DiscordBotRunner(token="fake", channel_id=1)
+        scalper._bot_runner = runner
+        runner.command_queue.put(BotCommand(command=CommandType.PAUSE))
+
+        # Target time is 2 seconds from "now" — should poll once then exit
+        fake_times = [
+            datetime(2026, 2, 17, 14, 14, 58, tzinfo=timezone.utc),  # _next_bar_time
+            datetime(2026, 2, 17, 14, 14, 58, tzinfo=timezone.utc),  # first loop check
+            datetime(2026, 2, 17, 14, 14, 58, tzinfo=timezone.utc),  # remaining calc
+            datetime(2026, 2, 17, 14, 15, 6, tzinfo=timezone.utc),   # after sleep: past target
+        ]
+        call_idx = [0]
+
+        def fake_now(*args, **kwargs):
+            idx = min(call_idx[0], len(fake_times) - 1)
+            call_idx[0] += 1
+            return fake_times[idx]
+
+        with patch("quantbox.scalper.datetime") as mock_dt, \
+             patch("quantbox.scalper.time") as mock_time:
+            mock_dt.now = fake_now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_time.sleep = MagicMock()
+            mock_time.monotonic = time.monotonic
+
+            scalper._wait_for_bar()
+
+        assert scalper._paused is True  # bot command was processed
+        mock_time.sleep.assert_called()  # slept at least once
+
+    def test_wait_for_bar_stops_on_stop_request(self, scalper):
+        """_stop_requested=True면 즉시 대기 종료."""
+        runner = DiscordBotRunner(token="fake", channel_id=1)
+        scalper._bot_runner = runner
+        # Queue a stop command
+        runner.command_queue.put(BotCommand(command=CommandType.STOP))
+        scalper.download_klines = MagicMock(return_value=None)
+
+        fake_now_val = datetime(2026, 2, 17, 14, 1, 0, tzinfo=timezone.utc)
+
+        with patch("quantbox.scalper.datetime") as mock_dt, \
+             patch("quantbox.scalper.time") as mock_time:
+            mock_dt.now.return_value = fake_now_val
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_time.sleep = MagicMock()
+            mock_time.monotonic = time.monotonic
+
+            scalper._wait_for_bar()
+
+        assert scalper._stop_requested is True
+        # Should NOT have slept the full 14 minutes
+        if mock_time.sleep.called:
+            assert mock_time.sleep.call_args[0][0] <= 60.0
+
+    def test_wait_for_bar_syncs_server_orders(self, scalper):
+        """대기 중 _sync_server_orders가 호출되는지 확인."""
+        scalper._sync_server_orders = MagicMock()
+
+        fake_times = [
+            datetime(2026, 2, 17, 14, 14, 50, tzinfo=timezone.utc),  # _next_bar_time
+            datetime(2026, 2, 17, 14, 14, 50, tzinfo=timezone.utc),  # loop check
+            datetime(2026, 2, 17, 14, 14, 50, tzinfo=timezone.utc),  # remaining
+            datetime(2026, 2, 17, 14, 15, 6, tzinfo=timezone.utc),   # past target
+        ]
+        call_idx = [0]
+
+        def fake_now(*args, **kwargs):
+            idx = min(call_idx[0], len(fake_times) - 1)
+            call_idx[0] += 1
+            return fake_times[idx]
+
+        with patch("quantbox.scalper.datetime") as mock_dt, \
+             patch("quantbox.scalper.time") as mock_time:
+            mock_dt.now = fake_now
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_time.sleep = MagicMock()
+            mock_time.monotonic = time.monotonic
+
+            scalper._wait_for_bar()
+
+        scalper._sync_server_orders.assert_called()
