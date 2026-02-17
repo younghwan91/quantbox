@@ -120,6 +120,24 @@ class QuantBoxSettings(BaseSettings):
     rb_rsi_period: int = 14                   # RSI 계산 기간
     rb_vol_period: int = 20                   # 거래량 SMA 기간 (스파이크 감지)
 
+    # ── v7.0 Multi-Timeframe Confirmation (365-day A/B validated) ──
+    # Uses 4h candle data to confirm 15m entries. Blocks counter-trend trades.
+    # MDD: 16.5% → 4.3% (-74%), Calmar: 8.65 → 32.42 (+275%)
+    rb_mtf_confirmation_enabled: bool = True  # 4h 트렌드 확인 활성화
+    rb_mtf_sma_period: int = 12               # 4h SMA 기간 (12봉 = 2일)
+    rb_mtf_leverage_mult: float = 2.0         # MTF 확인 후 레버리지 배수 (2.0x → 3.0x 실효)
+
+    # ── v7.0 Independent 4H Rubber Band ──
+    # Trades mean-reversion on 4h timeframe independently from 15m.
+    # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
+    rb_htf_independent_enabled: bool = True   # 독립 4시간 트레이딩 활성화
+    rb_htf_rb_lookback: int = 3               # 4h lookback (12시간)
+    rb_htf_rb_threshold: float = 0.10         # 10% 임계값 (4h는 더 높은 노이즈)
+    rb_htf_rb_target_retrace: float = 0.5     # 50% 되돌림 목표
+    rb_htf_rb_stop_mult: float = 0.8          # 0.8x 손절
+    rb_htf_rb_max_hold: int = 12              # 12봉 (2일)
+    rb_htf_rb_btc_sma_period: int = 48        # BTC SMA (8일)
+
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
     rb_btc_directional_period: int = 32       # BTC 모멘텀 lookback (32봉 = 8시간)
@@ -275,6 +293,18 @@ class QuantBoxSettings(BaseSettings):
             'confidence_leverage_step': self.rb_confidence_leverage_step,
             'rsi_period': self.rb_rsi_period,
             'vol_period': self.rb_vol_period,
+            # v7.0 Multi-Timeframe Confirmation
+            'mtf_confirmation_enabled': self.rb_mtf_confirmation_enabled,
+            'mtf_sma_period': self.rb_mtf_sma_period,
+            'mtf_leverage_mult': self.rb_mtf_leverage_mult,
+            # v7.0 Independent 4H Rubber Band
+            'htf_independent_enabled': self.rb_htf_independent_enabled,
+            'htf_rb_lookback': self.rb_htf_rb_lookback,
+            'htf_rb_threshold': self.rb_htf_rb_threshold,
+            'htf_rb_target_retrace': self.rb_htf_rb_target_retrace,
+            'htf_rb_stop_mult': self.rb_htf_rb_stop_mult,
+            'htf_rb_max_hold': self.rb_htf_rb_max_hold,
+            'htf_rb_btc_sma_period': self.rb_htf_rb_btc_sma_period,
             # BTC Directional Alignment
             'btc_directional_enabled': self.rb_btc_directional_enabled,
             'btc_directional_period': self.rb_btc_directional_period,

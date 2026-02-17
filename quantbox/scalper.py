@@ -315,29 +315,37 @@ class RubberBandScalper:
             return {}
 
     def download_klines(
-        self, symbol: str, n_bars: int = 200
-    ) -> np.ndarray | None:
-        """Download recent 15m close prices.
+        self, symbol: str, n_bars: int = 200, interval: str = '15m',
+        full: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """Download recent klines.
 
         Args:
             symbol: Trading symbol.
             n_bars: Number of bars to fetch.
+            interval: Candle interval ('15m', '4h', etc.).
+            full: If True, returns (close, volume, taker_buy) tuple.
 
         Returns:
-            Array of close prices, or None on failure.
+            Array of close prices (default), or (close, volume, taker_buy) tuple
+            if full=True, or None on failure.
         """
         try:
             klines = self.client.futures_klines(
                 symbol=symbol,
-                interval='15m',
+                interval=interval,
                 limit=n_bars,
             )
             if not klines:
                 return None
             close = np.array([float(k[4]) for k in klines], dtype=np.float64)
+            if full:
+                volume = np.array([float(k[5]) for k in klines], dtype=np.float64)
+                taker_buy = np.array([float(k[9]) for k in klines], dtype=np.float64)
+                return close, volume, taker_buy
             return close
         except Exception as e:
-            logger.error(f"Klines fetch failed for {symbol}: {e}")
+            logger.error(f"Klines fetch failed for {symbol} ({interval}): {e}")
             return None
 
     # ==================== Order Execution ====================
@@ -772,6 +780,11 @@ class RubberBandScalper:
         # 3. Fetch BTC klines for regime filter
         btc_close = self.download_klines('BTCUSDT', 200)
 
+        # 3b. v7.0: Fetch BTC 4h klines for MTF confirmation
+        btc_close_4h = None
+        if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
+            btc_close_4h = self.download_klines('BTCUSDT', 100, interval='4h')
+
         # 4. Process existing positions
         for sym in list(self.strategy.active_positions):
             close = self.download_klines(sym, 200)
@@ -793,7 +806,8 @@ class RubberBandScalper:
                 self.config.max_concurrent - self.strategy.n_active
             )
             if available_slots > 0:
-                self._scan_entries(symbols, btc_close, balance, available_slots)
+                self._scan_entries(symbols, btc_close, balance, available_slots,
+                                   btc_close_4h=btc_close_4h)
 
         # 6. Save state
         self._save_state()
@@ -808,9 +822,12 @@ class RubberBandScalper:
         btc_close: np.ndarray | None,
         balance: float,
         max_entries: int,
+        btc_close_4h: np.ndarray | None = None,
     ) -> None:
         """Scan all symbols for entry signals.
 
+        v7.0: Downloads volume/taker data for confidence scoring,
+        and 4h data for MTF confirmation filter.
         Prioritizes symbols with the largest moves (strongest alpha signal).
         """
         candidates: list[tuple[str, int, float, np.ndarray]] = []
@@ -820,9 +837,22 @@ class RubberBandScalper:
             if self.strategy.has_position(sym):
                 continue
 
-            close = self.download_klines(sym, 200)
-            if close is None or len(close) < self.config.lookback + 1:
+            # v6.0: Download full klines (close + volume + taker) for confidence scoring
+            result = self.download_klines(sym, 200, full=True)
+            if result is None:
                 continue
+            close, volume, taker_buy = result
+            if len(close) < self.config.lookback + 1:
+                continue
+
+            # Wire up volume/taker data for confidence scoring
+            self.strategy.update_market_data(sym, volume, taker_buy)
+
+            # v7.0: Download 4h data for MTF confirmation
+            if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
+                close_4h = self.download_klines(sym, 100, interval='4h')
+                if close_4h is not None:
+                    self.strategy.update_htf_data(sym, close_4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
             if signal != 0:
@@ -1108,6 +1138,26 @@ def main():
         rr_leverage_enabled=settings.rb_rr_leverage_enabled,
         min_rr_for_leverage=settings.rb_min_rr_for_leverage,
         max_concurrent=args.max_slots,
+        # v6.0: Confidence scoring
+        entry_mode=settings.rb_entry_mode,
+        btc_regime_period=settings.rb_btc_regime_period,
+        asset_trend_period=settings.rb_asset_trend_period,
+        min_confidence=settings.rb_min_confidence,
+        confidence_leverage_step=settings.rb_confidence_leverage_step,
+        rsi_period=settings.rb_rsi_period,
+        vol_period=settings.rb_vol_period,
+        # v7.0: Multi-timeframe confirmation
+        mtf_confirmation_enabled=settings.rb_mtf_confirmation_enabled,
+        mtf_sma_period=settings.rb_mtf_sma_period,
+        mtf_leverage_mult=settings.rb_mtf_leverage_mult,
+        # v7.0: Independent 4H rubber band
+        htf_independent_enabled=settings.rb_htf_independent_enabled,
+        htf_rb_lookback=settings.rb_htf_rb_lookback,
+        htf_rb_threshold=settings.rb_htf_rb_threshold,
+        htf_rb_target_retrace=settings.rb_htf_rb_target_retrace,
+        htf_rb_stop_mult=settings.rb_htf_rb_stop_mult,
+        htf_rb_max_hold=settings.rb_htf_rb_max_hold,
+        htf_rb_btc_sma_period=settings.rb_htf_rb_btc_sma_period,
     )
 
     scalper = RubberBandScalper(paper_mode=args.paper, config=config)

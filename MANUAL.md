@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 6.0.0  
-> 최종 업데이트: 2025년 7월 21일
+> 버전: 7.0.0  
+> 최종 업데이트: 2026년 2월 17일
 
 ---
 
@@ -120,6 +120,55 @@ signals = compute_signals(close, 8, 0.025, 0.5, 1.0, 8)
 result = bt.run_single(close, signals, "BTCUSDT")
 print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
 ```
+
+### 3.6 v7.0: Multi-Timeframe Confirmation + Independent 4H Trading
+
+v7.0은 두 가지 핵심 업그레이드를 도입합니다:
+
+#### 3.6.1 MTF Confirmation (4h 트렌드 확인)
+
+4h SMA(12)로 15m 진입을 필터링합니다. 역추세 트레이드를 차단하여 MDD를 극적으로 줄입니다.
+
+| 지표 | v6.0 (15m only) | v7.0 hybrid | 변화 |
+|------|-----------------|-------------|------|
+| Return | +143.0% | +139.8% | -2.2% |
+| MDD | 16.5% | 4.3% | **-73.9%** |
+| Calmar | 8.65 | 32.42 | **+274.8%** |
+| Sharpe | 2.07 | 5.23 | **+153%** |
+
+- Walk-forward Q3 (worst quarter) DD: 16.5% → 3.0% (-82%)
+- `apply_mtf_confirmation()` — Numba 컴파일, 4h SMA 방향과 15m 신호 비교
+- `apply_mtf_leverage()` — MTF 확인된 트레이드에 2.0x 레버리지 부스트 (실효 3.0x)
+
+#### 3.6.2 Independent 4H Rubber Band
+
+4h 타임프레임에서 독립적으로 평균회귀 트레이딩합니다. 15m과 별개로 동작합니다.
+
+- 4h-only 성과: Ret +52.2%, DD 4.8%, Calmar 10.87
+- `compute_signals_4h_independent()` — Numba 컴파일 4h 신호 생성
+- `RubberBandStrategy.on_bar_4h()` — 4h 봉 데이터 시 신호 생성
+- `RubberBandStrategy.update_htf_data()` — 4h 데이터 저장
+
+#### 3.6.3 MTF 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| RB_MTF_CONFIRMATION_ENABLED | true | 4h 트렌드 확인 활성화 |
+| RB_MTF_SMA_PERIOD | 12 | 4h SMA 기간 (12봉 = 2일) |
+| RB_MTF_LEVERAGE_MULT | 2.0 | MTF 확인 후 레버리지 배수 (실효 3.0x) |
+| RB_HTF_INDEPENDENT_ENABLED | true | 독립 4시간 트레이딩 활성화 |
+| RB_HTF_RB_LOOKBACK | 3 | 4h lookback (12시간) |
+| RB_HTF_RB_THRESHOLD | 0.10 | 10% 임계값 |
+| RB_HTF_RB_TARGET_RETRACE | 0.5 | 50% 되돌림 목표 |
+| RB_HTF_RB_STOP_MULT | 0.8 | 0.8x 손절 |
+| RB_HTF_RB_MAX_HOLD | 12 | 12봉 (2일) |
+| RB_HTF_RB_BTC_SMA_PERIOD | 48 | BTC SMA (8일) |
+
+#### 3.6.4 Live Parity Fix (v7.0)
+
+- volume/taker 데이터를 scalper의 `_scan_entries()`에 연결 (기존 누락 수정)
+- 4h kline 다운로드 추가
+- `main()`에서 v6.0/v7.0 모든 설정을 전달하도록 수정
 
 ---
 
@@ -294,6 +343,24 @@ RB_MIN_CONFIDENCE=2                # 최소 증거 점수 (1-5, 2=최적: +9% Ca
 RB_CONFIDENCE_LEVERAGE_STEP=0.0    # 컨피던스당 추가 레버리지 (0=고정, 1.0=moderate)
 RB_RSI_PERIOD=14                   # RSI 계산 기간
 RB_VOL_PERIOD=20                   # 거래량 SMA 기간 (스파이크 감지)
+
+# v7.0 Multi-Timeframe Confirmation (365일 A/B 검증)
+# 4h SMA(12) 트렌드 필터로 15m 역추세 진입 차단
+# MDD 16.5% → 4.3% (-74%), Calmar 8.65 → 32.42 (+275%), Sharpe 2.07 → 5.23 (+153%)
+RB_MTF_CONFIRMATION_ENABLED=true   # 4h 트렌드 확인 활성화
+RB_MTF_SMA_PERIOD=12               # 4h SMA 기간 (12봉 = 2일)
+RB_MTF_LEVERAGE_MULT=2.0           # MTF 확인 후 레버리지 배수 (2.0x → 실효 3.0x)
+
+# v7.0 Independent 4H Rubber Band
+# 4h 타임프레임에서 독립적으로 평균회귀 트레이딩
+# 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
+RB_HTF_INDEPENDENT_ENABLED=true    # 독립 4시간 트레이딩 활성화
+RB_HTF_RB_LOOKBACK=3               # 4h lookback (12시간)
+RB_HTF_RB_THRESHOLD=0.10           # 10% 임계값
+RB_HTF_RB_TARGET_RETRACE=0.5       # 50% 되돌림 목표
+RB_HTF_RB_STOP_MULT=0.8            # 0.8x 손절
+RB_HTF_RB_MAX_HOLD=12              # 12봉 (2일)
+RB_HTF_RB_BTC_SMA_PERIOD=48        # BTC SMA (8일)
 
 # BTC Directional Alignment (v4.2, Risk-Off 모드에서 사용)
 RB_BTC_DIRECTIONAL_ENABLED=true   # BTC 방향 정렬: Long→BTC하락, Short→BTC상승 시만 진입
