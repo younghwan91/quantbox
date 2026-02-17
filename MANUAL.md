@@ -2,7 +2,7 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 7.0.0  
+> 버전: 8.0.0  
 > 최종 업데이트: 2026년 2월 17일
 
 ---
@@ -148,6 +148,38 @@ v7.0은 두 가지 핵심 업그레이드를 도입합니다:
 - `compute_signals_4h_independent()` — Numba 컴파일 4h 신호 생성
 - `RubberBandStrategy.on_bar_4h()` — 4h 봉 데이터 시 신호 생성
 - `RubberBandStrategy.update_htf_data()` — 4h 데이터 저장
+
+### 3.7 v8.0: Dynamic Target (Confluence-Gated)
+
+v8.0은 컨피던스 점수에 따라 이익 실현 타겟을 동적으로 확대합니다. 확신이 높을 때 더 큰 수익을 추구하는 "비대칭 R:R" 원칙입니다.
+
+**원리**: 10000% 대회 우승자의 "확실할 때 파도를 타라" 전략에서 영감
+
+| 컨피던스 | 타겟 | 설명 |
+|----------|------|------|
+| ≤ 2 | 40% (기본) | 기존과 동일 |
+| 3 | 45% | 3개 증거 확인 시 |
+| 4 | 50% | 4개 증거 확인 시 |
+| 5 | 55% | 전 증거 확인 시 |
+
+**A/B 검증 결과:**
+- DD 불변: 4.3% (동일)
+- Calmar +9.3%: 27.71 → 30.29
+- Sharpe 안정
+
+**테스트 후 기각된 전략:**
+- RSI Divergence — 데이터가 지지하지 않음
+- Volatility Squeeze — 데이터가 지지하지 않음
+- Reversal Confirmation — 데이터가 지지하지 않음
+
+#### 3.7.1 Dynamic Target 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| RB_DYNAMIC_TARGET_ENABLED | true | 컨피던스 기반 동적 타겟 활성화 |
+| RB_TARGET_CONF3 | 0.45 | conf=3 타겟 (45%) |
+| RB_TARGET_CONF4 | 0.50 | conf=4 타겟 (50%) |
+| RB_TARGET_CONF5 | 0.55 | conf=5 타겟 (55%) |
 
 #### 3.6.3 MTF 파라미터
 
@@ -350,6 +382,14 @@ RB_VOL_PERIOD=20                   # 거래량 SMA 기간 (스파이크 감지)
 RB_MTF_CONFIRMATION_ENABLED=true   # 4h 트렌드 확인 활성화
 RB_MTF_SMA_PERIOD=12               # 4h SMA 기간 (12봉 = 2일)
 RB_MTF_LEVERAGE_MULT=2.0           # MTF 확인 후 레버리지 배수 (2.0x → 실효 3.0x)
+
+# v8.0 Dynamic Target (Confluence-Gated)
+# 컨피던스 ≥3일 때 타겟 스케일링: conf3→45%, conf4→50%, conf5→55%
+# DD 불변 (4.3%), Calmar +9.3% (27.71→30.29)
+RB_DYNAMIC_TARGET_ENABLED=true     # 컨피던스 기반 동적 타겟 활성화
+RB_TARGET_CONF3=0.45               # conf=3 타겟 (45%)
+RB_TARGET_CONF4=0.50               # conf=4 타겟 (50%)
+RB_TARGET_CONF5=0.55               # conf=5 타겟 (55%)
 
 # v7.0 Independent 4H Rubber Band
 # 4h 타임프레임에서 독립적으로 평균회귀 트레이딩
