@@ -201,10 +201,11 @@ class RubberBandConfig:
     min_volume_rank: int = 30  # Top 30 by volume
     exclude_symbols: list[str] = field(default_factory=lambda: ['USDCUSDT', 'TUSDUSDT', 'BUSDUSDT'])
     symbol_whitelist: list[str] = field(default_factory=lambda: [
-        'FILUSDT', 'NEARUSDT', 'ADAUSDT', 'XLMUSDT', 'ETHUSDT',
-        'BCHUSDT', 'ARBUSDT', 'UNIUSDT', 'PEPEUSDT', 'XRPUSDT',
-        'FETUSDT', 'INJUSDT', 'SOLUSDT', 'AVAXUSDT', 'AAVEUSDT',
-    ])  # v10.0 Top-15: 982.4% ret, 0 losers, Calmar 4.78
+        'FILUSDT', 'PEPEUSDT', 'XRPUSDT', 'XLMUSDT', 'ADAUSDT',
+        'FETUSDT', 'ETHUSDT', 'ARBUSDT', 'SHIBUSDT', 'LINKUSDT',
+        'ATOMUSDT', 'OPUSDT', 'DOTUSDT', 'NEARUSDT', 'AAVEUSDT',
+        'BCHUSDT', 'HBARUSDT', 'SOLUSDT', 'ICPUSDT', 'BNBUSDT',
+    ])  # v11.1 Top-20: 3384% ret, Calmar 155.22, A/B validated vs Top-15 baseline
 
     # ── Dynamic capital allocation (v10.0) ──
     dynamic_capital_enabled: bool = True  # balance / max(1, n_active+1) instead of fixed slots
@@ -2470,12 +2471,15 @@ class RubberBandStrategy:
         self, symbol: str, signal: int, entry_price: float,
         notional: float, leverage: float, move_size: float,
         entry_stop_mult: float | None = None,
+        server_sl_order_id: str | None = None,
     ):
         """Record a new position.
 
         Args:
             entry_stop_mult: Effective stop multiplier at entry (for
                 HTF agree parity). If None, uses cfg.stop_mult.
+            server_sl_order_id: Exchange-side stop-loss order ID (v11.1).
+                Used for cancellation when position is closed normally.
         """
         self._positions[symbol] = {
             'signal': signal,
@@ -2487,6 +2491,7 @@ class RubberBandStrategy:
             'best_pnl': 0.0,
             'entry_stop_mult': entry_stop_mult if entry_stop_mult is not None else self.config.stop_mult,
             'partial_closed': False,   # v4.3: track partial exit state
+            'server_sl_order_id': server_sl_order_id,  # v11.1: server-side stop
         }
 
     def close_position(self, symbol: str) -> dict | None:
