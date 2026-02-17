@@ -211,6 +211,7 @@ class VectorizedBacktest:
         signal_func: Callable[[np.ndarray], np.ndarray],
         btc_close: np.ndarray | None = None,
         signal_func_with_regime: Callable | None = None,
+        leverage_func: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
     ) -> dict:
         """Run portfolio backtest across multiple assets.
 
@@ -221,6 +222,9 @@ class VectorizedBacktest:
             signal_func: Function(close) -> signals.
             btc_close: BTC close prices for regime filter.
             signal_func_with_regime: Function(close, btc_close) -> signals.
+            leverage_func: Optional function(close, raw_signals) -> leveraged_signals.
+                Applied after signal generation. Use apply_confidence_leverage
+                from rubberband.py to scale signals by move-confidence leverage.
 
         Returns:
             Dict with portfolio metrics, per-asset results, equity curve.
@@ -239,6 +243,10 @@ class VectorizedBacktest:
                 sigs = signal_func_with_regime(close, btc_close[:n_bars])
             else:
                 sigs = signal_func(close)
+
+            # Apply leverage scaling (e.g., move-confidence leverage)
+            if leverage_func is not None:
+                sigs = leverage_func(close, sigs)
 
             result = self.run_single(close, sigs, symbol=sym)
             per_asset.append(result)
@@ -280,6 +288,7 @@ class VectorizedBacktest:
         inverse_vol_weight: bool = True,
         dd_dampening_threshold: float = 0.0,
         dd_dampening_scale: float = 0.5,
+        leverage_func: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
     ) -> dict:
         """Run portfolio backtest with drawdown management.
 
@@ -318,6 +327,8 @@ class VectorizedBacktest:
         for sym in selected_symbols:
             close = data[sym]['Close'].values[:n_bars].astype(np.float64)
             sigs = signal_func(close)
+            if leverage_func is not None:
+                sigs = leverage_func(close, sigs)
             result = self.run_single(close, sigs, symbol=sym)
             per_asset_results[sym] = result
             eq = result.equity_curve[:n_bars]
