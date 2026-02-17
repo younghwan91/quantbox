@@ -524,6 +524,21 @@ class RubberBandScalper:
             notional = per_slot_capital * conf_lev
             leverage = conf_lev
 
+        # ═══ v10.2 PARITY FIX: Apply MTF leverage multiplier ═══
+        # In backtest: apply_mtf_leverage(signals, mult) scales signal magnitude
+        # which _backtest_core uses as position size (position * bar_return).
+        # In live: on_bar() returns ±1 (no magnitude), so we apply the same
+        # multiplier here via the was_mtf_confirmed() side-channel.
+        # Effective leverage: base(1.5) × mtf_mult(2.5) = 3.75x per trade.
+        if cfg.mtf_confirmation_enabled and cfg.mtf_leverage_mult > 1.0:
+            if self.strategy.was_mtf_confirmed(symbol):
+                leverage *= cfg.mtf_leverage_mult
+                notional = per_slot_capital * leverage
+                logger.debug(
+                    f"[{symbol}] MTF leverage boost: "
+                    f"{leverage/cfg.mtf_leverage_mult:.2f}x → {leverage:.2f}x"
+                )
+
         if notional < 10.0:  # Min notional $10
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
             return False
@@ -540,8 +555,8 @@ class RubberBandScalper:
             logger.debug(f"[{symbol}] Below min notional ${min_notional}")
             return False
 
-        side = 'BUY' if signal == 1 else 'SELL'
-        lev_int = max(1, min(int(leverage), 20))
+        side = 'BUY' if signal > 0 else 'SELL'
+        lev_int = max(1, min(math.ceil(leverage), 20))
 
         result = self._place_order(symbol, side, quantity, leverage=lev_int)
         if result is None:
@@ -1116,24 +1131,24 @@ def main():
         help='Run a single cycle then exit'
     )
     parser.add_argument(
-        '--lookback', type=int, default=8,
-        help='Signal lookback bars (default: 8)'
+        '--lookback', type=int, default=None,
+        help='Signal lookback bars (default: from .env/config)'
     )
     parser.add_argument(
-        '--threshold', type=float, default=0.025,
-        help='Min move to trigger (default: 0.025 = 2.5%%)'
+        '--threshold', type=float, default=None,
+        help='Min move to trigger (default: from .env/config)'
     )
     parser.add_argument(
-        '--max-slots', type=int, default=5,
-        help='Max concurrent positions (default: 5)'
+        '--max-slots', type=int, default=None,
+        help='Max concurrent positions (default: from .env/config)'
     )
     args = parser.parse_args()
 
     # Build config from .env settings (pydantic-settings) + CLI overrides
     settings = get_settings()
     config = RubberBandConfig(
-        lookback=args.lookback or settings.rb_lookback,
-        threshold=args.threshold or settings.rb_threshold,
+        lookback=args.lookback if args.lookback is not None else settings.rb_lookback,
+        threshold=args.threshold if args.threshold is not None else settings.rb_threshold,
         target_retrace=settings.rb_target_retrace,
         stop_mult=settings.rb_stop_mult,
         max_hold=settings.rb_max_hold,
@@ -1152,7 +1167,7 @@ def main():
         partial_exit_fraction=settings.rb_partial_exit_fraction,
         rr_leverage_enabled=settings.rb_rr_leverage_enabled,
         min_rr_for_leverage=settings.rb_min_rr_for_leverage,
-        max_concurrent=args.max_slots,
+        max_concurrent=args.max_slots if args.max_slots is not None else 5,
         # v6.0: Confidence scoring
         entry_mode=settings.rb_entry_mode,
         btc_regime_period=settings.rb_btc_regime_period,
