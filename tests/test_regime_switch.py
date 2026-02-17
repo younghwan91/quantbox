@@ -233,7 +233,7 @@ class TestRegimeSwitchConfigV5:
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_period == 32
-        assert cfg.min_confidence == 2
+        assert cfg.min_confidence == 1  # v10.0: lowered, MTF as quality gate
         assert cfg.confidence_leverage_step == 0.0
         assert cfg.rsi_period == 14
         assert cfg.vol_period == 20
