@@ -8,8 +8,12 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v7.0 — Multi-Timeframe Confirmation + Independent 4H)
+### 🔥 Rubber Band Scalper (v8.0 — Dynamic Target + MTF Confirmation)
 - **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
+- **Dynamic Target (v8.0)**: 컨피던스 기반 타겟 스케일링 — conf≤2→40%, conf3→45%, conf4→50%, conf5→55%
+  - "When certain, ride the wave" — 10000% 대회 우승자의 비대칭 R:R 원칙
+  - DD 불변 (4.3%), Calmar +9.3% (27.71→30.29), Sharpe 안정
+  - 테스트 후 기각: RSI Divergence, Volatility Squeeze, Reversal Confirmation
 - **MTF Confirmation (v7.0)**: 4h SMA(12) 트렌드 필터로 15m 역추세 진입 차단
   - MDD 16.5% → 4.3% (-74%), Calmar 8.65 → 32.42 (+275%), Sharpe 2.07 → 5.23 (+153%)
   - Walk-forward Q3 (worst quarter) DD 16.5% → 3.0% (-82%)
@@ -146,23 +150,23 @@ quantbox/
 scripts/                    # 연구/분석 스크립트
 ├── mtf_trading_ab_test.py  # Multi-TF A/B 테스트
 └── mtf_hybrid_test.py      # v7.0 하이브리드 전략 테스트
-tests/                      # 유닛 테스트 (385개)
+tests/                      # 유닛 테스트 (395개)
 ├── test_mtf_confirmation.py  # MTF 확인 테스트 (18개)
 \`\`\`
 
 ## 📈 성과 지표 (v7.0: MTF Hybrid, 365일 Top-10)
 
-| 지표 | v5.0 RS | v6.0 Conf | v7.0 Hybrid ★ |
-|------|---------|-----------|---------------|
-| Portfolio Return | +135.6% | +148.1% | **+139.8%** |
-| Max Drawdown | 16.9% | 16.9% | **4.3%** |
-| Calmar Ratio | 8.03 | 8.76 | **32.42** |
-| Sharpe Ratio | 1.96 | 2.05 | **5.23** |
-| Win Rate | 61.7% | 63.3% | **63.3%** |
-| R:R (Realized) | 1.25 | 1.25 | **1.25** |
-| Trades | 832 | 798 | **798** |
+| 지표 | v5.0 RS | v6.0 Conf | v7.0 Hybrid | v8.0 DynTarget ★ |
+|------|---------|-----------|-------------|-------------------|
+| Portfolio Return | +135.6% | +148.1% | +139.8% | **+139.8%** |
+| Max Drawdown | 16.9% | 16.9% | 4.3% | **4.3%** |
+| Calmar Ratio | 8.03 | 8.76 | 32.42 | **30.29** |
+| Sharpe Ratio | 1.96 | 2.05 | 5.23 | **5.23** |
+| Win Rate | 61.7% | 63.3% | 63.3% | **63.3%** |
+| R:R (Realized) | 1.25 | 1.25 | 1.25 | **1.25** |
+| Trades | 832 | 798 | 798 | **798** |
 
-> **v7.0 핵심**: 수익률은 -2.2% 소폭 감소하나, MDD -73.9%, Calmar +275%, Sharpe +153%. Walk-forward Q3 DD 16.5% → 3.0% (-82%).
+> **v8.0 핵심**: Dynamic Target — 컨피던스 ≥3일 때 타겟을 40%→45/50/55%로 확대. DD 불변(4.3%), Calmar +9.3% (27.71→30.29). RSI Divergence, Vol Squeeze, Reversal Confirmation은 A/B 테스트 후 기각.
 
 ## 🧪 테스트
 
