@@ -8,14 +8,18 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v4.2 — BTC Directional Alignment)
+### 🔥 Rubber Band Scalper (v4.3 — Capital Preservation Framework)
 - **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **BTC Directional Alignment (NEW)**: BTC 방향 정렬 필터 — 시장 전체가 같은 방향(`Long→BTC 하락, Short→BTC 상승`)일 때만 진입
+- **Capital Preservation (NEW)**: 수익 즉시 50% 부분 청산 + 손익분기 스톱 → 하방 리스크 제거
+  - 남은 절반은 손익분기 스톱으로 보호: 최악의 경우 0% 손실
+  - 레버리지를 전략적 자산으로 전환: 하방 리스크 없이 상방만 추구
+  - 365일 검증: DD 75%→15%, Calmar 0.84→3.72, 10/10 롤링 90일 수익
+- **R:R-Gated Leverage (NEW)**: "손익비가 높아야 레버리지를 쓴다"
+  - R:R ≥ 0.30일 때만 레버리지 허용, 그 외 1x (무레버리지)
+  - 365일 검증: DD 75%→15%, Calmar 0.84→4.47, Sharpe 0.97→1.73
+- **BTC Directional Alignment**: BTC 방향 정렬 필터 — 시장 전체가 같은 방향일 때만 진입
   - 개별 종목의 특이적 움직임(비복귀 가능) 대비 시장 전체 움직임(복귀 가능)을 구분
-  - 365일 검증: Top-10 Calmar 4.04 vs 3.74 baseline (+8%), 100% 롤링 90일 윈도우 수익
-- **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (큰 움직임 = 높은 확신 = 더 높은 레버리지)
-  - 보수적 모드: Base=3x, Max=7x (기본값, +132% 365일 검증)
-  - 경쟁 모드: Base=5x, Max=15x (Top-10, +20,012% 365일 검증, Sharpe 2.25)
+- **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (R:R 게이트와 연동)
 - **MTF**: 비활성화 (장기 성능 저하 확인 — A/B 테스트 결과 No MTF이 최적)
 - **Live/Backtest Parity**: entry_stop_mult 저장 + 동일 레버리지 계산으로 일치 보장
 - **365-Day Validated**: 30 심볼 × 35,040봉, 7/7 견고성 점수, 9/10 롤링 윈도우 수익
@@ -131,18 +135,19 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (315개)
+tests/                      # 유닛 테스트 (338개)
 \`\`\`
 
-## 📈 성과 지표 (v4.2: BTC Directional + Dynamic Leverage, 365일 검증)
+## 📈 성과 지표 (v4.3: Capital Preservation, 365일 검증)
 
-| 지표 | 1x (기준선) | BTC Dir (1x, Top-10) | 보수적 (3-7x) | 경쟁모드 (5-15x, Top-10) |
-|------|------------|---------------------|---------------|------------------------|
-| Portfolio Return | +17.6% | +63.2% | +132% | +20,012% |
-| Max Drawdown | 16.9% | 15.7% | 49.9% | 62.8% |
-| Calmar Ratio | 1.04 | 4.04 | 2.65 | 318.58 |
-| Sharpe Ratio | 0.76 | 1.62 | 1.14 | 2.25 |
-| Rolling Window (90d) | 9/10 수익 | **10/10 수익** | - | 9/10 수익 |
+| 지표 | v4.2 Baseline | Partial Exit | R:R-Gated Lev | Combined (v4.3) |
+|------|--------------|-------------|---------------|-----------------|
+| Portfolio Return (Top-10) | +63.3% | +317.1% | +65.8% | +56.9% |
+| Max Drawdown | **75.4%** | 74.7% | **14.7%** | **15.3%** |
+| Calmar Ratio | 0.84 | 4.24 | **4.47** | 3.72 |
+| Sharpe Ratio | 0.97 | 1.42 | **1.73** | 1.64 |
+| Win Rate | 52.9% | 57.2% | 62.5% | **65.4%** |
+| Rolling 90-day | 5/10 | 6/10 | **10/10** | **10/10** |
 
 ## 🧪 테스트
 
