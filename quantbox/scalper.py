@@ -998,6 +998,8 @@ def main():
         base_leverage=settings.rb_base_leverage,
         leverage_scale=settings.rb_leverage_scale,
         max_leverage=settings.rb_max_leverage,
+        btc_directional_enabled=settings.rb_btc_directional_enabled,
+        btc_directional_period=settings.rb_btc_directional_period,
         max_concurrent=args.max_slots,
     )
 

@@ -7,7 +7,7 @@
 
 ## 1. 시스템 개요
 
-QuantBox v4.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
+QuantBox v4.2.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
 
 | 구성 요소 | 역할 |
@@ -77,6 +77,7 @@ QuantBox v4.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 | `lookback` 바 수익률 > `+threshold` | -1 | 급등 → SHORT (하락 포착) |
 | 그 외 | 0 | 진입 안 함 |
 
+- **BTC Directional Alignment (v4.2)**: Long 진입 시 BTC도 하락 중이어야, Short 진입 시 BTC도 상승 중이어야 진입 허용 (시장 전체 움직임과 상관된 되돌림만 포착)
 - BTC crash gate: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
 - 기존 포지션 보유 심볼은 중복 신호 무시
 
@@ -148,7 +149,7 @@ else:
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_confidence_leverage`, `apply_confidence_leverage` | 기본 평균회귀 신호 + 동적 레버리지 (Numba 컴파일) |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_confidence_leverage`, `apply_confidence_leverage` | 기본 평균회귀 신호 + BTC 방향 정렬 + 동적 레버리지 (Numba 컴파일) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
@@ -260,6 +261,8 @@ else:
 | `base_leverage` | 3.0 | `RubberBandConfig` | 최소 레버리지 (threshold 수준 움직임) |
 | `leverage_scale` | 10.0 | `RubberBandConfig` | 100% 초과 움직임당 레버리지 증가 |
 | `max_leverage` | 7.0 | `RubberBandConfig` | 레버리지 안전 상한 |
+| `btc_directional_enabled` | True | `RubberBandConfig` | BTC 방향 정렬 필터 활성화 |
+| `btc_directional_period` | 32 (8h) | `RubberBandConfig` | BTC 모멘텀 lookback (봉 수) |
 
 ### 6.2 Alpha Engine 파라미터
 
