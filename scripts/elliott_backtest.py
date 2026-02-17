@@ -38,6 +38,7 @@ from quantbox.strategy.elliott import (
     compute_atr,
     zigzag_pivots,
     detect_impulse_abc_patterns,
+    scan_multi_scale_patterns,
     detect_bullish_divergence,
     detect_bearish_divergence,
     detect_triangle,
@@ -121,9 +122,11 @@ def compute_signals_relaxed(
 ) -> np.ndarray:
     """Signal generation WITHOUT mandatory divergence requirement.
 
-    Uses 5-wave impulse + ABC pattern + Fibonacci + macro bias +
+    Uses multi-scale 5-wave impulse + ABC pattern + Fibonacci + macro bias +
     any 1 of {divergence, MACD, Stoch} for more trades.
     Signals scaled by effective_leverage.
+
+    Optimized: pre-computes all patterns once (O(n)), then walks forward.
     """
     cfg = config or ElliottConfig()
     n = len(close_4h)
@@ -144,8 +147,39 @@ def compute_signals_relaxed(
 
     lev = cfg.effective_leverage
     min_start = cfg.ema_macro_slow + 50
+    lookback_bars = cfg.pattern_lookback_bars
+
+    # Pre-compute multi-scale patterns on full data (O(n) total)
+    all_patterns = scan_multi_scale_patterns(high_4h, low_4h, cfg)
+    all_patterns.sort(key=lambda p: p["c_idx"])
+
+    pat_ptr = 0
+    signalled_patterns: set[int] = set()  # one signal per pattern
 
     for bar in range(min_start, n):
+        # Advance pointer past stale patterns
+        while pat_ptr < len(all_patterns) and all_patterns[pat_ptr]["c_idx"] < bar - lookback_bars:
+            pat_ptr += 1
+
+        # Collect recent causal patterns
+        recent = []
+        for j in range(pat_ptr, len(all_patterns)):
+            p = all_patterns[j]
+            if p["c_idx"] > bar:
+                break
+            if p["c_idx"] >= bar - lookback_bars:
+                recent.append(p)
+
+        if not recent:
+            continue
+
+        pattern = recent[-1]
+
+        # Skip if this pattern already emitted a signal
+        if pattern["c_idx"] in signalled_patterns:
+            continue
+
+        # Macro bias
         btc_price = float(btc_close_4h[bar])
         above_200 = btc_price > float(btc_ema200[bar])
         above_500 = btc_price > float(btc_ema500[bar])
@@ -157,26 +191,6 @@ def compute_signals_relaxed(
         else:
             bias = "neutral"
 
-        pidx, pprice, ptype, n_piv = zigzag_pivots(
-            high_4h[: bar + 1], low_4h[: bar + 1], cfg.zigzag_threshold,
-        )
-        if n_piv < 9:
-            continue
-
-        if detect_triangle(pprice, ptype, n_piv):
-            continue
-
-        patterns = detect_impulse_abc_patterns(pidx, pprice, ptype, n_piv, cfg)
-        if not patterns:
-            continue
-
-        recent = [p for p in patterns if p["c_idx"] >= bar - 2]
-        if not recent:
-            continue
-
-        pattern = recent[-1]
-
-        # Macro bias filter
         if bias == "long" and pattern["signal"] != 1:
             continue
         if bias == "short" and pattern["signal"] != -1:
@@ -203,6 +217,7 @@ def compute_signals_relaxed(
 
         if confirmations >= 1:
             signals[bar] = float(direction) * lev
+            signalled_patterns.add(pattern["c_idx"])
 
     return signals
 
