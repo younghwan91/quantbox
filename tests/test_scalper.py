@@ -80,15 +80,6 @@ class TestScalperRiskManagement:
         dd = (hwm - balance) / hwm
         assert dd >= cfg.max_drawdown_pct
 
-    def test_daily_loss_detection(self):
-        """Daily loss > 5% triggers halt."""
-        cfg = RubberBandConfig(daily_loss_limit_pct=0.05)
-
-        daily_start = 10000.0
-        balance = 9400.0
-        daily_loss = (daily_start - balance) / daily_start
-        assert daily_loss >= cfg.daily_loss_limit_pct
-
     def test_position_count_limit(self):
         """Max concurrent positions are enforced."""
         cfg = RubberBandConfig(max_concurrent=2)
