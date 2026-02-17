@@ -183,10 +183,10 @@ class TestOnBarRegimeSwitchRouting:
         # Should produce a signal via regime-switch
         assert isinstance(sig, int)
 
-    def test_regime_switch_is_default(self):
-        """Default config entry_mode is 'regime_switch'."""
+    def test_confidence_is_default(self):
+        """Default config entry_mode is 'confidence' (v6.0)."""
         cfg = RubberBandConfig()
-        assert cfg.entry_mode == 'regime_switch'
+        assert cfg.entry_mode == 'confidence'
 
     def test_btc_directional_mode_bypasses_regime_switch(self):
         """entry_mode='btc_directional' uses old btc_directional path."""
@@ -229,10 +229,14 @@ class TestRegimeSwitchConfigV5:
 
     def test_defaults(self):
         cfg = RubberBandConfig()
-        assert cfg.entry_mode == 'regime_switch'
+        assert cfg.entry_mode == 'confidence'  # v6.0 default
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_period == 32
+        assert cfg.min_confidence == 2
+        assert cfg.confidence_leverage_step == 0.0
+        assert cfg.rsi_period == 14
+        assert cfg.vol_period == 20
 
     def test_custom_regime_periods(self):
         cfg = RubberBandConfig(btc_regime_period=48, asset_trend_period=96)
