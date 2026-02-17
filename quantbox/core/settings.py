@@ -90,11 +90,11 @@ class QuantBoxSettings(BaseSettings):
     dynamic_exit_range: float = 0.9  # max exit = base + range = 1.0
 
     # ── Rubber Band Signal Parameters (v9.0, Fibonacci discipline) ──
-    rb_lookback: int = 8               # Bars to measure move (2h at 15m)
-    rb_threshold: float = 0.045        # Minimum move to trigger (4.5%)
+    rb_lookback: int = 8               # Bars to measure move (2h at 15m) — SACRED
+    rb_threshold: float = 0.032        # v10.0: Lower threshold (3.2%, +162% ret vs 4.5%)
     rb_target_retrace: float = 0.382   # Fibonacci 0.382 target (v9.0, +29% Calmar vs 0.4)
-    rb_stop_mult: float = 0.786        # Fibonacci 0.786 stop (v9.0, -9.5% DD vs 0.9)
-    rb_max_hold: int = 10              # Maximum holding period (bars, 2.5h)
+    rb_stop_mult: float = 0.786        # Fibonacci 0.786 stop (v9.0, DD -9.5% vs 0.9)
+    rb_max_hold: int = 20              # v10.0: Extended hold (20 bars, +24% ret vs 10)
     rb_stop_decay: float = 0.0         # Stop tightening disabled for robustness
 
     # ── Multi-timeframe Confirmation (DISABLED) ──
@@ -114,8 +114,8 @@ class QuantBoxSettings(BaseSettings):
     rb_btc_regime_period: int = 96            # BTC SMA period for regime detection (96봉 = 24시간)
     rb_asset_trend_period: int = 192          # Asset SMA period for classic pullback (192봉 = 48시간)
 
-    # ── Confidence Scoring (v6.0, 365-day A/B validated) ──
-    rb_min_confidence: int = 2                # 최소 엔트리 증거 점수 (1-5, 2=최적)
+    # ── Confidence Scoring (v10.0, MTF acts as quality gate) ──
+    rb_min_confidence: int = 1                # v10.0: 최소 1 (MTF가 진짜 필터, +86.9% ret)
     rb_confidence_leverage_step: float = 0.0  # 컨피던스당 추가 레버리지 (0=고정)
     rb_rsi_period: int = 14                   # RSI 계산 기간
     rb_vol_period: int = 20                   # 거래량 SMA 기간 (스파이크 감지)
@@ -142,7 +142,7 @@ class QuantBoxSettings(BaseSettings):
     rb_macd_slow: int = 26                    # MACD slow EMA 기간
     rb_macd_signal_period: int = 14           # MACD signal EMA 기간 (14=최적)
     rb_stoch_enabled: bool = True             # 스토캐스틱 크로스 컨피던스 증거
-    rb_stoch_k_period: int = 5                # 스토캐스틱 %K 기간 (5=very fast, 최적)
+    rb_stoch_k_period: int = 3                # v10.0: 더 빠른 스토캐스틱 (+5% Calmar vs 5)
     rb_stoch_d_period: int = 3                # 스토캐스틱 %D 기간
 
     # ── v7.0 Independent 4H Rubber Band ──
@@ -167,6 +167,10 @@ class QuantBoxSettings(BaseSettings):
     # ── R:R-Gated Leverage (v4.3, A/B validated) ──
     rb_rr_leverage_enabled: bool = True       # R:R 기준 레버리지 게이트 활성화
     rb_min_rr_for_leverage: float = 0.30      # 레버리지 허용 최소 R:R 비율
+
+    # ── v10.0 Symbol Whitelist & Dynamic Capital ──
+    rb_symbol_whitelist: str = 'FILUSDT,NEARUSDT,ADAUSDT,XLMUSDT,ETHUSDT,BCHUSDT,ARBUSDT,UNIUSDT,PEPEUSDT,XRPUSDT,FETUSDT,INJUSDT,SOLUSDT,AVAXUSDT,AAVEUSDT'
+    rb_dynamic_capital_enabled: bool = True  # balance / max(1, n_active+1) 동적 자본 배분
 
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
