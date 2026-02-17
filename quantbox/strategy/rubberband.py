@@ -2106,6 +2106,8 @@ class RubberBandStrategy:
         self._low_data: dict[str, np.ndarray] = {}
         # v7.0: higher timeframe close data for MTF confirmation (per-symbol)
         self._htf_close_data: dict[str, np.ndarray] = {}
+        # v10.2 PARITY: Track whether last signal per symbol was MTF-confirmed
+        self._mtf_confirmed: dict[str, bool] = {}
 
     def update_market_data(
         self,
@@ -2256,18 +2258,24 @@ class RubberBandStrategy:
             # ═══ v7.0 MTF Confirmation ═══
             # Filter by 4h trend: block counter-trend entries
             htf_close = self._htf_close_data.get(symbol)
+            mtf_applied = False
             if cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
                 sigs = apply_mtf_confirmation(sigs, htf_close, cfg.mtf_sma_period, 16)
-                # Apply leverage boost to MTF-confirmed trades
-                if cfg.mtf_leverage_mult > 1.0:
-                    sigs = apply_mtf_leverage(sigs, cfg.mtf_leverage_mult)
+                mtf_applied = True
+                # NOTE: apply_mtf_leverage is NOT called here anymore.
+                # In backtest, it scales signal magnitude for _backtest_core.
+                # In live, leverage is applied in scalper._open_position()
+                # via was_mtf_confirmed() side-channel for exact parity.
 
-            # Return signal with leverage magnitude
+            # Return signal direction; leverage communicated via was_mtf_confirmed()
             last_sig = sigs[-1]
             if last_sig > 0:
+                self._mtf_confirmed[symbol] = mtf_applied
                 return 1
             elif last_sig < 0:
+                self._mtf_confirmed[symbol] = mtf_applied
                 return -1
+            self._mtf_confirmed[symbol] = False
             return 0
 
         # ═══ v5.0 Regime-Switch Dual Entry ═══
@@ -2379,6 +2387,18 @@ class RubberBandStrategy:
             cfg.htf_rb_max_hold, cfg.htf_rb_btc_sma_period,
         )
         return int(sigs[-1])
+
+    def was_mtf_confirmed(self, symbol: str) -> bool:
+        """Check if the last signal for a symbol was MTF-confirmed.
+
+        Used by scalper._open_position() to apply mtf_leverage_mult,
+        ensuring exact parity with the backtest signal pipeline:
+        compute_signals_v9 → apply_mtf_confirmation → apply_mtf_leverage.
+
+        Returns:
+            True if the signal survived MTF confirmation filter.
+        """
+        return self._mtf_confirmed.get(symbol, False)
 
     def has_position(self, symbol: str) -> bool:
         return symbol in self._positions
