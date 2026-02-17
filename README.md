@@ -8,14 +8,19 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v6.0 — Confidence-Scored Multi-Evidence)
+### 🔥 Rubber Band Scalper (v7.0 — Multi-Timeframe Confirmation + Independent 4H)
 - **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
+- **MTF Confirmation (v7.0)**: 4h SMA(12) 트렌드 필터로 15m 역추세 진입 차단
+  - MDD 16.5% → 4.3% (-74%), Calmar 8.65 → 32.42 (+275%), Sharpe 2.07 → 5.23 (+153%)
+  - Walk-forward Q3 (worst quarter) DD 16.5% → 3.0% (-82%)
+- **Independent 4H Rubber Band (v7.0)**: 4h 타임프레임 독립 평균회귀 트레이딩
+  - 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
+  - 15m + 4h 하이브리드: Ret +139.8%, DD 4.3%, Calmar 32.42
+- **MTF Leverage Boost (v7.0)**: MTF 확인 통과 트레이드에 2.0x 레버리지 부스트 (실효 3.0x)
 - **Confidence-Scored Entry (v6.0)**: 멀티 증거 기반 컨피던스 필터링 + 졸업 레버리지
   - RSI, 거래량 스파이크, 테이커 매수/매도 비율, SMA 거리, BTC 모멘텀 5가지 증거
   - min_confidence=2: 34개 저품질 트레이드 필터링 → Calmar +9%, 동일 DD
   - 선택적 졸업 레버리지: 증거 많을수록 포지션 확대
-  - **Conservative**: Calmar 8.76, Sharpe 2.05, DD 16.9% (flat 1.5x)
-  - **Moderate**: Calmar 9.99, Sharpe 2.03, DD 22.4% (base=1.0, step=1.0, max=2.0)
 - **Regime-Switch Dual Entry (v5.0 base)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
   - Risk-On (BTC > SMA96): Classic Pullback — 자산 자체 상승추세에서 조정 시 매수
   - Risk-Off (BTC < SMA96): Sympathy Pullback — BTC 하락 시 동반 하락하는 자산 매수
@@ -23,9 +28,10 @@
 - **Flat 1.5x Leverage**: R:R 1.25로 레버리지 정당화
   - R:R ≥ 0.30 안전 게이트 유지
 - **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (R:R 게이트와 연동)
-- **MTF**: 비활성화 (장기 성능 저하 확인 — A/B 테스트 결과 No MTF이 최적)
-- **Live/Backtest Parity**: entry_stop_mult 저장 + 동일 레버리지 계산으로 일치 보장
+- **MTF (v7.0)**: 4h SMA(12) 트렌드 확인 활성화 — MDD -74%, Calmar +275%
+- **Live/Backtest Parity (v7.0)**: volume/taker 데이터 _scan_entries() 연결 + 4h kline 다운로드 + main() v7.0 설정 전달
 - **365-Day Validated**: 30 심볼 × 35,040봉, 7/7 견고성 점수, 9/10 롤링 윈도우 수익
+- **v7.0 MTF Numba 함수**: `apply_mtf_confirmation()`, `apply_mtf_leverage()`, `compute_signals_4h_independent()` (Numba 가속)
 - **Volatility Selection**: 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일마다 리밸런싱)
 - **DD-Managed Portfolio**: 역변동성 가중 + 포트폴리오 DD 기반 노출 축소
 - **Numba 가속**: 신호 생성, 백테스트, 레버리지 스케일링, 변동성 계산 모두 `@numba.jit(nopython=True)` 컴파일
@@ -50,7 +56,7 @@
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
-- **Walk-Forward 검증**: 365일 롤링 윈도우, Calmar 8.76, Sharpe 2.05
+- **Walk-Forward 검증**: 365일 롤링 윈도우, Calmar 32.42, Sharpe 5.23 (v7.0 hybrid)
 
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
@@ -138,21 +144,25 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (367개)
+├── mtf_trading_ab_test.py  # Multi-TF A/B 테스트
+└── mtf_hybrid_test.py      # v7.0 하이브리드 전략 테스트
+tests/                      # 유닛 테스트 (385개)
+├── test_mtf_confirmation.py  # MTF 확인 테스트 (18개)
 \`\`\`
 
-## 📈 성과 지표 (v6.0: Confidence-Scored, 365일 Top-10)
+## 📈 성과 지표 (v7.0: MTF Hybrid, 365일 Top-10)
 
-| 지표 | v4.4 1.5x | v5.0 RS | v6.0 Conf ★ |
-|------|-----------|---------|-------------|
-| Portfolio Return | +95.0% | +135.6% | **+148.1%** |
-| Max Drawdown | 19.1% | 16.9% | **16.9%** |
-| Calmar Ratio | 4.98 | 8.03 | **8.76** |
-| Sharpe Ratio | 1.61 | 1.96 | **2.05** |
-| Win Rate | 59.2% | 61.7% | **63.3%** |
-| R:R (Realized) | 1.10 | 1.25 | **1.25** |
-| Trades | — | 832 | **798** |
-| Rolling 90-day | 12/13 | 4/4 | **4/4** |
+| 지표 | v5.0 RS | v6.0 Conf | v7.0 Hybrid ★ |
+|------|---------|-----------|---------------|
+| Portfolio Return | +135.6% | +148.1% | **+139.8%** |
+| Max Drawdown | 16.9% | 16.9% | **4.3%** |
+| Calmar Ratio | 8.03 | 8.76 | **32.42** |
+| Sharpe Ratio | 1.96 | 2.05 | **5.23** |
+| Win Rate | 61.7% | 63.3% | **63.3%** |
+| R:R (Realized) | 1.25 | 1.25 | **1.25** |
+| Trades | 832 | 798 | **798** |
+
+> **v7.0 핵심**: 수익률은 -2.2% 소폭 감소하나, MDD -73.9%, Calmar +275%, Sharpe +153%. Walk-forward Q3 DD 16.5% → 3.0% (-82%).
 
 ## 🧪 테스트
 
