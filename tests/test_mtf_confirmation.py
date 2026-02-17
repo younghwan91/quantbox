@@ -204,7 +204,7 @@ def test_config_mtf_defaults():
     assert cfg.mtf_confirmation_enabled is True
     assert cfg.mtf_sma_period == 12
     assert cfg.mtf_leverage_mult == 2.5  # v10.1: boosted from 2.0
-    assert cfg.htf_independent_enabled is True
+    assert cfg.htf_independent_enabled is False  # v10.2: disabled (dead code)
     assert cfg.htf_rb_lookback == 3
     assert cfg.htf_rb_threshold == 0.10
     assert cfg.htf_rb_target_retrace == 0.5

@@ -148,7 +148,7 @@ class QuantBoxSettings(BaseSettings):
     # ── v7.0 Independent 4H Rubber Band ──
     # Trades mean-reversion on 4h timeframe independently from 15m.
     # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
-    rb_htf_independent_enabled: bool = True   # 독립 4시간 트레이딩 활성화
+    rb_htf_independent_enabled: bool = False  # v10.2: Disabled (dead code in production)
     rb_htf_rb_lookback: int = 3               # 4h lookback (12시간)
     rb_htf_rb_threshold: float = 0.10         # 10% 임계값 (4h는 더 높은 노이즈)
     rb_htf_rb_target_retrace: float = 0.5     # 50% 되돌림 목표
@@ -158,7 +158,7 @@ class QuantBoxSettings(BaseSettings):
 
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
-    rb_btc_directional_period: int = 32       # BTC 모멘텀 lookback (32봉 = 8시간)
+    rb_btc_directional_period: int = 0        # v10.2: 0 = Risk-Off disabled (matches backtest)
 
     # ── Capital Preservation (v4.4: DISABLED — hurts with tighter stop) ──
     rb_partial_exit_enabled: bool = False     # Disabled: Calmar 3.75 vs 4.96 without

@@ -138,7 +138,9 @@ class RubberBandConfig:
     # Trades rubber band signals on 4h timeframe independently.
     # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87.
     # Combined with MTF-confirmed 15m: 70%/30% allocation.
-    htf_independent_enabled: bool = True     # Enable independent 4h trading
+    # v10.2: Disabled — on_bar_4h() never called in scalper.py,
+    # and not used in backtest scripts. Dead code in production.
+    htf_independent_enabled: bool = False    # Disabled: dead code in production
     htf_rb_lookback: int = 3                 # 4h lookback (12h)
     htf_rb_threshold: float = 0.10           # 10% threshold (higher for 4h noise)
     htf_rb_target_retrace: float = 0.5       # 50% retracement target
@@ -169,10 +171,13 @@ class RubberBandConfig:
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     # Counter-trend entries only when BTC confirms: long when BTC falling,
     # short when BTC rising. Filters out idiosyncratic altcoin moves that
-    # are less likely to revert. 365-day validated: 100% rolling 90-day
-    # windows profitable, Calmar 4.04 vs 3.74 baseline (Top-10).
+    # are less likely to revert.
+    # v10.2 PARITY: Set period=0 to match v10 A/B test validation.
+    # btc_dir_period=0 → btc_mom=0 always → Risk-Off entries disabled.
+    # v10 winning params (th=0.032, mc=1, mh=20) were validated with
+    # Risk-Off disabled. Using period=32 would enable untested trades.
     btc_directional_enabled: bool = True   # Align entry with BTC momentum
-    btc_directional_period: int = 32       # BTC momentum lookback (32 bars = 8h)
+    btc_directional_period: int = 0        # v10.2: 0 = Risk-Off disabled (matches backtest)
 
     # ── Capital Preservation (v4.4: DISABLED — hurts at tighter stop) ──
     # v4.3 partial exit hurt performance with stop=0.9 target=0.4:
@@ -2255,20 +2260,34 @@ class RubberBandStrategy:
                     cfg.target_conf5,
                 )
 
-            # ═══ v7.0 MTF Confirmation ═══
-            # Filter by 4h trend: block counter-trend entries
+            # ═══ v7.0 MTF Confirmation (LIVE — inline latest-bar check) ═══
+            # CRITICAL PARITY NOTE: apply_mtf_confirmation() uses j = i // 16
+            # to map 15m→4h index. This is CORRECT for backtest (both arrays
+            # start at the same date), but WRONG for live (200 15m bars vs
+            # 100 4h bars with different start times). Bar 199 would map to
+            # close_4h[12] (352h ago) instead of close_4h[99] (current).
+            #
+            # Fix: Compute the 4h trend directly from the LATEST 4h data.
+            # This is equivalent to what apply_mtf_confirmation does at the
+            # last bar when arrays are properly time-aligned.
             htf_close = self._htf_close_data.get(symbol)
             mtf_applied = False
+            last_sig = sigs[-1]
+
             if cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
-                sigs = apply_mtf_confirmation(sigs, htf_close, cfg.mtf_sma_period, 16)
-                mtf_applied = True
-                # NOTE: apply_mtf_leverage is NOT called here anymore.
-                # In backtest, it scales signal magnitude for _backtest_core.
-                # In live, leverage is applied in scalper._open_position()
-                # via was_mtf_confirmed() side-channel for exact parity.
+                # Compute 4h SMA from the most recent bars
+                sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period:]))
+                trend_up = float(htf_close[-1]) > sma_4h
+
+                # Block counter-trend entries (same logic as apply_mtf_confirmation)
+                if last_sig > 0 and not trend_up:
+                    last_sig = 0.0  # Block long in 4h downtrend
+                elif last_sig < 0 and trend_up:
+                    last_sig = 0.0  # Block short in 4h uptrend
+                else:
+                    mtf_applied = True  # Signal survived MTF filter
 
             # Return signal direction; leverage communicated via was_mtf_confirmed()
-            last_sig = sigs[-1]
             if last_sig > 0:
                 self._mtf_confirmed[symbol] = mtf_applied
                 return 1
