@@ -109,6 +109,10 @@ class QuantBoxSettings(BaseSettings):
     rb_leverage_scale: float = 10.0           # Lev gain per 100% excess move
     rb_max_leverage: float = 7.0              # Hard cap on leverage
 
+    # ── BTC Directional Alignment (v4.2, A/B validated) ──
+    rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
+    rb_btc_directional_period: int = 32       # BTC 모멘텀 lookback (32봉 = 8시간)
+
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부
@@ -244,6 +248,9 @@ class QuantBoxSettings(BaseSettings):
             'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
             'btc_crash_window': self.btc_crash_window,
             'btc_crash_threshold': self.btc_crash_threshold,
+            # BTC Directional Alignment
+            'btc_directional_enabled': self.rb_btc_directional_enabled,
+            'btc_directional_period': self.rb_btc_directional_period,
             # Alpha Filters
             'zscore_velocity_enabled': self.zscore_velocity_enabled,
             'zscore_velocity_lookback': self.zscore_velocity_lookback,
