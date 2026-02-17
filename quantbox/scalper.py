@@ -280,7 +280,14 @@ class RubberBandScalper:
                 s for s in sorted_syms[:self.config.min_volume_rank]
                 if s not in self.config.exclude_symbols
             ]
-            logger.info(f"Universe: {len(result)} symbols")
+
+            # v10.0: Apply symbol whitelist filter
+            if self.config.symbol_whitelist:
+                whitelist_set = set(self.config.symbol_whitelist)
+                result = [s for s in result if s in whitelist_set]
+                logger.info(f"Universe: {len(result)} symbols (whitelist={len(whitelist_set)})")
+            else:
+                logger.info(f"Universe: {len(result)} symbols")
             return result
         except Exception as e:
             logger.error(f"Symbol fetch failed: {e}")
@@ -473,8 +480,14 @@ class RubberBandScalper:
         lookback_price = close_prices[-cfg.lookback - 1]
         move_size = abs(entry_price / lookback_price - 1.0)
 
-        # Position sizing
-        per_slot_capital = balance / cfg.max_concurrent
+        # Position sizing — v10.0: dynamic capital allocation
+        if cfg.dynamic_capital_enabled:
+            n_active = self.strategy.n_active
+            per_slot_capital = balance / max(1, n_active + 1)
+            # Safety: cap at 50% of balance to prevent over-concentration
+            per_slot_capital = min(per_slot_capital, balance * 0.5)
+        else:
+            per_slot_capital = balance / cfg.max_concurrent
         notional, leverage = calculate_position_size(
             capital=per_slot_capital,
             risk_per_trade=cfg.risk_per_trade,
@@ -1165,6 +1178,9 @@ def main():
         stoch_enabled=settings.rb_stoch_enabled,
         stoch_k_period=settings.rb_stoch_k_period,
         stoch_d_period=settings.rb_stoch_d_period,
+        # v10.0: Symbol whitelist & dynamic capital
+        symbol_whitelist=[s.strip() for s in settings.rb_symbol_whitelist.split(',') if s.strip()],
+        dynamic_capital_enabled=settings.rb_dynamic_capital_enabled,
         # v7.0: Independent 4H rubber band
         htf_independent_enabled=settings.rb_htf_independent_enabled,
         htf_rb_lookback=settings.rb_htf_rb_lookback,
