@@ -45,9 +45,10 @@ BASE_KWARGS = dict(
 class TestDynamicTargetConfig:
     """Test RubberBandConfig defaults for dynamic target."""
 
-    def test_defaults_enabled(self):
+    def test_defaults_disabled_v9(self):
+        """v9.0: dynamic target disabled by default — Fib discipline outperforms."""
         cfg = RubberBandConfig()
-        assert cfg.dynamic_target_enabled is True
+        assert cfg.dynamic_target_enabled is False
 
     def test_default_conf3(self):
         cfg = RubberBandConfig()
