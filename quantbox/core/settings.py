@@ -127,6 +127,14 @@ class QuantBoxSettings(BaseSettings):
     rb_mtf_sma_period: int = 12               # 4h SMA 기간 (12봉 = 2일)
     rb_mtf_leverage_mult: float = 2.0         # MTF 확인 후 레버리지 배수 (2.0x → 3.0x 실효)
 
+    # ── v8.0 Dynamic Target (A/B validated, winning strategy insight) ──
+    # "확신할 때 파도를 타라" — 컨피던스 레벨에 따라 목표 스케일링.
+    # DD 변동 없음 (4.3%), Calmar +9.3% (27.71 → 30.29)
+    rb_dynamic_target_enabled: bool = True    # 컨피던스 기반 동적 목표 활성화
+    rb_target_conf3: float = 0.45             # confidence=3 목표 되돌림 (기본 0.4 대비)
+    rb_target_conf4: float = 0.50             # confidence=4 목표 되돌림
+    rb_target_conf5: float = 0.55             # confidence≥5 목표 되돌림
+
     # ── v7.0 Independent 4H Rubber Band ──
     # Trades mean-reversion on 4h timeframe independently from 15m.
     # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
@@ -297,6 +305,11 @@ class QuantBoxSettings(BaseSettings):
             'mtf_confirmation_enabled': self.rb_mtf_confirmation_enabled,
             'mtf_sma_period': self.rb_mtf_sma_period,
             'mtf_leverage_mult': self.rb_mtf_leverage_mult,
+            # v8.0 Dynamic Target
+            'dynamic_target_enabled': self.rb_dynamic_target_enabled,
+            'target_conf3': self.rb_target_conf3,
+            'target_conf4': self.rb_target_conf4,
+            'target_conf5': self.rb_target_conf5,
             # v7.0 Independent 4H Rubber Band
             'htf_independent_enabled': self.rb_htf_independent_enabled,
             'htf_rb_lookback': self.rb_htf_rb_lookback,
