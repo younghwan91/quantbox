@@ -37,8 +37,6 @@ def save_state(
     paper_mode: bool,
     initial_balance: float = 0.0,
     session_high_water_mark: float = 0.0,
-    daily_start_balance: float = 0.0,
-    daily_start_time: str = '',
     filepath: Path = DEFAULT_STATE_FILE,
 ) -> None:
     """슬롯 상태를 JSON 파일로 저장 (atomic write).
@@ -52,8 +50,6 @@ def save_state(
         paper_mode: 페이퍼 모드 여부.
         initial_balance: 세션 시작 잔고 (drawdown 기준).
         session_high_water_mark: 세션 최고 잔고 (DD 계산용).
-        daily_start_balance: 일일 시작 잔고 (daily loss limit용).
-        daily_start_time: 일일 시작 시각 ISO format.
         filepath: 저장 파일 경로.
     """
     filepath = Path(filepath)
@@ -66,8 +62,6 @@ def save_state(
         'paper_balance': paper_balance,
         'initial_balance': initial_balance,
         'session_high_water_mark': session_high_water_mark,
-        'daily_start_balance': daily_start_balance,
-        'daily_start_time': daily_start_time,
         'slots': _serialize_slots(slots),
         'positions': _serialize_positions(slot_positions),
         'entry_times': _serialize_entry_times(slot_entry_times),

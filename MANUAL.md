@@ -483,14 +483,8 @@ RB_PARTIAL_EXIT_FRACTION=0.5      # 부분 청산 비율 (0.5 = 50%)
 RB_RR_LEVERAGE_ENABLED=true       # R:R 기준 레버리지 게이트: 손익비 높을 때만 레버리지
 RB_MIN_RR_FOR_LEVERAGE=0.30       # 레버리지 허용 최소 R:R 비율
 
-# BTC Crash Gate (매크로 방어)
-BTC_CRASH_GATE_ENABLED=true    # BTC 급락/급등 시 진입 차단 활성화
-BTC_CRASH_WINDOW=8             # 최근 N봉 체크 (15분봉 기준 = 2시간)
-BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 진입 차단
-
-# 드로다운 & 손실 제한
+# 드로다운 제한
 MAX_DRAWDOWN_PCT=0.10          # 세션 HWM 대비 최대 허용 드로다운 (10%)
-DAILY_LOSS_LIMIT_PCT=0.05      # 당일 시작 잔고 대비 최대 허용 손실 (5%)
 
 # 비용 모델
 TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
@@ -1145,27 +1139,10 @@ DYNAMIC_EXIT_RANGE=0.7
 
 | # | Gate | 대상 | 설정 | 기본값 |
 |---|------|------|------|--------|
-| 1 | **BTC Crash Gate** | 시장 전체 | `BTC_CRASH_THRESHOLD` | ±3% |
-| 2 | **Z-Score Cap** | 개별 페어 | `Z_SCORE_CAP` | \|z\| > 4.0 |
-| 3 | **Vol Expansion Gate** | 개별 페어 | `VOL_EXPANSION_GATE` | ratio > 2.0x |
-| 4 | **Entry Z-Score Threshold** | 개별 페어 | `ENTRY_ZSCORE` | \|z\| >= 2.0 |
-| 5 | **자본 충분성** | 슬롯 | - | min notional 이상 |
-
-**BTC Crash Gate 상세:**
-
-BTC가 최근 N봉(기본 8봉 = 2시간) 동안 ±3% 이상 움직이면 **모든 페어의 신규 진입을 차단**합니다.
-
-- **목적**: 시장 전체 상관관계 급등 시 페어 스프레드의 평균회귀 전제 자체가 깨지는 것을 방어
-- **실전 사례**: 2026-02-13 BTC $70K→$65K (-7.1%), AI 공포 + 테크 셀오프 → 7연속 SL 방지
-- **Fail-open**: API 에러 시 차단하지 않음 (보수적 안전장치)
-- **기존 포지션**: 영향 없음 (모니터링/청산은 정상 동작)
-- **Discord 상태**: `!status` 명령에 BTC 🟢/🔴 표시
-
-```bash
-BTC_CRASH_GATE_ENABLED=true    # 활성화/비활성화
-BTC_CRASH_WINDOW=8             # 최근 N봉 (15분봉 기준)
-BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 차단
-```
+| 1 | **Z-Score Cap** | 개별 페어 | `Z_SCORE_CAP` | \|z\| > 4.0 |
+| 2 | **Vol Expansion Gate** | 개별 페어 | `VOL_EXPANSION_GATE` | ratio > 2.0x |
+| 3 | **Entry Z-Score Threshold** | 개별 페어 | `ENTRY_ZSCORE` | \|z\| >= 2.0 |
+| 4 | **자본 충분성** | 슬롯 | - | min notional 이상 |
 
 ### 7.6 커스텀 전략 구현 예시
 

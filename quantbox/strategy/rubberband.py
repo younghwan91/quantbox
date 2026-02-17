@@ -196,7 +196,6 @@ class RubberBandConfig:
     risk_per_trade: float = 0.01   # Risk 1% of capital per trade
     max_concurrent: int = 5        # Max simultaneous positions
     max_drawdown_pct: float = 0.10  # 10% session drawdown → halt
-    daily_loss_limit_pct: float = 0.05  # 5% daily loss → halt
 
     # ── Symbol selection (v10.0: whitelist filter) ──
     min_volume_rank: int = 30  # Top 30 by volume
