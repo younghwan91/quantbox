@@ -7,15 +7,17 @@
 
 ## 1. 시스템 개요
 
-QuantBox v10.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
+QuantBox v11.1은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
-**v10.0: Entry Optimization + Symbol Whitelist** — threshold 0.032 (3.2%), min_confidence=1 (MTF as gate), max_hold=20, stoch_k=3. Top-15 심볼 화이트리스트 + 동적 자본 배분.
+**v11.1: Critical Fixes + Pool Expansion** — 서버사이드 손절(STOP 주문), 레버리지 검증, Top-20 심볼 화이트리스트 (A/B validated: +130% return vs Top-15).
+**v11.0: BTC Directional Alignment** — btc_directional_period=48 (12h BTC momentum).
+**v10.0: Entry Optimization + Symbol Whitelist** — threshold 0.032 (3.2%), min_confidence=1 (MTF as gate), max_hold=20, stoch_k=3. 동적 자본 배분.
 **v9.0: Fibonacci + S+R+M Confluence** — target 0.382, stop 0.786, MACD(12,26,14), Stochastic(3,3).
 **v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
 
 | 구성 요소 | 역할 |
 |-----------|------|
-| **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산 |
+| **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산. v11.1: 서버사이드 STOP 손절 + 레버리지 검증 |
 | **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 3.2%+ 급등/급락 포착) + Fibonacci Exit (v9.0) + MACD/Stochastic Confluence (v9.0) + MTF 확인 + 독립 4H 트레이딩 + Symbol Whitelist (v10.0) |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
@@ -28,10 +30,11 @@ QuantBox v10.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Fibonacci + S+R+M Confluence v9.0 + Entry Optimization v10.0)
-심볼선택: Top-15 whitelist (FILUSDT, NEARUSDT, ADAUSDT, XLMUSDT, ETHUSDT,
-                          BCHUSDT, ARBUSDT, UNIUSDT, PEPEUSDT, XRPUSDT,
-                          FETUSDT, INJUSDT, SOLUSDT, AVAXUSDT, AAVEUSDT)
+전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Fibonacci + S+R+M Confluence v9.0 + Entry Optimization v10.0 + Critical Fixes v11.1)
+심볼선택: Top-20 whitelist (FILUSDT, PEPEUSDT, XRPUSDT, XLMUSDT, ADAUSDT,
+                          FETUSDT, ETHUSDT, ARBUSDT, SHIBUSDT, LINKUSDT,
+                          ATOMUSDT, OPUSDT, DOTUSDT, NEARUSDT, AAVEUSDT,
+                          BCHUSDT, HBARUSDT, SOLUSDT, ICPUSDT, BNBUSDT)
 파라미터: lookback=8, threshold=0.032, target=0.382, stop=0.786, max_hold=20
          stop_decay=0.0
          entry_mode='confidence'
@@ -65,14 +68,16 @@ QuantBox v10.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber
          htf_rb_max_hold=12, htf_rb_btc_sma_period=48
 비용:     0.04%/side + 펀딩비
 
-성과 (365일, v10.0 Entry Optimization + Symbol Whitelist, Top-15 유니버스):
-  Return:    +982.4%
-  Max DD:    19.6%
-  Calmar:    4.78
-  Trades:    318
-  Losers:    0/15 (전 심볼 수익)
-  Win Rate:  71.1%
+성과 (365일, v11.1 Pool Expansion, Top-20 유니버스, 5 slots):
+  Return:    +3384.3%
+  Max DD:    21.8%
+  Calmar:    155.22
+  Trades:    936
+  Win Rate:  69.7%
+  Profit Factor: 2.66
+  Sharpe:    5.02
   Dynamic Capital: balance / max(1, n_active+1), 50% cap
+  안전장치: 서버사이드 STOP 손절 (클라이언트 크래시 방어), 레버리지 검증
 ```
 
 ---
