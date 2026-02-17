@@ -8,15 +8,14 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v3.3 — Enhanced MTF)
-- **Alpha**: 2~3% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **MTF 3-Mode**: 16h SMA 트렌드 3단계 필터 (agree=더 많은 진입+타이트 스탑, neutral=정상, against=차단)
+### 🔥 Rubber Band Scalper (v4.0 — 365-Day Validated)
+- **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
+- **MTF**: 비활성화 (장기 성능 저하 확인 — A/B 테스트 결과 No MTF이 최적)
 - **Live/Backtest Parity**: entry_stop_mult 저장으로 실거래/백테스트 스탑 완전 일치
+- **365-Day Validated**: 30 심볼 × 35,040봉, 7/7 견고성 점수, 9/10 롤링 윈도우 수익
 - **Volatility Selection**: 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일마다 리밸런싱)
-- **Time-Decaying Stop**: 보유 시간이 길어질수록 스탑 레벨을 점진적으로 타이트닝 (`stop_decay`)
 - **DD-Managed Portfolio**: 역변동성 가중 + 포트폴리오 DD 기반 노출 축소
 - **Numba 가속**: 신호 생성, 백테스트, 변동성 계산 모두 `@numba.jit(nopython=True)` 컴파일
-- **Walk-Forward 검증**: 4-window walk-forward, OOS 3/4 수익, max OOS DD 7.02%
 - **Alpha Engine**: 멀티팩터 신호 엔진 (볼륨, 모멘텀, ATR 적응, 트레일링 스탑, 테이커 비율)
 - **LimitChaser 실행**: maker-only 체결로 슬리피지 최소화
 - **위험 관리**: Max DD 차단기, 일일 손실 제한, 포지션 사이징 (1% risk/trade)
@@ -34,11 +33,11 @@
 - **바이낸스 연동**: Rate limiting과 배치 처리 지원
 
 ### 전략 프레임워크
-- **Rubber Band Mean-Reversion**: 2.5%+ 급등/급락 후 반등 포착 (기본 전략)
+- **Rubber Band Mean-Reversion**: 4.5%+ 급등/급락 후 반등 포착 (기본 전략, 365일 검증)
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
-- **Walk-Forward 검증**: OOS +34.31% (60일), 연환산 +502%, Sharpe 4.67
+- **Walk-Forward 검증**: 365일 롤링 윈도우 9/10 수익, Calmar 1.13, Sharpe 0.81
 
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
