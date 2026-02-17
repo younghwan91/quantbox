@@ -37,7 +37,7 @@ from quantbox.strategy.elliott import (
     compute_stochastic,
     compute_atr,
     zigzag_pivots,
-    detect_abc_patterns,
+    detect_impulse_abc_patterns,
     detect_bullish_divergence,
     detect_bearish_divergence,
     detect_triangle,
@@ -54,8 +54,8 @@ from quantbox.backtest.vectorized_backtest import (
 TOP_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT",
     "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
-    "XLMUSDT", "DOTUSDT", "PEPEUSDT", "FILUSDT",
-    "ARBUSDT", "FETUSDT", "SHIBUSDT", "OPUSDT",
+    "XLMUSDT", "DOTUSDT", "1000PEPEUSDT", "FILUSDT",
+    "ARBUSDT", "FETUSDT", "1000SHIBUSDT", "OPUSDT",
     "ATOMUSDT", "HBARUSDT", "ICPUSDT",
 ]
 
@@ -121,9 +121,9 @@ def compute_signals_relaxed(
 ) -> np.ndarray:
     """Signal generation WITHOUT mandatory divergence requirement.
 
-    Uses ABC pattern + Fibonacci + macro bias + MACD/Stoch confirmation
-    instead of divergence-only gating. This is less strict but generates
-    more trades for statistical significance.
+    Uses 5-wave impulse + ABC pattern + Fibonacci + macro bias +
+    any 1 of {divergence, MACD, Stoch} for more trades.
+    Signals scaled by effective_leverage.
     """
     cfg = config or ElliottConfig()
     n = len(close_4h)
@@ -142,6 +142,7 @@ def compute_signals_relaxed(
         high_4h, low_4h, close_4h, cfg.stoch_k_period, cfg.stoch_d_period,
     )
 
+    lev = cfg.effective_leverage
     min_start = cfg.ema_macro_slow + 50
 
     for bar in range(min_start, n):
@@ -159,13 +160,13 @@ def compute_signals_relaxed(
         pidx, pprice, ptype, n_piv = zigzag_pivots(
             high_4h[: bar + 1], low_4h[: bar + 1], cfg.zigzag_threshold,
         )
-        if n_piv < 5:
+        if n_piv < 9:
             continue
 
         if detect_triangle(pprice, ptype, n_piv):
             continue
 
-        patterns = detect_abc_patterns(pidx, pprice, ptype, n_piv, cfg)
+        patterns = detect_impulse_abc_patterns(pidx, pprice, ptype, n_piv, cfg)
         if not patterns:
             continue
 
@@ -185,9 +186,8 @@ def compute_signals_relaxed(
 
         # Confluence: count confirmations (need at least 1)
         confirmations = 0
-
-        # 1. RSI divergence
         lookback = min(30, bar)
+
         if direction == 1:
             if detect_bullish_divergence(close_4h[:bar+1], rsi_4h[:bar+1], lookback):
                 confirmations += 1
@@ -195,17 +195,14 @@ def compute_signals_relaxed(
             if detect_bearish_divergence(close_4h[:bar+1], rsi_4h[:bar+1], lookback):
                 confirmations += 1
 
-        # 2. MACD reversal
         if check_macd_reversal(macd_hist[:bar+1], direction):
             confirmations += 1
 
-        # 3. Stochastic cross
         if check_stoch_cross(stoch_k[:bar+1], stoch_d[:bar+1], direction):
             confirmations += 1
 
-        # Need at least 1 confluence for signal
         if confirmations >= 1:
-            signals[bar] = float(direction)
+            signals[bar] = float(direction) * lev
 
     return signals
 
@@ -242,8 +239,8 @@ def run_backtest(
         else:
             signals = compute_elliott_signals(c, h, lo, bc, config)
 
-        n_long = int(np.sum(signals == 1))
-        n_short = int(np.sum(signals == -1))
+        n_long = int(np.sum(signals > 0))
+        n_short = int(np.sum(signals < 0))
 
         if n_long + n_short == 0:
             results[symbol] = {
@@ -254,7 +251,8 @@ def run_backtest(
             }
             continue
 
-        result = bt.run_single(c, signals, symbol=symbol)
+        # Use partial cost model since signals have leverage magnitude
+        result = bt.run_single_partial(c, signals, symbol=symbol)
         results[symbol] = {
             "result": result,
             "signals": signals,

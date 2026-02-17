@@ -76,15 +76,26 @@ class ElliottConfig:
     stoch_k_period: int = 14
     stoch_d_period: int = 3
 
-    # ── Fibonacci ratios (winning_strategy §3.1, calibrated to real data) ──
-    # ABC B retrace of A: standard EW range (0.236 shallow to deep retrace)
-    fib_b_retrace_min: float = 0.23
-    fib_b_retrace_max: float = 1.00
-    # ABC C vs A length: standard EW extension range
-    fib_c_vs_a_min: float = 0.38
-    fib_c_vs_a_max: float = 2.62
-    # C termination near 0.618 Fib of prior impulse: distance tolerance
-    fib_c_impulse_tolerance: float = 0.50
+    # ── 5-Wave Impulse Fibonacci ratios (winning_strategy §3.1 table) ──
+    # Wave 2 retraces Wave 1: doc says 0.5, 0.618, 0.764
+    w2_retrace_min: float = 0.382
+    w2_retrace_max: float = 0.886
+    # Wave 3 extends Wave 1: doc says 1.618, 2.618
+    w3_extension_min: float = 1.272
+    w3_extension_max: float = 4.236
+    # Wave 4 retraces Wave 3: doc says 0.236, 0.382
+    w4_retrace_min: float = 0.146
+    w4_retrace_max: float = 0.500
+
+    # ── ABC Corrective Fibonacci ratios (winning_strategy §3.1 table) ──
+    # Wave B retraces Wave A: doc says 0.5, 0.618
+    fib_b_retrace_min: float = 0.382
+    fib_b_retrace_max: float = 0.786
+    # Wave C extends Wave A: doc says 1.0, 1.618
+    fib_c_vs_a_min: float = 0.786
+    fib_c_vs_a_max: float = 2.000
+    # C termination near 0.618 Fib of entire impulse: distance tolerance
+    fib_c_impulse_tolerance: float = 0.20
 
     # ── Capital management (winning_strategy §4) ──
     max_margin_pct: float = 0.10     # 10% max of total capital
@@ -103,6 +114,10 @@ class ElliottConfig:
     # ── Pyramiding (winning_strategy §4.2) ──
     pyramid_enabled: bool = True
     pyramid_min_profit_pct: float = 0.02  # Min 2% unrealized before pyramid
+
+    # ── Effective leverage for backtest (winning_strategy §4.1) ──
+    # 10% margin × 20x nominal = 2.0x effective leverage on total equity
+    effective_leverage: float = 2.0
 
     # ── Costs ──
     fee_rate: float = 0.0005       # 0.05% taker
@@ -573,34 +588,49 @@ def check_stoch_cross(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  ABC corrective wave pattern detection
+#  Full 5-Wave Impulse + ABC Corrective Pattern Detection
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def detect_abc_patterns(
+def detect_impulse_abc_patterns(
     pivot_idx: np.ndarray,
     pivot_price: np.ndarray,
     pivot_type: np.ndarray,
     n_pivots: int,
     config: ElliottConfig,
 ) -> list[dict]:
-    """Detect completed ABC corrective wave patterns.
+    """Detect completed 5-wave impulse + ABC corrective wave patterns.
 
-    Requires 5 consecutive alternating pivots to identify:
-      Prior impulse (L→H or H→L) + ABC correction (3 swings)
+    Requires 9 consecutive alternating pivots:
+      5-wave impulse (6 pivots: origin + 5 wave endpoints)
+      + ABC correction (3 more pivots: A, B, C endpoints)
 
-    Winning_strategy §3.1:
-      - ABC B retraces 0.5-0.618 of Wave A
-      - ABC C extends 1.0-1.618 of Wave A length
-      - C termination near 0.618 Fib of prior impulse
+    Winning_strategy §3.1 Fibonacci validation:
+      Impulse:
+        - Wave 2 retraces 0.5/0.618/0.764 of Wave 1 (not beyond origin)
+        - Wave 3 extends 1.618/2.618 of Wave 1 (strongest phase)
+        - Wave 4 retraces 0.236/0.382 of Wave 3 (must NOT enter Wave 1 territory)
 
-    Long setup (bearish ABC completing):
-      Low(-1) → High(+1) → Low_A(-1) → High_B(+1) → Low_C(-1)
-      Entry at C termination, expecting new impulse UP.
+      ABC Correction:
+        - Wave B retraces 0.5/0.618 of Wave A (cannot exceed Wave A origin)
+        - Wave C extends 1.0/1.618 of Wave A length
+        - Wave C terminates near 0.618 Fibonacci retracement of entire impulse
 
-    Short setup (bullish ABC completing):
-      High(+1) → Low(-1) → High_A(+1) → Low_B(-1) → High_C(+1)
-      Entry at C termination, expecting new impulse DOWN.
+    Bullish setup (bearish ABC completing after bullish impulse):
+      Impulse UP: W0(L) → W1(H) → W2(L) → W3(H) → W4(L) → W5(H)
+      ABC DOWN:   W5(H) = A_origin → A(L) → B(H) → C(L)
+      Pivots: -1, +1, -1, +1, -1, +1, -1, +1, -1
+      Entry at C completion → new impulse UP expected.
+
+    Bearish setup (bullish ABC completing after bearish impulse):
+      Impulse DOWN: W0(H) → W1(L) → W2(H) → W3(L) → W4(H) → W5(L)
+      ABC UP:       W5(L) = A_origin → A(H) → B(L) → C(H)
+      Pivots: +1, -1, +1, -1, +1, -1, +1, -1, +1
+      Entry at C completion → new impulse DOWN expected.
+
+    Targets use Fibonacci extensions of Wave 1 from point C:
+      TP1: C ± 1.618 × Wave1_length (conservative)
+      TP2: C ± 2.618 × Wave1_length (extended)
 
     Args:
         pivot_idx: Bar indices of zigzag pivots.
@@ -613,116 +643,266 @@ def detect_abc_patterns(
         List of pattern dicts with entry signal, targets, and metadata.
     """
     patterns: list[dict] = []
-    if n_pivots < 5:
+    if n_pivots < 9:
         return patterns
 
-    # Scan all 5-pivot sequences
-    for i in range(n_pivots - 4):
-        p_types = (
-            pivot_type[i], pivot_type[i + 1], pivot_type[i + 2],
-            pivot_type[i + 3], pivot_type[i + 4],
-        )
-        p_prices = (
-            pivot_price[i], pivot_price[i + 1], pivot_price[i + 2],
-            pivot_price[i + 3], pivot_price[i + 4],
-        )
-        p_indices = (
-            pivot_idx[i], pivot_idx[i + 1], pivot_idx[i + 2],
-            pivot_idx[i + 3], pivot_idx[i + 4],
-        )
+    for i in range(n_pivots - 8):
+        # ── Bullish setup: 9 pivots L,H,L,H,L,H,L,H,L ──
+        types_bull = True
+        expected_bull = -1
+        for k in range(9):
+            if pivot_type[i + k] != expected_bull:
+                types_bull = False
+                break
+            expected_bull = -expected_bull
 
-        # ── Long setup: Low → High → Low(A) → High(B) → Low(C) ──
-        if p_types == (-1, 1, -1, 1, -1):
-            L, H, A, B, C = p_prices
-            impulse = H - L  # Prior impulse UP
-            wave_a_len = H - A  # A decline (correction down)
-            wave_b_len = B - A  # B rally (partial recovery)
-            wave_c_len = B - C  # C decline (final leg down)
+        if types_bull:
+            p = [float(pivot_price[i + j]) for j in range(9)]
+            W0, W1, W2, W3, W4, W5, A, B, C = p
 
-            if impulse <= 0 or wave_a_len <= 0 or wave_b_len <= 0 or wave_c_len <= 0:
-                continue
+            pattern = _validate_bullish_impulse_abc(
+                W0, W1, W2, W3, W4, W5, A, B, C,
+                int(pivot_idx[i + 8]), config,
+            )
+            if pattern is not None:
+                patterns.append(pattern)
+            continue
 
-            # B must not exceed H (winning_strategy §3.1)
-            if B > H:
-                continue
+        # ── Bearish setup: 9 pivots H,L,H,L,H,L,H,L,H ──
+        types_bear = True
+        expected_bear = 1
+        for k in range(9):
+            if pivot_type[i + k] != expected_bear:
+                types_bear = False
+                break
+            expected_bear = -expected_bear
 
-            # B retracement of A (0.5-0.618 target)
-            b_retrace = wave_b_len / wave_a_len
+        if types_bear:
+            p = [float(pivot_price[i + j]) for j in range(9)]
+            W0, W1, W2, W3, W4, W5, A, B, C = p
 
-            # C vs A length ratio (1.0-1.618 target)
-            c_vs_a = wave_c_len / wave_a_len
-
-            # C near 0.618 Fib retracement of prior impulse
-            fib_618 = H - 0.618 * impulse
-            c_fib_dist = abs(C - fib_618) / impulse if impulse > 0 else 1.0
-
-            if (config.fib_b_retrace_min <= b_retrace <= config.fib_b_retrace_max
-                    and config.fib_c_vs_a_min <= c_vs_a <= config.fib_c_vs_a_max
-                    and c_fib_dist <= config.fib_c_impulse_tolerance):
-                patterns.append({
-                    'signal': 1,  # Long
-                    'type': 'bearish_abc_long',
-                    'impulse_start': float(L),
-                    'impulse_end': float(H),
-                    'a_price': float(A),
-                    'b_price': float(B),
-                    'c_price': float(C),
-                    'c_idx': int(p_indices[4]),
-                    'b_retrace': float(b_retrace),
-                    'c_vs_a': float(c_vs_a),
-                    'c_fib_dist': float(c_fib_dist),
-                    # Targets: B level (primary), H level (extended)
-                    'target_1': float(B),
-                    'target_2': float(H),
-                    # Stop below C by 10% of wave A length
-                    'stop': float(C - wave_a_len * 0.10),
-                    'impulse_size': float(impulse),
-                })
-
-        # ── Short setup: High → Low → High(A) → Low(B) → High(C) ──
-        elif p_types == (1, -1, 1, -1, 1):
-            H, L, A, B, C = p_prices
-            impulse = H - L  # Prior impulse DOWN (H to L)
-            wave_a_len = A - L  # A rally (correction up)
-            wave_b_len = A - B  # B decline (partial retracement)
-            wave_c_len = C - B  # C rally (final leg up)
-
-            if impulse <= 0 or wave_a_len <= 0 or wave_b_len <= 0 or wave_c_len <= 0:
-                continue
-
-            # B must not go below L
-            if B < L:
-                continue
-
-            b_retrace = wave_b_len / wave_a_len
-            c_vs_a = wave_c_len / wave_a_len
-
-            # C near 0.618 Fib retracement of prior impulse (from the low)
-            fib_618 = L + 0.618 * impulse
-            c_fib_dist = abs(C - fib_618) / impulse if impulse > 0 else 1.0
-
-            if (config.fib_b_retrace_min <= b_retrace <= config.fib_b_retrace_max
-                    and config.fib_c_vs_a_min <= c_vs_a <= config.fib_c_vs_a_max
-                    and c_fib_dist <= config.fib_c_impulse_tolerance):
-                patterns.append({
-                    'signal': -1,  # Short
-                    'type': 'bullish_abc_short',
-                    'impulse_start': float(H),
-                    'impulse_end': float(L),
-                    'a_price': float(A),
-                    'b_price': float(B),
-                    'c_price': float(C),
-                    'c_idx': int(p_indices[4]),
-                    'b_retrace': float(b_retrace),
-                    'c_vs_a': float(c_vs_a),
-                    'c_fib_dist': float(c_fib_dist),
-                    'target_1': float(B),
-                    'target_2': float(L),
-                    'stop': float(C + wave_a_len * 0.10),
-                    'impulse_size': float(impulse),
-                })
+            pattern = _validate_bearish_impulse_abc(
+                W0, W1, W2, W3, W4, W5, A, B, C,
+                int(pivot_idx[i + 8]), config,
+            )
+            if pattern is not None:
+                patterns.append(pattern)
 
     return patterns
+
+
+def _validate_bullish_impulse_abc(
+    W0: float, W1: float, W2: float, W3: float, W4: float,
+    W5: float, A: float, B: float, C: float,
+    c_idx: int, config: ElliottConfig,
+) -> dict | None:
+    """Validate bullish impulse (UP) + bearish ABC (DOWN) → Long entry.
+
+    Impulse UP: W0(low) → W1(high) → W2(low) → W3(high) → W4(low) → W5(high)
+    ABC DOWN:   W5(high) → A(low) → B(high) → C(low)
+
+    Returns pattern dict or None if validation fails.
+    """
+    # ── Wave lengths ──
+    wave1 = W1 - W0   # UP
+    wave2_drop = W1 - W2  # DOWN (retrace)
+    wave3 = W3 - W2   # UP (extension)
+    wave4_drop = W3 - W4  # DOWN (retrace)
+    wave5 = W5 - W4   # UP
+
+    # Basic direction checks
+    if wave1 <= 0 or wave2_drop <= 0 or wave3 <= 0 or wave4_drop <= 0 or wave5 <= 0:
+        return None
+
+    # ── Impulse validation (§3.1) ──
+
+    # Wave 2 retraces Wave 1: 0.382-0.886
+    w2_retrace = wave2_drop / wave1
+    if not (config.w2_retrace_min <= w2_retrace <= config.w2_retrace_max):
+        return None
+
+    # Wave 2 must not go below Wave 0 origin
+    if W2 <= W0:
+        return None
+
+    # Wave 3 extends Wave 1: 1.272-4.236
+    w3_ext = wave3 / wave1
+    if not (config.w3_extension_min <= w3_ext <= config.w3_extension_max):
+        return None
+
+    # Wave 3 must exceed Wave 1 peak
+    if W3 <= W1:
+        return None
+
+    # Wave 4 retraces Wave 3: 0.146-0.500
+    w4_retrace = wave4_drop / wave3
+    if not (config.w4_retrace_min <= w4_retrace <= config.w4_retrace_max):
+        return None
+
+    # CARDINAL RULE: Wave 4 must NOT intrude into Wave 1 territory (§3.1)
+    if W4 <= W1:
+        return None
+
+    # ── ABC correction validation (§3.1) ──
+    wave_a_len = W5 - A   # A decline
+    wave_b_len = B - A     # B recovery
+    wave_c_len = B - C     # C decline
+
+    if wave_a_len <= 0 or wave_b_len <= 0 or wave_c_len <= 0:
+        return None
+
+    # B must not exceed W5 (Wave A origin)
+    if B > W5:
+        return None
+
+    # B retracement of A: 0.382-0.786
+    b_retrace = wave_b_len / wave_a_len
+    if not (config.fib_b_retrace_min <= b_retrace <= config.fib_b_retrace_max):
+        return None
+
+    # C vs A length: 0.786-2.000
+    c_vs_a = wave_c_len / wave_a_len
+    if not (config.fib_c_vs_a_min <= c_vs_a <= config.fib_c_vs_a_max):
+        return None
+
+    # C near 0.618 Fib of ENTIRE impulse (W0 to W5)
+    total_impulse = W5 - W0
+    fib_618 = W5 - 0.618 * total_impulse
+    c_fib_dist = abs(C - fib_618) / total_impulse if total_impulse > 0 else 1.0
+    if c_fib_dist > config.fib_c_impulse_tolerance:
+        return None
+
+    # ── Targets: Fibonacci extensions of Wave 1 from C (§6) ──
+    # TP1: 1.618 × Wave 1 from C (conservative — Wave 3 of new impulse)
+    # TP2: 2.618 × Wave 1 from C (extended — full new impulse)
+    target_1 = C + 1.618 * wave1
+    target_2 = C + 2.618 * wave1
+
+    # Stop: below C by 10% of Wave A length
+    stop = C - wave_a_len * 0.10
+
+    return {
+        'signal': 1,  # Long
+        'type': 'bullish_impulse_abc_long',
+        'w0': W0, 'w1': W1, 'w2': W2, 'w3': W3, 'w4': W4, 'w5': W5,
+        'a_price': A, 'b_price': B, 'c_price': C,
+        'c_idx': c_idx,
+        'w2_retrace': w2_retrace, 'w3_extension': w3_ext,
+        'w4_retrace': w4_retrace,
+        'b_retrace': b_retrace, 'c_vs_a': c_vs_a,
+        'c_fib_dist': c_fib_dist,
+        'target_1': target_1, 'target_2': target_2,
+        'stop': stop,
+        'wave1_length': wave1,
+        'impulse_size': total_impulse,
+    }
+
+
+def _validate_bearish_impulse_abc(
+    W0: float, W1: float, W2: float, W3: float, W4: float,
+    W5: float, A: float, B: float, C: float,
+    c_idx: int, config: ElliottConfig,
+) -> dict | None:
+    """Validate bearish impulse (DOWN) + bullish ABC (UP) → Short entry.
+
+    Impulse DOWN: W0(high) → W1(low) → W2(high) → W3(low) → W4(high) → W5(low)
+    ABC UP:       W5(low) → A(high) → B(low) → C(high)
+
+    Returns pattern dict or None if validation fails.
+    """
+    # ── Wave lengths (all positive for valid bearish impulse) ──
+    wave1 = W0 - W1   # DOWN
+    wave2_rise = W2 - W1  # UP (retrace)
+    wave3 = W2 - W3   # DOWN (extension)
+    wave4_rise = W4 - W3  # UP (retrace)
+    wave5 = W4 - W5   # DOWN
+
+    if wave1 <= 0 or wave2_rise <= 0 or wave3 <= 0 or wave4_rise <= 0 or wave5 <= 0:
+        return None
+
+    # ── Impulse validation (§3.1) ──
+
+    # Wave 2 retraces Wave 1
+    w2_retrace = wave2_rise / wave1
+    if not (config.w2_retrace_min <= w2_retrace <= config.w2_retrace_max):
+        return None
+
+    # Wave 2 must not go above Wave 0 origin
+    if W2 >= W0:
+        return None
+
+    # Wave 3 extends Wave 1
+    w3_ext = wave3 / wave1
+    if not (config.w3_extension_min <= w3_ext <= config.w3_extension_max):
+        return None
+
+    # Wave 3 must go below Wave 1 trough
+    if W3 >= W1:
+        return None
+
+    # Wave 4 retraces Wave 3
+    w4_retrace = wave4_rise / wave3
+    if not (config.w4_retrace_min <= w4_retrace <= config.w4_retrace_max):
+        return None
+
+    # CARDINAL RULE: Wave 4 must NOT intrude into Wave 1 territory
+    if W4 >= W1:
+        return None
+
+    # ── ABC correction validation ──
+    wave_a_len = A - W5   # A rise
+    wave_b_len = A - B     # B decline
+    wave_c_len = C - B     # C rise
+
+    if wave_a_len <= 0 or wave_b_len <= 0 or wave_c_len <= 0:
+        return None
+
+    # B must not go below W5
+    if B < W5:
+        return None
+
+    # B retracement of A
+    b_retrace = wave_b_len / wave_a_len
+    if not (config.fib_b_retrace_min <= b_retrace <= config.fib_b_retrace_max):
+        return None
+
+    # C vs A length
+    c_vs_a = wave_c_len / wave_a_len
+    if not (config.fib_c_vs_a_min <= c_vs_a <= config.fib_c_vs_a_max):
+        return None
+
+    # C near 0.618 Fib of entire impulse
+    total_impulse = W0 - W5
+    fib_618 = W5 + 0.618 * total_impulse
+    c_fib_dist = abs(C - fib_618) / total_impulse if total_impulse > 0 else 1.0
+    if c_fib_dist > config.fib_c_impulse_tolerance:
+        return None
+
+    # ── Targets: Fibonacci extensions of Wave 1 from C ──
+    target_1 = C - 1.618 * wave1
+    target_2 = C - 2.618 * wave1
+
+    stop = C + wave_a_len * 0.10
+
+    return {
+        'signal': -1,  # Short
+        'type': 'bearish_impulse_abc_short',
+        'w0': W0, 'w1': W1, 'w2': W2, 'w3': W3, 'w4': W4, 'w5': W5,
+        'a_price': A, 'b_price': B, 'c_price': C,
+        'c_idx': c_idx,
+        'w2_retrace': w2_retrace, 'w3_extension': w3_ext,
+        'w4_retrace': w4_retrace,
+        'b_retrace': b_retrace, 'c_vs_a': c_vs_a,
+        'c_fib_dist': c_fib_dist,
+        'target_1': target_1, 'target_2': target_2,
+        'stop': stop,
+        'wave1_length': wave1,
+        'impulse_size': total_impulse,
+    }
+
+
+# Keep backward compatibility alias
+detect_abc_patterns = detect_impulse_abc_patterns
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1011,7 +1191,7 @@ class ElliottStrategy:
         pidx, pprice, ptype, n_piv = zigzag_pivots(
             high_4h, low_4h, cfg.zigzag_threshold,
         )
-        if n_piv < 5:
+        if n_piv < 9:
             return 0
 
         # 4. Triangle filter (winning_strategy §3.2)
@@ -1435,12 +1615,18 @@ def compute_elliott_signals(
 ) -> np.ndarray:
     """Generate Elliott wave signals at 4h granularity for backtesting.
 
-    Processes the full 4h dataset and returns a signal array where:
-      +1 = long entry (ABC bearish correction completed)
-      -1 = short entry (ABC bullish correction completed)
-       0 = flat
+    Implements the full championship strategy flow (winning_strategy §5):
+      1. BTC 200/500 EMA macro bias filter
+      2. ZigZag → 5-wave impulse + ABC correction detection (9 pivots)
+      3. Fibonacci validation for all waves
+      4. Triangle filter
+      5. Divergence (mandatory) + corroboration (MACD or Stoch) per §2.2
+      6. Signal scaled by effective leverage (§4.1: 10% margin × 20x = 2x)
 
-    Includes macro bias filtering (BTC vs 200/500 EMA).
+    Confirmation Protocol (§2.2): "Divergence signals require mandatory
+    corroboration. The agent must verify a reversal in the MACD histogram
+    OR a golden/dead cross in the Stochastic oscillator."
+    → Divergence REQUIRED + at least 1 of {MACD reversal, Stoch cross}
 
     Args:
         close_4h: Symbol 4h close prices.
@@ -1450,7 +1636,8 @@ def compute_elliott_signals(
         config: Strategy configuration.
 
     Returns:
-        Signal array aligned to close_4h (same length).
+        Signal array aligned to close_4h. Values are scaled by
+        effective_leverage (default 2.0) for realistic P&L modeling.
     """
     cfg = config or ElliottConfig()
     n = len(close_4h)
@@ -1463,14 +1650,22 @@ def compute_elliott_signals(
     btc_ema200 = compute_ema(btc_close_4h, cfg.ema_macro_fast)
     btc_ema500 = compute_ema(btc_close_4h, cfg.ema_macro_slow)
 
-    # Pre-compute RSI on symbol 4h for divergence
+    # Pre-compute indicators on symbol 4h
     rsi_4h = compute_rsi(close_4h, cfg.rsi_period)
+    _, _, macd_hist_4h = compute_macd(
+        close_4h, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period,
+    )
+    stoch_k_4h, stoch_d_4h = compute_stochastic(
+        high_4h, low_4h, close_4h, cfg.stoch_k_period, cfg.stoch_d_period,
+    )
 
-    # Walk-forward: at each bar, run ZigZag on data up to that bar
-    min_start = cfg.ema_macro_slow + 50  # Need enough warmup
+    lev = cfg.effective_leverage
+
+    # Walk-forward: at each bar, detect patterns on data up to that bar
+    min_start = cfg.ema_macro_slow + 50
 
     for bar in range(min_start, n):
-        # Macro bias at this bar
+        # 1. Macro bias at this bar
         btc_price = float(btc_close_4h[bar])
         above_200 = btc_price > float(btc_ema200[bar])
         above_500 = btc_price > float(btc_ema500[bar])
@@ -1482,19 +1677,19 @@ def compute_elliott_signals(
         else:
             bias = 'neutral'
 
-        # ZigZag on data up to this bar
+        # 2. ZigZag on data up to this bar
         pidx, pprice, ptype, n_piv = zigzag_pivots(
             high_4h[:bar + 1], low_4h[:bar + 1], cfg.zigzag_threshold,
         )
-        if n_piv < 5:
+        if n_piv < 9:
             continue
 
-        # Triangle filter
+        # 3. Triangle filter (§3.2)
         if detect_triangle(pprice, ptype, n_piv):
             continue
 
-        # ABC pattern detection
-        patterns = detect_abc_patterns(pidx, pprice, ptype, n_piv, cfg)
+        # 4. 5-wave impulse + ABC detection with Fibonacci validation
+        patterns = detect_impulse_abc_patterns(pidx, pprice, ptype, n_piv, cfg)
         if not patterns:
             continue
 
@@ -1505,15 +1700,18 @@ def compute_elliott_signals(
 
         pattern = recent[-1]
 
-        # Macro bias filter
+        # 5. Macro bias filter
         if bias == 'long' and pattern['signal'] != 1:
             continue
         if bias == 'short' and pattern['signal'] != -1:
             continue
 
-        # Simple divergence check on 4h
+        # 6. Confirmation Protocol (§2.2):
+        #    Divergence (REQUIRED) + at least 1 corroboration (MACD or Stoch)
         direction = pattern['signal']
         lookback = min(30, bar)
+
+        # Check divergence (mandatory)
         if direction == 1:
             has_div = detect_bullish_divergence(
                 close_4h[:bar + 1], rsi_4h[:bar + 1], lookback,
@@ -1523,7 +1721,19 @@ def compute_elliott_signals(
                 close_4h[:bar + 1], rsi_4h[:bar + 1], lookback,
             )
 
-        if has_div:
-            signals[bar] = float(direction)
+        if not has_div:
+            continue  # Divergence is mandatory
+
+        # Check corroboration (at least 1 of MACD or Stoch)
+        has_macd = check_macd_reversal(macd_hist_4h[:bar + 1], direction)
+        has_stoch = check_stoch_cross(
+            stoch_k_4h[:bar + 1], stoch_d_4h[:bar + 1], direction,
+        )
+
+        if not (has_macd or has_stoch):
+            continue  # Corroboration is mandatory
+
+        # 7. Signal with effective leverage
+        signals[bar] = float(direction) * lev
 
     return signals
