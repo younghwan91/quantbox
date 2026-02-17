@@ -38,7 +38,7 @@ QuantBox v10.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber
          min_confidence=1 (MTF is the real quality gate)
          btc_regime_period=96 (24h SMA for regime detection)
          asset_trend_period=192 (48h SMA for classic pullback)
-         btc_directional_period=32 (8h BTC momentum for sympathy)
+         btc_directional_period=48 (12h BTC momentum for sympathy)
          base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
          partial_exit_enabled=false
          dynamic_capital_enabled=true (balance / max(1, n_active+1))
@@ -346,7 +346,7 @@ else:
 | `leverage_scale` | 0.0 | `RubberBandConfig` | 컨피던스 스케일링 비활성화 |
 | `max_leverage` | 1.5 | `RubberBandConfig` | 레버리지 안전 상한 |
 | `btc_directional_enabled` | True | `RubberBandConfig` | BTC 방향 정렬 필터 활성화 (Risk-Off에서 사용) |
-| `btc_directional_period` | 32 (8h) | `RubberBandConfig` | BTC 모멘텀 lookback (봉 수) |
+| `btc_directional_period` | 48 (12h) | `RubberBandConfig` | BTC 모멘텀 lookback (봉 수) |
 | `entry_mode` | 'confidence' | `RubberBandConfig` | 진입 모드: confidence / regime_switch / btc_directional / raw |
 | `btc_regime_period` | 96 (24h) | `RubberBandConfig` | BTC SMA period for regime detection |
 | `asset_trend_period` | 192 (48h) | `RubberBandConfig` | Asset SMA period for classic pullback |
