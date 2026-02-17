@@ -7,13 +7,13 @@
 
 ## 1. 시스템 개요
 
-QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
+QuantBox v4.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
 
 | 구성 요소 | 역할 |
 |-----------|------|
 | **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산 |
-| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 2.5%+ 급등/급락 포착) |
+| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 4.5%+ 급등/급락 포착) |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -25,22 +25,20 @@ QuantBox v3.0.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original + Enhanced MTF (러버밴드 + HTF 3-mode 필터)
-심볼선택: 30일 실현변동성 Top-3 (10일마다 리밸런싱)
-파라미터: lookback=8, threshold=0.025, target=0.5, stop=1.0, max_hold=8
-         stop_decay=0.3, htf_period=64, htf_block_threshold=0.01
-         htf_agree_discount=0.85, htf_agree_stop_mult=0.95
+전략:     RB_original (러버밴드, MTF 비활성화)
+심볼선택: EW All-30 (균등 가중, 365일 검증)
+파라미터: lookback=8, threshold=0.045, target=0.3, stop=1.0, max_hold=10
+         stop_decay=0.0, htf_period=0 (MTF DISABLED)
 비용:     0.04%/side + 펀딩비
 
-성과 (90일, 30개 심볼 유니버스, Top-3 vol-selected):
-  Return:    +63.18%
-  Sharpe:    6.52
-  Max DD:    7.08% (post-warmup)
-  Calmar:    8.92
-  Win Rate:  56.5%
-  Avg Win:   1.353%, Avg Loss: 1.498% (RR 0.90)
-  Profit Factor: 1.17
-  Trades/Day: ~15.5
+성과 (365일, 30개 심볼 유니버스, EW All-30):
+  Return:    +18.40%
+  Sharpe:    0.81
+  Max DD:    16.29%
+  Calmar:    1.13
+  Rolling Windows: 9/10 profitable (90%)
+  Neighbor Stability: 62/63 profitable (98%)
+  Robustness Score: 7/7
 ```
 
 ---

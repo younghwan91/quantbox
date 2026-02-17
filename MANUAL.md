@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 3.3.0  
-> 최종 업데이트: 2025년 7월 14일
+> 버전: 4.0.0  
+> 최종 업데이트: 2025년 7월 17일
 
 ---
 
@@ -85,15 +85,15 @@ python -m quantbox.scalper
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | lookback | 8 | 이동 측정 기간 (봉 수, 8×15m = 2시간) |
-| threshold | 0.025 | 최소 진입 이동 폭 (2.5%) |
-| target_retrace | 0.5 | 이익 실현: 이동 폭의 50% 되돌림 |
+| threshold | 0.045 | 최소 진입 이동 폭 (4.5% — 노이즈 필터링) |
+| target_retrace | 0.3 | 이익 실현: 이동 폭의 30% 되돌림 (빠른 청산) |
 | stop_mult | 1.0 | 손절: 이동 폭의 1배 |
-| max_hold | 8 | 최대 보유 기간 (봉 수) |
-| stop_decay | 0.3 | 시간감쇠 계수 (30% 감쇠 by max_hold) |
-| htf_period | 64 | MTF SMA 기간 (16시간, 0=비활성) |
-| htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%) |
-| htf_agree_discount | 0.85 | HTF 동의 시 진입 임계값 할인 (15% 낮춤) |
-| htf_agree_stop_mult | 0.95 | HTF 동의 시 스톱 배수 (5% 타이트) |
+| max_hold | 10 | 최대 보유 기간 (봉 수, 2.5시간) |
+| stop_decay | 0.0 | 시간감쇠 비활성화 (장기 안정성 확보) |
+| htf_period | 0 | MTF SMA 기간 (0=비활성화 — 장기 성능 저하) |
+| htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%, MTF 비활성 시 미사용) |
+| htf_agree_discount | 0.85 | HTF 동의 시 진입 임계값 할인 (MTF 비활성 시 미사용) |
+| htf_agree_stop_mult | 0.95 | HTF 동의 시 스톱 배수 (MTF 비활성 시 미사용) |
 | max_concurrent | 5 | 최대 동시 포지션 |
 | risk_per_trade | 0.01 | 트레이드당 리스크 (자본의 1%) |
 
