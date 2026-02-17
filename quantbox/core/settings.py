@@ -125,7 +125,7 @@ class QuantBoxSettings(BaseSettings):
     # MDD: 16.5% → 4.3% (-74%), Calmar: 8.65 → 32.42 (+275%)
     rb_mtf_confirmation_enabled: bool = True  # 4h 트렌드 확인 활성화
     rb_mtf_sma_period: int = 12               # 4h SMA 기간 (12봉 = 2일)
-    rb_mtf_leverage_mult: float = 2.0         # MTF 확인 후 레버리지 배수 (2.0x → 3.0x 실효)
+    rb_mtf_leverage_mult: float = 2.5         # v10.1: MTF 확인 후 레버리지 배수 (2.0→2.5, +35% ret)
 
     # ── v8.0 Dynamic Target (DISABLED in v9.0 — Fib discipline outperforms) ──
     # Fib 0.382 fixed target > dynamic scaling. Tighter stop (0.786) requires faster TP.

@@ -109,7 +109,8 @@ class RubberBandConfig:
     # Walk-forward: Q3 DD drops 16.5% → 3.0% (the critical quarter).
     mtf_confirmation_enabled: bool = True    # Enable 4h trend confirmation
     mtf_sma_period: int = 12                 # 4h SMA period (12 bars = 2 days)
-    mtf_leverage_mult: float = 2.0           # Leverage multiplier for confirmed trades (2.0x → 3.0x effective)
+    mtf_leverage_mult: float = 2.5           # v10.1: MTF leverage boost (2.0→2.5, +35% ret, +7.5% Calmar)
+                                             # Effective: 1.5 × 2.5 = 3.75x per trade, 1.875x on total equity
 
     # ── v8.0 Dynamic Target (A/B validated, winning strategy insight) ──
     # "When certain, ride the wave" — scale target by confidence level.
