@@ -7,9 +7,9 @@
 
 ## 1. 시스템 개요
 
-QuantBox v5.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
+QuantBox v6.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
-**v5.0: Regime-Switch Dual Entry** — BTC 레짐에 따라 다른 진입 알고리즘을 사용한다.
+**v6.0: Confidence-Scored Multi-Evidence** — 레짐 스위치 + 멀티 증거 컨피던스 필터링 + 졸업 레버리지.
 
 | 구성 요소 | 역할 |
 |-----------|------|
@@ -78,17 +78,21 @@ QuantBox v5.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber 
 
 ### 2.1 신호 생성 (RubberBandStrategy.on_bar)
 
-단일 자산의 15m close 배열과 BTC close를 받아 `compute_signals_regime_switch()` (Numba 컴파일)로 신호를 생성한다:
+단일 자산의 15m close/volume/taker_buy 배열과 BTC close를 받아 `compute_signals_confidence()` (Numba 컴파일)로 신호를 생성한다:
 
-**Regime-Switch Dual Entry (v5.0):**
+**Confidence-Scored Multi-Evidence Entry (v6.0):**
 
 | BTC 레짐 | 감지 방법 | 알고리즘 | 진입 조건 |
 |----------|----------|---------|----------|
-| **Risk-On** (BTC > SMA96) | BTC price > SMA(96) | Classic Pullback | 자산 dip + 자산 uptrend (price > SMA192) |
-| **Risk-Off** (BTC < SMA96) | BTC price < SMA(96) | Sympathy Pullback | 자산 dip + BTC 단기 하락 (btc_mom < 0) |
+| **Risk-On** (BTC > SMA96) | BTC price > SMA(96) | Classic Pullback | 자산 dip + 자산 uptrend (price > SMA192) + ≥min_confidence |
+| **Risk-Off** (BTC < SMA96) | BTC price < SMA(96) | Sympathy Pullback | 자산 dip + BTC 단기 하락 (btc_mom < 0) + ≥min_confidence |
 
-- **Risk-On**: BTC 상승장 → 자산이 자체 상승추세에서 조정 → 매수 (클래식 풀백)
-- **Risk-Off**: BTC 하락장 → BTC와 동반 하락하는 자산 → 매수 (동조 풀백, v4.4과 동일)
+**컨피던스 증거 (5가지, 레짐별 임계값 다름):**
+- +1: BTC 레짐 확인 (기본 1점)
+- +1: RSI 과매도/과매수 (Risk-On: RSI<40, Risk-Off: RSI<35)
+- +1: 거래량 > 1.5x 평균 (청산 캐스케이드 감지)
+- +1: 테이커 매도 압력 (Risk-On: ratio<0.45, Risk-Off: ratio<0.42)
+- +1: SMA 지지 근접 (Risk-On) / BTC 모멘텀 강도 (Risk-Off)
 - **BTC crash gate**: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
 - 기존 포지션 보유 심볼은 중복 신호 무시
 
@@ -141,7 +145,7 @@ else:
     notional = per_slot_capital × leverage
 ```
 
-> **핵심 발견 (v5.0)**: Regime-Switch Dual Entry가 단일 BTC directional 대비 Calmar 6.70 (vs 4.98). 두 레짐에서 각각 최적의 알고리즘을 사용하여 832 trades, WR 61.7%, R:R 1.25로 안정적 수익. 레버리지는 flat 1.5x가 최적 (2.5x에서 Calmar 6.94지만 리스크 상승).
+> **핵심 발견 (v6.0)**: Confidence-Scored Entry가 v5.0 대비 Calmar 8.76 (vs 8.03). min_confidence=2로 34개 저품질 트레이드 필터링 → 동일 DD(16.9%)에서 Sharpe 2.05, WR 63.3%. 모멘텀 전략 5종 테스트 결과 15m 크립토에서 모멘텀은 비효과적임을 확인. 졸업 레버리지(base=1.0, step=1.0, max=2.0) 적용 시 Calmar 9.99까지 상승 가능하나 DD 22.4%로 상승. 보수적 flat 1.5x가 라이브 트레이딩 기본값.
 
 ### 2.5 비용 모델
 
@@ -170,7 +174,7 @@ else:
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage` | 기본 평균회귀 신호 + BTC 레짐 스위치 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 (Numba 컴파일) |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 (Numba 컴파일) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
@@ -287,7 +291,13 @@ else:
 | `max_leverage` | 1.5 | `RubberBandConfig` | 레버리지 안전 상한 |
 | `btc_directional_enabled` | True | `RubberBandConfig` | BTC 방향 정렬 필터 활성화 (Risk-Off에서 사용) |
 | `btc_directional_period` | 32 (8h) | `RubberBandConfig` | BTC 모멘텀 lookback (봉 수) |
-| `entry_mode` | 'regime_switch' | `RubberBandConfig` | 진입 모드: regime_switch / btc_directional / raw |
+| `entry_mode` | 'confidence' | `RubberBandConfig` | 진입 모드: confidence / regime_switch / btc_directional / raw |
+| `btc_regime_period` | 96 (24h) | `RubberBandConfig` | BTC SMA period for regime detection |
+| `asset_trend_period` | 192 (48h) | `RubberBandConfig` | Asset SMA period for classic pullback |
+| `min_confidence` | 2 | `RubberBandConfig` | 최소 증거 점수 (1-5, 2=최적) |
+| `confidence_leverage_step` | 0.0 | `RubberBandConfig` | 컨피던스당 추가 레버리지 (0=고정) |
+| `rsi_period` | 14 | `RubberBandConfig` | RSI 계산 기간 |
+| `vol_period` | 20 | `RubberBandConfig` | 거래량 SMA 기간 |
 | `btc_regime_period` | 96 (24h) | `RubberBandConfig` | BTC SMA period for regime detection |
 | `asset_trend_period` | 192 (48h) | `RubberBandConfig` | Asset SMA period for classic pullback |
 | `partial_exit_enabled` | False | `RubberBandConfig` | 부분 청산 비활성화 (v4.4) |

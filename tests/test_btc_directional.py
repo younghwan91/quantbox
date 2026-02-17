@@ -168,10 +168,10 @@ class TestOnBarRouting:
 class TestConfigDefaults:
     """Test config defaults and settings propagation."""
 
-    def test_default_regime_switch(self):
-        """Default entry_mode is regime_switch (v5.0)."""
+    def test_default_confidence(self):
+        """Default entry_mode is confidence (v6.0)."""
         cfg = RubberBandConfig()
-        assert cfg.entry_mode == 'regime_switch'
+        assert cfg.entry_mode == 'confidence'
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_enabled is True
