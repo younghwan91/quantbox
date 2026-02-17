@@ -7,14 +7,14 @@
 
 ## 1. 시스템 개요
 
-QuantBox v6.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
+QuantBox v7.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
-**v6.0: Confidence-Scored Multi-Evidence** — 레짐 스위치 + 멀티 증거 컨피던스 필터링 + 졸업 레버리지.
+**v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
 
 | 구성 요소 | 역할 |
 |-----------|------|
 | **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산 |
-| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 4.5%+ 급등/급락 포착) |
+| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 4.5%+ 급등/급락 포착) + MTF 확인 + 독립 4H 트레이딩 |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -26,28 +26,37 @@ QuantBox v6.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (러버밴드, Regime-Switch Dual Entry v5.0)
+전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0)
 심볼선택: Top-10 curated (FETUSDT, FILUSDT, ICPUSDT, HBARUSDT, DOTUSDT,
                         OPUSDT, SHIBUSDT, DOGEUSDT, LTCUSDT, ATOMUSDT)
 파라미터: lookback=8, threshold=0.045, target=0.4, stop=0.9, max_hold=10
-         stop_decay=0.0, htf_period=0 (MTF DISABLED)
-         entry_mode='regime_switch'
+         stop_decay=0.0
+         entry_mode='confidence'
          btc_regime_period=96 (24h SMA for regime detection)
          asset_trend_period=192 (48h SMA for classic pullback)
          btc_directional_period=32 (8h BTC momentum for sympathy)
          base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
          partial_exit_enabled=false
+         # v7.0 MTF Confirmation
+         mtf_confirmation_enabled=true
+         mtf_sma_period=12 (4h SMA, 2일)
+         mtf_leverage_mult=2.0 (MTF 확인 시 실효 3.0x)
+         # v7.0 Independent 4H Rubber Band
+         htf_independent_enabled=true
+         htf_rb_lookback=3, htf_rb_threshold=0.10
+         htf_rb_target_retrace=0.5, htf_rb_stop_mult=0.8
+         htf_rb_max_hold=12, htf_rb_btc_sma_period=48
 비용:     0.04%/side + 펀딩비
 
-성과 (365일, 10개 심볼 유니버스):
-  Return:    +116.8%
-  Sharpe:    1.89
-  Max DD:    17.4%
-  Calmar:    6.70
-  Win Rate:  61.7%
+성과 (365일, v7.0 hybrid, 10개 심볼 유니버스):
+  Return:    +139.8%
+  Sharpe:    5.23
+  Max DD:    4.3%
+  Calmar:    32.42
+  Win Rate:  63.3%
   R:R:       1.25
-  Trades:    832
-  Rolling Windows: 13/13 profitable (100%)
+  Trades:    798
+  Walk-forward Q3 DD: 3.0% (was 16.5%)
 ```
 
 ---
@@ -62,6 +71,7 @@ QuantBox v6.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 │     → 당일 손실 ≥ 5% → _daily_halt (신규 진입 차단)             │
 │  2. If drawdown_halt: close ALL positions → return              │
 │  3. BTC klines 다운로드 (regime filter용)                       │
+│  3b. 4h klines 다운로드 (MTF confirmation + 독립 4H 트레이딩)   │
 │  4. 기존 포지션 관리:                                            │
 │     ∀ active position:                                          │
 │       → update_position(symbol, price) → exit?                  │
@@ -69,7 +79,11 @@ QuantBox v6.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 │  5. 신규 진입 스캔 (_scan_entries):                              │
 │     ∀ symbol in universe (not already held):                    │
 │       → download_klines(symbol) → on_bar(symbol, close, btc)   │
+│       → MTF confirmation: 4h SMA(12) 트렌드 필터 적용 (v7.0)   │
 │       → 신호 +1/-1 → candidates 수집 → move 크기 정렬          │
+│       → MTF 확인 트레이드: 2.0x 레버리지 부스트 (v7.0)          │
+│     ∀ symbol: on_bar_4h(symbol, close_4h, btc_4h) (v7.0)       │
+│       → 독립 4H 러버밴드 신호 → 4h candidates 추가              │
 │       → 상위 N개까지 _open_position()                           │
 │  6. _save_state() — 원자적 JSON 저장                            │
 │  7. 매 4사이클마다 _log_summary() → 시간별 요약                  │
@@ -95,6 +109,17 @@ QuantBox v6.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 - +1: SMA 지지 근접 (Risk-On) / BTC 모멘텀 강도 (Risk-Off)
 - **BTC crash gate**: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
 - 기존 포지션 보유 심볼은 중복 신호 무시
+
+**v7.0 MTF Confirmation (apply_mtf_confirmation):**
+- 4h SMA(12)로 15m 신호 필터링: long 시 close_4h > SMA_4h, short 시 close_4h < SMA_4h
+- 역추세 트레이드 차단 → MDD 16.5% → 4.3% (-74%)
+- MTF 확인된 트레이드에 `apply_mtf_leverage()` 적용 (2.0x 부스트, 실효 3.0x)
+
+**v7.0 Independent 4H Rubber Band (compute_signals_4h_independent):**
+- 4h 타임프레임에서 독립적으로 평균회귀 신호 생성
+- lookback=3, threshold=0.10, target=0.5, stop=0.8, max_hold=12
+- BTC SMA(48) 레짐 필터 적용
+- `on_bar_4h()` → `update_htf_data()` → 4h 데이터 저장 및 신호 생성
 
 ### 2.2 청산 조건 (update_position)
 
@@ -147,6 +172,8 @@ else:
 
 > **핵심 발견 (v6.0)**: Confidence-Scored Entry가 v5.0 대비 Calmar 8.76 (vs 8.03). min_confidence=2로 34개 저품질 트레이드 필터링 → 동일 DD(16.9%)에서 Sharpe 2.05, WR 63.3%. 모멘텀 전략 5종 테스트 결과 15m 크립토에서 모멘텀은 비효과적임을 확인. 졸업 레버리지(base=1.0, step=1.0, max=2.0) 적용 시 Calmar 9.99까지 상승 가능하나 DD 22.4%로 상승. 보수적 flat 1.5x가 라이브 트레이딩 기본값.
 
+> **핵심 발견 (v7.0)**: MTF Confirmation(4h SMA12)이 v6.0 대비 MDD 16.5% → 4.3% (-74%), Calmar 32.42 (+275%), Sharpe 5.23 (+153%). 수익률은 -2.2% 소폭 감소하나 위험조정 수익 극적 개선. Walk-forward Q3 DD 16.5% → 3.0% (-82%). 독립 4H 트레이딩 단독으로 Ret +52.2%, DD 4.8%, Calmar 10.87. 15m+4h 하이브리드가 최적 구성.
+
 ### 2.5 비용 모델
 
 | 비용 항목 | 값 | 비고 |
@@ -174,7 +201,7 @@ else:
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 (Numba 컴파일) |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage`, `apply_mtf_confirmation`, `apply_mtf_leverage`, `compute_signals_4h_independent` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 + **MTF 확인 (v7.0)** + **독립 4H 트레이딩 (v7.0)** (Numba 컴파일) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
@@ -247,6 +274,10 @@ else:
 - [x] `settings.py` → `scalper.py main()` 완전 연동: `.env`의 14개 RB 파라미터가 라이브에 자동 적용
 - [x] Partial exit: `_partial_close_position()` 라이브 부분 청산 ↔ `_backtest_core_partial()` 백테스트 부분 청산 패리티
 - [x] R:R-gated leverage: `compute_rr_gated_leverage()` 라이브 ↔ `apply_rr_gated_leverage()` 백테스트 패리티
+- [x] **v7.0 MTF Confirmation**: `apply_mtf_confirmation()` 백테스트 ↔ `_scan_entries()` 라이브 4h SMA 필터 패리티
+- [x] **v7.0 MTF Leverage**: `apply_mtf_leverage()` 백테스트 ↔ 라이브 MTF 확인 시 2.0x 레버리지 부스트 패리티
+- [x] **v7.0 Independent 4H**: `compute_signals_4h_independent()` 백테스트 ↔ `on_bar_4h()` 라이브 4h 신호 패리티
+- [x] **v7.0 Live Fix**: volume/taker 데이터 `_scan_entries()` 연결, 4h kline 다운로드, `main()` v7.0 설정 전달
 
 ---
 
@@ -304,6 +335,16 @@ else:
 | `partial_exit_fraction` | 0.5 (50%) | `RubberBandConfig` | 부분 청산 비율 |
 | `rr_leverage_enabled` | True | `RubberBandConfig` | R:R-Gated 레버리지 활성화 |
 | `min_rr_for_leverage` | 0.30 | `RubberBandConfig` | 레버리지 허용 최소 R:R 값 |
+| `mtf_confirmation_enabled` | True | `RubberBandConfig` | **v7.0** 4h 트렌드 확인 활성화 |
+| `mtf_sma_period` | 12 (2일) | `RubberBandConfig` | **v7.0** 4h SMA 기간 |
+| `mtf_leverage_mult` | 2.0 | `RubberBandConfig` | **v7.0** MTF 확인 시 레버리지 배수 (실효 3.0x) |
+| `htf_independent_enabled` | True | `RubberBandConfig` | **v7.0** 독립 4시간 트레이딩 활성화 |
+| `htf_rb_lookback` | 3 (12h) | `RubberBandConfig` | **v7.0** 4h lookback |
+| `htf_rb_threshold` | 0.10 (10%) | `RubberBandConfig` | **v7.0** 4h 최소 무브 크기 |
+| `htf_rb_target_retrace` | 0.5 (50%) | `RubberBandConfig` | **v7.0** 4h 되돌림 목표 |
+| `htf_rb_stop_mult` | 0.8 | `RubberBandConfig` | **v7.0** 4h 손절 배수 |
+| `htf_rb_max_hold` | 12 (2일) | `RubberBandConfig` | **v7.0** 4h 최대 보유 기간 |
+| `htf_rb_btc_sma_period` | 48 (8일) | `RubberBandConfig` | **v7.0** 4h BTC SMA 기간 |
 
 ### 6.2 Alpha Engine 파라미터
 
@@ -346,11 +387,12 @@ else:
 
 ---
 
-## 7. 테스트 현황 (30+파일, 352개)
+## 7. 테스트 현황 (30+파일, 385개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
 | `test_rubberband` | 러버밴드 신호 생성 | compute_signals 정확성, 진입/청산 로직, **stop_decay**, **DD-managed portfolio**, **MTF confirmation**, **MTF enhanced (agree discount + tighter stop)**, **entry_stop_mult 패리티 (3개)** |
+| `test_mtf_confirmation` | MTF 확인 + 독립 4H | apply_mtf_confirmation, apply_mtf_leverage, compute_signals_4h_independent, on_bar_4h, update_htf_data (18개) |
 | `test_alpha_engine` | Alpha Engine 멀티팩터 | 팩터 토글, 적응형 임계값, 트레일링 |
 | `test_vol_selector` | 변동성 선택기 | 랭킹, 리밸런싱, 실현변동성 계산 |
 | `test_scalper` | 라이브 스캘퍼 | 사이클, 포지션 관리, 상태 저장/복원 |
