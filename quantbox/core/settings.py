@@ -89,11 +89,11 @@ class QuantBoxSettings(BaseSettings):
     dynamic_exit_base: float = 0.1  # 빠른 페어 exit z-score (half_life=min)
     dynamic_exit_range: float = 0.9  # max exit = base + range = 1.0
 
-    # ── Rubber Band Signal Parameters (365-day validated) ──
+    # ── Rubber Band Signal Parameters (v4.4, 365-day A/B validated) ──
     rb_lookback: int = 8               # Bars to measure move (2h at 15m)
     rb_threshold: float = 0.045        # Minimum move to trigger (4.5%)
-    rb_target_retrace: float = 0.3     # Take profit at 30% retracement
-    rb_stop_mult: float = 1.0          # Stop at 1x the move size
+    rb_target_retrace: float = 0.4     # Take profit at 40% retracement (R:R 1.10)
+    rb_stop_mult: float = 0.9          # Stop at 0.9x the move size (DD 12.7%)
     rb_max_hold: int = 10              # Maximum holding period (bars, 2.5h)
     rb_stop_decay: float = 0.0         # Stop tightening disabled for robustness
 
@@ -103,18 +103,18 @@ class QuantBoxSettings(BaseSettings):
     rb_htf_agree_discount: float = 0.85   # Threshold discount when HTF agrees
     rb_htf_agree_stop_mult: float = 0.95  # Stop multiplier when HTF agrees
 
-    # ── Dynamic Leverage (move-confidence scaling, 365-day validated) ──
-    rb_dynamic_leverage_enabled: bool = True  # Enable move-confidence leverage
-    rb_base_leverage: float = 3.0             # Minimum leverage for threshold-level moves
-    rb_leverage_scale: float = 10.0           # Lev gain per 100% excess move
-    rb_max_leverage: float = 7.0              # Hard cap on leverage
+    # ── Dynamic Leverage (v4.4: flat 1.5x, 365-day A/B validated) ──
+    rb_dynamic_leverage_enabled: bool = True  # Enable leverage pipeline
+    rb_base_leverage: float = 1.5             # Flat 1.5x leverage (sweet spot)
+    rb_leverage_scale: float = 0.0            # No confidence scaling (flat leverage)
+    rb_max_leverage: float = 1.5              # Aligned with base (safety cap)
 
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
     rb_btc_directional_period: int = 32       # BTC 모멘텀 lookback (32봉 = 8시간)
 
-    # ── Capital Preservation (v4.3, A/B validated) ──
-    rb_partial_exit_enabled: bool = True      # 50% 부분 청산 활성화 (수익 발생 즉시)
+    # ── Capital Preservation (v4.4: DISABLED — hurts with tighter stop) ──
+    rb_partial_exit_enabled: bool = False     # Disabled: Calmar 3.75 vs 4.96 without
     rb_partial_exit_fraction: float = 0.5     # 부분 청산 비율 (0.5 = 50%)
 
     # ── R:R-Gated Leverage (v4.3, A/B validated) ──

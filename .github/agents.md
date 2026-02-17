@@ -27,8 +27,10 @@ QuantBox v4.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 ```
 전략:     RB_original (러버밴드, MTF 비활성화)
 심볼선택: EW All-30 (균등 가중, 365일 검증)
-파라미터: lookback=8, threshold=0.045, target=0.3, stop=1.0, max_hold=10
+파라미터: lookback=8, threshold=0.045, target=0.4, stop=0.9, max_hold=10
          stop_decay=0.0, htf_period=0 (MTF DISABLED)
+         base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
+         partial_exit_enabled=false (tighter stop이 DD 충분히 억제)
 비용:     0.04%/side + 펀딩비
 
 성과 (365일, 30개 심볼 유니버스, EW All-30):
@@ -78,7 +80,7 @@ QuantBox v4.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 | 그 외 | 0 | 진입 안 함 |
 
 - **BTC Directional Alignment (v4.2)**: Long 진입 시 BTC도 하락 중이어야, Short 진입 시 BTC도 상승 중이어야 진입 허용 (시장 전체 움직임과 상관된 되돌림만 포착)
-- **Partial Exit Signal (v4.3)**: `compute_signals_partial_exit_btc_directional()` — 3-Phase 포지션 추적 (0=flat, 1=full ±1.0, 2=half ±0.5). 진입 후 이익 발생 시 50% 부분 청산 → 잔여 50%에 손익분기 스탑 적용
+- **Partial Exit (v4.3, v4.4에서 비활성화)**: `compute_signals_partial_exit_btc_directional()` — stop=0.9에서 오히려 성능 저하 (Calmar 3.75 vs 4.96). Tighter stop이 DD를 충분히 억제.
 - BTC crash gate: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
 - 기존 포지션 보유 심볼은 중복 신호 무시
 
@@ -86,12 +88,12 @@ QuantBox v4.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 
 | 조건 | 판정 | 비고 |
 |------|------|------|
-| **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 50% 되돌림 기본 |
+| **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 40% 되돌림 기본 |
 | **Stop Loss** | unrealized PnL < -stop_mult × move_size × time_factor | time_factor = 1 - stop_decay × (bars_held / max_hold) |
 | **Trailing Stop** | best_pnl > 0 && PnL < best_pnl × (1 - trail_pct) | 이익 확보 후 역전 방어 |
 | **Max Hold** | bars_held ≥ max_hold | 타임아웃 강제 청산 (8 bars = 2h) |
-| **Partial Close (v4.3)** | gain > 0 && not partial_closed | 50% 부분 청산, 이익 확보 |
-| **Break-even Stop (v4.3)** | partial_closed && gain ≤ 0 | 부분 청산 후 손익분기 방어 |
+| **Partial Close (v4.3, 비활성)** | gain > 0 && not partial_closed | v4.4에서 비활성화 (tighter stop이 DD 억제) |
+| **Break-even Stop (v4.3, 비활성)** | partial_closed && gain ≤ 0 | v4.4에서 비활성화 |
 
 ### 2.3 주문 실행 (LimitOrderChaser)
 
@@ -131,7 +133,7 @@ else:
     notional = per_slot_capital × leverage
 ```
 
-> **핵심 발견 (v4.3)**: target=0.3, stop=1.0 기본 전략의 R:R ≈ 0.28로, min_rr=0.30 시 모든 트레이드에 leverage=1x 적용. DD 75%→15%로 5배 감소.
+> **핵심 발견 (v4.4)**: stop=0.9, target=0.4로 최적화 시 실현 R:R=1.10, DD 12.7%. Flat 1.5x에서 Calmar 4.98 ★ (레버리지가 리스크 대비 수익 개선). 2x부터 DD 급증, 5x BLOWUP.
 
 ### 2.5 비용 모델
 
@@ -212,7 +214,7 @@ else:
 
 ### 4.3 포지션 관리
 - [ ] Target/Stop/Trailing/MaxHold 4중 청산 조건
-- [ ] Partial Close (v4.3) — 이익 발생 시 50% 부분 청산 + Break-even stop
+- [ ] Partial Close (v4.3, v4.4 비활성) — 부분 청산 기능 존재하나 v4.4에서 비활성화
 - [ ] 청산 실패 시 포지션 재등록 → 다음 사이클 재시도
 - [ ] 동일 심볼 중복 진입 방지 (`has_position()`)
 - [ ] max_hold 강제 청산 (타임아웃)
@@ -263,8 +265,8 @@ else:
 |---------|--------|------|------|
 | `lookback` | 8 bars (2h) | `RubberBandConfig` | 급등/급락 측정 기간 |
 | `threshold` | 0.045 (4.5%) | `RubberBandConfig` | 최소 무브 크기 |
-| `target_retrace` | 0.3 (30%) | `RubberBandConfig` | 이익 실현 목표 |
-| `stop_mult` | 1.0 | `RubberBandConfig` | 손절 배수 (무브 크기 대비) |
+| `target_retrace` | 0.4 (40%) | `RubberBandConfig` | 이익 실현 목표 |
+| `stop_mult` | 0.9 | `RubberBandConfig` | 손절 배수 (무브 크기 대비) |
 | `max_hold` | 10 bars (2.5h) | `RubberBandConfig` | 최대 보유 기간 |
 | `stop_decay` | 0.0 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성) |
 | `htf_period` | 0 (비활성) | `RubberBandConfig` | MTF SMA lookback (0=비활성) |
@@ -272,12 +274,12 @@ else:
 | `htf_agree_discount` | 0.85 | `RubberBandConfig` | HTF 동의 시 threshold 배수 (15% 낮춤) |
 | `htf_agree_stop_mult` | 0.95 | `RubberBandConfig` | HTF 동의 시 stop 배수 (5% 타이트) |
 | `dynamic_leverage_enabled` | True | `RubberBandConfig` | Move-confidence 동적 레버리지 활성화 |
-| `base_leverage` | 3.0 | `RubberBandConfig` | 최소 레버리지 (threshold 수준 움직임) |
-| `leverage_scale` | 10.0 | `RubberBandConfig` | 100% 초과 움직임당 레버리지 증가 |
-| `max_leverage` | 7.0 | `RubberBandConfig` | 레버리지 안전 상한 |
+| `base_leverage` | 1.5 | `RubberBandConfig` | flat 1.5x 레버리지 |
+| `leverage_scale` | 0.0 | `RubberBandConfig` | 컨피던스 스케일링 비활성화 |
+| `max_leverage` | 1.5 | `RubberBandConfig` | 레버리지 안전 상한 |
 | `btc_directional_enabled` | True | `RubberBandConfig` | BTC 방향 정렬 필터 활성화 |
 | `btc_directional_period` | 32 (8h) | `RubberBandConfig` | BTC 모멘텀 lookback (봉 수) |
-| `partial_exit_enabled` | True | `RubberBandConfig` | 부분 청산 + 손익분기 스탑 활성화 |
+| `partial_exit_enabled` | False | `RubberBandConfig` | 부분 청산 비활성화 (v4.4) |
 | `partial_exit_fraction` | 0.5 (50%) | `RubberBandConfig` | 부분 청산 비율 |
 | `rr_leverage_enabled` | True | `RubberBandConfig` | R:R-Gated 레버리지 활성화 |
 | `min_rr_for_leverage` | 0.30 | `RubberBandConfig` | 레버리지 허용 최소 R:R 값 |
