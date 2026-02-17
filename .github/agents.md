@@ -84,7 +84,6 @@ QuantBox v10.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber
 │  0. balance = get_balance()                                     │
 │  1. _check_risk_limits(balance)                                 │
 │     → HWM 대비 DD ≥ 10% → _drawdown_halt (전체 청산)           │
-│     → 당일 손실 ≥ 5% → _daily_halt (신규 진입 차단)             │
 │  2. If drawdown_halt: close ALL positions → return              │
 │  3. BTC klines 다운로드 (regime filter용)                       │
 │  3b. 4h klines 다운로드 (MTF confirmation + 독립 4H 트레이딩)   │
@@ -405,7 +404,6 @@ else:
 | `risk_per_trade` | 0.01 (1%) | `RubberBandConfig` | 트레이드당 리스크 |
 | `max_concurrent` | 5 | `RubberBandConfig` | 최대 동시 포지션 |
 | `max_drawdown_pct` | 0.10 (10%) | `RubberBandConfig` | 세션 DD 서킷 브레이커 |
-| `daily_loss_limit_pct` | 0.05 (5%) | `RubberBandConfig` | 일일 손실 제한 |
 | `fee_rate` | 0.0002 (0.02%) | `RubberBandConfig` | 메이커 수수료/side |
 | `slippage_rate` | 0.0002 (0.02%) | `RubberBandConfig` | 슬리피지/side |
 | `funding_rate_8h` | 0.0001 (0.01%) | `RubberBandConfig` | 8h 펀딩비 |
