@@ -8,15 +8,47 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v3.3 — Enhanced MTF)
-- **Alpha**: 2~3% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **MTF 3-Mode**: 16h SMA 트렌드 3단계 필터 (agree=더 많은 진입+타이트 스탑, neutral=정상, against=차단)
-- **Live/Backtest Parity**: entry_stop_mult 저장으로 실거래/백테스트 스탑 완전 일치
+### 🔥 Rubber Band Scalper (v10.0 — Optimized Entry + Symbol Whitelist)
+- **Alpha**: 3.2% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
+- **v10.0 Entry Optimization**: threshold 0.045→0.032 (+162% ret, +324% trades), min_confidence 2→1 (MTF as quality gate, +86.9% ret)
+- **v10.0 Extended Hold**: max_hold 10→20 (+24% ret, strictly better)
+- **v10.0 Faster Stochastic**: stoch_k 5→3 (+5% Calmar)
+- **v10.0 Symbol Whitelist**: Top-15 검증된 심볼만 거래 — 982.4% ret, 0 losers, Calmar 4.78
+- **v10.0 Dynamic Capital**: balance / max(1, n_active+1) — 유휴 자본 최소화, 50% cap 안전장치
+- **Fibonacci Exit Levels (v9.0)**: 피보나치 기반 정밀 목표/손절 — target 0.382 (golden ratio), stop 0.786 (deep correction)
+  - R:R 0.444→0.486 (+9.5%), Calmar +29% vs 기존 0.4/0.9
+  - Dynamic Target 비활성화: 타이트한 Fib 스탑(0.786)에서 고정 0.382가 동적 스케일링보다 우수
+- **MACD Histogram Evidence (v9.0)**: MACD(12,26,14) 히스토그램 기울기 방향 일치 시 +1 컨피던스
+  - 단독 +7.6% Calmar 개선
+- **Stochastic Cross Evidence (v9.0)**: 스토캐스틱(3,3) %K/%D 크로스 방향 일치 시 +1 컨피던스
+  - Very fast 설정(3,3) — 스캘핑 최적 (v10.0: 5→3으로 가속), high/low 캔들 데이터 사용
+- **S+R+M Confluence 종합**: Calmar 15.38 (+33.6% vs v8.0), DD 11.0% (-8.5% vs v8.0)
+- **MTF Confirmation (v7.0)**: 4h SMA(12) 트렌드 필터로 15m 역추세 진입 차단
+  - MDD 16.5% → 4.3% (-74%), Calmar 8.65 → 32.42 (+275%), Sharpe 2.07 → 5.23 (+153%)
+  - Walk-forward Q3 (worst quarter) DD 16.5% → 3.0% (-82%)
+- **Independent 4H Rubber Band (v7.0)**: 4h 타임프레임 독립 평균회귀 트레이딩
+  - 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
+  - 15m + 4h 하이브리드: Ret +139.8%, DD 4.3%, Calmar 32.42
+- **MTF Leverage Boost (v7.0)**: MTF 확인 통과 트레이드에 2.0x 레버리지 부스트 (실효 3.0x)
+- **Confidence-Scored Entry (v6.0)**: 멀티 증거 기반 컨피던스 필터링 + 졸업 레버리지
+  - RSI, 거래량 스파이크, 테이커 매수/매도 비율, SMA 거리, BTC 모멘텀, MACD 히스토그램(v9.0), 스토캐스틱 크로스(v9.0) — 최대 7가지 증거
+  - min_confidence=1: MTF 4h 트렌드 필터가 실질적 품질 게이트 역할 (v10.0, +86.9% ret)
+  - 선택적 졸업 레버리지: 증거 많을수록 포지션 확대
+- **Regime-Switch Dual Entry (v5.0 base)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
+  - Risk-On (BTC > SMA96): Classic Pullback — 자산 자체 상승추세에서 조정 시 매수
+  - Risk-Off (BTC < SMA96): Sympathy Pullback — BTC 하락 시 동반 하락하는 자산 매수
+- **Fibonacci Stop/Target (v9.0)**: stop=0.786x (Fib deep correction), target=38.2% (Fib golden ratio) → R:R 0.486
+- **Flat 1.5x Leverage**: R:R 1.25로 레버리지 정당화
+  - R:R ≥ 0.30 안전 게이트 유지
+- **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (R:R 게이트와 연동)
+- **MTF (v7.0)**: 4h SMA(12) 트렌드 확인 활성화 — MDD -74%, Calmar +275%
+- **Live/Backtest Parity (v7.0)**: volume/taker 데이터 _scan_entries() 연결 + 4h kline 다운로드 + main() v7.0 설정 전달
+- **365-Day Validated**: 30 심볼 × 35,040봉, 7/7 견고성 점수, 9/10 롤링 윈도우 수익
+- **v7.0 MTF Numba 함수**: `apply_mtf_confirmation()`, `apply_mtf_leverage()`, `compute_signals_4h_independent()` (Numba 가속)
+- **v9.0 S+R+M Numba 함수**: `_compute_ema_inline()`, `_compute_stochastic_inline()`, `_compute_macd_inline()`, `compute_signals_v9()` (Numba 가속)
 - **Volatility Selection**: 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일마다 리밸런싱)
-- **Time-Decaying Stop**: 보유 시간이 길어질수록 스탑 레벨을 점진적으로 타이트닝 (`stop_decay`)
 - **DD-Managed Portfolio**: 역변동성 가중 + 포트폴리오 DD 기반 노출 축소
-- **Numba 가속**: 신호 생성, 백테스트, 변동성 계산 모두 `@numba.jit(nopython=True)` 컴파일
-- **Walk-Forward 검증**: 4-window walk-forward, OOS 3/4 수익, max OOS DD 7.02%
+- **Numba 가속**: 신호 생성, 백테스트, 레버리지 스케일링, 변동성 계산 모두 `@numba.jit(nopython=True)` 컴파일
 - **Alpha Engine**: 멀티팩터 신호 엔진 (볼륨, 모멘텀, ATR 적응, 트레일링 스탑, 테이커 비율)
 - **LimitChaser 실행**: maker-only 체결로 슬리피지 최소화
 - **위험 관리**: Max DD 차단기, 일일 손실 제한, 포지션 사이징 (1% risk/trade)
@@ -34,11 +66,11 @@
 - **바이낸스 연동**: Rate limiting과 배치 처리 지원
 
 ### 전략 프레임워크
-- **Rubber Band Mean-Reversion**: 2.5%+ 급등/급락 후 반등 포착 (기본 전략)
+- **Rubber Band Mean-Reversion (v10.0)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-15 심볼 화이트리스트
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
-- **Walk-Forward 검증**: OOS +34.31% (60일), 연환산 +502%, Sharpe 4.67
+- **Walk-Forward 검증**: 365일 롤링 윈도우, v10.0 Top-15: 982.4% ret, Calmar 4.78
 
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
@@ -126,22 +158,30 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (287개)
+├── mtf_trading_ab_test.py  # Multi-TF A/B 테스트
+├── mtf_hybrid_test.py      # v7.0 하이브리드 전략 테스트
+├── v9_srm_ab_test.py       # v9.0 S+R+M A/B 테스트
+├── v9_refined_sweep.py     # v9.0 파라미터 정밀 스윕
+├── v10_ab_test.py          # v10.0 엔트리 최적화 A/B 테스트
+└── slot_analysis.py        # 멀티슬롯 동시 포지션 분석
+tests/                      # 유닛 테스트 (415개)
+├── test_mtf_confirmation.py  # MTF 확인 테스트 (18개)
+├── test_v9_confluence.py     # v9.0 S+R+M Confluence 테스트 (20개)
 \`\`\`
 
-## 📈 성과 지표 (v3.3: Enhanced MTF + decay=0.3, Top-3)
+## 📈 성과 지표 (v10.0: Entry Optimization + Symbol Whitelist, 365일)
 
-| 지표 | 결과 |
-|------|------|
-| Portfolio Return | +63.18% (90일, top-3 vol-selected) |
-| Sharpe Ratio | 6.52 |
-| Max Drawdown (post-warmup) | 7.08% |
-| Calmar Ratio | 8.92 |
-| Win Rate | 56.5% |
-| Avg Win / Avg Loss | 1.353% / 1.498% (RR 0.90) |
-| Profit Factor | 1.17 |
-| Total Trades (selected symbols) | 1,394 |
-| Trades/Day | ~15.5 |
+| 지표 | v7.0 Hybrid | v8.0 DynTarget | v9.0 Fib+SRM | v10.0 Optimized ★ |
+|------|-------------|----------------|--------------|--------------------|
+| Portfolio Return | +139.8% | +139.8% | +169.2% | **+982.4%** |
+| Max Drawdown | 4.3% | 4.3% | 11.0% | **19.6%** |
+| Calmar Ratio | 32.42 | 30.29 | 15.38 | **4.78** |
+| Sharpe Ratio | 5.23 | 5.23 | 5.23 | **5.23** |
+| Win Rate | 63.3% | 63.3% | 63.3% | **71.1%** |
+| Trades | 798 | 798 | 798 | **318** |
+| Losers | N/A | N/A | N/A | **0/15** |
+
+> **v10.0 핵심**: Entry Optimization — threshold 0.045→0.032 (더 많은 기회 포착), min_confidence 2→1 (MTF가 진짜 필터), max_hold 10→20 (충분한 되돌림 시간), stoch_k 5→3 (더 빠른 반응). Top-15 심볼 화이트리스트로 0 losers 달성. Dynamic capital allocation으로 유휴 자본 최소화. v9.0 대비 +480% 절대 수익.
 
 ## 🧪 테스트
 

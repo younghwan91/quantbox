@@ -52,6 +52,7 @@ from quantbox.core.settings import get_settings
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.rubberband import (
     RubberBandConfig, RubberBandStrategy, calculate_position_size,
+    compute_confidence_leverage,
 )
 
 load_dotenv()
@@ -165,10 +166,7 @@ class RubberBandScalper:
         # Risk tracking
         self._initial_balance: float = 0.0
         self._high_water_mark: float = 0.0
-        self._daily_start_balance: float = 0.0
-        self._daily_start_time: datetime = datetime.now(timezone.utc)
         self._drawdown_halt: bool = False
-        self._daily_halt: bool = False
 
         # Symbol info cache (avoid repeated exchange_info calls)
         self._symbol_info_cache: dict[str, dict] = {}
@@ -207,7 +205,7 @@ class RubberBandScalper:
         return 0.0
 
     def _check_risk_limits(self, balance: float) -> bool:
-        """Check drawdown and daily loss limits.
+        """Check session drawdown limit.
 
         Returns True if trading should be blocked.
         """
@@ -231,27 +229,6 @@ class RubberBandScalper:
                         f"Closing all positions."
                     ))
                     self._drawdown_halt = True
-                return True
-
-        # Daily loss check (reset at UTC midnight)
-        now = datetime.now(timezone.utc)
-        if now.date() > self._daily_start_time.date():
-            self._daily_start_balance = balance
-            self._daily_start_time = now
-            self._daily_halt = False
-
-        if self._daily_start_balance > 0:
-            daily_loss = (
-                (self._daily_start_balance - balance)
-                / self._daily_start_balance
-            )
-            if daily_loss >= self.config.daily_loss_limit_pct:
-                if not self._daily_halt:
-                    logger.warning(
-                        f"DAILY LOSS LIMIT: {daily_loss*100:.1f}% "
-                        f"(start=${self._daily_start_balance:.2f})"
-                    )
-                    self._daily_halt = True
                 return True
 
         return False
@@ -279,7 +256,14 @@ class RubberBandScalper:
                 s for s in sorted_syms[:self.config.min_volume_rank]
                 if s not in self.config.exclude_symbols
             ]
-            logger.info(f"Universe: {len(result)} symbols")
+
+            # v10.0: Apply symbol whitelist filter
+            if self.config.symbol_whitelist:
+                whitelist_set = set(self.config.symbol_whitelist)
+                result = [s for s in result if s in whitelist_set]
+                logger.info(f"Universe: {len(result)} symbols (whitelist={len(whitelist_set)})")
+            else:
+                logger.info(f"Universe: {len(result)} symbols")
             return result
         except Exception as e:
             logger.error(f"Symbol fetch failed: {e}")
@@ -314,29 +298,39 @@ class RubberBandScalper:
             return {}
 
     def download_klines(
-        self, symbol: str, n_bars: int = 200
-    ) -> np.ndarray | None:
-        """Download recent 15m close prices.
+        self, symbol: str, n_bars: int = 200, interval: str = '15m',
+        full: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """Download recent klines.
 
         Args:
             symbol: Trading symbol.
             n_bars: Number of bars to fetch.
+            interval: Candle interval ('15m', '4h', etc.).
+            full: If True, returns (close, volume, taker_buy) tuple.
 
         Returns:
-            Array of close prices, or None on failure.
+            Array of close prices (default), or (close, volume, taker_buy) tuple
+            if full=True, or None on failure.
         """
         try:
             klines = self.client.futures_klines(
                 symbol=symbol,
-                interval='15m',
+                interval=interval,
                 limit=n_bars,
             )
             if not klines:
                 return None
             close = np.array([float(k[4]) for k in klines], dtype=np.float64)
+            if full:
+                high = np.array([float(k[2]) for k in klines], dtype=np.float64)
+                low = np.array([float(k[3]) for k in klines], dtype=np.float64)
+                volume = np.array([float(k[5]) for k in klines], dtype=np.float64)
+                taker_buy = np.array([float(k[9]) for k in klines], dtype=np.float64)
+                return close, high, low, volume, taker_buy
             return close
         except Exception as e:
-            logger.error(f"Klines fetch failed for {symbol}: {e}")
+            logger.error(f"Klines fetch failed for {symbol} ({interval}): {e}")
             return None
 
     # ==================== Order Execution ====================
@@ -462,16 +456,64 @@ class RubberBandScalper:
         lookback_price = close_prices[-cfg.lookback - 1]
         move_size = abs(entry_price / lookback_price - 1.0)
 
-        # Position sizing
-        per_slot_capital = balance / cfg.max_concurrent
+        # Position sizing — v10.0: dynamic capital allocation
+        if cfg.dynamic_capital_enabled:
+            n_active = self.strategy.n_active
+            per_slot_capital = balance / max(1, n_active + 1)
+            # Safety: cap at 50% of balance to prevent over-concentration
+            per_slot_capital = min(per_slot_capital, balance * 0.5)
+        else:
+            per_slot_capital = balance / cfg.max_concurrent
         notional, leverage = calculate_position_size(
             capital=per_slot_capital,
             risk_per_trade=cfg.risk_per_trade,
             entry_price=entry_price,
             move_size=move_size,
             stop_mult=cfg.stop_mult,
-            max_leverage=20.0,
+            max_leverage=cfg.max_leverage,
         )
+
+        # Dynamic leverage: override with move-confidence scaling
+        if cfg.dynamic_leverage_enabled:
+            if cfg.rr_leverage_enabled:
+                # v4.3: R:R-gated leverage — only deploy when R:R justifies it
+                from quantbox.strategy.rubberband import compute_rr_gated_leverage
+                conf_lev = compute_rr_gated_leverage(
+                    move_size=move_size,
+                    threshold=cfg.threshold,
+                    target_retrace=cfg.target_retrace,
+                    stop_mult=cfg.stop_mult,
+                    cost_per_side=cfg.cost_per_side,
+                    base_leverage=cfg.base_leverage,
+                    leverage_scale=cfg.leverage_scale,
+                    max_leverage=cfg.max_leverage,
+                    min_rr=cfg.min_rr_for_leverage,
+                )
+            else:
+                conf_lev = compute_confidence_leverage(
+                    move_size=move_size,
+                    threshold=cfg.threshold,
+                    base_leverage=cfg.base_leverage,
+                    leverage_scale=cfg.leverage_scale,
+                    max_leverage=cfg.max_leverage,
+                )
+            notional = per_slot_capital * conf_lev
+            leverage = conf_lev
+
+        # ═══ v10.2 PARITY FIX: Apply MTF leverage multiplier ═══
+        # In backtest: apply_mtf_leverage(signals, mult) scales signal magnitude
+        # which _backtest_core uses as position size (position * bar_return).
+        # In live: on_bar() returns ±1 (no magnitude), so we apply the same
+        # multiplier here via the was_mtf_confirmed() side-channel.
+        # Effective leverage: base(1.5) × mtf_mult(2.5) = 3.75x per trade.
+        if cfg.mtf_confirmation_enabled and cfg.mtf_leverage_mult > 1.0:
+            if self.strategy.was_mtf_confirmed(symbol):
+                leverage *= cfg.mtf_leverage_mult
+                notional = per_slot_capital * leverage
+                logger.debug(
+                    f"[{symbol}] MTF leverage boost: "
+                    f"{leverage/cfg.mtf_leverage_mult:.2f}x → {leverage:.2f}x"
+                )
 
         if notional < 10.0:  # Min notional $10
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
@@ -489,8 +531,8 @@ class RubberBandScalper:
             logger.debug(f"[{symbol}] Below min notional ${min_notional}")
             return False
 
-        side = 'BUY' if signal == 1 else 'SELL'
-        lev_int = max(1, min(int(leverage), 20))
+        side = 'BUY' if signal > 0 else 'SELL'
+        lev_int = max(1, min(math.ceil(leverage), 20))
 
         result = self._place_order(symbol, side, quantity, leverage=lev_int)
         if result is None:
@@ -535,6 +577,90 @@ class RubberBandScalper:
                  'inline': True},
                 {'name': 'Leverage', 'value': f'{lev_int}x', 'inline': True},
                 {'name': 'Move', 'value': f'{move_size*100:.2f}%', 'inline': True},
+            ],
+        })
+        return True
+
+    def _partial_close_position(
+        self, symbol: str, current_price: float,
+    ) -> bool:
+        """Partially close 50% of a position (v4.3 capital preservation).
+
+        Closes half the position to lock in profit. The remaining half
+        continues with a break-even stop. Does NOT remove the position
+        from the strategy — it stays tracked with partial_closed=True.
+
+        Returns True if partial close succeeded.
+        """
+        pos = self.strategy._positions.get(symbol)
+        if pos is None:
+            return False
+
+        fraction = self.config.partial_exit_fraction
+        full_quantity = pos['notional'] / pos['entry_price']
+        close_qty = self._round_qty(full_quantity * fraction, symbol)
+        if close_qty <= 0:
+            return False
+
+        # Reverse the entry side to close
+        side = 'SELL' if pos['signal'] == 1 else 'BUY'
+
+        result = self._place_order(symbol, side, close_qty)
+        if result is None:
+            # Failed: revert partial_closed flag
+            pos['partial_closed'] = False
+            return False
+
+        fill_price = float(result['avgPrice'])
+
+        # PnL on the partial close
+        if pos['signal'] == 1:
+            pnl_pct = (fill_price - pos['entry_price']) / pos['entry_price']
+        else:
+            pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
+
+        partial_notional = close_qty * fill_price
+        pnl_usd = pnl_pct * partial_notional
+        cost = partial_notional * self.config.cost_per_side
+        net_pnl = pnl_usd - cost
+
+        # Update position: reduce notional by closed amount
+        pos['notional'] -= partial_notional
+
+        # Paper mode
+        if self.paper_mode:
+            self._paper_balance += pnl_usd - cost
+
+        # Trade record (partial)
+        trade = {
+            'symbol': symbol,
+            'signal': pos['signal'],
+            'entry_price': pos['entry_price'],
+            'exit_price': fill_price,
+            'pnl_pct': pnl_pct * 100,
+            'pnl_usd': net_pnl,
+            'notional': partial_notional,
+            'bars_held': pos['bars_held'],
+            'reason': 'partial_close',
+            'time': datetime.now(timezone.utc).isoformat(),
+        }
+        self._trade_history.append(trade)
+
+        logger.info(
+            f"[{symbol}] PARTIAL CLOSE ({fraction*100:.0f}%): "
+            f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
+            f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+            f"→ remaining ${pos['notional']:.2f}, BE stop active"
+        )
+        self.discord.send(embed={
+            'title': f"🔒 {symbol} PARTIAL CLOSE ({fraction*100:.0f}%)",
+            'color': 0xFFC107,
+            'fields': [
+                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': 'Remaining', 'value': f'${pos["notional"]:.2f}',
+                 'inline': True},
+                {'name': 'Stop', 'value': 'Break-even', 'inline': True},
             ],
         })
         return True
@@ -660,6 +786,11 @@ class RubberBandScalper:
         # 3. Fetch BTC klines for regime filter
         btc_close = self.download_klines('BTCUSDT', 200)
 
+        # 3b. v7.0: Fetch BTC 4h klines for MTF confirmation
+        btc_close_4h = None
+        if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
+            btc_close_4h = self.download_klines('BTCUSDT', 100, interval='4h')
+
         # 4. Process existing positions
         for sym in list(self.strategy.active_positions):
             close = self.download_klines(sym, 200)
@@ -669,15 +800,20 @@ class RubberBandScalper:
             current_price = close[-1]
             exit_reason = self.strategy.update_position(sym, current_price)
             if exit_reason:
-                self._close_position(sym, exit_reason, current_price)
+                if exit_reason == 'partial_close':
+                    # v4.3: partial close 50%, keep remaining with BE stop
+                    self._partial_close_position(sym, current_price)
+                else:
+                    self._close_position(sym, exit_reason, current_price)
 
         # 5. Look for new entries (skip if risk blocked)
-        if not risk_blocked and not self._daily_halt:
+        if not risk_blocked:
             available_slots = (
                 self.config.max_concurrent - self.strategy.n_active
             )
             if available_slots > 0:
-                self._scan_entries(symbols, btc_close, balance, available_slots)
+                self._scan_entries(symbols, btc_close, balance, available_slots,
+                                   btc_close_4h=btc_close_4h)
 
         # 6. Save state
         self._save_state()
@@ -692,9 +828,12 @@ class RubberBandScalper:
         btc_close: np.ndarray | None,
         balance: float,
         max_entries: int,
+        btc_close_4h: np.ndarray | None = None,
     ) -> None:
         """Scan all symbols for entry signals.
 
+        v7.0: Downloads volume/taker data for confidence scoring,
+        and 4h data for MTF confirmation filter.
         Prioritizes symbols with the largest moves (strongest alpha signal).
         """
         candidates: list[tuple[str, int, float, np.ndarray]] = []
@@ -704,9 +843,22 @@ class RubberBandScalper:
             if self.strategy.has_position(sym):
                 continue
 
-            close = self.download_klines(sym, 200)
-            if close is None or len(close) < self.config.lookback + 1:
+            # v9.0: Download full klines (close + high + low + volume + taker)
+            result = self.download_klines(sym, 200, full=True)
+            if result is None:
                 continue
+            close, high, low, volume, taker_buy = result
+            if len(close) < self.config.lookback + 1:
+                continue
+
+            # Wire up volume/taker/high/low data for v9 confluence scoring
+            self.strategy.update_market_data(sym, volume, taker_buy, high, low)
+
+            # v7.0: Download 4h data for MTF confirmation
+            if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
+                close_4h = self.download_klines(sym, 100, interval='4h')
+                if close_4h is not None:
+                    self.strategy.update_htf_data(sym, close_4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
             if signal != 0:
@@ -769,8 +921,7 @@ class RubberBandScalper:
             'paper_balance': self._paper_balance,
             'initial_balance': self._initial_balance,
             'high_water_mark': self._high_water_mark,
-            'daily_start_balance': self._daily_start_balance,
-            'daily_start_time': self._daily_start_time.isoformat(),
+
             'positions': self.strategy.active_positions,
             'trade_history': self._trade_history[-100:],  # Keep last 100
             'cycle_count': self._cycle_count,
@@ -793,7 +944,7 @@ class RubberBandScalper:
         self._paper_balance = state.get('paper_balance', self._paper_balance)
         self._initial_balance = state.get('initial_balance', 0)
         self._high_water_mark = state.get('high_water_mark', 0)
-        self._daily_start_balance = state.get('daily_start_balance', 0)
+
         self._trade_history = state.get('trade_history', [])
         self._cycle_count = state.get('cycle_count', 0)
 
@@ -955,24 +1106,24 @@ def main():
         help='Run a single cycle then exit'
     )
     parser.add_argument(
-        '--lookback', type=int, default=8,
-        help='Signal lookback bars (default: 8)'
+        '--lookback', type=int, default=None,
+        help='Signal lookback bars (default: from .env/config)'
     )
     parser.add_argument(
-        '--threshold', type=float, default=0.025,
-        help='Min move to trigger (default: 0.025 = 2.5%%)'
+        '--threshold', type=float, default=None,
+        help='Min move to trigger (default: from .env/config)'
     )
     parser.add_argument(
-        '--max-slots', type=int, default=5,
-        help='Max concurrent positions (default: 5)'
+        '--max-slots', type=int, default=None,
+        help='Max concurrent positions (default: from .env/config)'
     )
     args = parser.parse_args()
 
     # Build config from .env settings (pydantic-settings) + CLI overrides
     settings = get_settings()
     config = RubberBandConfig(
-        lookback=args.lookback or settings.rb_lookback,
-        threshold=args.threshold or settings.rb_threshold,
+        lookback=args.lookback if args.lookback is not None else settings.rb_lookback,
+        threshold=args.threshold if args.threshold is not None else settings.rb_threshold,
         target_retrace=settings.rb_target_retrace,
         stop_mult=settings.rb_stop_mult,
         max_hold=settings.rb_max_hold,
@@ -981,7 +1132,53 @@ def main():
         htf_block_threshold=settings.rb_htf_block_threshold,
         htf_agree_discount=settings.rb_htf_agree_discount,
         htf_agree_stop_mult=settings.rb_htf_agree_stop_mult,
-        max_concurrent=args.max_slots,
+        dynamic_leverage_enabled=settings.rb_dynamic_leverage_enabled,
+        base_leverage=settings.rb_base_leverage,
+        leverage_scale=settings.rb_leverage_scale,
+        max_leverage=settings.rb_max_leverage,
+        btc_directional_enabled=settings.rb_btc_directional_enabled,
+        btc_directional_period=settings.rb_btc_directional_period,
+        partial_exit_enabled=settings.rb_partial_exit_enabled,
+        partial_exit_fraction=settings.rb_partial_exit_fraction,
+        rr_leverage_enabled=settings.rb_rr_leverage_enabled,
+        min_rr_for_leverage=settings.rb_min_rr_for_leverage,
+        max_concurrent=args.max_slots if args.max_slots is not None else 5,
+        # v6.0: Confidence scoring
+        entry_mode=settings.rb_entry_mode,
+        btc_regime_period=settings.rb_btc_regime_period,
+        asset_trend_period=settings.rb_asset_trend_period,
+        min_confidence=settings.rb_min_confidence,
+        confidence_leverage_step=settings.rb_confidence_leverage_step,
+        rsi_period=settings.rb_rsi_period,
+        vol_period=settings.rb_vol_period,
+        # v7.0: Multi-timeframe confirmation
+        mtf_confirmation_enabled=settings.rb_mtf_confirmation_enabled,
+        mtf_sma_period=settings.rb_mtf_sma_period,
+        mtf_leverage_mult=settings.rb_mtf_leverage_mult,
+        # v8.0: Dynamic target (disabled in v9.0 — Fib discipline outperforms)
+        dynamic_target_enabled=settings.rb_dynamic_target_enabled,
+        target_conf3=settings.rb_target_conf3,
+        target_conf4=settings.rb_target_conf4,
+        target_conf5=settings.rb_target_conf5,
+        # v9.0: S+R+M Confluence (MACD + Stochastic evidence)
+        macd_enabled=settings.rb_macd_enabled,
+        macd_fast=settings.rb_macd_fast,
+        macd_slow=settings.rb_macd_slow,
+        macd_signal_period=settings.rb_macd_signal_period,
+        stoch_enabled=settings.rb_stoch_enabled,
+        stoch_k_period=settings.rb_stoch_k_period,
+        stoch_d_period=settings.rb_stoch_d_period,
+        # v10.0: Symbol whitelist & dynamic capital
+        symbol_whitelist=[s.strip() for s in settings.rb_symbol_whitelist.split(',') if s.strip()],
+        dynamic_capital_enabled=settings.rb_dynamic_capital_enabled,
+        # v7.0: Independent 4H rubber band
+        htf_independent_enabled=settings.rb_htf_independent_enabled,
+        htf_rb_lookback=settings.rb_htf_rb_lookback,
+        htf_rb_threshold=settings.rb_htf_rb_threshold,
+        htf_rb_target_retrace=settings.rb_htf_rb_target_retrace,
+        htf_rb_stop_mult=settings.rb_htf_rb_stop_mult,
+        htf_rb_max_hold=settings.rb_htf_rb_max_hold,
+        htf_rb_btc_sma_period=settings.rb_htf_rb_btc_sma_period,
     )
 
     scalper = RubberBandScalper(paper_mode=args.paper, config=config)

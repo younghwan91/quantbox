@@ -89,19 +89,88 @@ class QuantBoxSettings(BaseSettings):
     dynamic_exit_base: float = 0.1  # 빠른 페어 exit z-score (half_life=min)
     dynamic_exit_range: float = 0.9  # max exit = base + range = 1.0
 
-    # ── Rubber Band Signal Parameters ──
-    rb_lookback: int = 8               # Bars to measure move (2h at 15m)
-    rb_threshold: float = 0.025        # Minimum move to trigger (2.5%)
-    rb_target_retrace: float = 0.5     # Take profit at 50% retracement
-    rb_stop_mult: float = 1.0          # Stop at 1x the move size
-    rb_max_hold: int = 8               # Maximum holding period (bars)
-    rb_stop_decay: float = 0.3         # Stop tightening rate (30% by max_hold)
+    # ── Rubber Band Signal Parameters (v9.0, Fibonacci discipline) ──
+    rb_lookback: int = 8               # Bars to measure move (2h at 15m) — SACRED
+    rb_threshold: float = 0.032        # v10.0: Lower threshold (3.2%, +162% ret vs 4.5%)
+    rb_target_retrace: float = 0.382   # Fibonacci 0.382 target (v9.0, +29% Calmar vs 0.4)
+    rb_stop_mult: float = 0.786        # Fibonacci 0.786 stop (v9.0, DD -9.5% vs 0.9)
+    rb_max_hold: int = 20              # v10.0: Extended hold (20 bars, +24% ret vs 10)
+    rb_stop_decay: float = 0.0         # Stop tightening disabled for robustness
 
-    # ── Multi-timeframe Confirmation ──
-    rb_htf_period: int = 64            # HTF trend lookback in 15m bars (64=16h)
+    # ── Multi-timeframe Confirmation (DISABLED) ──
+    rb_htf_period: int = 0             # HTF trend lookback (0=DISABLED)
     rb_htf_block_threshold: float = 0.01  # Block entry if HTF trend > 1% against dir
-    rb_htf_agree_discount: float = 0.85   # Threshold discount when HTF agrees (15% easier)
-    rb_htf_agree_stop_mult: float = 0.95  # Stop multiplier when HTF agrees (5% tighter)
+    rb_htf_agree_discount: float = 0.85   # Threshold discount when HTF agrees
+    rb_htf_agree_stop_mult: float = 0.95  # Stop multiplier when HTF agrees
+
+    # ── Dynamic Leverage (v4.4: flat 1.5x, 365-day A/B validated) ──
+    rb_dynamic_leverage_enabled: bool = True  # Enable leverage pipeline
+    rb_base_leverage: float = 1.5             # Flat 1.5x leverage (sweet spot)
+    rb_leverage_scale: float = 0.0            # No confidence scaling (flat leverage)
+    rb_max_leverage: float = 1.5              # Aligned with base (safety cap)
+
+    # ── Regime-Switch Dual Entry (v5.0) + Confidence Scoring (v6.0) ──
+    rb_entry_mode: str = 'confidence'         # Entry mode: 'confidence' | 'regime_switch' | 'btc_directional' | 'raw'
+    rb_btc_regime_period: int = 96            # BTC SMA period for regime detection (96봉 = 24시간)
+    rb_asset_trend_period: int = 192          # Asset SMA period for classic pullback (192봉 = 48시간)
+
+    # ── Confidence Scoring (v10.0, MTF acts as quality gate) ──
+    rb_min_confidence: int = 1                # v10.0: 최소 1 (MTF가 진짜 필터, +86.9% ret)
+    rb_confidence_leverage_step: float = 0.0  # 컨피던스당 추가 레버리지 (0=고정)
+    rb_rsi_period: int = 14                   # RSI 계산 기간
+    rb_vol_period: int = 20                   # 거래량 SMA 기간 (스파이크 감지)
+
+    # ── v7.0 Multi-Timeframe Confirmation (365-day A/B validated) ──
+    # Uses 4h candle data to confirm 15m entries. Blocks counter-trend trades.
+    # MDD: 16.5% → 4.3% (-74%), Calmar: 8.65 → 32.42 (+275%)
+    rb_mtf_confirmation_enabled: bool = True  # 4h 트렌드 확인 활성화
+    rb_mtf_sma_period: int = 12               # 4h SMA 기간 (12봉 = 2일)
+    rb_mtf_leverage_mult: float = 2.5         # v10.1: MTF 확인 후 레버리지 배수 (2.0→2.5, +35% ret)
+
+    # ── v8.0 Dynamic Target (DISABLED in v9.0 — Fib discipline outperforms) ──
+    # Fib 0.382 fixed target > dynamic scaling. Tighter stop (0.786) requires faster TP.
+    rb_dynamic_target_enabled: bool = False   # 비활성화: Fib 0.382 고정 > 동적 스케일링
+    rb_target_conf3: float = 0.45             # confidence=3 목표 되돌림 (사용 안 함)
+    rb_target_conf4: float = 0.50             # confidence=4 목표 되돌림 (사용 안 함)
+    rb_target_conf5: float = 0.55             # confidence≥5 목표 되돌림 (사용 안 함)
+
+    # ── v9.0 S+R+M Confluence Pipeline (A/B validated, winning strategy) ──
+    # MACD 히스토그램 반전 + 스토캐스틱 %K/%D 크로스 = 추가 컨피던스 증거
+    # Combined with Fib exits: Calmar +33.6%, DD -8.5%
+    rb_macd_enabled: bool = True              # MACD 히스토그램 기울기 컨피던스 증거
+    rb_macd_fast: int = 12                    # MACD fast EMA 기간
+    rb_macd_slow: int = 26                    # MACD slow EMA 기간
+    rb_macd_signal_period: int = 14           # MACD signal EMA 기간 (14=최적)
+    rb_stoch_enabled: bool = True             # 스토캐스틱 크로스 컨피던스 증거
+    rb_stoch_k_period: int = 3                # v10.0: 더 빠른 스토캐스틱 (+5% Calmar vs 5)
+    rb_stoch_d_period: int = 3                # 스토캐스틱 %D 기간
+
+    # ── v7.0 Independent 4H Rubber Band ──
+    # Trades mean-reversion on 4h timeframe independently from 15m.
+    # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
+    rb_htf_independent_enabled: bool = False  # v10.2: Disabled (dead code in production)
+    rb_htf_rb_lookback: int = 3               # 4h lookback (12시간)
+    rb_htf_rb_threshold: float = 0.10         # 10% 임계값 (4h는 더 높은 노이즈)
+    rb_htf_rb_target_retrace: float = 0.5     # 50% 되돌림 목표
+    rb_htf_rb_stop_mult: float = 0.8          # 0.8x 손절
+    rb_htf_rb_max_hold: int = 12              # 12봉 (2일)
+    rb_htf_rb_btc_sma_period: int = 48        # BTC SMA (8일)
+
+    # ── BTC Directional Alignment (v4.2, A/B validated) ──
+    rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
+    rb_btc_directional_period: int = 48       # v11.0: 12h BTC momentum (Maeoknam A/B winner)
+
+    # ── Capital Preservation (v4.4: DISABLED — hurts with tighter stop) ──
+    rb_partial_exit_enabled: bool = False     # Disabled: Calmar 3.75 vs 4.96 without
+    rb_partial_exit_fraction: float = 0.5     # 부분 청산 비율 (0.5 = 50%)
+
+    # ── R:R-Gated Leverage (v4.3, A/B validated) ──
+    rb_rr_leverage_enabled: bool = True       # R:R 기준 레버리지 게이트 활성화
+    rb_min_rr_for_leverage: float = 0.30      # 레버리지 허용 최소 R:R 비율
+
+    # ── v10.0 Symbol Whitelist & Dynamic Capital ──
+    rb_symbol_whitelist: str = 'FILUSDT,NEARUSDT,ADAUSDT,XLMUSDT,ETHUSDT,BCHUSDT,ARBUSDT,UNIUSDT,PEPEUSDT,XRPUSDT,FETUSDT,INJUSDT,SOLUSDT,AVAXUSDT,AAVEUSDT'
+    rb_dynamic_capital_enabled: bool = True  # balance / max(1, n_active+1) 동적 자본 배분
 
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
@@ -115,17 +184,6 @@ class QuantBoxSettings(BaseSettings):
     # ── Direction Diversity (방향 다양화) ──
     max_same_direction_slots: int = 2  # 동일 방향(Long/Short) 최대 슬롯 수
 
-    # ── Asia Session Gate (아시아 세션 진입 제한) ──
-    asia_session_gate_enabled: bool = True    # 아시아 세션(00-08 UTC) 신규 진입 제한
-    asia_session_start_utc: int = 0           # 아시아 세션 시작 (UTC hour)
-    asia_session_end_utc: int = 8             # 아시아 세션 종료 (UTC hour)
-    asia_max_entry_slots: int = 1             # 아시아 세션 중 최대 신규 진입 슬롯 수
-
-    # ── BTC Crash Gate (매크로 방어) ──
-    btc_crash_gate_enabled: bool = True    # BTC 급락 시 진입 차단 활성화
-    btc_crash_window: int = 8              # 최근 N봉 (15분봉 기준 = 2시간)
-    btc_crash_threshold: float = 0.03     # |수익률| > 3% 이면 진입 차단
-
     # ── Alpha Filters (알파 필터) ──
     zscore_velocity_enabled: bool = False      # Z-score 속도 확인: mean 방향 이동 시만 진입
     zscore_velocity_lookback: int = 4          # Z 속도 측정용 lookback bars (15분봉 4개 = 1시간)
@@ -133,9 +191,8 @@ class QuantBoxSettings(BaseSettings):
     spread_autocorr_lookback: int = 40         # 자기상관 측정 lookback bars
     spread_autocorr_max: float = 0.0           # 최대 허용 lag-1 자기상관 (< 0 = 평균회귀)
 
-    # ── 드로다운 & 일일 손실 제한 ──
+    # ── 드로다운 제한 ──
     max_drawdown_pct: float = 0.10         # 세션 최고 잔고 대비 10% 드로다운 시 전체 청산+일시정지
-    daily_loss_limit_pct: float = 0.05     # 당일 시작 잔고 대비 5% 손실 시 진입 중단
 
     # ── 비용 모델 ──
     trading_fee: float = 0.0005
@@ -229,24 +286,50 @@ class QuantBoxSettings(BaseSettings):
             'trailing_stop_trail_z': self.trailing_stop_trail_z,
             # Direction Diversity
             'max_same_direction_slots': self.max_same_direction_slots,
-            # Asia Session Gate
-            'asia_session_gate_enabled': self.asia_session_gate_enabled,
-            'asia_session_start_utc': self.asia_session_start_utc,
-            'asia_session_end_utc': self.asia_session_end_utc,
-            'asia_max_entry_slots': self.asia_max_entry_slots,
-            # BTC Crash Gate
-            'btc_crash_gate_enabled': self.btc_crash_gate_enabled,
-            'btc_crash_window': self.btc_crash_window,
-            'btc_crash_threshold': self.btc_crash_threshold,
+            # Regime-Switch Dual Entry (v5.0) + Confidence (v6.0)
+            'entry_mode': self.rb_entry_mode,
+            'btc_regime_period': self.rb_btc_regime_period,
+            'asset_trend_period': self.rb_asset_trend_period,
+            'min_confidence': self.rb_min_confidence,
+            'confidence_leverage_step': self.rb_confidence_leverage_step,
+            'rsi_period': self.rb_rsi_period,
+            'vol_period': self.rb_vol_period,
+            # v7.0 Multi-Timeframe Confirmation
+            'mtf_confirmation_enabled': self.rb_mtf_confirmation_enabled,
+            'mtf_sma_period': self.rb_mtf_sma_period,
+            'mtf_leverage_mult': self.rb_mtf_leverage_mult,
+            # v8.0 Dynamic Target
+            'dynamic_target_enabled': self.rb_dynamic_target_enabled,
+            'target_conf3': self.rb_target_conf3,
+            'target_conf4': self.rb_target_conf4,
+            'target_conf5': self.rb_target_conf5,
+            # v9.0 S+R+M Confluence
+            'macd_enabled': self.rb_macd_enabled,
+            'macd_fast': self.rb_macd_fast,
+            'macd_slow': self.rb_macd_slow,
+            'macd_signal_period': self.rb_macd_signal_period,
+            'stoch_enabled': self.rb_stoch_enabled,
+            'stoch_k_period': self.rb_stoch_k_period,
+            'stoch_d_period': self.rb_stoch_d_period,
+            # v7.0 Independent 4H Rubber Band
+            'htf_independent_enabled': self.rb_htf_independent_enabled,
+            'htf_rb_lookback': self.rb_htf_rb_lookback,
+            'htf_rb_threshold': self.rb_htf_rb_threshold,
+            'htf_rb_target_retrace': self.rb_htf_rb_target_retrace,
+            'htf_rb_stop_mult': self.rb_htf_rb_stop_mult,
+            'htf_rb_max_hold': self.rb_htf_rb_max_hold,
+            'htf_rb_btc_sma_period': self.rb_htf_rb_btc_sma_period,
+            # BTC Directional Alignment
+            'btc_directional_enabled': self.rb_btc_directional_enabled,
+            'btc_directional_period': self.rb_btc_directional_period,
             # Alpha Filters
             'zscore_velocity_enabled': self.zscore_velocity_enabled,
             'zscore_velocity_lookback': self.zscore_velocity_lookback,
             'spread_autocorr_enabled': self.spread_autocorr_enabled,
             'spread_autocorr_lookback': self.spread_autocorr_lookback,
             'spread_autocorr_max': self.spread_autocorr_max,
-            # Drawdown & Daily Loss
+            # Drawdown Halt
             'max_drawdown_pct': self.max_drawdown_pct,
-            'daily_loss_limit_pct': self.daily_loss_limit_pct,
         }
 
 

@@ -1,30 +1,61 @@
 """
-Rubber Band Scalper Strategy
+Rubber Band Scalper Strategy (v9.0 — S+R+M Confluence Pipeline)
 
 Fades extreme short-term moves in crypto futures, profiting from the
 mechanical snap-back after liquidation cascades overshoot.
 
 Alpha source:
-  - After a 2.5-3%+ move in 1.5-2 hours, liquidation cascades overshoot
-  - The overshoot gets corrected within ~2 hours (8 bars at 15m)
+  - After a 4.5%+ move in 2 hours, liquidation cascades overshoot
+  - The overshoot gets corrected within ~2.5 hours (10 bars at 15m)
   - This is a market-microstructure edge: stop hunts + forced liquidations
 
-Walk-forward validated on 30 Binance USDT-M pairs, 90 days of 15m data:
-  - Profitable in 3 of 4 rolling windows
-  - 63-93% of symbols profitable OOS
-  - Sharpe 0.8-4.7 depending on regime
+v9.0: S+R+M Confluence Pipeline (Winning Strategy Deep Integration)
+  - Fibonacci exit discipline: target=0.382 (golden ratio), stop=0.786 (deep correction)
+  - MACD histogram reversal as confidence evidence (+7.6% Calmar)
+  - Stochastic %K/%D cross as confidence evidence (+3.7% Calmar)
+  - Combined: Calmar +33.6%, DD -8.5%
+  - Dynamic target (v8.0) disabled — Fib discipline outperforms confidence scaling
+  - Tested & rejected: EMA regime, capital preservation, confluence gate
 
-Regime awareness:
-  - Works best in choppy/ranging markets
-  - Loses in strong trending markets (controlled via regime filter)
-  - BTC crash gate blocks all entries in extreme moves
+v8.0: Dynamic Target (Confluence-Gated)
+  - Scale target by confidence: conf<=2→40%, conf3→45%, conf4→50%, conf5→55%
+  - "When certain, ride the wave" — winning strategy's asymmetric R:R principle
+  - DD unchanged (4.3%), Calmar +9.3% (27.71→30.29)
+  - Tested & rejected: RSI Divergence, Vol Squeeze, Reversal Confirmation
 
-Parameters (validated, not over-optimised):
+v6.0: Confidence-Scored Multi-Evidence
+  - Same regime-switch entry as v5.0 + multi-evidence confidence scoring
+  - Evidence: RSI, volume spike, taker buy/sell ratio, price near SMA, BTC momentum
+  - min_confidence=2 filters low-quality trades (34 trades rejected = +9% Calmar)
+  - Optional: Graduated leverage (high confidence → bigger position)
+  - 365-day validated across 500+ configurations:
+    Conservative (flat 1.5x, min_conf=2): Calmar 8.76, Sharpe 2.05, DD 16.9%
+    Moderate (conf_lev 1.0→2.0, min_conf=2): Calmar 9.99, Sharpe 2.03, DD 22.4%
+  - Momentum strategies exhaustively tested (5 types) — all failed on 15m crypto
+
+v5.0: Regime-Switch Dual Entry
+  - Detects BTC regime via SMA: BTC > SMA(96) = Risk-On, BTC < SMA(96) = Risk-Off
+  - Risk-Off (BTC bearish) → Sympathy Pullback: long when alt dips + BTC falling
+  - Risk-On (BTC bullish) → Classic Pullback: long when alt dips in its own uptrend
+
+v4.4: Stop/Target Optimization
+  - Tighter stop (0.9x) + wider target (40%) → R:R 1.10
+  - Flat 1.5x leverage (sweet spot), partial exit disabled
+
+Parameters (v6.0, 365-day A/B validated):
   lookback = 8 bars (2 hours)
-  threshold = 2.5% (minimum move to trigger)
-  target_retrace = 50% of original move
-  stop_mult = 1.0x (stop at same distance as the extreme move)
-  max_hold = 8 bars (2 hours)
+  threshold = 4.5% (minimum move to trigger)
+  target_retrace = 40% of original move
+  stop_mult = 0.9x (tighter stop)
+  max_hold = 10 bars (2.5 hours)
+  entry_mode = 'confidence' (v6.0 default)
+  min_confidence = 2 (require ≥2 pieces of confirming evidence)
+  btc_regime_period = 96 bars (24h SMA for BTC regime detection)
+  asset_trend_period = 192 bars (48h SMA for asset trend in Risk-On)
+  btc_directional_period = 48 bars (12h BTC momentum for Risk-Off)
+  base_leverage = 1.5x (conservative, same DD as v5.0)
+  confidence_leverage_step = 0.0 (disabled by default for safety)
+  max_leverage = 1.5x (capped at base)
 """
 
 import numpy as np
@@ -40,19 +71,82 @@ class RubberBandConfig:
     All parameters are walk-forward validated. Do NOT tighten stops
     or widen targets without re-running walk_forward_test.py.
     """
-    # ── Signal parameters ──
-    lookback: int = 8           # Bars to measure move (2h at 15m)
-    threshold: float = 0.025   # Minimum move to trigger (2.5%)
-    target_retrace: float = 0.5  # Take profit at 50% retracement
-    stop_mult: float = 1.0     # Stop at 1x the move size
-    max_hold: int = 8          # Maximum holding period (bars)
-    stop_decay: float = 0.3    # Stop tightening rate (0=off, 0.3=tightens 30% by max_hold)
+    # ── Signal parameters (v10.0, 365-day A/B validated) ──
+    lookback: int = 8           # Bars to measure move (2h at 15m) — SACRED, never change
+    threshold: float = 0.032   # v10.0: Lower threshold (+162% ret, +324% trades vs 0.045)
+    target_retrace: float = 0.382  # Fibonacci golden ratio retracement (v9.0)
+    stop_mult: float = 0.786   # Fibonacci deep correction stop (v9.0)
+    max_hold: int = 20          # v10.0: Extended hold (+24% ret, strictly better vs 10)
+    stop_decay: float = 0.0    # Stop tightening rate (0=off, disabled for robustness)
 
-    # ── Multi-timeframe confirmation ──
-    htf_period: int = 64         # Higher TF trend lookback in 15m bars (64=16h SMA)
+    # ── Entry Mode (v6.0, A/B validated) ──
+    # 'confidence': v6.0 — regime-switch + multi-evidence confidence scoring.
+    #   Same regime-switch entry + RSI, volume, taker ratio, SMA distance evidence.
+    #   min_confidence=2 filters 34 bad trades → Calmar 8.76 (+9% vs v5.0).
+    # 'regime_switch': v5.0 — BTC regime detection → dual algo dispatch.
+    # 'btc_directional': v4.4 legacy. Long only when BTC falling.
+    # 'raw': No filter (baseline).
+    entry_mode: str = 'confidence'         # 'confidence' | 'regime_switch' | 'btc_directional' | 'raw'
+    btc_regime_period: int = 96            # BTC SMA period for regime detection (96 = 24h)
+    asset_trend_period: int = 192          # Asset SMA for classic pullback (192 = 48h)
+
+    # ── Confidence Scoring (v10.0, MTF acts as quality gate) ──
+    min_confidence: int = 1                # v10.0: Lowered to 1 (MTF is the real filter, +86.9% ret)
+    confidence_leverage_step: float = 0.0  # Extra leverage per confidence point above 1 (0=flat)
+    rsi_period: int = 14                   # RSI calculation period
+    vol_period: int = 20                   # Volume SMA period for spike detection
+
+    # ── Multi-timeframe confirmation (DISABLED — old single-TF SMA overlay) ──
+    htf_period: int = 0          # Higher TF trend lookback (0=DISABLED)
     htf_block_threshold: float = 0.01  # Block entry if HTF trend > 1% against trade dir
-    htf_agree_discount: float = 0.85   # Threshold multiplier when HTF agrees (0.85=15% lower → more entries)
-    htf_agree_stop_mult: float = 0.95  # Stop multiplier when HTF agrees (0.95=5% tighter stop)
+    htf_agree_discount: float = 0.85   # Threshold multiplier when HTF agrees
+    htf_agree_stop_mult: float = 0.95  # Stop multiplier when HTF agrees
+
+    # ── v7.0 Multi-Timeframe Confirmation (A/B validated, 365-day) ──
+    # Uses ACTUAL 4h candle data (not SMA overlay on 15m).
+    # 4h SMA(12) trend confirms 15m entries: blocks counter-trend trades.
+    # Result: MDD 16.5% → 4.3% (-74%), Calmar 8.65 → 32.42 (+275%)
+    # Walk-forward: Q3 DD drops 16.5% → 3.0% (the critical quarter).
+    mtf_confirmation_enabled: bool = True    # Enable 4h trend confirmation
+    mtf_sma_period: int = 12                 # 4h SMA period (12 bars = 2 days)
+    mtf_leverage_mult: float = 2.5           # v10.1: MTF leverage boost (2.0→2.5, +35% ret, +7.5% Calmar)
+                                             # Effective: 1.5 × 2.5 = 3.75x per trade, 1.875x on total equity
+
+    # ── v8.0 Dynamic Target (A/B validated, winning strategy insight) ──
+    # "When certain, ride the wave" — scale target by confidence level.
+    # Higher confidence → wider target → capture more of the snap-back.
+    # DD unchanged (4.3%), Calmar +9.3% (27.71 → 30.29).
+    # Inspired by competition winner: "ride 3rd/5th waves at high conviction."
+    dynamic_target_enabled: bool = False     # Disabled in v9.0 — Fib discipline outperforms
+    target_conf3: float = 0.45              # Target at confidence=3 (vs 0.4 default)
+    target_conf4: float = 0.50              # Target at confidence=4
+    target_conf5: float = 0.55              # Target at confidence≥5
+
+    # ── v9.0 S+R+M Confluence (A/B validated, winning strategy deep integration) ──
+    # MACD histogram reversal as confidence evidence (+7.6% Calmar).
+    # Stochastic %K/%D cross as confidence evidence (+3.7% Calmar).
+    # Combined with Fib exits: +33.6% Calmar, -8.5% DD.
+    macd_enabled: bool = True               # MACD histogram slope as evidence
+    macd_fast: int = 12                     # MACD fast EMA period
+    macd_slow: int = 26                     # MACD slow EMA period
+    macd_signal_period: int = 14            # MACD signal EMA period
+    stoch_enabled: bool = True              # Stochastic cross as evidence
+    stoch_k_period: int = 3                 # v10.0: Faster stochastic (+5% Calmar vs 5)
+    stoch_d_period: int = 3                 # Stochastic %D period
+
+    # ── v7.0 Independent 4H Rubber Band (A/B validated) ──
+    # Trades rubber band signals on 4h timeframe independently.
+    # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87.
+    # Combined with MTF-confirmed 15m: 70%/30% allocation.
+    # v10.2: Disabled — on_bar_4h() never called in scalper.py,
+    # and not used in backtest scripts. Dead code in production.
+    htf_independent_enabled: bool = False    # Disabled: dead code in production
+    htf_rb_lookback: int = 3                 # 4h lookback (12h)
+    htf_rb_threshold: float = 0.10           # 10% threshold (higher for 4h noise)
+    htf_rb_target_retrace: float = 0.5       # 50% retracement target
+    htf_rb_stop_mult: float = 0.8            # 0.8x stop
+    htf_rb_max_hold: int = 12                # 12 bars (2 days)
+    htf_rb_btc_sma_period: int = 48          # BTC SMA for 4h regime (8 days)
 
     # ── Regime filter ──
     regime_filter_enabled: bool = False   # Disabled: blocks the very moves that generate alpha
@@ -65,15 +159,55 @@ class RubberBandConfig:
     funding_rate_8h: float = 0.0001  # 0.01% per 8h
     bar_interval_minutes: int = 15
 
+    # ── Dynamic Leverage (v6.0: flat 1.5x default, confidence optional) ──
+    # Conservative (DD ≈ 16.9%): base=1.5 step=0.0 max=1.5 → Calmar 8.76
+    # Moderate (DD ≈ 22%): base=1.0 step=1.0 max=2.0 → Calmar 9.99
+    # 1.5x flat is conservative sweet spot for live trading.
+    dynamic_leverage_enabled: bool = True  # Enable leverage pipeline
+    base_leverage: float = 1.5     # Flat leverage for all trades
+    leverage_scale: float = 0.0    # Legacy: No confidence scaling (use confidence_leverage_step)
+    max_leverage: float = 1.5      # Aligned with base (safety cap)
+
+    # ── BTC Directional Alignment (v4.2, A/B validated) ──
+    # Counter-trend entries only when BTC confirms: long when BTC falling,
+    # short when BTC rising. Filters out idiosyncratic altcoin moves that
+    # are less likely to revert.
+    # v11.0: Re-enabled with period=48 (12h BTC momentum window).
+    # Maeoknam A/B test: unlocks Risk-Off trades (sympathy pullback).
+    # Result: Ret 1331% → 6556% (+393%), Calmar 5.14 → 19.65 (+282%).
+    # Robust across all tested periods (16-96), not curve-fit.
+    btc_directional_enabled: bool = True   # Align entry with BTC momentum
+    btc_directional_period: int = 48       # v11.0: 12h BTC momentum window (Maeoknam A/B winner)
+
+    # ── Capital Preservation (v4.4: DISABLED — hurts at tighter stop) ──
+    # v4.3 partial exit hurt performance with stop=0.9 target=0.4:
+    # Without partial: Calmar 4.96, With partial: Calmar 3.75 (-24%).
+    # Tighter stop (0.9 vs 1.0) already limits DD to 12.7%.
+    partial_exit_enabled: bool = False     # Disabled: hurts with tighter stop
+    partial_exit_fraction: float = 0.5     # Fraction to close (0.5 = 50%)
+
+    # ── R:R-Gated Leverage (v4.4, safety gate) ──
+    # With stop=0.9, target=0.4: theoretical R:R = 0.44 > 0.30, gate always
+    # passes. Kept as safety: if params changed to worse R:R, it disables leverage.
+    rr_leverage_enabled: bool = True       # Gate leverage by R:R ratio
+    min_rr_for_leverage: float = 0.30      # Minimum R:R to allow leverage
+
     # ── Risk management ──
     risk_per_trade: float = 0.01   # Risk 1% of capital per trade
     max_concurrent: int = 5        # Max simultaneous positions
     max_drawdown_pct: float = 0.10  # 10% session drawdown → halt
-    daily_loss_limit_pct: float = 0.05  # 5% daily loss → halt
 
-    # ── Symbol selection ──
+    # ── Symbol selection (v10.0: whitelist filter) ──
     min_volume_rank: int = 30  # Top 30 by volume
     exclude_symbols: list[str] = field(default_factory=lambda: ['USDCUSDT', 'TUSDUSDT', 'BUSDUSDT'])
+    symbol_whitelist: list[str] = field(default_factory=lambda: [
+        'FILUSDT', 'NEARUSDT', 'ADAUSDT', 'XLMUSDT', 'ETHUSDT',
+        'BCHUSDT', 'ARBUSDT', 'UNIUSDT', 'PEPEUSDT', 'XRPUSDT',
+        'FETUSDT', 'INJUSDT', 'SOLUSDT', 'AVAXUSDT', 'AAVEUSDT',
+    ])  # v10.0 Top-15: 982.4% ret, 0 losers, Calmar 4.78
+
+    # ── Dynamic capital allocation (v10.0) ──
+    dynamic_capital_enabled: bool = True  # balance / max(1, n_active+1) instead of fixed slots
 
     @property
     def cost_per_side(self) -> float:
@@ -250,6 +384,1447 @@ def compute_signals_with_regime(
 
 
 @numba.jit(nopython=True, cache=True)
+def compute_signals_with_btc_directional(
+    close: np.ndarray,
+    btc_close: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    max_hold: int,
+    stop_decay: float,
+    btc_mom_period: int,
+) -> np.ndarray:
+    """Compute signals with BTC directional alignment.
+
+    Only enter counter-trend when BTC momentum confirms the move is
+    market-wide (not idiosyncratic):
+      - Long (price crashed): enter only if BTC also falling (market selloff → likely revert)
+      - Short (price surged): enter only if BTC also rising (market euphoria → likely revert)
+
+    This filters out idiosyncratic altcoin moves that may not revert.
+    365-day A/B validated: Calmar +8%, 100% rolling 90-day windows profitable.
+
+    Args:
+        close: Alt close prices.
+        btc_close: BTCUSDT close prices (same timeframe).
+        lookback: Bars to measure the move.
+        threshold: Minimum move to trigger entry.
+        target_retrace: Take profit fraction.
+        stop_mult: Stop loss multiple.
+        max_hold: Maximum holding period.
+        stop_decay: Stop tightening rate.
+        btc_mom_period: BTC momentum lookback (32 bars = 8h recommended).
+
+    Returns:
+        Signal array: -1 (short), 0 (flat), +1 (long).
+    """
+    n = len(close)
+    sig = np.zeros(n)
+    position = 0
+    entry_price = 0.0
+    move_size = 0.0
+    hold_count = 0
+    best_pnl = 0.0
+    start_bar = max(lookback, btc_mom_period)
+
+    for i in range(start_bar, n):
+        ret = close[i] / close[i - lookback] - 1.0
+
+        if position == 0:
+            if abs(ret) > threshold:
+                # BTC momentum check
+                btc_mom = btc_close[i] / btc_close[i - btc_mom_period] - 1.0
+
+                if ret < -threshold and btc_mom < 0:
+                    # Long: alt crashed AND BTC falling → correlated selloff, likely reverts
+                    position = 1
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+                elif ret > threshold and btc_mom > 0:
+                    # Short: alt surged AND BTC rising → correlated euphoria, likely reverts
+                    position = -1
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+        else:
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+
+            target = move_size * target_retrace
+            if gain >= target:
+                position = 0
+            elif gain < -effective_stop:
+                position = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+            elif hold_count >= max_hold:
+                position = 0
+
+        sig[i] = position
+    return sig
+
+
+# ────────── Regime-Switch Dual Entry (v5.0) ──────────
+@numba.jit(nopython=True, cache=True)
+def compute_signals_regime_switch(
+    close: np.ndarray,
+    btc_close: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    max_hold: int,
+    stop_decay: float,
+    btc_mom_period: int,
+    btc_regime_period: int,
+    asset_trend_period: int,
+) -> np.ndarray:
+    """Regime-switching dual entry: different algo per BTC regime.
+
+    BTC Regime Detection: BTC price vs SMA(btc_regime_period)
+      - BTC < SMA → "Risk-Off" → SYMPATHY PULLBACK
+        (Long when alt dips AND BTC is falling short-term)
+      - BTC > SMA → "Risk-On" → CLASSIC PULLBACK
+        (Long when alt dips AND alt's own trend is UP)
+
+    Each algo is high-conviction in its home regime.
+    365-day A/B validated: Calmar 6.70, Sharpe 1.89, WR 61.7%, R:R 1.25.
+    13/13 rolling 90-day windows profitable.
+
+    Args:
+        close: Alt close prices.
+        btc_close: BTCUSDT close prices (same timeframe).
+        lookback: Bars to measure the move.
+        threshold: Minimum move to trigger entry.
+        target_retrace: Take profit fraction.
+        stop_mult: Stop loss multiple.
+        max_hold: Maximum holding period.
+        stop_decay: Stop tightening rate.
+        btc_mom_period: BTC momentum lookback for Risk-Off (32 bars = 8h).
+        btc_regime_period: BTC SMA period for regime detection (96 = 24h).
+        asset_trend_period: Asset SMA period for classic pullback (192 = 48h).
+
+    Returns:
+        Signal array: -1 (short), 0 (flat), +1 (long).
+    """
+    n = len(close)
+    sig = np.zeros(n)
+
+    # Pre-compute BTC SMA for regime detection
+    btc_sma = np.full(n, np.nan)
+    s = 0.0
+    for i in range(n):
+        s += btc_close[i]
+        if i >= btc_regime_period:
+            s -= btc_close[i - btc_regime_period]
+        if i >= btc_regime_period - 1:
+            btc_sma[i] = s / btc_regime_period
+
+    # Pre-compute asset SMA for classic pullback (risk-on regime)
+    asset_sma = np.full(n, np.nan)
+    s2 = 0.0
+    for i in range(n):
+        s2 += close[i]
+        if i >= asset_trend_period:
+            s2 -= close[i - asset_trend_period]
+        if i >= asset_trend_period - 1:
+            asset_sma[i] = s2 / asset_trend_period
+
+    position = 0
+    entry_price = 0.0
+    move_size = 0.0
+    hold_count = 0
+    best_pnl = 0.0
+    start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period)
+
+    for i in range(start_bar, n):
+        ret = close[i] / close[i - lookback] - 1.0
+
+        if position == 0:
+            if abs(ret) > threshold:
+                # Determine BTC regime
+                if np.isnan(btc_sma[i]):
+                    continue
+                is_risk_on = btc_close[i] > btc_sma[i]  # BTC above SMA = bull
+
+                if is_risk_on:
+                    # ═══ RISK-ON: Classic Pullback ═══
+                    # BTC bullish → alt dips are pullbacks in uptrend
+                    if np.isnan(asset_sma[i]):
+                        continue
+                    is_uptrend = close[i] > asset_sma[i]
+
+                    if ret < -threshold and is_uptrend:
+                        position = 1
+                        entry_price = close[i]
+                        move_size = abs(ret)
+                        hold_count = 0
+                        best_pnl = 0.0
+                    elif ret > threshold and not is_uptrend:
+                        position = -1
+                        entry_price = close[i]
+                        move_size = abs(ret)
+                        hold_count = 0
+                        best_pnl = 0.0
+                else:
+                    # ═══ RISK-OFF: Sympathy Pullback ═══
+                    # BTC bearish → use BTC directional (proven v4.4)
+                    btc_mom = btc_close[i] / btc_close[i - btc_mom_period] - 1.0
+
+                    if ret < -threshold and btc_mom < 0:
+                        position = 1
+                        entry_price = close[i]
+                        move_size = abs(ret)
+                        hold_count = 0
+                        best_pnl = 0.0
+                    elif ret > threshold and btc_mom > 0:
+                        position = -1
+                        entry_price = close[i]
+                        move_size = abs(ret)
+                        hold_count = 0
+                        best_pnl = 0.0
+        else:
+            # ═══ EXIT LOGIC (same regardless of regime) ═══
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+            target = move_size * target_retrace
+
+            if gain >= target:
+                position = 0
+            elif gain < -effective_stop:
+                position = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+            elif hold_count >= max_hold:
+                position = 0
+
+        sig[i] = position
+    return sig
+
+
+# ────────── Confidence-Filtered Regime-Switch (v6.0) ──────────
+@numba.jit(nopython=True, cache=True)
+def _compute_sma_inline(arr: np.ndarray, period: int) -> np.ndarray:
+    """SMA helper for Numba context."""
+    n = len(arr)
+    out = np.full(n, np.nan)
+    s = 0.0
+    for i in range(n):
+        s += arr[i]
+        if i >= period:
+            s -= arr[i - period]
+        if i >= period - 1:
+            out[i] = s / period
+    return out
+
+
+@numba.jit(nopython=True, cache=True)
+def _compute_rsi_inline(close: np.ndarray, period: int) -> np.ndarray:
+    """RSI helper (Wilder's smoothing) for Numba context."""
+    n = len(close)
+    rsi = np.full(n, 50.0)
+    if n < period + 1:
+        return rsi
+    gains = np.zeros(n)
+    losses = np.zeros(n)
+    for i in range(1, n):
+        d = close[i] - close[i - 1]
+        if d > 0:
+            gains[i] = d
+        else:
+            losses[i] = -d
+    ag, al = 0.0, 0.0
+    for i in range(1, period + 1):
+        ag += gains[i]
+        al += losses[i]
+    ag /= period
+    al /= period
+    if al > 0:
+        rsi[period] = 100.0 - 100.0 / (1.0 + ag / al)
+    else:
+        rsi[period] = 100.0
+    for i in range(period + 1, n):
+        ag = (ag * (period - 1) + gains[i]) / period
+        al = (al * (period - 1) + losses[i]) / period
+        if al > 0:
+            rsi[i] = 100.0 - 100.0 / (1.0 + ag / al)
+        else:
+            rsi[i] = 100.0
+    return rsi
+
+
+@numba.jit(nopython=True, cache=True)
+def _compute_ema_inline(arr: np.ndarray, period: int) -> np.ndarray:
+    """EMA helper for Numba. Uses SMA warm-up then EMA smoothing."""
+    n = len(arr)
+    out = np.full(n, np.nan)
+    if n < period:
+        return out
+    s = 0.0
+    for i in range(period):
+        s += arr[i]
+    out[period - 1] = s / period
+    alpha = 2.0 / (period + 1.0)
+    for i in range(period, n):
+        out[i] = (arr[i] - out[i - 1]) * alpha + out[i - 1]
+    return out
+
+
+@numba.jit(nopython=True, cache=True)
+def _compute_stochastic_inline(
+    high: np.ndarray, low: np.ndarray, close: np.ndarray,
+    k_period: int = 14, d_period: int = 3,
+) -> tuple:
+    """Stochastic %K and %D arrays."""
+    n = len(close)
+    k = np.full(n, 50.0)
+    d = np.full(n, 50.0)
+    for i in range(k_period - 1, n):
+        hh = high[i]
+        ll = low[i]
+        for j in range(i - k_period + 1, i):
+            if high[j] > hh:
+                hh = high[j]
+            if low[j] < ll:
+                ll = low[j]
+        rng = hh - ll
+        if rng > 0:
+            k[i] = (close[i] - ll) / rng * 100.0
+        else:
+            k[i] = 50.0
+    s = 0.0
+    for i in range(n):
+        s += k[i]
+        if i >= d_period:
+            s -= k[i - d_period]
+        if i >= d_period - 1:
+            d[i] = s / d_period
+    return k, d
+
+
+@numba.jit(nopython=True, cache=True)
+def _compute_macd_inline(
+    close: np.ndarray, fast: int = 12, slow: int = 26, signal_period: int = 9,
+) -> tuple:
+    """MACD line, signal line, histogram."""
+    ema_fast = _compute_ema_inline(close, fast)
+    ema_slow = _compute_ema_inline(close, slow)
+    n = len(close)
+    macd_line = np.full(n, 0.0)
+    for i in range(n):
+        if not np.isnan(ema_fast[i]) and not np.isnan(ema_slow[i]):
+            macd_line[i] = ema_fast[i] - ema_slow[i]
+    signal_line = _compute_ema_inline(macd_line, signal_period)
+    hist = np.full(n, 0.0)
+    for i in range(n):
+        if not np.isnan(signal_line[i]):
+            hist[i] = macd_line[i] - signal_line[i]
+    return macd_line, signal_line, hist
+
+
+@numba.jit(nopython=True, cache=True)
+def compute_signals_confidence(
+    close: np.ndarray,
+    volume: np.ndarray,
+    taker_buy: np.ndarray,
+    btc_close: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    max_hold: int,
+    stop_decay: float,
+    btc_mom_period: int,
+    btc_regime_period: int,
+    asset_trend_period: int,
+    min_confidence: int,
+    base_leverage: float,
+    confidence_leverage_step: float,
+    max_leverage: float,
+    rsi_period: int,
+    vol_period: int,
+    dynamic_target_enabled: bool = False,
+    target_conf3: float = 0.45,
+    target_conf4: float = 0.5,
+    target_conf5: float = 0.55,
+) -> np.ndarray:
+    """v6.0→v8.0: Regime-switch MR with confidence scoring + graduated leverage.
+
+    Same regime-switch entry logic as v5.0, enhanced with:
+      1. Multi-evidence confidence scoring (RSI, volume, taker ratio, price/SMA)
+      2. Minimum confidence filter — reject low-quality entries
+      3. Graduated leverage — more evidence → bigger position
+      4. Dynamic target (v8.0) — higher confidence → wider target (ride the wave)
+
+    Evidence for LONG entries:
+      +1 BTC regime confirmed (always, since regime check passes)
+      +1 RSI oversold (< 40 Risk-On, < 35 Risk-Off)
+      +1 Volume > 1.5x average (institutional / liquidation cascade)
+      +1 Taker sell pressure (ratio < 0.45 Risk-On, < 0.42 Risk-Off)
+      +1 Near SMA support (Risk-On) or strong BTC momentum (Risk-Off)
+
+    For SHORT entries, evidence is mirrored (RSI overbought, taker buy, etc.).
+
+    Leverage = min(base_leverage + confidence_leverage_step * (conf - 1), max_leverage)
+
+    v8.0 Dynamic Target (A/B validated, winning strategy insight):
+      When confident, ride the wave — scale target by confidence level:
+        conf ≤ 2: target_retrace (default 0.4)
+        conf = 3: target_conf3 (default 0.45)
+        conf = 4: target_conf4 (default 0.50)
+        conf ≥ 5: target_conf5 (default 0.55)
+      DD=4.3% (unchanged), Calmar +9.3% (27.71 → 30.29)
+
+    365-day validated across 500+ configurations.
+
+    Args:
+        close: Alt close prices.
+        volume: Alt volume data.
+        taker_buy: Taker buy base volume (buying pressure indicator).
+        btc_close: BTCUSDT close prices.
+        lookback: Bars to measure the move.
+        threshold: Minimum move to trigger entry.
+        target_retrace: Take profit fraction.
+        stop_mult: Stop loss multiple.
+        max_hold: Maximum holding period.
+        stop_decay: Stop tightening rate.
+        btc_mom_period: BTC momentum lookback for Risk-Off.
+        btc_regime_period: BTC SMA period for regime detection.
+        asset_trend_period: Asset SMA for Risk-On trend check.
+        min_confidence: Minimum confidence score to enter (1-5, recommended: 2).
+        base_leverage: Base leverage for all entries.
+        confidence_leverage_step: Additional leverage per confidence point above 1.
+        max_leverage: Maximum leverage cap.
+        rsi_period: RSI calculation period.
+        vol_period: Volume SMA period for comparison.
+        dynamic_target_enabled: Scale target by confidence (v8.0).
+        target_conf3: Target retrace for confidence=3 (default 0.45).
+        target_conf4: Target retrace for confidence=4 (default 0.50).
+        target_conf5: Target retrace for confidence≥5 (default 0.55).
+
+    Returns:
+        Signal array with leverage encoded: e.g., +1.5 = long at 1.5x leverage.
+    """
+    n = len(close)
+    sig = np.zeros(n)
+
+    # Pre-compute indicators
+    btc_sma = _compute_sma_inline(btc_close, btc_regime_period)
+    asset_sma = _compute_sma_inline(close, asset_trend_period)
+    rsi = _compute_rsi_inline(close, rsi_period)
+    vol_sma = _compute_sma_inline(volume, vol_period)
+
+    taker_ratio = np.full(n, 0.5)
+    for i in range(n):
+        if volume[i] > 0:
+            taker_ratio[i] = taker_buy[i] / volume[i]
+
+    position = 0
+    entry_price = 0.0
+    move_size = 0.0
+    hold_count = 0
+    best_pnl = 0.0
+    lev = base_leverage
+    trade_target_retrace = target_retrace  # per-trade target (may scale by confidence)
+    start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period,
+                    rsi_period, vol_period)
+
+    for i in range(start_bar, n):
+        ret = close[i] / close[i - lookback] - 1.0
+
+        if position == 0:
+            if abs(ret) > threshold:
+                if np.isnan(btc_sma[i]):
+                    continue
+                is_risk_on = btc_close[i] > btc_sma[i]
+                btc_mom = btc_close[i] / btc_close[i - btc_mom_period] - 1.0
+                entered = False
+                confidence = 1  # BTC regime alignment confirmed
+
+                if is_risk_on:
+                    # ═══ RISK-ON: Classic Pullback + Confidence ═══
+                    if np.isnan(asset_sma[i]):
+                        continue
+                    is_uptrend = close[i] > asset_sma[i]
+
+                    if ret < -threshold and is_uptrend:
+                        # LONG: alt dipped in its own uptrend during BTC bull
+                        if rsi[i] < 40:
+                            confidence += 1
+                        if not np.isnan(vol_sma[i]) and volume[i] > 1.5 * vol_sma[i]:
+                            confidence += 1
+                        if taker_ratio[i] < 0.45:
+                            confidence += 1
+                        dist = abs(close[i] - asset_sma[i]) / asset_sma[i]
+                        if dist < 0.02:
+                            confidence += 1
+                        if confidence >= min_confidence:
+                            position = 1
+                            entered = True
+
+                    elif ret > threshold and not is_uptrend:
+                        # SHORT: alt surged but in downtrend → exhaustion
+                        if rsi[i] > 60:
+                            confidence += 1
+                        if not np.isnan(vol_sma[i]) and volume[i] > 1.5 * vol_sma[i]:
+                            confidence += 1
+                        if taker_ratio[i] > 0.55:
+                            confidence += 1
+                        dist = abs(close[i] - asset_sma[i]) / asset_sma[i]
+                        if dist < 0.02:
+                            confidence += 1
+                        if confidence >= min_confidence:
+                            position = -1
+                            entered = True
+                else:
+                    # ═══ RISK-OFF: Sympathy Pullback + Confidence ═══
+                    if ret < -threshold and btc_mom < 0:
+                        # LONG: alt dips with BTC → sympathy → mean revert
+                        if rsi[i] < 35:
+                            confidence += 1
+                        if not np.isnan(vol_sma[i]) and volume[i] > 1.5 * vol_sma[i]:
+                            confidence += 1
+                        if taker_ratio[i] < 0.42:
+                            confidence += 1
+                        if btc_mom < -0.01:
+                            confidence += 1
+                        if confidence >= min_confidence:
+                            position = 1
+                            entered = True
+
+                    elif ret > threshold and btc_mom > 0:
+                        # SHORT: alt pumps with BTC bounce → fades back
+                        if rsi[i] > 65:
+                            confidence += 1
+                        if not np.isnan(vol_sma[i]) and volume[i] > 1.5 * vol_sma[i]:
+                            confidence += 1
+                        if taker_ratio[i] > 0.58:
+                            confidence += 1
+                        if btc_mom > 0.01:
+                            confidence += 1
+                        if confidence >= min_confidence:
+                            position = -1
+                            entered = True
+
+                if entered:
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+                    lev = min(base_leverage + confidence_leverage_step * (confidence - 1),
+                              max_leverage)
+                    # v8.0: Scale target by confidence (ride the wave when certain)
+                    if dynamic_target_enabled:
+                        if confidence >= 5:
+                            trade_target_retrace = target_conf5
+                        elif confidence >= 4:
+                            trade_target_retrace = target_conf4
+                        elif confidence >= 3:
+                            trade_target_retrace = target_conf3
+                        else:
+                            trade_target_retrace = target_retrace
+                    else:
+                        trade_target_retrace = target_retrace
+                    sig[i] = position * lev
+                    continue
+
+        else:
+            # ═══ EXIT LOGIC ═══
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+            target = move_size * trade_target_retrace
+
+            if gain >= target:
+                position = 0
+            elif gain < -effective_stop:
+                position = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+            elif hold_count >= max_hold:
+                position = 0
+
+            if position == 0:
+                sig[i] = 0
+                continue
+
+        if position != 0:
+            sig[i] = position * lev
+
+    return sig
+
+
+@numba.jit(nopython=True, cache=True)
+def compute_signals_v9(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    volume: np.ndarray,
+    taker_buy: np.ndarray,
+    btc_close: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    max_hold: int,
+    stop_decay: float,
+    btc_mom_period: int,
+    btc_regime_period: int,
+    asset_trend_period: int,
+    min_confidence: int,
+    base_leverage: float,
+    confidence_leverage_step: float,
+    max_leverage: float,
+    rsi_period: int,
+    vol_period: int,
+    dynamic_target_enabled: bool = False,
+    target_conf3: float = 0.45,
+    target_conf4: float = 0.5,
+    target_conf5: float = 0.55,
+    stoch_enabled: bool = False,
+    stoch_k_period: int = 5,
+    stoch_d_period: int = 3,
+    macd_enabled: bool = False,
+    macd_fast: int = 12,
+    macd_slow: int = 26,
+    macd_signal_period: int = 14,
+) -> np.ndarray:
+    """v9.0: S+R+M Confluence Pipeline — regime-switch MR with Stochastic + MACD evidence.
+
+    Extends compute_signals_confidence (v6.0→v8.0) with:
+      - Stochastic %K/%D cross as confidence evidence (+3.7% Calmar)
+      - MACD histogram reversal as confidence evidence (+7.6% Calmar)
+      - Fibonacci exit discipline: target=0.382, stop=0.786
+      - Combined: Calmar +33.6%, DD -8.5%
+
+    Additional evidence for LONG:
+      +1 Stochastic oversold cross (%K < 20, %K crosses above %D)
+      +1 MACD histogram reversal (hist rising from below zero)
+
+    Additional evidence for SHORT:
+      +1 Stochastic overbought cross (%K > 80, %K crosses below %D)
+      +1 MACD histogram reversal (hist falling from above zero)
+
+    Args:
+        close: Alt close prices.
+        high: Alt high prices (for stochastic).
+        low: Alt low prices (for stochastic).
+        volume: Alt volume data.
+        taker_buy: Taker buy base volume.
+        btc_close: BTCUSDT close prices.
+        lookback..target_conf5: Same as compute_signals_confidence.
+        stoch_enabled: Enable stochastic %K/%D cross evidence.
+        stoch_k_period: Stochastic %K period.
+        stoch_d_period: Stochastic %D period.
+        macd_enabled: Enable MACD histogram reversal evidence.
+        macd_fast: MACD fast EMA period.
+        macd_slow: MACD slow EMA period.
+        macd_signal_period: MACD signal EMA period.
+
+    Returns:
+        Signal array with leverage encoded.
+    """
+    n = len(close)
+    sig = np.zeros(n)
+
+    # Pre-compute indicators
+    btc_sma = _compute_sma_inline(btc_close, btc_regime_period)
+    asset_sma = _compute_sma_inline(close, asset_trend_period)
+    rsi = _compute_rsi_inline(close, rsi_period)
+    vol_sma = _compute_sma_inline(volume, vol_period)
+
+    taker_ratio = np.full(n, 0.5)
+    for i in range(n):
+        if volume[i] > 0:
+            taker_ratio[i] = taker_buy[i] / volume[i]
+
+    # v9.0: Pre-compute stochastic and MACD
+    if stoch_enabled:
+        stoch_k, stoch_d = _compute_stochastic_inline(
+            high, low, close, stoch_k_period, stoch_d_period)
+    else:
+        stoch_k = np.full(n, 50.0)
+        stoch_d = np.full(n, 50.0)
+
+    if macd_enabled:
+        _macd_line, _macd_signal, macd_hist = _compute_macd_inline(
+            close, macd_fast, macd_slow, macd_signal_period)
+    else:
+        macd_hist = np.full(n, 0.0)
+
+    position = 0
+    entry_price = 0.0
+    move_size = 0.0
+    hold_count = 0
+    best_pnl = 0.0
+    lev = base_leverage
+    trade_target_retrace = target_retrace
+    start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period,
+                    rsi_period, vol_period)
+
+    for i in range(start_bar, n):
+        ret = close[i] / close[i - lookback] - 1.0
+
+        if position == 0:
+            if abs(ret) > threshold:
+                if np.isnan(btc_sma[i]):
+                    continue
+                is_risk_on = btc_close[i] > btc_sma[i]
+                btc_mom = btc_close[i] / btc_close[i - btc_mom_period] - 1.0
+                entered = False
+                confidence = 1  # BTC regime alignment confirmed
+
+                if is_risk_on:
+                    # ═══ RISK-ON: Classic Pullback + Confidence ═══
+                    if np.isnan(asset_sma[i]):
+                        continue
+                    is_uptrend = close[i] > asset_sma[i]
+
+                    if ret < -threshold and is_uptrend:
+                        # LONG: alt dipped in its own uptrend during BTC bull
+                        if rsi[i] < 40:
+                            confidence += 1
+                        if not np.isnan(vol_sma[i]) and volume[i] > 1.5 * vol_sma[i]:
+                            confidence += 1
+                        if taker_ratio[i] < 0.45:
+                            confidence += 1
+                        dist = abs(close[i] - asset_sma[i]) / asset_sma[i]
+                        if dist < 0.02:
+                            confidence += 1
+                        # v9.0: Stochastic oversold cross
+                        if stoch_enabled and i > 0:
+                            if stoch_k[i] < 20 and stoch_k[i] > stoch_d[i] and stoch_k[i - 1] <= stoch_d[i - 1]:
+                                confidence += 1
+                        # v9.0: MACD histogram reversal (rising from negative)
+                        if macd_enabled and i > 0:
+                            if macd_hist[i] > macd_hist[i - 1] and macd_hist[i - 1] < 0:
+                                confidence += 1
+                        if confidence >= min_confidence:
+                            position = 1
+                            entered = True
+
+                    elif ret > threshold and not is_uptrend:
+                        # SHORT: alt surged but in downtrend → exhaustion
+                        if rsi[i] > 60:
+                            confidence += 1
+                        if not np.isnan(vol_sma[i]) and volume[i] > 1.5 * vol_sma[i]:
+                            confidence += 1
+                        if taker_ratio[i] > 0.55:
+                            confidence += 1
+                        dist = abs(close[i] - asset_sma[i]) / asset_sma[i]
+                        if dist < 0.02:
+                            confidence += 1
+                        # v9.0: Stochastic overbought cross
+                        if stoch_enabled and i > 0:
+                            if stoch_k[i] > 80 and stoch_k[i] < stoch_d[i] and stoch_k[i - 1] >= stoch_d[i - 1]:
+                                confidence += 1
+                        # v9.0: MACD histogram reversal (falling from positive)
+                        if macd_enabled and i > 0:
+                            if macd_hist[i] < macd_hist[i - 1] and macd_hist[i - 1] > 0:
+                                confidence += 1
+                        if confidence >= min_confidence:
+                            position = -1
+                            entered = True
+                else:
+                    # ═══ RISK-OFF: Sympathy Pullback + Confidence ═══
+                    if ret < -threshold and btc_mom < 0:
+                        # LONG: alt dips with BTC → sympathy → mean revert
+                        if rsi[i] < 35:
+                            confidence += 1
+                        if not np.isnan(vol_sma[i]) and volume[i] > 1.5 * vol_sma[i]:
+                            confidence += 1
+                        if taker_ratio[i] < 0.42:
+                            confidence += 1
+                        if btc_mom < -0.01:
+                            confidence += 1
+                        # v9.0: Stochastic oversold cross
+                        if stoch_enabled and i > 0:
+                            if stoch_k[i] < 20 and stoch_k[i] > stoch_d[i] and stoch_k[i - 1] <= stoch_d[i - 1]:
+                                confidence += 1
+                        # v9.0: MACD histogram reversal (rising from negative)
+                        if macd_enabled and i > 0:
+                            if macd_hist[i] > macd_hist[i - 1] and macd_hist[i - 1] < 0:
+                                confidence += 1
+                        if confidence >= min_confidence:
+                            position = 1
+                            entered = True
+
+                    elif ret > threshold and btc_mom > 0:
+                        # SHORT: alt pumps with BTC bounce → fades back
+                        if rsi[i] > 65:
+                            confidence += 1
+                        if not np.isnan(vol_sma[i]) and volume[i] > 1.5 * vol_sma[i]:
+                            confidence += 1
+                        if taker_ratio[i] > 0.58:
+                            confidence += 1
+                        if btc_mom > 0.01:
+                            confidence += 1
+                        # v9.0: Stochastic overbought cross
+                        if stoch_enabled and i > 0:
+                            if stoch_k[i] > 80 and stoch_k[i] < stoch_d[i] and stoch_k[i - 1] >= stoch_d[i - 1]:
+                                confidence += 1
+                        # v9.0: MACD histogram reversal (falling from positive)
+                        if macd_enabled and i > 0:
+                            if macd_hist[i] < macd_hist[i - 1] and macd_hist[i - 1] > 0:
+                                confidence += 1
+                        if confidence >= min_confidence:
+                            position = -1
+                            entered = True
+
+                if entered:
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+                    lev = min(base_leverage + confidence_leverage_step * (confidence - 1),
+                              max_leverage)
+                    # v8.0: Scale target by confidence (ride the wave when certain)
+                    if dynamic_target_enabled:
+                        if confidence >= 5:
+                            trade_target_retrace = target_conf5
+                        elif confidence >= 4:
+                            trade_target_retrace = target_conf4
+                        elif confidence >= 3:
+                            trade_target_retrace = target_conf3
+                        else:
+                            trade_target_retrace = target_retrace
+                    else:
+                        trade_target_retrace = target_retrace
+                    sig[i] = position * lev
+                    continue
+
+        else:
+            # ═══ EXIT LOGIC ═══
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+            target = move_size * trade_target_retrace
+
+            if gain >= target:
+                position = 0
+            elif gain < -effective_stop:
+                position = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+            elif hold_count >= max_hold:
+                position = 0
+
+            if position == 0:
+                sig[i] = 0
+                continue
+
+        if position != 0:
+            sig[i] = position * lev
+
+    return sig
+
+
+# ────────── v7.0 Multi-Timeframe Confirmation ──────────
+@numba.jit(nopython=True, cache=True)
+def apply_mtf_confirmation(
+    signals_15m: np.ndarray,
+    close_4h: np.ndarray,
+    sma_period_4h: int,
+    ratio: int = 16,
+) -> np.ndarray:
+    """Filter 15m signals by 4h trend direction (v7.0).
+
+    Only allows entries that align with the 4h SMA trend:
+      - Long signal: requires close_4h > SMA_4h (uptrend)
+      - Short signal: requires close_4h < SMA_4h (downtrend)
+    Counter-trend entries are zeroed out.
+
+    A/B validated (365-day, 10 symbols):
+      Without MTF: DD=16.5%, Calmar=8.65
+      With MTF:    DD=2.2%,  Calmar=19.64
+
+    Args:
+        signals_15m: 15m signal array (from compute_signals_confidence).
+        close_4h: 4h close prices array.
+        sma_period_4h: SMA period on 4h bars (12 = 2 days optimal).
+        ratio: Number of 15m bars per 4h bar (16 for USDT-M).
+
+    Returns:
+        Filtered signal array (same shape, counter-trend entries zeroed).
+    """
+    sma_4h = _compute_sma_inline(close_4h, sma_period_4h)
+    n = len(signals_15m)
+    out = signals_15m.copy()
+
+    for i in range(n):
+        if out[i] == 0.0:
+            continue
+        j = min(i // ratio, len(close_4h) - 1)
+        if j < sma_period_4h or np.isnan(sma_4h[j]):
+            continue
+
+        trend_up = close_4h[j] > sma_4h[j]
+
+        # Block counter-trend entries
+        if out[i] > 0 and not trend_up:
+            out[i] = 0.0
+        elif out[i] < 0 and trend_up:
+            out[i] = 0.0
+
+    return out
+
+
+@numba.jit(nopython=True, cache=True)
+def apply_mtf_leverage(
+    signals: np.ndarray,
+    leverage_mult: float,
+) -> np.ndarray:
+    """Scale signal magnitude by leverage multiplier (v7.0).
+
+    Used after MTF confirmation to amplify position size on high-confidence
+    trades. The MTF filter removes ~75% of trades; remaining ones are
+    trend-aligned and deserve increased leverage.
+
+    With MTF confirmation + 2.0x leverage (effective 3.0x):
+      Return: +103.7%, DD: 4.4%, Calmar: 23.75
+
+    Args:
+        signals: Signal array (magnitude encodes leverage).
+        leverage_mult: Multiplier to apply (e.g., 2.0).
+
+    Returns:
+        Scaled signal array.
+    """
+    n = len(signals)
+    out = np.zeros(n)
+    for i in range(n):
+        out[i] = signals[i] * leverage_mult
+    return out
+
+
+@numba.jit(nopython=True, cache=True)
+def compute_signals_4h_independent(
+    close: np.ndarray,
+    btc_close: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    max_hold: int,
+    btc_sma_period: int,
+) -> np.ndarray:
+    """Independent 4h rubber band signals with BTC regime switch (v7.0).
+
+    Trades 4h mean-reversion independently from 15m strategy.
+    Different parameters optimized for 4h bar structure:
+      - lookback=3 (12h), threshold=10%, max_hold=12 (2 days)
+      - BTC SMA(48) for 8-day regime detection
+
+    A/B validated (365-day, 10 symbols):
+      Return: +52.2%, DD: 4.8%, Calmar: 10.87, 135 trades
+
+    Args:
+        close: 4h close prices.
+        btc_close: 4h BTC close prices.
+        lookback: Bars to measure move (3 = 12h).
+        threshold: Min move to trigger (0.10 = 10%).
+        target_retrace: TP at retrace fraction (0.5 = 50%).
+        stop_mult: Stop at mult × move_size (0.8).
+        max_hold: Max hold bars (12 = 2 days).
+        btc_sma_period: BTC SMA for regime (48 = 8 days).
+
+    Returns:
+        Signal array (±1 for position direction).
+    """
+    n = len(close)
+    sig = np.zeros(n)
+    btc_sma = _compute_sma_inline(btc_close, btc_sma_period)
+    btc_mom_period = min(lookback * 2, btc_sma_period)
+
+    position = 0
+    entry_price = 0.0
+    move_size = 0.0
+    hold_count = 0
+    best_pnl = 0.0
+    start_bar = max(lookback, btc_sma_period, btc_mom_period)
+
+    for i in range(start_bar, n):
+        ret = close[i] / close[i - lookback] - 1.0
+
+        if position == 0:
+            if abs(ret) > threshold:
+                if np.isnan(btc_sma[i]):
+                    continue
+
+                is_risk_on = btc_close[i] > btc_sma[i]
+                btc_mom = btc_close[i] / btc_close[i - btc_mom_period] - 1.0
+                entered = False
+
+                if is_risk_on:
+                    # Risk-On: buy dips, short rips
+                    if ret < -threshold:
+                        position = 1
+                        entered = True
+                    elif ret > threshold:
+                        position = -1
+                        entered = True
+                else:
+                    # Risk-Off: sympathy trades with BTC direction
+                    if ret < -threshold and btc_mom < 0:
+                        position = 1
+                        entered = True
+                    elif ret > threshold and btc_mom > 0:
+                        position = -1
+                        entered = True
+
+                if entered:
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+        else:
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            target = move_size * target_retrace
+            effective_stop = move_size * stop_mult
+
+            if gain >= target:
+                position = 0
+            elif gain < -effective_stop:
+                position = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                # Trailing: if gained >50% of target then dropped to <30% of peak
+                position = 0
+            elif hold_count >= max_hold:
+                position = 0
+
+        sig[i] = position
+    return sig
+
+
+# ────────── Partial Exit + Break-Even Stop (v4.3) ──────────
+@numba.jit(nopython=True, cache=True)
+def compute_signals_with_partial_exit(
+    close: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    max_hold: int,
+    stop_decay: float = 0.0,
+) -> np.ndarray:
+    """Compute signals with partial exit + break-even stop.
+
+    Capital preservation framework:
+      Phase 1 (full position): on ANY profit → close 50%, transition to Phase 2.
+      Phase 2 (half position): break-even stop replaces original stop.
+        Remaining half runs to target or gets stopped at break-even ($0 risk).
+
+    Output: ±1.0 (full position), ±0.5 (half position after partial close), 0.0 (flat).
+    The backtest core treats signal magnitude as position size.
+
+    Args:
+        close: Close price array.
+        lookback: Bars to measure the move.
+        threshold: Minimum move to trigger entry.
+        target_retrace: Take profit fraction of move.
+        stop_mult: Stop loss multiple.
+        max_hold: Maximum holding period.
+        stop_decay: Stop tightening rate.
+
+    Returns:
+        Signal array with fractional positions.
+    """
+    n = len(close)
+    sig = np.zeros(n)
+    position = 0       # Direction: +1, -1, or 0
+    phase = 0           # 0=flat, 1=full position, 2=half position
+    entry_price = 0.0
+    move_size = 0.0
+    hold_count = 0
+    best_pnl = 0.0
+
+    for i in range(lookback, n):
+        ret = close[i] / close[i - lookback] - 1.0
+
+        if phase == 0:
+            # ── Entry logic (same as compute_signals) ──
+            if ret < -threshold:
+                position = 1
+                phase = 1
+                entry_price = close[i]
+                move_size = abs(ret)
+                hold_count = 0
+                best_pnl = 0.0
+            elif ret > threshold:
+                position = -1
+                phase = 1
+                entry_price = close[i]
+                move_size = abs(ret)
+                hold_count = 0
+                best_pnl = 0.0
+
+        elif phase == 1:
+            # ── Full position: check exits, then partial close ──
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+            target = move_size * target_retrace
+
+            # Priority: full exit conditions checked FIRST
+            if gain >= target:
+                position = 0
+                phase = 0
+            elif gain < -effective_stop:
+                position = 0
+                phase = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+                phase = 0
+            elif hold_count >= max_hold:
+                position = 0
+                phase = 0
+            elif gain > 0:
+                # ANY profit → partial close 50%, enter Phase 2
+                phase = 2
+                best_pnl = gain
+
+        elif phase == 2:
+            # ── Half position: break-even stop, target still active ──
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            target = move_size * target_retrace
+
+            if gain >= target:
+                position = 0
+                phase = 0
+            elif gain <= 0:
+                # Break-even stop: $0 risk on remaining half
+                position = 0
+                phase = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+                phase = 0
+            elif hold_count >= max_hold:
+                position = 0
+                phase = 0
+
+        # Output signal: magnitude encodes position size
+        if phase == 0:
+            sig[i] = 0.0
+        elif phase == 1:
+            sig[i] = float(position)        # ±1.0
+        elif phase == 2:
+            sig[i] = float(position) * 0.5  # ±0.5
+
+    return sig
+
+
+@numba.jit(nopython=True, cache=True)
+def compute_signals_partial_exit_btc_directional(
+    close: np.ndarray,
+    btc_close: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    max_hold: int,
+    stop_decay: float,
+    btc_mom_period: int,
+) -> np.ndarray:
+    """Partial exit + break-even stop + BTC directional alignment.
+
+    Combines v4.2 BTC directional gate with v4.3 partial exit framework:
+      - Entry: only when BTC momentum confirms (v4.2)
+      - Exit: 50% partial close on any profit, break-even stop on remainder (v4.3)
+
+    Output: ±1.0 (full), ±0.5 (half after partial close), 0.0 (flat).
+    """
+    n = len(close)
+    sig = np.zeros(n)
+    position = 0
+    phase = 0
+    entry_price = 0.0
+    move_size = 0.0
+    hold_count = 0
+    best_pnl = 0.0
+    start_bar = max(lookback, btc_mom_period)
+
+    for i in range(start_bar, n):
+        ret = close[i] / close[i - lookback] - 1.0
+
+        if phase == 0:
+            if abs(ret) > threshold:
+                btc_mom = btc_close[i] / btc_close[i - btc_mom_period] - 1.0
+
+                if ret < -threshold and btc_mom < 0:
+                    position = 1
+                    phase = 1
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+                elif ret > threshold and btc_mom > 0:
+                    position = -1
+                    phase = 1
+                    entry_price = close[i]
+                    move_size = abs(ret)
+                    hold_count = 0
+                    best_pnl = 0.0
+
+        elif phase == 1:
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            time_factor = 1.0 - stop_decay * (hold_count / max_hold)
+            effective_stop = move_size * stop_mult * time_factor
+            target = move_size * target_retrace
+
+            if gain >= target:
+                position = 0
+                phase = 0
+            elif gain < -effective_stop:
+                position = 0
+                phase = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+                phase = 0
+            elif hold_count >= max_hold:
+                position = 0
+                phase = 0
+            elif gain > 0:
+                phase = 2
+                best_pnl = gain
+
+        elif phase == 2:
+            hold_count += 1
+            if position == 1:
+                gain = (close[i] - entry_price) / entry_price
+            else:
+                gain = (entry_price - close[i]) / entry_price
+
+            if gain > best_pnl:
+                best_pnl = gain
+
+            target = move_size * target_retrace
+
+            if gain >= target:
+                position = 0
+                phase = 0
+            elif gain <= 0:
+                position = 0
+                phase = 0
+            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                position = 0
+                phase = 0
+            elif hold_count >= max_hold:
+                position = 0
+                phase = 0
+
+        if phase == 0:
+            sig[i] = 0.0
+        elif phase == 1:
+            sig[i] = float(position)
+        elif phase == 2:
+            sig[i] = float(position) * 0.5
+
+    return sig
+
+
+# ────────── R:R-Gated Leverage (v4.3) ──────────
+@numba.jit(nopython=True, cache=True)
+def compute_rr_gated_leverage(
+    move_size: float,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    cost_per_side: float,
+    base_leverage: float,
+    leverage_scale: float,
+    max_leverage: float,
+    min_rr: float = 0.5,
+) -> float:
+    """Compute leverage gated by risk-reward ratio.
+
+    Don't use leverage on trades with poor R:R. Only scale up when the
+    expected gain/loss ratio justifies the leverage risk.
+
+    "손익비가 높아야 레버리지를 쓴다"
+
+    Args:
+        move_size: Actual move that triggered entry.
+        threshold: Minimum trigger threshold.
+        target_retrace: Fraction of move targeted.
+        stop_mult: Stop loss multiple of move.
+        cost_per_side: Trading cost per side (fee + slippage).
+        base_leverage: Min leverage when R:R is sufficient.
+        leverage_scale: Scale factor for excess moves.
+        max_leverage: Hard cap.
+        min_rr: Minimum R:R ratio required for leverage. Below this → 1x.
+
+    Returns:
+        Leverage (1.0 if R:R insufficient, scaled if sufficient).
+    """
+    if move_size <= 0 or threshold <= 0:
+        return 1.0
+
+    round_trip = cost_per_side * 2.0
+    expected_gain = move_size * target_retrace - round_trip
+    expected_loss = move_size * stop_mult + round_trip
+
+    if expected_loss <= 0 or expected_gain <= 0:
+        return 1.0
+
+    rr = expected_gain / expected_loss
+
+    if rr < min_rr:
+        return 1.0  # No leverage — R:R too low
+
+    # R:R sufficient: scale by excess move (same as confidence leverage)
+    excess = (move_size - threshold) / threshold
+    lev = base_leverage + leverage_scale * max(excess, 0.0)
+    return min(lev, max_leverage)
+
+
+@numba.jit(nopython=True, cache=True)
+def apply_rr_gated_leverage(
+    close: np.ndarray,
+    signals: np.ndarray,
+    lookback: int,
+    threshold: float,
+    target_retrace: float,
+    stop_mult: float,
+    cost_per_side: float,
+    base_leverage: float,
+    leverage_scale: float,
+    max_leverage: float,
+    min_rr: float = 0.5,
+) -> np.ndarray:
+    """Scale raw signals by R:R-gated leverage (Numba).
+
+    Applies compute_rr_gated_leverage at each bar. Signals ±1 or ±0.5
+    (from partial exit) get multiplied by the leverage only when R:R
+    meets the minimum threshold.
+
+    Args:
+        close: Close price array.
+        signals: Raw signals (±1, ±0.5, or 0).
+        lookback: Move measurement lookback.
+        threshold: Entry threshold.
+        target_retrace: Take profit fraction.
+        stop_mult: Stop loss multiple.
+        cost_per_side: Fee + slippage per side.
+        base_leverage: Min leverage when R:R met.
+        leverage_scale: Excess move scale.
+        max_leverage: Hard cap.
+        min_rr: Minimum R:R for leverage.
+
+    Returns:
+        Leveraged signals array.
+    """
+    n = len(close)
+    lev_signals = np.empty(n, dtype=np.float64)
+
+    for i in range(n):
+        s = signals[i]
+        if s == 0.0 or i < lookback:
+            lev_signals[i] = s
+            continue
+
+        move = abs(close[i] / close[i - lookback] - 1.0)
+
+        round_trip = cost_per_side * 2.0
+        expected_gain = move * target_retrace - round_trip
+        expected_loss = move * stop_mult + round_trip
+
+        if expected_loss <= 0 or expected_gain <= 0:
+            lev_signals[i] = s  # Keep raw signal, no leverage
+            continue
+
+        rr = expected_gain / expected_loss
+
+        if rr < min_rr:
+            lev_signals[i] = s  # No leverage — R:R too low
+            continue
+
+        excess = (move - threshold) / threshold
+        lev = base_leverage + leverage_scale * max(excess, 0.0)
+        if lev > max_leverage:
+            lev = max_leverage
+        if lev < base_leverage:
+            lev = base_leverage
+
+        # Scale signal magnitude (preserves direction & partial fraction)
+        if s > 0:
+            lev_signals[i] = abs(s) * lev
+        else:
+            lev_signals[i] = -abs(s) * lev
+
+    return lev_signals
+
+
+@numba.jit(nopython=True, cache=True)
 def compute_signals_mtf(
     close: np.ndarray,
     lookback: int,
@@ -390,6 +1965,95 @@ def compute_signals_mtf(
     return sig
 
 
+# ──────────────────── Confidence Leverage ─────────────────────────────
+def compute_confidence_leverage(
+    move_size: float,
+    threshold: float,
+    base_leverage: float = 1.5,
+    leverage_scale: float = 0.0,
+    max_leverage: float = 1.5,
+) -> float:
+    """Compute leverage proportional to confidence (move size).
+
+    v4.4: Flat 1.5x leverage for all trades. Confidence scaling disabled
+    (scale=0). At stop=0.9, target=0.4, 1.5x is the sweet spot where
+    Calmar peaks at 4.98 (higher than 1x=4.96).
+
+    Formula: lev = base + scale * (move - threshold) / threshold
+    Capped at max_leverage.
+
+    Args:
+        move_size: Actual move size (fraction, e.g. 0.06 = 6%).
+        threshold: Minimum threshold (fraction, e.g. 0.045 = 4.5%).
+        base_leverage: Flat leverage (1.5x for all trades).
+        leverage_scale: Leverage gain per 100% excess move (0=flat).
+        max_leverage: Hard cap on leverage.
+
+    Returns:
+        Computed leverage (float, between base_leverage and max_leverage).
+    """
+    if move_size <= 0 or threshold <= 0:
+        return base_leverage
+    excess = (move_size - threshold) / threshold
+    lev = base_leverage + leverage_scale * max(excess, 0.0)
+    return min(lev, max_leverage)
+
+
+@numba.jit(nopython=True, cache=True)
+def apply_confidence_leverage(
+    close: np.ndarray,
+    signals: np.ndarray,
+    lookback: int,
+    threshold: float,
+    base_leverage: float,
+    leverage_scale: float,
+    max_leverage: float,
+) -> np.ndarray:
+    """Scale raw ±1 signals by move-confidence leverage (Numba).
+
+    For backtest use: converts signal ±1 to ±leverage.
+    The vectorized backtest treats signal magnitude as position size,
+    so signal=±5 means 5x leveraged position.
+
+    Args:
+        close: Close price array.
+        signals: Raw signals (±1 or 0).
+        lookback: Bars to measure the move.
+        threshold: Minimum threshold (fraction).
+        base_leverage: Minimum leverage.
+        leverage_scale: Scale factor.
+        max_leverage: Hard cap.
+
+    Returns:
+        Leveraged signals array.
+    """
+    n = len(close)
+    lev_signals = np.empty(n, dtype=np.float64)
+
+    for i in range(n):
+        s = signals[i]
+        if s == 0.0 or i < lookback:
+            lev_signals[i] = s
+            continue
+
+        # Compute move size at this bar
+        move = abs(close[i] / close[i - lookback] - 1.0)
+        excess = (move - threshold) / threshold
+        lev = base_leverage + leverage_scale * max(excess, 0.0)
+        if lev > max_leverage:
+            lev = max_leverage
+        if lev < base_leverage:
+            lev = base_leverage
+
+        # Scale direction by leverage
+        if s > 0:
+            lev_signals[i] = lev
+        else:
+            lev_signals[i] = -lev
+
+    return lev_signals
+
+
 # ──────────────────────── Position Sizing ──────────────────────────────
 def calculate_position_size(
     capital: float,
@@ -438,6 +2102,61 @@ class RubberBandStrategy:
     def __init__(self, config: RubberBandConfig = None):
         self.config = config or RubberBandConfig()
         self._positions: dict[str, dict] = {}
+        # v6.0: volume & taker data for confidence scoring (per-symbol)
+        self._volume_data: dict[str, np.ndarray] = {}
+        self._taker_data: dict[str, np.ndarray] = {}
+        # v9.0: high/low data for stochastic (per-symbol)
+        self._high_data: dict[str, np.ndarray] = {}
+        self._low_data: dict[str, np.ndarray] = {}
+        # v7.0: higher timeframe close data for MTF confirmation (per-symbol)
+        self._htf_close_data: dict[str, np.ndarray] = {}
+        # v10.2 PARITY: Track whether last signal per symbol was MTF-confirmed
+        self._mtf_confirmed: dict[str, bool] = {}
+
+    def update_market_data(
+        self,
+        symbol: str,
+        volume: np.ndarray,
+        taker_buy: np.ndarray,
+        high: np.ndarray | None = None,
+        low: np.ndarray | None = None,
+    ) -> None:
+        """Update volume, taker buy, and OHLC data for confidence scoring.
+
+        Call this before on_bar() with the latest data arrays.
+        v6.0: volume + taker_buy for confidence scoring.
+        v9.0: high + low for stochastic %K/%D evidence.
+
+        Args:
+            symbol: Trading symbol.
+            volume: Volume array (same length as close_prices).
+            taker_buy: Taker buy base volume array.
+            high: High price array (for stochastic, v9.0).
+            low: Low price array (for stochastic, v9.0).
+        """
+        self._volume_data[symbol] = volume
+        self._taker_data[symbol] = taker_buy
+        if high is not None:
+            self._high_data[symbol] = high
+        if low is not None:
+            self._low_data[symbol] = low
+
+    def update_htf_data(
+        self,
+        symbol: str,
+        close_4h: np.ndarray,
+    ) -> None:
+        """Update 4h close data for MTF confirmation (v7.0).
+
+        Call this before on_bar() with the latest 4h candle closes.
+        Used for: (1) MTF trend confirmation on 15m entries,
+                  (2) Independent 4h rubber band signal generation.
+
+        Args:
+            symbol: Trading symbol.
+            close_4h: 4h close prices array (at least mtf_sma_period bars).
+        """
+        self._htf_close_data[symbol] = close_4h
 
     def on_bar(
         self,
@@ -459,6 +2178,143 @@ class RubberBandStrategy:
         if len(close_prices) < cfg.lookback + 1:
             return 0
 
+        # ═══ v6.0 Confidence-Scored Entry (highest priority) ═══
+        if btc_close_prices is not None and cfg.entry_mode == 'confidence':
+            min_bars = max(
+                cfg.lookback, cfg.btc_directional_period,
+                cfg.btc_regime_period, cfg.asset_trend_period,
+                cfg.rsi_period, cfg.vol_period,
+            ) + 1
+            if len(btc_close_prices) < min_bars or len(close_prices) < min_bars:
+                return 0
+            # on_bar needs volume/taker_buy — stored in self._volume_data / self._taker_data
+            vol_data = self._volume_data.get(symbol)
+            taker_data = self._taker_data.get(symbol)
+            if vol_data is None or taker_data is None:
+                # Fallback to regime_switch if volume data not available
+                sigs = compute_signals_regime_switch(
+                    close_prices, btc_close_prices,
+                    cfg.lookback, cfg.threshold,
+                    cfg.target_retrace, cfg.stop_mult,
+                    cfg.max_hold, cfg.stop_decay,
+                    cfg.btc_directional_period,
+                    cfg.btc_regime_period,
+                    cfg.asset_trend_period,
+                )
+                return int(sigs[-1])
+
+            # v9.0: Use enhanced signal function when MACD or Stochastic enabled
+            if cfg.macd_enabled or cfg.stoch_enabled:
+                high_data = self._high_data.get(symbol)
+                low_data = self._low_data.get(symbol)
+                if high_data is None:
+                    high_data = close_prices  # fallback
+                if low_data is None:
+                    low_data = close_prices  # fallback
+                sigs = compute_signals_v9(
+                    close_prices, high_data, low_data,
+                    vol_data, taker_data, btc_close_prices,
+                    cfg.lookback, cfg.threshold,
+                    cfg.target_retrace, cfg.stop_mult,
+                    cfg.max_hold, cfg.stop_decay,
+                    cfg.btc_directional_period,
+                    cfg.btc_regime_period,
+                    cfg.asset_trend_period,
+                    cfg.min_confidence,
+                    cfg.base_leverage,
+                    cfg.confidence_leverage_step,
+                    cfg.max_leverage,
+                    cfg.rsi_period,
+                    cfg.vol_period,
+                    cfg.dynamic_target_enabled,
+                    cfg.target_conf3,
+                    cfg.target_conf4,
+                    cfg.target_conf5,
+                    cfg.stoch_enabled,
+                    cfg.stoch_k_period,
+                    cfg.stoch_d_period,
+                    cfg.macd_enabled,
+                    cfg.macd_fast,
+                    cfg.macd_slow,
+                    cfg.macd_signal_period,
+                )
+            else:
+                sigs = compute_signals_confidence(
+                    close_prices, vol_data, taker_data, btc_close_prices,
+                    cfg.lookback, cfg.threshold,
+                    cfg.target_retrace, cfg.stop_mult,
+                    cfg.max_hold, cfg.stop_decay,
+                    cfg.btc_directional_period,
+                    cfg.btc_regime_period,
+                    cfg.asset_trend_period,
+                    cfg.min_confidence,
+                    cfg.base_leverage,
+                    cfg.confidence_leverage_step,
+                    cfg.max_leverage,
+                    cfg.rsi_period,
+                    cfg.vol_period,
+                    cfg.dynamic_target_enabled,
+                    cfg.target_conf3,
+                    cfg.target_conf4,
+                    cfg.target_conf5,
+                )
+
+            # ═══ v7.0 MTF Confirmation (LIVE — inline latest-bar check) ═══
+            # CRITICAL PARITY NOTE: apply_mtf_confirmation() uses j = i // 16
+            # to map 15m→4h index. This is CORRECT for backtest (both arrays
+            # start at the same date), but WRONG for live (200 15m bars vs
+            # 100 4h bars with different start times). Bar 199 would map to
+            # close_4h[12] (352h ago) instead of close_4h[99] (current).
+            #
+            # Fix: Compute the 4h trend directly from the LATEST 4h data.
+            # This is equivalent to what apply_mtf_confirmation does at the
+            # last bar when arrays are properly time-aligned.
+            htf_close = self._htf_close_data.get(symbol)
+            mtf_applied = False
+            last_sig = sigs[-1]
+
+            if cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
+                # Compute 4h SMA from the most recent bars
+                sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period:]))
+                trend_up = float(htf_close[-1]) > sma_4h
+
+                # Block counter-trend entries (same logic as apply_mtf_confirmation)
+                if last_sig > 0 and not trend_up:
+                    last_sig = 0.0  # Block long in 4h downtrend
+                elif last_sig < 0 and trend_up:
+                    last_sig = 0.0  # Block short in 4h uptrend
+                else:
+                    mtf_applied = True  # Signal survived MTF filter
+
+            # Return signal direction; leverage communicated via was_mtf_confirmed()
+            if last_sig > 0:
+                self._mtf_confirmed[symbol] = mtf_applied
+                return 1
+            elif last_sig < 0:
+                self._mtf_confirmed[symbol] = mtf_applied
+                return -1
+            self._mtf_confirmed[symbol] = False
+            return 0
+
+        # ═══ v5.0 Regime-Switch Dual Entry ═══
+        if btc_close_prices is not None and cfg.entry_mode == 'regime_switch':
+            min_bars = max(
+                cfg.lookback, cfg.btc_directional_period,
+                cfg.btc_regime_period, cfg.asset_trend_period,
+            ) + 1
+            if len(btc_close_prices) < min_bars or len(close_prices) < min_bars:
+                return 0
+            sigs = compute_signals_regime_switch(
+                close_prices, btc_close_prices,
+                cfg.lookback, cfg.threshold,
+                cfg.target_retrace, cfg.stop_mult,
+                cfg.max_hold, cfg.stop_decay,
+                cfg.btc_directional_period,
+                cfg.btc_regime_period,
+                cfg.asset_trend_period,
+            )
+            return int(sigs[-1])
+
         # Use regime-filtered signals if BTC data available
         if btc_close_prices is not None and cfg.regime_filter_enabled:
             if len(btc_close_prices) < max(cfg.lookback, cfg.regime_lookback) + 1:
@@ -471,6 +2327,26 @@ class RubberBandStrategy:
                 cfg.regime_trend_threshold,
                 cfg.stop_decay,
             )
+        elif btc_close_prices is not None and cfg.btc_directional_enabled:
+            min_bars = max(cfg.lookback, cfg.btc_directional_period) + 1
+            if len(btc_close_prices) < min_bars or len(close_prices) < min_bars:
+                return 0
+            if cfg.partial_exit_enabled:
+                sigs = compute_signals_partial_exit_btc_directional(
+                    close_prices, btc_close_prices,
+                    cfg.lookback, cfg.threshold,
+                    cfg.target_retrace, cfg.stop_mult,
+                    cfg.max_hold, cfg.stop_decay,
+                    cfg.btc_directional_period,
+                )
+            else:
+                sigs = compute_signals_with_btc_directional(
+                    close_prices, btc_close_prices,
+                    cfg.lookback, cfg.threshold,
+                    cfg.target_retrace, cfg.stop_mult,
+                    cfg.max_hold, cfg.stop_decay,
+                    cfg.btc_directional_period,
+                )
         elif cfg.htf_period > 0:
             if len(close_prices) < max(cfg.lookback, cfg.htf_period) + 1:
                 return 0
@@ -493,6 +2369,54 @@ class RubberBandStrategy:
             )
 
         return int(sigs[-1])
+
+    def on_bar_4h(
+        self,
+        symbol: str,
+        close_4h: np.ndarray,
+        btc_close_4h: np.ndarray | None = None,
+    ) -> int:
+        """Generate independent 4h rubber band signal (v7.0).
+
+        Separate from on_bar() — this runs on 4h candle data and generates
+        independent entry/exit signals for the 4h timeframe strategy.
+
+        Args:
+            symbol: Trading symbol.
+            close_4h: Array of 4h close prices.
+            btc_close_4h: 4h BTC close prices for regime detection.
+
+        Returns:
+            Signal: -1 (short), 0 (flat), +1 (long).
+        """
+        cfg = self.config
+        if not cfg.htf_independent_enabled:
+            return 0
+        if btc_close_4h is None:
+            return 0
+        min_bars = max(cfg.htf_rb_lookback, cfg.htf_rb_btc_sma_period) + 1
+        if len(close_4h) < min_bars or len(btc_close_4h) < min_bars:
+            return 0
+
+        sigs = compute_signals_4h_independent(
+            close_4h, btc_close_4h,
+            cfg.htf_rb_lookback, cfg.htf_rb_threshold,
+            cfg.htf_rb_target_retrace, cfg.htf_rb_stop_mult,
+            cfg.htf_rb_max_hold, cfg.htf_rb_btc_sma_period,
+        )
+        return int(sigs[-1])
+
+    def was_mtf_confirmed(self, symbol: str) -> bool:
+        """Check if the last signal for a symbol was MTF-confirmed.
+
+        Used by scalper._open_position() to apply mtf_leverage_mult,
+        ensuring exact parity with the backtest signal pipeline:
+        compute_signals_v9 → apply_mtf_confirmation → apply_mtf_leverage.
+
+        Returns:
+            True if the signal survived MTF confirmation filter.
+        """
+        return self._mtf_confirmed.get(symbol, False)
 
     def has_position(self, symbol: str) -> bool:
         return symbol in self._positions
@@ -562,6 +2486,7 @@ class RubberBandStrategy:
             'bars_held': 0,
             'best_pnl': 0.0,
             'entry_stop_mult': entry_stop_mult if entry_stop_mult is not None else self.config.stop_mult,
+            'partial_closed': False,   # v4.3: track partial exit state
         }
 
     def close_position(self, symbol: str) -> dict | None:
@@ -569,7 +2494,10 @@ class RubberBandStrategy:
         return self._positions.pop(symbol, None)
 
     def update_position(self, symbol: str, current_price: float) -> str | None:
-        """Check if position should be closed.
+        """Check if position should be closed or partially closed.
+
+        v4.3: When partial_exit_enabled, returns 'partial_close' on first
+        profit, then uses break-even stop for remaining half.
 
         Returns exit reason string or None.
         """
@@ -590,21 +2518,37 @@ class RubberBandStrategy:
 
         target = pos['move_size'] * cfg.target_retrace
 
-        # Time-decaying stop (parity with compute_signals_mtf)
-        # Uses entry_stop_mult stored at open time (accounts for HTF agree)
-        entry_sm = pos.get('entry_stop_mult', cfg.stop_mult)
-        time_factor = 1.0 - cfg.stop_decay * (pos['bars_held'] / cfg.max_hold)
-        effective_stop = pos['move_size'] * entry_sm * time_factor
+        if not pos.get('partial_closed', False):
+            # ── Phase 1: Full position ──
+            entry_sm = pos.get('entry_stop_mult', cfg.stop_mult)
+            time_factor = 1.0 - cfg.stop_decay * (pos['bars_held'] / cfg.max_hold)
+            effective_stop = pos['move_size'] * entry_sm * time_factor
 
-        # Exit conditions
-        if gain >= target:
-            return 'target'
-        if gain < -effective_stop:
-            return 'stop_loss'
-        if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
-            return 'trailing_stop'
-        if pos['bars_held'] >= cfg.max_hold:
-            return 'max_hold'
+            # Full exit conditions (priority order)
+            if gain >= target:
+                return 'target'
+            if gain < -effective_stop:
+                return 'stop_loss'
+            if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
+                return 'trailing_stop'
+            if pos['bars_held'] >= cfg.max_hold:
+                return 'max_hold'
+
+            # Partial close: any profit triggers 50% exit
+            if cfg.partial_exit_enabled and gain > 0:
+                pos['partial_closed'] = True
+                pos['best_pnl'] = gain
+                return 'partial_close'
+        else:
+            # ── Phase 2: Half position with break-even stop ──
+            if gain >= target:
+                return 'target'
+            if gain <= 0:
+                return 'breakeven_stop'
+            if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
+                return 'trailing_stop'
+            if pos['bars_held'] >= cfg.max_hold:
+                return 'max_hold'
 
         return None
 
