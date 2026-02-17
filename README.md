@@ -8,12 +8,14 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v10.0 — Optimized Entry + Symbol Whitelist)
+### 🔥 Rubber Band Scalper (v11.1 — Critical Fixes + Pool Expansion)
 - **Alpha**: 3.2% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
 - **v10.0 Entry Optimization**: threshold 0.045→0.032 (+162% ret, +324% trades), min_confidence 2→1 (MTF as quality gate, +86.9% ret)
 - **v10.0 Extended Hold**: max_hold 10→20 (+24% ret, strictly better)
 - **v10.0 Faster Stochastic**: stoch_k 5→3 (+5% Calmar)
-- **v10.0 Symbol Whitelist**: Top-15 검증된 심볼만 거래 — 982.4% ret, 0 losers, Calmar 4.78
+- **v11.1 Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어 + 레버리지 설정 검증
+- **v11.1 Pool Expansion**: Top-15→Top-20 (A/B validated: 3384% ret, Calmar 155.22 vs baseline 1470%)
+- **v10.0 Symbol Whitelist**: Top-20 검증된 심볼만 거래 — 3384% ret, WR 69.7%, Calmar 155.22
 - **v10.0 Dynamic Capital**: balance / max(1, n_active+1) — 유휴 자본 최소화, 50% cap 안전장치
 - **Fibonacci Exit Levels (v9.0)**: 피보나치 기반 정밀 목표/손절 — target 0.382 (golden ratio), stop 0.786 (deep correction)
   - R:R 0.444→0.486 (+9.5%), Calmar +29% vs 기존 0.4/0.9
@@ -66,13 +68,15 @@
 - **바이낸스 연동**: Rate limiting과 배치 처리 지원
 
 ### 전략 프레임워크
-- **Rubber Band Mean-Reversion (v10.0)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-15 심볼 화이트리스트
+- **Rubber Band Mean-Reversion (v11.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-20 심볼 화이트리스트
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
-- **Walk-Forward 검증**: 365일 롤링 윈도우, v10.0 Top-15: 982.4% ret, Calmar 4.78
+- **Walk-Forward 검증**: 365일 롤링 윈도우, v11.1 Top-20: 3384% ret, Calmar 155.22
 
 ### 실거래 안전장치
+- **Server-Side Stop-Loss (v11.1)**: 바이난스 STOP 주문으로 클라이언트 크래시/네트워크 단절 시 손절 보장
+- **Leverage Verification (v11.1)**: 레버리지 설정 실패 시 주문 중단 (알 수 없는 레버리지로 거래 방지)
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
 - **Market Fallback 검증**: ACK 응답 감지 → 자동 재조회 (유령 체결 방지)
 - **State Persistence**: 포지션 상태 JSON 저장 → 크래시 후 자동 복구 + 거래소 대조
@@ -164,24 +168,24 @@ scripts/                    # 연구/분석 스크립트
 ├── v9_refined_sweep.py     # v9.0 파라미터 정밀 스윕
 ├── v10_ab_test.py          # v10.0 엔트리 최적화 A/B 테스트
 └── slot_analysis.py        # 멀티슬롯 동시 포지션 분석
-tests/                      # 유닛 테스트 (415개)
+tests/                      # 유닛 테스트 (425개)
 ├── test_mtf_confirmation.py  # MTF 확인 테스트 (18개)
 ├── test_v9_confluence.py     # v9.0 S+R+M Confluence 테스트 (20개)
 \`\`\`
 
-## 📈 성과 지표 (v10.0: Entry Optimization + Symbol Whitelist, 365일)
+## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
 
-| 지표 | v7.0 Hybrid | v8.0 DynTarget | v9.0 Fib+SRM | v10.0 Optimized ★ |
-|------|-------------|----------------|--------------|--------------------|
-| Portfolio Return | +139.8% | +139.8% | +169.2% | **+982.4%** |
-| Max Drawdown | 4.3% | 4.3% | 11.0% | **19.6%** |
-| Calmar Ratio | 32.42 | 30.29 | 15.38 | **4.78** |
-| Sharpe Ratio | 5.23 | 5.23 | 5.23 | **5.23** |
-| Win Rate | 63.3% | 63.3% | 63.3% | **71.1%** |
-| Trades | 798 | 798 | 798 | **318** |
-| Losers | N/A | N/A | N/A | **0/15** |
+| 지표 | v7.0 Hybrid | v8.0 DynTarget | v9.0 Fib+SRM | v10.0 Optimized | v11.1 Top-20 ★ |
+|------|-------------|----------------|--------------|--------------------|--------------------|
+| Portfolio Return | +139.8% | +139.8% | +169.2% | +982.4% | **+3384.3%** |
+| Max Drawdown | 4.3% | 4.3% | 11.0% | 19.6% | **21.8%** |
+| Calmar Ratio | 32.42 | 30.29 | 15.38 | 4.78 | **155.22** |
+| Sharpe Ratio | 5.23 | 5.23 | 5.23 | 5.23 | **5.02** |
+| Win Rate | 63.3% | 63.3% | 63.3% | 71.1% | **69.7%** |
+| Trades | 798 | 798 | 798 | 318 | **936** |
+| Profit Factor | N/A | N/A | N/A | N/A | **2.66** |
 
-> **v10.0 핵심**: Entry Optimization — threshold 0.045→0.032 (더 많은 기회 포착), min_confidence 2→1 (MTF가 진짜 필터), max_hold 10→20 (충분한 되돌림 시간), stoch_k 5→3 (더 빠른 반응). Top-15 심볼 화이트리스트로 0 losers 달성. Dynamic capital allocation으로 유휴 자본 최소화. v9.0 대비 +480% 절대 수익.
+> **v11.1 핵심**: Top-15→Top-20 Pool Expansion (SHIBUSDT, LINKUSDT, ATOMUSDT, OPUSDT, DOTUSDT, HBARUSDT, ICPUSDT, BNBUSDT 추가). 5 slots 집중 전략이 8/10/15 slots 대비 압도적 성과. 서버사이드 STOP 손절로 클라이언트 크래시 방어.
 
 ## 🧪 테스트
 

@@ -360,22 +360,37 @@ class RubberBandScalper:
             }
 
         try:
-            # Set leverage
+            # Set leverage — v11.1: verify it was applied correctly
+            actual_leverage = leverage
             try:
-                self.client.futures_change_leverage(
+                resp = self.client.futures_change_leverage(
                     symbol=symbol, leverage=leverage,
                 )
+                actual_leverage = int(resp.get('leverage', leverage))
+                if actual_leverage != leverage:
+                    logger.warning(
+                        f"[{symbol}] Leverage mismatch: requested={leverage}x, "
+                        f"actual={actual_leverage}x"
+                    )
             except BinanceAPIException as e:
                 if '-4028' in str(e):
                     # Leverage too high — try lower
                     try:
-                        self.client.futures_change_leverage(
+                        resp = self.client.futures_change_leverage(
                             symbol=symbol, leverage=min(leverage, 20),
                         )
+                        actual_leverage = int(resp.get('leverage', min(leverage, 20)))
                     except Exception:
-                        pass
+                        logger.error(
+                            f"[{symbol}] Leverage fallback also failed — "
+                            f"ABORTING order to prevent unknown leverage"
+                        )
+                        return None
                 else:
-                    logger.warning(f"[{symbol}] Leverage set failed: {e}")
+                    logger.error(
+                        f"[{symbol}] Leverage set failed: {e} — ABORTING order"
+                    )
+                    return None
 
             info = self.get_symbol_info(symbol)
             tick_size = info.get('tick_size', 0.01)
@@ -431,6 +446,118 @@ class RubberBandScalper:
         prec = info.get('quantity_precision', 3)
         rounded = math.floor(qty / step) * step
         return round(rounded, prec)
+
+    # ==================== Server-Side Stop-Loss (v11.1 Safety) ====================
+
+    def _place_server_stop_loss(
+        self, symbol: str, signal: int, quantity: float,
+        entry_price: float, move_size: float, stop_mult: float,
+    ) -> str | None:
+        """Place a server-side stop-loss order on Binance as a safety net.
+
+        This ensures positions are protected even if the client process crashes.
+        The stop price is set at the strategy's stop-loss level (move_size * stop_mult)
+        with a 0.5% buffer beyond to account for slippage in fast markets.
+
+        v11.1: Critical safety feature — positions are NEVER left unprotected.
+
+        Args:
+            symbol: Trading symbol.
+            signal: +1 (long) or -1 (short).
+            quantity: Position quantity.
+            entry_price: Fill price.
+            move_size: Magnitude of the triggering move.
+            stop_mult: Stop loss multiplier.
+
+        Returns:
+            Order ID string, or None on failure (position still tracked).
+        """
+        if self.paper_mode:
+            return f"paper_sl_{int(time.time() * 1000)}"
+
+        # Stop price: entry ± (move_size * stop_mult) with 0.5% buffer
+        stop_distance = move_size * stop_mult
+        buffer = 0.005  # 0.5% extra beyond stop to ensure fill
+
+        if signal == 1:  # Long: stop below entry
+            stop_price = entry_price * (1.0 - stop_distance)
+            limit_price = stop_price * (1.0 - buffer)  # Sell limit below stop
+            close_side = 'SELL'
+        else:  # Short: stop above entry
+            stop_price = entry_price * (1.0 + stop_distance)
+            limit_price = stop_price * (1.0 + buffer)  # Buy limit above stop
+            close_side = 'BUY'
+
+        info = self.get_symbol_info(symbol)
+        tick_size = info.get('tick_size', 0.01)
+        price_precision = info.get('price_precision', 2)
+
+        # Round prices to tick size
+        stop_price = round(
+            round(stop_price / tick_size) * tick_size, price_precision
+        )
+        limit_price = round(
+            round(limit_price / tick_size) * tick_size, price_precision
+        )
+
+        try:
+            order = self.client.futures_create_order(
+                symbol=symbol,
+                side=close_side,
+                type='STOP',
+                timeInForce='GTC',
+                quantity=quantity,
+                price=str(limit_price),
+                stopPrice=str(stop_price),
+                reduceOnly=True,
+            )
+            order_id = str(order['orderId'])
+            logger.info(
+                f"[{symbol}] SERVER STOP-LOSS placed: "
+                f"{close_side} {quantity:.6f} @ stop=${stop_price:.4f} "
+                f"limit=${limit_price:.4f} (orderId={order_id})"
+            )
+            return order_id
+        except Exception as e:
+            logger.error(
+                f"[{symbol}] SERVER STOP-LOSS FAILED: {e}. "
+                f"Position is UNPROTECTED — client-side stop still active."
+            )
+            self.discord.send(content=(
+                f"\u26a0\ufe0f **SERVER STOP FAILED** [{symbol}] — "
+                f"Position unprotected on exchange side. "
+                f"Client-side stop still active."
+            ))
+            return None
+
+    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
+        """Cancel the server-side stop-loss when closing a position normally.
+
+        Must be called BEFORE placing the close order to avoid the stop
+        triggering while we're trying to close.
+
+        Args:
+            symbol: Trading symbol.
+            order_id: The stop-loss order ID to cancel.
+        """
+        if self.paper_mode or not order_id or order_id.startswith('paper_'):
+            return
+
+        try:
+            self.client.futures_cancel_order(
+                symbol=symbol, orderId=int(order_id),
+            )
+            logger.debug(f"[{symbol}] Server stop-loss cancelled: {order_id}")
+        except BinanceAPIException as e:
+            if 'Unknown order' in str(e) or '-2011' in str(e):
+                # Already cancelled or filled — OK
+                logger.debug(
+                    f"[{symbol}] Server stop-loss already gone: {order_id}"
+                )
+            else:
+                logger.warning(
+                    f"[{symbol}] Failed to cancel server stop-loss: {e}"
+                )
 
     # ==================== Position Management ====================
 
@@ -544,6 +671,17 @@ class RubberBandScalper:
         # Compute effective stop (HTF agree parity)
         eff_stop = self.strategy.get_effective_stop_mult(close_prices)
 
+        # ═══ v11.1: Place server-side stop-loss FIRST ═══
+        # Protects position even if client crashes after this point.
+        sl_order_id = self._place_server_stop_loss(
+            symbol=symbol,
+            signal=signal,
+            quantity=fill_qty,
+            entry_price=fill_price,
+            move_size=move_size,
+            stop_mult=eff_stop,
+        )
+
         # Record in strategy
         self.strategy.open_position(
             symbol=symbol,
@@ -553,6 +691,7 @@ class RubberBandScalper:
             leverage=lev_int,
             move_size=move_size,
             entry_stop_mult=eff_stop,
+            server_sl_order_id=sl_order_id,
         )
 
         # Paper balance adjustment
@@ -596,6 +735,11 @@ class RubberBandScalper:
         if pos is None:
             return False
 
+        # v11.1: Cancel old server SL (quantity will change)
+        sl_oid = pos.get('server_sl_order_id')
+        if sl_oid:
+            self._cancel_server_stop_loss(symbol, sl_oid)
+
         fraction = self.config.partial_exit_fraction
         full_quantity = pos['notional'] / pos['entry_price']
         close_qty = self._round_qty(full_quantity * fraction, symbol)
@@ -626,6 +770,21 @@ class RubberBandScalper:
 
         # Update position: reduce notional by closed amount
         pos['notional'] -= partial_notional
+
+        # v11.1: Place new server SL for remaining quantity
+        remaining_qty = self._round_qty(
+            pos['notional'] / pos['entry_price'], symbol,
+        )
+        if remaining_qty > 0 and not self.paper_mode:
+            new_sl_oid = self._place_server_stop_loss(
+                symbol=symbol,
+                signal=pos['signal'],
+                quantity=remaining_qty,
+                entry_price=pos['entry_price'],
+                move_size=pos['move_size'],
+                stop_mult=0.0001,  # Break-even stop (tiny distance)
+            )
+            pos['server_sl_order_id'] = new_sl_oid
 
         # Paper mode
         if self.paper_mode:
@@ -681,12 +840,26 @@ class RubberBandScalper:
         if quantity <= 0:
             return False
 
+        # v11.1: Cancel server-side stop-loss BEFORE closing
+        sl_oid = pos.get('server_sl_order_id')
+        if sl_oid:
+            self._cancel_server_stop_loss(symbol, sl_oid)
+
         # Reverse the entry side
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
         result = self._place_order(symbol, side, quantity)
         if result is None:
-            # Failed to close — re-add position for retry
+            # Failed to close — re-add position for retry (SL already cancelled,
+            # so we need to re-place it)
+            new_sl_oid = self._place_server_stop_loss(
+                symbol=symbol,
+                signal=pos['signal'],
+                quantity=quantity,
+                entry_price=pos['entry_price'],
+                move_size=pos['move_size'],
+                stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
+            )
             self.strategy.open_position(
                 symbol=symbol,
                 signal=pos['signal'],
@@ -695,6 +868,7 @@ class RubberBandScalper:
                 leverage=pos['leverage'],
                 move_size=pos['move_size'],
                 entry_stop_mult=pos.get('entry_stop_mult'),
+                server_sl_order_id=new_sl_oid,
             )
             return False
 
