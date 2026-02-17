@@ -251,18 +251,27 @@ class RubberBandScalper:
             }
             sorted_syms = sorted(volumes, key=volumes.get, reverse=True)
 
-            # Filter exclusions
-            result = [
-                s for s in sorted_syms[:self.config.min_volume_rank]
-                if s not in self.config.exclude_symbols
-            ]
-
-            # v10.0: Apply symbol whitelist filter
+            # v11.1 fix: When whitelist is set, use whitelist directly
+            # (only filter to actively trading symbols). Volume rank
+            # is irrelevant when we have a curated, A/B-validated list.
             if self.config.symbol_whitelist:
                 whitelist_set = set(self.config.symbol_whitelist)
-                result = [s for s in result if s in whitelist_set]
+                exclude_set = set(self.config.exclude_symbols)
+                tradable = set(volumes.keys())  # actively trading symbols
+                result = [
+                    s for s in sorted_syms
+                    if s in whitelist_set and s not in exclude_set
+                ]
+                missing = whitelist_set - tradable
+                if missing:
+                    logger.warning(f"Whitelist symbols not tradable: {missing}")
                 logger.info(f"Universe: {len(result)} symbols (whitelist={len(whitelist_set)})")
             else:
+                # No whitelist: fall back to top-N by volume
+                result = [
+                    s for s in sorted_syms[:self.config.min_volume_rank]
+                    if s not in self.config.exclude_symbols
+                ]
                 logger.info(f"Universe: {len(result)} symbols")
             return result
         except Exception as e:
