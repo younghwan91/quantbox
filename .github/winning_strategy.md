@@ -1,170 +1,89 @@
-이것은 크립토 선물 대회 우승자의 전략입니다. 참조하면 좋을 것이다.
+# Advanced Algorithmic Guide for Quant Trading Agents: Maeoknam Strategy
 
-이 시스템은 엘리어트 파동을 메인 프레임워크로 삼고, 피보나치와 RSI 다이버전스를 확정 신호(Confirmation)로 사용하는 '복합 기술 분석' 체계입니다.
+This document codifies the practical trading techniques of trader Maeoknam, translating them into executable logic for a quantitative trading agent. It specifically details the geometric evaluation of impulse and corrective waves, alongside the mathematical leverage management techniques that served as the foundation for their world championship victory.
 
-1. 기술적 분석 스택 (Technical Indicator Stack)
-Primary (구조 분석): 엘리어트 파동 이론 (Elliott Wave Theory)
+## 1. Asset Selection and Filtering Logic
 
-Secondary (수치 검증): 피보나치 되돌림 및 확장 (Fibonacci Retracement/Extension)
+The agent must concentrate its computational resources exclusively on assets with verified market dominance.
 
-Tertiary (신호 확정): RSI 다이버전스, 거래량(Volume), 매물대(Support/Resistance)
-
-Auxiliary (추세 확인): 이동평균선(MA), 캔들 패턴
-
-2. 계층적 분석 프로세스 (Analysis Pipeline)
-에이전트가 실행해야 할 분석 순서는 다음과 같은 Top-Down 방식을 따릅니다.
-
-시장 지수 분석: 비트코인(또는 해당 시장 지수)의 전체적인 파동 위치 파악.
-
-다중 타임프레임(MTF) 동기화:
-
-1D / 4H: 큰 추세 및 파동의 대주기 확인 (Main Trend).
-
-1H / 15m / 5m: 세부 파동 카운팅 및 진입 타점 포착 (Execution).
-
-매물대 식별: 주요 지지/저항 라인을 수평선으로 설정하여 피보나치 레벨과 겹치는 '중첩 구간' 탐색.
-
-3. 진입 및 청산 알고리즘 (Execution Logic)
-A. 진입 조건 (Entry Confluence)
-단일 지표가 아닌, 최소 3가지 이상의 기술적 근거가 일치할 때만 진입합니다.
-
-Condition 1 (파동): 엘리어트 파동상 조정 파동(ABC)의 끝점이거나, 새로운 충격 파동(Impulse)의 시작점일 것.
-
-Condition 2 (피보나치): 가격이 0.382, 0.618, 0.786 등 주요 되돌림 레벨에 도달.
-
-Condition 3 (오실레이터): 해당 타점에서 RSI 다이버전스(하락/상승)가 명확히 발생.
-
-Condition 4 (거래량): 추세 반전 시 거래량이 실리는지 확인.
-
-B. 파동별 세부 규칙 (Elliott Wave Rules)
-3파의 법칙: 3파는 1, 3, 5파 중 가장 짧을 수 없으며, 보통 1파의 1.618배 확장 수준까지 도달.
-
-4파의 법칙: 4파의 저점은 1파의 고점과 겹치지 않아야 함 (임펄스 파동의 기본 원칙).
-
-2파와 4파의 교대 법칙: 2파가 단순하면 4파는 복잡하게 나타날 확률이 높음.
-
-C. 피보나치 활용 수치 (Fibonacci Specification)
-되돌림(Retracement): 0.236, 0.382, 0.5, 0.618, 0.707, 0.786, 0.886.
-
-확장(Extension): 1.13, 1.236, 1.272, 1.382, 1.5, 1.618, 2.0, 2.618.
-
-Tip: 매물대와 피보나치 수치가 겹치는 지점을 'Golden Zone'으로 설정.
-
-4. 기술적 리스크 관리 (Risk Management)
-손절가(SL) 설정: 파동 카운팅이 무효화되는 지점(예: 4파가 1파 영역 침범 시)에 즉시 설정.
-
-손익비(Risk-Reward): 최소 1:2 이상의 구간에서만 진입.
-
-분할 청산: 목표가 도달 시 물량의 50%를 수익 실현하고, 나머지 물량은 본절가(Entry Price)로 스탑로스 이동 (귀하의 'Capital Preservation' 원칙과 일치).
-
-매매 방식은 단일 기법으로 정의하기보다 **'구조적 반전(Structural Reversal)'**과 **'파동 기반의 추세 추종'**이 결합된 형태입니다. 요청하신 회귀와 돌파의 관점에서 기술적으로 분석한 결과는 다음과 같습니다.
-
-1. 매매 성향: 회귀(Mean Reversion)와 추세(Trend)의 결합
-주요 방식: **'조정 파동의 끝단에서 진입하는 역추세 기반의 추세 추종'**입니다.
-
-회귀적 요소: 가격이 평균에서 멀어져 과매수/과매도 구간에 진입했을 때, RSI 다이버전스를 통해 추세의 힘이 빠지는 것을 포착합니다. 즉, 단기적인 가격 과열이 해소되며 평균 혹은 반대 방향으로 회귀하는 지점(조정 ABC 파동의 C파 끝점)을 공략합니다.
-
-추세적 요소: 단순히 평균으로 돌아가는 것에 그치지 않고, 상위 타임프레임(MTF)의 주 파동 방향으로 복귀하는 지점을 찾습니다. 따라서 진입은 '회귀'를 이용하지만, 수익 실현은 '새로운 추세(3파 또는 5파)'를 타는 방식입니다.
-
-2. 돌파(Breakout) 매매에 대한 기술적 입장
-추격 돌파 지양: 가격이 저항선을 뚫는 순간 바로 따라붙는 '추격 돌파 매매'는 가짜 돌파(Fakeout)의 위험이 커서 선호하지 않습니다.
-
-리테스트(Retest) 활용: 만약 돌파 구간을 공략한다면, 돌파 후 이전 저항선이 지지선으로 바뀌는(S/R Flip) 구간에서의 지지를 확인하고 진입하는 '보수적 돌파' 방식을 취합니다. 이는 하방 리스크를 줄이려는 귀하의 MDD 관리 원칙과도 일맥상통합니다.
-
-3. 기술적 핵심 매커니즘: '비대칭적 역전'
-손익비의 극대화: 엘리어트 파동상 2파나 4파의 끝에서 진입하기 때문에, 파동 카운팅이 틀렸을 때의 손절선은 매우 짧고, 맞았을 때의 수익 구간(3파 또는 5파)은 매우 깁니다.
-
-수렴과 발산: 차트 패턴(삼각형, 웻지 등)의 수렴 구간 끝에서 에너지가 응축되었다가 분출되는 시점을 파동의 시작점으로 해석하여 진입 타점을 잡습니다.
-
-# 퀀트 트레이딩 에이전트 시스템 아키텍처: 매억남(Mae-eok-nam) 전략
-
-## 1. 시스템 개요 (System Overview)
-본 문서는 암호화폐 시장의 변동성을 활용하여 수익을 창출하는 자율 퀀트 트레이딩 에이전트의 핵심 행동 규칙을 정의한다. 주관적 판단을 철저히 배제하고 **지수 이동평균(EMA), 상대강도지수(RSI), 이동평균 수렴 확산(MACD), 스토캐스틱(Stochastics)**의 수렴(Confluence)과 **엘리엇 파동(ABC 패턴), 피보나치 비율**을 결합한 데이터 기반 시스템이다. 철저한 리스크 관리와 추세 추종 로직을 통해 장기적이고 안정적인 우상향 알파(Alpha)를 창출한다.
+* **Major Coin Priority:** Focus on the top 30 cryptocurrencies by market capitalization (e.g., BTC, ETH) as primary trading targets. This eliminates the delisting risks and abnormal liquidity noise associated with altcoins.
+* **Bitcoin as an Index:** Treat Bitcoin as the broader market index. Only activate the long algorithms for altcoins when Bitcoin reaches major support levels or forms a market bottom.
+* **Fractal Structure Verification:** Operate on the premise that all market movements consist of repetitive sequences (fractals). Adopt a 'Top-Down' approach, narrowing the analysis from long-term macro charts to short-term micro charts.
 
 ---
 
-## 2. 기술적 지표의 수학적 정의 및 정량적 역할
+## 2. S+R+M Indicator System Settings and Thresholds
 
-에이전트는 실시간 가격 데이터를 다음의 통계적 지표로 변환하여 시장 상태를 판별한다.
+These are the detailed technical indicator parameters the agent uses to generate entry signals.
 
-### 2.1 지수 이동평균 (EMA) 다중 시계열 분석
-최근 가격 데이터에 가중치를 부여하여 추세 변화에 민감하게 반응한다.
+### 2.1. Indicator Configuration
 
-$$EMA_{t} = \left( Price_{t} - EMA_{t-1} \right) \times \left( \frac{2}{n+1} \right) + EMA_{t-1}$$
+* **RSI (Relative Strength Index):** Utilize a default 14-period setting. Dynamically adjust to 7-9 periods to increase sensitivity in highly volatile zones.
+* **EMA (Exponential Moving Average):** Deploy the 20, 50, 100, 200, and 500-period lines. The 200 and 500 EMAs function as the trend's lifelines; maintain a strict short bias when the price is below these lines, and a long bias when above.
+* **Parallel Channels:** Define trend trajectories by connecting price highs and lows to form channels. Treat any breakout from these channels as either the termination of a wave or the inception of a new trend.
 
+### 2.2. Divergence Recognition Algorithm
 
+* **Failure Swing:** If the price prints a lower low while the RSI registers a higher low (bullish divergence), the algorithm classifies downward momentum as exhausted.
+* **Confirmation Protocol:** Divergence signals require mandatory corroboration. The agent must verify a reversal in the MACD histogram or a golden/dead cross in the Stochastic oscillator before validating the signal.
 
-| EMA 기간 | 전략적 명칭 | 알고리즘상 역할 | 비고 |
+---
+
+## 3. Elliott Wave and Fibonacci Ratios (The Skeleton)
+
+The core of the strategy is capturing the new impulse wave that emerges following an ABC corrective wave.
+
+### 3.1. Standard Fibonacci Ratios by Wave
+
+The agent utilizes the following thresholds to quantify geometric patterns.
+
+| Wave Type | Reference Wave | Target/Retracement Ratio | Algorithmic Validation Criteria |
 | :--- | :--- | :--- | :--- |
-| **20** | 단기 모멘텀선 | 단기 추세 가속도 및 이격도 측정 | 스캘핑 및 데이트레이딩 진입 근거 |
-| **50** | 중기 추세선 | 추세 지속 여부 판단 및 1차 지지/저항 | 눌림목 매매 핵심 기준 |
-| **100** | 구조적 분기점 | 시장 구조 변화 신호 포착 | 추세 반전 조기 경보 |
-| **200** | 장기 생명선 | 대세 상승장/하락장 구분 기준 | 기관/고래 매매 기준점 (H4 기준 핵심) |
-| **500** | 최종 저항/지지선 | 극단적 투매나 오버슈팅의 한계점 | 강력한 변곡점 제공 |
+| **Wave 2** | vs. Wave 1 | 0.5, 0.618, 0.764 | Pattern invalidated if Wave 1 origin is breached. |
+| **Wave 3** | vs. Wave 1 | 1.618, 2.618 | Strongest momentum phase; triggers pyramiding logic. |
+| **Wave 4** | vs. Wave 3 | 0.236, 0.382 | Monitor strictly for intrusion into Wave 1 apex. |
+| **ABC Correction (B)** | vs. Wave A | 0.5, 0.618 | Wave B cannot exceed the origin point of Wave A. |
+| **ABC Correction (C)** | vs. Wave A | 1.0 (1:1), 1.618 | Wave C termination point serves as the primary entry zone. |
 
-### 2.2 모멘텀 지표 (RSI & Stochastic)
+### 3.2. Special Pattern Analysis: Wedges and Triangles
 
-
-RSI는 시장의 과열/냉각 및 추세 강도를 측정한다.
-$$RSI = 100 - \left[ \frac{100}{1 + \left( \frac{\text{Average Gain}}{\text{Average Loss}} \right)} \right]$$
-
-스토캐스틱은 특정 기간의 고가/저가 범위 내 현재 가격 위치를 도출하여 단기 반전을 포착한다.
-
-| 지표 | 과매수 기준 | 과매도 기준 | 주요 신호 |
-| :--- | :--- | :--- | :--- |
-| **RSI** | 70 이상 | 30 이하 | 추세의 한계 및 다이버전스 포착 |
-| **Stochastic**| 80 이상 | 20 이하 | %K와 %D 교차를 통한 단기 반전 |
-
-### 2.3 MACD를 통한 추세 확증
-추세의 방향과 강도를 교차 검증한다.
-* **MACD 라인:** $EMA(12) - EMA(26)$
-* **시그널 라인:** $MACD \text{ 라인의 } EMA(9)$
-* **히스토그램:** $MACD \text{ 라인} - \text{시그널 라인}$
-
-
+* **Ending Diagonal (Wedge):** Occurs at the exhaustion point of a trend. The agent utilizes this as a termination signal for a Wave 5 or Wave C.
+    * *Hedging and Scaling Out:* Upon wedge detection, execute a 50% take-profit. Subsequently, establish a hedging position in the opposite direction at the 0.5 retracement level of the wedge to mitigate risk.
+* **Triangles:** Typically manifest in Wave 4 or Wave B. Attempting to extract profit from the final E wave carries a disproportionate risk profile; thus, the agent must either exclude the E wave from trading or deploy highly conservative parameters.
 
 ---
 
-## 3. S+R+M 통합 수렴 전략 및 다이버전스
+## 4. Leverage and Capital Management for Championship Trading
 
-### 3.1 다중 지표 수렴 파이프라인
-단일 지표의 허위 신호(Fake-out)를 제거하기 위한 순차적 논리 회로:
-1.  **RSI 상태 필터링:** RSI $\le 30$ (롱 셋업) 또는 RSI $\ge 70$ (숏 셋업).
-2.  **Stochastic 교차 트리거:** RSI 조건 충족 상태에서 %K가 %D를 교차 (골든/데드 크로스).
-3.  **MACD 추세 확증:** 히스토그램 기울기 반전 또는 MACD 선과 시그널 선의 교차 발생 시 진입 확정.
+To completely neutralize psychological variance, the agent must strictly adhere to the following mathematical allocation principles.
 
-### 3.2 다이버전스 (Divergence) 정량화
-최신 캔들의 가격 피봇과 지표 피봇을 대조하여 발생 여부를 수치화한다. S+R+M 수렴과 결합 시 **A급 타점**으로 분류된다.
+### 4.1. 10% Margin Limit and Effective Leverage Control
 
-| 다이버전스 유형 | 가격 움직임 | 지표(RSI/MACD) | 시장 함의 |
-| :--- | :--- | :--- | :--- |
-| **일반 하락** | 고점 상승 (Higher High) | 고점 하락 (Lower High) | 상승 추세 약화, 하락 반전 예고 |
-| **일반 상승** | 저점 하락 (Lower Low) | 저점 상승 (Higher Low) | 하락 추세 약화, 상승 반전 예고 |
-| **과장된 형태** | 쌍고점 / 쌍저점 | 고점 하락 / 저점 상승 | 추세 지속의 한계 도달 |
+* **Position Sizing:** Restrict margin utilization to a maximum of **10%** of total seed capital.
+* **Cross Margin Optimization:** Utilize the remaining 90% in cash as collateral to drastically lower the liquidation threshold.
+* **The Leverage Paradox:** Even when deploying 20x-50x nominal leverage during competitions, capping the margin at 10% keeps the *effective* leverage at a survivable 2x-5x relative to the total account equity, ensuring resilience against extreme volatility spikes.
 
----
+### 4.2. Fractional Entry and Pyramiding Logic
 
-## 4. 기하학적 구조: ABC 패턴과 피보나치 수열
-
-### 4.1 엘리엇 파동 ABC 패턴
-
-
-* **A 파동 (Impulse):** 신규 추세의 강한 시작.
-* **B 파동 (Correction):** A 파동 대비 $0.382 \sim 0.618$ 되돌림. (A 파동 시작점 이탈 시 패턴 무효화).
-* **C 파동 (Extension):** A 파동 방향으로 재진행. A 파동 길이의 $1.0 \sim 1.618$배 확장.
-
-### 4.2 피보나치 임계값 (Thresholds)
-* **$0.382$:** 강한 추세 내 얕은 조정.
-* **$0.618$ (황금 비율):** S+R+M 결합 시 최고 승률 지점.
-* **$0.786$:** 깊은 조정 구간, 지지 실패 시 추세 반전 확정.
+* **Exploratory Entry (2%):** Initiate a pilot position utilizing 2% of total capital to test the initial trend confirmation.
+* **Primary Entry (8%):** Upon definitive trend confirmation (e.g., validated divergence), deploy the remaining 8% to optimize the average entry price.
+* **Pyramiding:** Only allocate additional capital (using accrued unrealized profits as collateral) when a Wave 3 or Wave C is statistically confirmed. Concurrently, the stop-loss order must be aggressively trailed to the breakeven point or higher.
 
 ---
 
-## 5. 리스크 관리 및 레버리지 아키텍처 (Risk Management)
+## 5. Execution Logic Flow
 
-* **10% 증거금 법칙:** 전체 시드의 **10%**만 단일 포지션 증거금으로 투입하여 청산 리스크를 원천 차단.
-* **실효 레버리지 통제:** 교차(Cross) 모드 사용 시 포지션 규모(Notional Value)를 자산 총액 대비 일정 비율로 제한. (예: $10,000 중 $1,000 투입 20x 레버리지 = 실효 레버리지 2x).
-* **정량적 손절매 (Stop-Loss):**
-    1.  *구조적 손절:* B 파동 저점/고점 이탈 시 즉각 시장가 청산.
-    2.  *비율적 손절:* 진입가 대비 0.886 피보나치 레벨 이탈 시 청산.
-* **피라미딩 (불타기):** C 파동 확정 (A 파동 고점 돌파) 시 추가 비중 투입, 단 스탑로스는 본절가(Break-even)로 즉각 상향 조정.
+1.  **Market Scanning:** Determine the macroeconomic bias (Long/Short) by analyzing BTC's position relative to the 200/500 EMAs.
+2.  **Pattern Recognition:** Deploy Zig-Zag algorithms to monitor the completion of ABC corrective waves. Specifically verify that the internal sub-structures of Waves A and C consist of 5-wave motive sequences.
+3.  **Confluence Verification:**
+    * Price intersects the 0.618 Fibonacci retracement level.
+    * Verified RSI/MACD divergence.
+    * Stochastic %K and %D crossover confirmed.
+4.  **Position Execution:** Trigger exploratory entry (2%) -> Execute primary entry (8%) upon signal validation.
+5.  **Post-Entry Management:** Execute a 50% partial take-profit upon reaching the primary target. Trail the remaining position until trend exhaustion metrics (e.g., counter-divergence) are triggered.
+
+---
+
+## 6. Conclusion: The Architectural Advantage
+
+The structural edge of this championship strategy relies not merely on predictive accuracy, but on asymmetric risk modeling: **systematically minimizing drawdowns via a strict 10% margin cap, while maximizing upside by holding positions through the terminal extensions of Waves C or 3.** The quant agent must compute the retracement depth of Wave B and the extension length of Wave C in real-time. It is programmed to execute high-leverage entries exclusively at the most statistically favorable Fibonacci coordinates (0.618 and 1.618) during ABC corrective sequences.

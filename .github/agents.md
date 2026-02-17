@@ -7,15 +7,16 @@
 
 ## 1. 시스템 개요
 
-QuantBox v9.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
+QuantBox v10.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
-**v9.0: Fibonacci + S+R+M Confluence** — target 0.382 (Fib golden ratio), stop 0.786 (Fib deep correction) + MACD(12,26,14) 히스토그램 + Stochastic(5,3) 크로스 컨플루언스 증거. Calmar 15.38 (+33.6% vs v8.0), DD 11.0% (-8.5%). Dynamic Target 비활성화.
+**v10.0: Entry Optimization + Symbol Whitelist** — threshold 0.032 (3.2%), min_confidence=1 (MTF as gate), max_hold=20, stoch_k=3. Top-15 심볼 화이트리스트 + 동적 자본 배분.
+**v9.0: Fibonacci + S+R+M Confluence** — target 0.382, stop 0.786, MACD(12,26,14), Stochastic(3,3).
 **v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
 
 | 구성 요소 | 역할 |
 |-----------|------|
 | **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산 |
-| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 4.5%+ 급등/급락 포착) + Fibonacci Exit (v9.0) + MACD/Stochastic Confluence (v9.0) + MTF 확인 + 독립 4H 트레이딩 |
+| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 3.2%+ 급등/급락 포착) + Fibonacci Exit (v9.0) + MACD/Stochastic Confluence (v9.0) + MTF 확인 + 독립 4H 트레이딩 + Symbol Whitelist (v10.0) |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -27,17 +28,20 @@ QuantBox v9.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Fibonacci + S+R+M Confluence v9.0)
-심볼선택: Top-10 curated (FETUSDT, FILUSDT, ICPUSDT, HBARUSDT, DOTUSDT,
-                        OPUSDT, SHIBUSDT, DOGEUSDT, LTCUSDT, ATOMUSDT)
-파라미터: lookback=8, threshold=0.045, target=0.382, stop=0.786, max_hold=10
+전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Fibonacci + S+R+M Confluence v9.0 + Entry Optimization v10.0)
+심볼선택: Top-15 whitelist (FILUSDT, NEARUSDT, ADAUSDT, XLMUSDT, ETHUSDT,
+                          BCHUSDT, ARBUSDT, UNIUSDT, PEPEUSDT, XRPUSDT,
+                          FETUSDT, INJUSDT, SOLUSDT, AVAXUSDT, AAVEUSDT)
+파라미터: lookback=8, threshold=0.032, target=0.382, stop=0.786, max_hold=20
          stop_decay=0.0
          entry_mode='confidence'
+         min_confidence=1 (MTF is the real quality gate)
          btc_regime_period=96 (24h SMA for regime detection)
          asset_trend_period=192 (48h SMA for classic pullback)
          btc_directional_period=32 (8h BTC momentum for sympathy)
          base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
          partial_exit_enabled=false
+         dynamic_capital_enabled=true (balance / max(1, n_active+1))
          # v9.0 Fibonacci Exit Levels
          target_retrace=0.382 (Fibonacci golden ratio, +29% Calmar vs 0.4)
          stop_mult=0.786 (Fibonacci deep correction, DD -8.5% vs 0.9)
@@ -49,7 +53,7 @@ QuantBox v9.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
          macd_fast=12, macd_slow=26, macd_signal_period=14
          # v9.0 Stochastic Cross Evidence
          stoch_enabled=true
-         stoch_k_period=5, stoch_d_period=3
+         stoch_k_period=3, stoch_d_period=3  # v10.0: faster stochastic
          # v7.0 MTF Confirmation
          mtf_confirmation_enabled=true
          mtf_sma_period=12 (4h SMA, 2일)
@@ -61,15 +65,14 @@ QuantBox v9.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
          htf_rb_max_hold=12, htf_rb_btc_sma_period=48
 비용:     0.04%/side + 펀딩비
 
-성과 (365일, v9.0 Fibonacci + S+R+M Confluence, 10개 심볼 유니버스):
-  Return:    +169.2%
-  Sharpe:    5.23
-  Max DD:    11.0%
-  Calmar:    15.38
-  Win Rate:  63.3%
-  R:R:       0.486
-  Trades:    798
-  Walk-forward Q3 DD: 3.0% (was 16.5%)
+성과 (365일, v10.0 Entry Optimization + Symbol Whitelist, Top-15 유니버스):
+  Return:    +982.4%
+  Max DD:    19.6%
+  Calmar:    4.78
+  Trades:    318
+  Losers:    0/15 (전 심볼 수익)
+  Win Rate:  71.1%
+  Dynamic Capital: balance / max(1, n_active+1), 50% cap
 ```
 
 ---
