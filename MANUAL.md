@@ -520,29 +520,19 @@ quantbox/
 │   ├── execution.py        # 주문 실행
 │   └── portfolio.py        # 포지션 관리
 ├── data/                    # 데이터 계층
-│   ├── cache.py            # 캐싱 시스템
-│   ├── downloader.py       # 데이터 다운로드
-│   └── preprocessor.py     # 데이터 전처리
+│   ├── cache.py            # 2단계 캐싱 (LRU + gzip)
+│   ├── downloader.py       # 바이낸스 데이터 다운로드
+│   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 계층
-│   ├── base.py             # 전략 베이스 클래스
-│   ├── filters.py          # 필터 구현
-│   ├── pair_selector.py    # 페어 선택
-│   └── pair_strategy.py    # 페어 전략
+│   ├── rubberband.py       # Rubber Band Scalper (Numba 가속)
+│   ├── alpha_engine.py     # 멀티팩터 Alpha Engine
+│   └── vol_selector.py     # 변동성 기반 심볼 선택기
 ├── backtest/               # 백테스팅
-│   ├── runner.py           # 백테스트 실행
-│   ├── metrics.py          # 성과 지표
-│   ├── analyzer.py         # 결과 분석
-│   └── walk_forward.py     # Walk-Forward
-├── optimization/           # 최적화
-│   ├── optimizer.py        # 최적화 알고리즘
-│   ├── objective.py        # 목적 함수
-│   └── sensitivity.py      # 민감도 분석
+│   └── vectorized_backtest.py  # 벡터화 백테스트 (Numba)
 ├── notifications/          # 알림 & 원격 제어
 │   ├── discord.py          # Discord 웹훅 (단방향 알림)
 │   └── bot.py              # Discord 봇 (양방향 명령)
 └── utils/                  # 유틸리티
-    ├── numba_ops.py        # Numba 가속 함수
-    └── costs.py            # 거래 비용 모델
 ```
 
 ### 3.2 이벤트 기반 아키텍처
@@ -801,31 +791,6 @@ tf_cache = TimeframedCache(
 # 자동 타임프레임 감지
 tf_cache.put("BTCUSDT", df, interval="1h")
 data = tf_cache.get("BTCUSDT", interval="1h", days=30)
-```
-
-### 5.3 DataPreprocessor (데이터 전처리)
-
-```python
-from quantbox.data.preprocessor import DataPreprocessor, PairData
-
-preprocessor = DataPreprocessor()
-
-# 페어 데이터 처리
-pair_data: PairData = preprocessor.process_pair(
-    df1=btc_data,
-    df2=eth_data,
-    symbol1="BTCUSDT",
-    symbol2="ETHUSDT",
-    train_ratio=0.8
-)
-
-# 결과 확인
-print(f"Hedge Ratio: {pair_data.hedge_ratio:.4f}")
-print(f"Intercept: {pair_data.intercept:.4f}")
-print(f"Spread Mean: {pair_data.spread_mean:.4f}")
-print(f"Spread Std: {pair_data.spread_std:.4f}")
-print(f"Half-Life: {pair_data.half_life:.1f} bars")
-print(f"Correlation: {pair_data.correlation:.4f}")
 ```
 
 ---
@@ -2004,85 +1969,34 @@ logging.getLogger('BacktestRunner').setLevel(logging.INFO)
 
 ```python
 # Core
-from quantbox import (
-    Config,                  # 설정 관리
-    TradingMode,             # BACKTEST, PAPER, LIVE
-    TradingEngine,           # 트레이딩 엔진
-    Portfolio,               # 포트폴리오 관리
-    Position,                # 개별 포지션
-)
-
-# Events
-from quantbox.core.events import (
-    Event,                   # 기본 이벤트
-    EventType,               # 이벤트 타입
-    MarketEvent,             # 시장 데이터
-    SignalEvent,             # 시그널
-    OrderEvent,              # 주문
-    FillEvent,               # 체결
-    SignalType,              # LONG, SHORT, EXIT
-    OrderSide,               # BUY, SELL
-)
+from quantbox.core.config import RubberBandConfig
+from quantbox.core.settings import get_settings
+from quantbox.core.events import SignalEvent, OrderEvent, SignalType, OrderSide
+from quantbox.core.limit_chaser import LimitChaser
+from quantbox.core.state_persistence import save_state, load_state
 
 # Data
 from quantbox.data import (
     DataDownloader,          # 데이터 다운로드
     DataCache,               # 캐시 시스템
-    DataPreprocessor,        # 전처리
-    PairData,                # 페어 데이터
+    RealDataLoader,          # 실제 데이터 로더
+    get_real_data,           # 편의 함수
 )
 
 # Strategy
-from quantbox.strategy import (
-    Strategy,                # 기본 전략
-    StatefulStrategy,        # 상태 전략
-    PairTradingStrategy,     # 페어 전략
-    FilterPipeline,          # 필터 파이프라인
-    PairSelector,            # 페어 선택
-    PairCandidate,           # 페어 후보
-)
-
-# Filters
-from quantbox.strategy.filters import (
-    CorrelationFilter,       # 상관관계
-    CointegrationFilter,     # 공적분
-    HalfLifeFilter,          # 반감기
-    HurstFilter,             # 허스트 지수
-    VolumeFilter,            # 거래량
-    StationarityFilter,      # 정상성
-)
+from quantbox.strategy.rubberband import RubberBandStrategy
+from quantbox.strategy.alpha_engine import AlphaEngine
+from quantbox.strategy.vol_selector import VolSelector
 
 # Backtest
-from quantbox.backtest import (
-    BacktestRunner,          # 백테스트 실행
-    BacktestConfig,          # 백테스트 설정
-    PerformanceMetrics,      # 성과 지표
-    calculate_metrics,       # 지표 계산
-    WalkForwardAnalysis,     # Walk-Forward
-)
+from quantbox.backtest import VectorizedBacktest, BacktestConfig, BacktestResult
 
-# Optimization
-from quantbox.optimization import (
-    GridSearchOptimizer,     # 그리드 서치
-    RandomSearchOptimizer,   # 랜덤 서치
-    DifferentialEvolutionOptimizer,  # DE
-    BayesianOptimizer,       # 베이지안
-    SensitivityAnalyzer,     # 민감도 분석
-    SharpeObjective,         # Sharpe 목적함수
-    CalmarObjective,         # Calmar 목적함수
-    MultiObjective,          # 다목적 함수
-)
+# Notifications
+from quantbox.notifications.discord import DiscordNotifier
+from quantbox.notifications.bot import DiscordBotRunner, BotCommand, CommandType
 
-# Utils
-from quantbox.utils.numba_ops import (
-    calculate_rolling_zscore,
-    calculate_half_life,
-    calculate_hurst_exponent,
-    calculate_ema,
-    ols_hedge_ratio,
-    kelly_criterion,
-    optimal_position_sizing,
-)
+# Scalper (Live Trading)
+from quantbox.scalper import RubberBandScalper
 ```
 
 ### 16.2 설정 옵션 전체 목록

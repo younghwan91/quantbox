@@ -2472,6 +2472,7 @@ class RubberBandStrategy:
         notional: float, leverage: float, move_size: float,
         entry_stop_mult: float | None = None,
         server_sl_order_id: str | None = None,
+        server_tp_order_id: str | None = None,
     ):
         """Record a new position.
 
@@ -2479,6 +2480,8 @@ class RubberBandStrategy:
             entry_stop_mult: Effective stop multiplier at entry (for
                 HTF agree parity). If None, uses cfg.stop_mult.
             server_sl_order_id: Exchange-side stop-loss order ID (v11.1).
+                Used for cancellation when position is closed normally.
+            server_tp_order_id: Exchange-side take-profit order ID (v11.2).
                 Used for cancellation when position is closed normally.
         """
         self._positions[symbol] = {
@@ -2492,6 +2495,7 @@ class RubberBandStrategy:
             'entry_stop_mult': entry_stop_mult if entry_stop_mult is not None else self.config.stop_mult,
             'partial_closed': False,   # v4.3: track partial exit state
             'server_sl_order_id': server_sl_order_id,  # v11.1: server-side stop
+            'server_tp_order_id': server_tp_order_id,  # v11.2: server-side TP
         }
 
     def close_position(self, symbol: str) -> dict | None:

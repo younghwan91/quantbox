@@ -161,16 +161,11 @@ quantbox/
 │   └── discord.py          # Discord Webhook (단방향)
 └── scalper.py              # Rubber Band 실거래 트레이더
 
-scripts/                    # 연구/분석 스크립트
-├── mtf_trading_ab_test.py  # Multi-TF A/B 테스트
-├── mtf_hybrid_test.py      # v7.0 하이브리드 전략 테스트
-├── v9_srm_ab_test.py       # v9.0 S+R+M A/B 테스트
-├── v9_refined_sweep.py     # v9.0 파라미터 정밀 스윕
-├── v10_ab_test.py          # v10.0 엔트리 최적화 A/B 테스트
-└── slot_analysis.py        # 멀티슬롯 동시 포지션 분석
-tests/                      # 유닛 테스트 (425개)
-├── test_mtf_confirmation.py  # MTF 확인 테스트 (18개)
-├── test_v9_confluence.py     # v9.0 S+R+M Confluence 테스트 (20개)
+scripts/                    # 유틸리티 스크립트
+├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
+├── download_extended_data.py # 365일 확장 데이터 다운로드
+└── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
+tests/                      # 유닛 테스트 (457개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
