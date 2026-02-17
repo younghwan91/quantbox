@@ -49,6 +49,9 @@ from quantbox.core.limit_chaser import (
     ChaseConfig, ChaseFillStatus, ChaseResult, LimitOrderChaser,
 )
 from quantbox.core.settings import get_settings
+from quantbox.notifications.bot import (
+    BotCommand, CommandType, DiscordBotRunner,
+)
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.rubberband import (
     RubberBandConfig, RubberBandStrategy, calculate_position_size,
@@ -160,6 +163,14 @@ class RubberBandScalper:
         # Notifications
         self.discord = DiscordNotifier(webhook_url=settings.discord_webhook_url)
 
+        # Discord Bot (interactive commands)
+        self._bot_runner: DiscordBotRunner | None = None
+        if settings.discord_bot_token and settings.discord_channel_id:
+            self._bot_runner = DiscordBotRunner(
+                token=settings.discord_bot_token,
+                channel_id=settings.discord_channel_id,
+            )
+
         # Paper trading state
         self._paper_balance = settings.paper_balance
 
@@ -176,8 +187,9 @@ class RubberBandScalper:
         self._trade_history: list[dict] = []
         self._cycle_count: int = 0
 
-        # Stop flag (for testing)
+        # Control flags
         self._stop_requested: bool = False
+        self._paused: bool = False
 
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"RubberBandScalper initialized ({mode_str})")
@@ -762,21 +774,29 @@ class RubberBandScalper:
             f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
             f"held={pos['bars_held']} bars"
         )
+        cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        n_trades = len(self._trade_history)
+        wins_total = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+        wr = wins_total / n_trades * 100 if n_trades > 0 else 0
+        hold_time = pos['bars_held'] * 15
+
         self.discord.send(embed={
-            'title': f"{emoji} {symbol} {reason.upper().replace('_', ' ')}",
+            'title': f"{emoji} {symbol} {reason.upper().replace('_', ' ')} FILLED",
             'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
+            'description': (
+                'Server-side TP hit intra-bar!' if reason == 'server_tp'
+                else 'Server-side SL triggered (safety net).'
+            ),
             'fields': [
-                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%',
-                 'inline': True},
-                {'name': 'Net $', 'value': f'${net_pnl:+.2f}',
-                 'inline': True},
-                {'name': 'Bars', 'value': str(pos['bars_held']),
-                 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}',
-                 'inline': True},
-                {'name': 'Exit', 'value': f'${fill_price:.4f}',
-                 'inline': True},
+                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
+                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': 'Hold Time', 'value': f'{hold_time}m ({pos["bars_held"]} bars)', 'inline': True},
+                {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades}T, {wr:.0f}%WR)', 'inline': False},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
 
     # ==================== Position Management ====================
@@ -938,17 +958,34 @@ class RubberBandScalper:
             f"lev={lev_int}x, move={move_size*100:.2f}%)"
         )
 
+        # Compute TP/SL prices for notification
+        tp_distance = move_size * cfg.target_retrace
+        sl_distance = move_size * eff_stop
+        if signal == 1:
+            tp_price = fill_price * (1.0 + tp_distance)
+            sl_price = fill_price * (1.0 - sl_distance)
+        else:
+            tp_price = fill_price * (1.0 - tp_distance)
+            sl_price = fill_price * (1.0 + sl_distance)
+
+        balance_after = self.get_balance()
+        n_active = self.strategy.n_active
         self.discord.send(embed={
             'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} "
                      f"{'LONG' if signal == 1 else 'SHORT'}",
             'color': 0x00C853 if signal == 1 else 0xFF1744,
             'fields': [
-                {'name': 'Price', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': 'Entry', 'value': f'${fill_price:.4f}', 'inline': True},
                 {'name': 'Size', 'value': f'${fill_qty * fill_price:.2f}',
                  'inline': True},
                 {'name': 'Leverage', 'value': f'{lev_int}x', 'inline': True},
                 {'name': 'Move', 'value': f'{move_size*100:.2f}%', 'inline': True},
+                {'name': 'TP', 'value': f'${tp_price:.4f}', 'inline': True},
+                {'name': 'SL', 'value': f'${sl_price:.4f}', 'inline': True},
+                {'name': 'Slots', 'value': f'{n_active}/{cfg.max_concurrent}', 'inline': True},
+                {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
         return True
 
@@ -1062,13 +1099,18 @@ class RubberBandScalper:
         self.discord.send(embed={
             'title': f"🔒 {symbol} PARTIAL CLOSE ({fraction*100:.0f}%)",
             'color': 0xFFC107,
+            'description': 'Capital secured. Remaining rides with break-even stop.',
             'fields': [
+                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
                 {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Remaining', 'value': f'${pos["notional"]:.2f}',
-                 'inline': True},
+                {'name': 'Locked $', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': 'Remaining', 'value': f'${pos["notional"]:.2f}', 'inline': True},
                 {'name': 'Stop', 'value': 'Break-even', 'inline': True},
+                {'name': 'Bars Held', 'value': str(pos['bars_held']), 'inline': True},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
         return True
 
@@ -1174,17 +1216,29 @@ class RubberBandScalper:
             f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
             f"held={pos['bars_held']} bars"
         )
+        # Session stats for notification
+        cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        n_trades = len(self._trade_history)
+        wins_total = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+        wr = wins_total / n_trades * 100 if n_trades > 0 else 0
+        balance_after = self.get_balance()
+        hold_time = pos['bars_held'] * 15  # minutes
+
         self.discord.send(embed={
-            'title': f"{emoji} {symbol} CLOSED ({reason})",
+            'title': f"{emoji} {symbol} CLOSED — {reason.upper().replace('_', ' ')}",
             'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
             'fields': [
+                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
                 {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
                 {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Bars', 'value': str(pos['bars_held']), 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}',
-                 'inline': True},
+                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
                 {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': 'Hold Time', 'value': f'{hold_time}m ({pos["bars_held"]} bars)', 'inline': True},
+                {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades} trades)', 'inline': True},
+                {'name': 'Win Rate', 'value': f'{wr:.0f}%', 'inline': True},
+                {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
         return True
 
@@ -1193,13 +1247,19 @@ class RubberBandScalper:
     def _cycle(self, symbols: list[str]) -> None:
         """Process one 15m bar across all symbols.
 
-        1. Get BTC klines for regime filter
-        2. Manage existing positions
-        3. Check for new entries
-        4. Save state
+        1. Process bot commands (pause/stop/close)
+        2. Get BTC klines for regime filter
+        3. Manage existing positions
+        4. Check for new entries (skip if paused)
+        5. Save state
         """
         self._cycle_count += 1
         balance = self.get_balance()
+
+        # 0. Process interactive bot commands
+        self._process_bot_commands()
+        if self._stop_requested:
+            return
 
         logger.info(
             f"── Cycle #{self._cycle_count} | "
@@ -1230,7 +1290,7 @@ class RubberBandScalper:
         # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
         self._sync_server_orders()
 
-        # 4. Process existing positions
+        # 4. Process existing positions (always, even when paused)
         for sym in list(self.strategy.active_positions):
             close = self.download_klines(sym, 200)
             if close is None:
@@ -1240,13 +1300,14 @@ class RubberBandScalper:
             exit_reason = self.strategy.update_position(sym, current_price)
             if exit_reason:
                 if exit_reason == 'partial_close':
-                    # v4.3: partial close 50%, keep remaining with BE stop
                     self._partial_close_position(sym, current_price)
                 else:
                     self._close_position(sym, exit_reason, current_price)
 
-        # 5. Look for new entries (skip if risk blocked)
-        if not risk_blocked:
+        # 5. Look for new entries (skip if risk blocked or paused)
+        if self._paused:
+            logger.info("⏸️ Paused — skipping new entries")
+        elif not risk_blocked:
             available_slots = (
                 self.config.max_concurrent - self.strategy.n_active
             )
@@ -1349,6 +1410,223 @@ class RubberBandScalper:
                 f"best_pnl={pos['best_pnl']*100:.2f}%"
             )
 
+    # ==================== Discord Bot Commands ====================
+
+    def _process_bot_commands(self) -> None:
+        """Poll the bot command queue and handle all pending commands.
+
+        Called at the start of each cycle. Non-blocking.
+        """
+        if self._bot_runner is None:
+            return
+
+        for cmd in self._bot_runner.get_all_commands():
+            try:
+                result = self._handle_command(cmd)
+                cmd.set_response(result)
+            except Exception as e:
+                logger.error(f"Bot command error: {e}")
+                cmd.set_response(f"❌ Internal error: {e}")
+
+    def _handle_command(self, cmd: BotCommand) -> str:
+        """Dispatch a BotCommand to the appropriate handler.
+
+        Args:
+            cmd: The parsed bot command.
+
+        Returns:
+            Response text to send back to Discord.
+        """
+        handlers = {
+            CommandType.STATUS: lambda: self._cmd_status(),
+            CommandType.CLOSE_ALL: lambda: self._cmd_close_all(),
+            CommandType.CLOSE_SLOT: lambda: self._cmd_close_slot(
+                cmd.args.get('slot_id', -1) if cmd.args else -1,
+            ),
+            CommandType.PAUSE: lambda: self._cmd_pause(),
+            CommandType.RESUME: lambda: self._cmd_resume(),
+            CommandType.STOP: lambda: self._cmd_stop(),
+            CommandType.PNL: lambda: self._cmd_pnl(),
+            CommandType.BLACKLIST: lambda: self._cmd_blacklist(cmd.args),
+        }
+        handler = handlers.get(cmd.command)
+        if handler is None:
+            return "❓ Unknown command"
+        return handler()
+
+    def _cmd_status(self) -> str:
+        """!status — Show balance, positions, and active state."""
+        balance = self.get_balance()
+        positions = self.strategy.active_positions
+        n_trades = len(self._trade_history)
+        total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+
+        status = "⏸️ PAUSED" if self._paused else "▶️ ACTIVE"
+        if self._drawdown_halt:
+            status = "🛑 DD HALT"
+
+        lines = [
+            f"```",
+            f"📊 QuantBox Status — {status}",
+            f"{'─' * 40}",
+            f"Balance:    ${balance:,.2f}",
+            f"Session PnL: ${total_pnl:+,.2f} ({n_trades} trades)",
+            f"Positions:  {len(positions)}/{self.config.max_concurrent}",
+            f"Cycle:      #{self._cycle_count}",
+            f"{'─' * 40}",
+        ]
+
+        if positions:
+            for sym, pos in positions.items():
+                direction = "L" if pos['signal'] == 1 else "S"
+                bars = pos.get('bars_held', 0)
+                best = pos.get('best_pnl', 0) * 100
+                notional = pos.get('notional', 0)
+                lines.append(
+                    f"  {direction} {sym}: "
+                    f"${pos['entry_price']:.4f} | "
+                    f"${notional:.0f} | "
+                    f"{bars}bars | best={best:+.1f}%"
+                )
+        else:
+            lines.append("  No open positions")
+
+        lines.append("```")
+        return '\n'.join(lines)
+
+    def _cmd_close_all(self) -> str:
+        """!close all — Close all open positions."""
+        positions = list(self.strategy.active_positions.keys())
+        if not positions:
+            return "📭 No positions to close"
+
+        closed = 0
+        for sym in positions:
+            price_arr = self.download_klines(sym, 2)
+            price = price_arr[-1] if price_arr is not None else 0
+            if self._close_position(sym, 'bot_close_all', price):
+                closed += 1
+
+        self._save_state()
+        return f"✅ Closed {closed}/{len(positions)} positions"
+
+    def _cmd_close_slot(self, slot_id: int) -> str:
+        """!close <N> — Close the Nth active position (0-indexed).
+
+        Since the scalper uses symbol names instead of fixed slots,
+        positions are numbered in order of their dict keys.
+
+        Args:
+            slot_id: 0-based index of the position to close.
+        """
+        positions = list(self.strategy.active_positions.items())
+        if not positions:
+            return "📭 No positions to close"
+
+        if slot_id < 0 or slot_id >= len(positions):
+            symbols = [f"{i}: {s}" for i, (s, _) in enumerate(positions)]
+            return (
+                f"❌ Invalid index {slot_id}. "
+                f"Active positions:\n" + '\n'.join(symbols)
+            )
+
+        sym, pos = positions[slot_id]
+        price_arr = self.download_klines(sym, 2)
+        price = price_arr[-1] if price_arr is not None else 0
+        if self._close_position(sym, 'bot_close', price):
+            self._save_state()
+            return f"✅ Closed position {slot_id}: {sym}"
+        return f"❌ Failed to close {sym}"
+
+    def _cmd_pause(self) -> str:
+        """!pause — Stop new entries, keep monitoring existing."""
+        if self._paused:
+            return "⏸️ Already paused"
+        self._paused = True
+        logger.info("Bot command: PAUSED (no new entries)")
+        return "⏸️ New entries paused. Existing positions still monitored."
+
+    def _cmd_resume(self) -> str:
+        """!resume — Resume normal operation."""
+        if not self._paused:
+            return "▶️ Already active"
+        self._paused = False
+        logger.info("Bot command: RESUMED")
+        return "▶️ Trading resumed"
+
+    def _cmd_stop(self) -> str:
+        """!stop — Close all positions and shut down."""
+        self._stop_requested = True
+        # Close all positions first
+        positions = list(self.strategy.active_positions.keys())
+        closed = 0
+        for sym in positions:
+            price_arr = self.download_klines(sym, 2)
+            price = price_arr[-1] if price_arr is not None else 0
+            if self._close_position(sym, 'bot_stop', price):
+                closed += 1
+        self._save_state()
+        logger.info(f"Bot command: STOP (closed {closed} positions)")
+        return (
+            f"🛑 Stopping... Closed {closed} positions. "
+            f"Scalper will exit after this cycle."
+        )
+
+    def _cmd_pnl(self) -> str:
+        """!pnl — Session PnL summary."""
+        trades = self._trade_history
+        if not trades:
+            return "📭 No trades this session"
+
+        total_pnl = sum(t['pnl_usd'] for t in trades)
+        wins = [t for t in trades if t['pnl_usd'] > 0]
+        losses = [t for t in trades if t['pnl_usd'] <= 0]
+        wr = len(wins) / len(trades) * 100 if trades else 0
+        avg_win = (sum(t['pnl_usd'] for t in wins) / len(wins)) if wins else 0
+        avg_loss = (
+            sum(t['pnl_usd'] for t in losses) / len(losses)
+        ) if losses else 0
+        best = max(trades, key=lambda t: t['pnl_usd'])
+        worst = min(trades, key=lambda t: t['pnl_usd'])
+
+        balance = self.get_balance()
+        session_return = (
+            (balance - self._initial_balance) / self._initial_balance * 100
+            if self._initial_balance > 0 else 0
+        )
+
+        return (
+            f"```\n"
+            f"📈 Session PnL Summary\n"
+            f"{'─' * 36}\n"
+            f"Total PnL:    ${total_pnl:+,.2f}\n"
+            f"Session ROI:  {session_return:+.2f}%\n"
+            f"Trades:       {len(trades)} "
+            f"(W:{len(wins)} / L:{len(losses)})\n"
+            f"Win Rate:     {wr:.1f}%\n"
+            f"Avg Win:      ${avg_win:+,.2f}\n"
+            f"Avg Loss:     ${avg_loss:+,.2f}\n"
+            f"Best Trade:   {best['symbol']} ${best['pnl_usd']:+,.2f}\n"
+            f"Worst Trade:  {worst['symbol']} ${worst['pnl_usd']:+,.2f}\n"
+            f"Balance:      ${balance:,.2f}\n"
+            f"```"
+        )
+
+    def _cmd_blacklist(self, args: dict | None = None) -> str:
+        """!blacklist — View or clear the exclude list.
+
+        Args:
+            args: Optional dict with 'action': 'clear' to reset.
+        """
+        if args and args.get('action') == 'clear':
+            self.config.exclude_symbols.clear()
+            return "✅ Blacklist cleared"
+
+        excludes = self.config.exclude_symbols
+        if not excludes:
+            return "📭 Blacklist is empty"
+        return f"🚫 Blacklist ({len(excludes)}): " + ', '.join(sorted(excludes))
+
     # ==================== State Persistence ====================
 
     def _save_state(self) -> None:
@@ -1439,6 +1717,7 @@ class RubberBandScalper:
         """Run the scalper continuously, cycling every 15 minutes.
 
         Waits for bar close, processes all symbols, repeats.
+        Starts/stops the Discord bot for interactive commands.
         """
         # Setup
         balance = self.get_balance()
@@ -1451,15 +1730,37 @@ class RubberBandScalper:
         logger.info(f"Starting continuous trading ({mode_str})")
         logger.info(f"Initial balance: ${balance:.2f}")
 
+        # Start Discord bot for interactive commands
+        if self._bot_runner:
+            self._bot_runner.start()
+            logger.info("Discord Bot started for interactive commands")
+
+        n_symbols = len(self.config.symbol_whitelist) if self.config.symbol_whitelist else 0
         self.discord.send(embed={
-            'title': '🚀 Scalper Started',
+            'title': '🚀 QuantBox Scalper Started',
             'color': 0x2979FF,
+            'description': (
+                f"Rubber Band mean-reversion scalper initialized.\n"
+                f"Use `!help` for interactive commands."
+            ),
             'fields': [
-                {'name': 'Mode', 'value': mode_str, 'inline': True},
-                {'name': 'Balance', 'value': f'${balance:.2f}', 'inline': True},
-                {'name': 'Max Slots',
-                 'value': str(self.config.max_concurrent), 'inline': True},
+                {'name': 'Mode', 'value': f"**{mode_str}**", 'inline': True},
+                {'name': 'Balance', 'value': f'${balance:,.2f}', 'inline': True},
+                {'name': 'Slots', 'value': f'{self.strategy.n_active}/{self.config.max_concurrent}', 'inline': True},
+                {'name': 'Strategy', 'value': (
+                    f"LB={self.config.lookback} | "
+                    f"Thr={self.config.threshold} | "
+                    f"TP={self.config.target_retrace} | "
+                    f"SL={self.config.stop_mult}x"
+                ), 'inline': False},
+                {'name': 'Universe', 'value': f'{n_symbols} symbols', 'inline': True},
+                {'name': 'Max Hold', 'value': f'{self.config.max_hold} bars', 'inline': True},
+                {'name': 'Leverage', 'value': (
+                    f'Base {self.config.base_leverage}x, '
+                    f'MTF {self.config.mtf_leverage_mult}x'
+                ), 'inline': True},
             ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
 
         # Pre-fetch exchange info
@@ -1492,24 +1793,50 @@ class RubberBandScalper:
                 break
             except Exception as e:
                 logger.error(f"Cycle error: {e}", exc_info=True)
-                time.sleep(60)  # Wait before retry
+                self.discord.send(embed={
+                    'title': '🚨 Cycle Error',
+                    'color': 0xFF1744,
+                    'description': str(e)[:500],
+                    'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+                })
+                time.sleep(60)
 
         # Clean shutdown
         logger.info("Shutting down...")
         self._save_state()
 
+        # Stop Discord bot
+        if self._bot_runner:
+            self._bot_runner.stop()
+
         total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        n_trades = len(self._trade_history)
+        wins = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+        wr = wins / n_trades * 100 if n_trades > 0 else 0
+        balance_now = self.get_balance()
+        session_return = (
+            (balance_now - self._initial_balance) / self._initial_balance * 100
+            if self._initial_balance > 0 else 0
+        )
+
+        fields = [
+            {'name': 'Cycles', 'value': str(self._cycle_count), 'inline': True},
+            {'name': 'Trades', 'value': f'{n_trades} (WR {wr:.0f}%)', 'inline': True},
+            {'name': 'Total PnL', 'value': f'${total_pnl:+,.2f}', 'inline': True},
+            {'name': 'Balance', 'value': f'${balance_now:,.2f}', 'inline': True},
+            {'name': 'Session ROI', 'value': f'{session_return:+.2f}%', 'inline': True},
+        ]
+        if self._trade_history:
+            best = max(self._trade_history, key=lambda t: t['pnl_usd'])
+            worst = min(self._trade_history, key=lambda t: t['pnl_usd'])
+            fields.append({'name': 'Best', 'value': f"{best['symbol']} ${best['pnl_usd']:+,.2f}", 'inline': True})
+            fields.append({'name': 'Worst', 'value': f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", 'inline': True})
+
         self.discord.send(embed={
-            'title': '🛑 Scalper Stopped',
-            'color': 0xFF1744,
-            'fields': [
-                {'name': 'Cycles', 'value': str(self._cycle_count),
-                 'inline': True},
-                {'name': 'Trades', 'value': str(len(self._trade_history)),
-                 'inline': True},
-                {'name': 'PnL', 'value': f'${total_pnl:+.2f}',
-                 'inline': True},
-            ],
+            'title': '🛑 QuantBox Scalper Stopped',
+            'color': 0xFF1744 if total_pnl < 0 else 0x00C853,
+            'fields': fields,
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
 
     def _wait_for_bar(self) -> None:
