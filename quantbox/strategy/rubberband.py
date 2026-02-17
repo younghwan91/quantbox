@@ -201,8 +201,8 @@ class RubberBandConfig:
     min_volume_rank: int = 30  # Top 30 by volume
     exclude_symbols: list[str] = field(default_factory=lambda: ['USDCUSDT', 'TUSDUSDT', 'BUSDUSDT'])
     symbol_whitelist: list[str] = field(default_factory=lambda: [
-        'FILUSDT', 'PEPEUSDT', 'XRPUSDT', 'XLMUSDT', 'ADAUSDT',
-        'FETUSDT', 'ETHUSDT', 'ARBUSDT', 'SHIBUSDT', 'LINKUSDT',
+        'FILUSDT', '1000PEPEUSDT', 'XRPUSDT', 'XLMUSDT', 'ADAUSDT',
+        'FETUSDT', 'ETHUSDT', 'ARBUSDT', '1000SHIBUSDT', 'LINKUSDT',
         'ATOMUSDT', 'OPUSDT', 'DOTUSDT', 'NEARUSDT', 'AAVEUSDT',
         'BCHUSDT', 'HBARUSDT', 'SOLUSDT', 'ICPUSDT', 'BNBUSDT',
     ])  # v11.1 Top-20: 3384% ret, Calmar 155.22, A/B validated vs Top-15 baseline
