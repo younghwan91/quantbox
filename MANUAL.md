@@ -1,9 +1,9 @@
 # QuantBox 실행 매뉴얼 📈
 
-**암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
+**암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 11.1.0  
-> 최종 업데이트: 2026년 2월 22일
+> 버전: 11.4.0  
+> 최종 업데이트: 2025년 7월 15일
 
 ---
 
@@ -12,6 +12,7 @@
 1. [개요](#1-개요)
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
 3. [🔥 Rubber Band Scalper (v2.0)](#3-rubber-band-scalper)
+3.5. [🌊 Elliott Wave Strategy (v11.4)](#35-elliott-wave-strategy)
 4. [아키텍처 이해](#4-아키텍처-이해)
 5. [핵심 모듈 상세](#5-핵심-모듈-상세)
 6. [데이터 관리](#6-데이터-관리)
@@ -119,6 +120,66 @@ bt = VectorizedBacktest(BacktestConfig(
 signals = compute_signals(close, 8, 0.025, 0.5, 1.0, 8)
 result = bt.run_single(close, signals, "BTCUSDT")
 print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
+```
+
+### 3.5 Elliott Wave Strategy (v11.4)
+
+매옥남 챔피언십 메소드 — Elliott Wave ABC 패턴 + Fibonacci 비율 검증 기반 전략.
+
+#### 실행 방법
+
+```bash
+# Paper trading
+python -m quantbox.scalper --strategy elliott --paper
+
+# Live trading
+python -m quantbox.scalper --strategy elliott
+```
+
+#### 전략 개요
+
+1. **ZigZag 피봇 감지**: 4h 캔들에서 High/Low ZigZag 피봇 추출 (threshold 3%/1.5%)
+2. **ABC 패턴 인식**: 5개 피봇 시퀀스에서 Fibonacci 비율 검증
+   - B wave: 0.40–0.72 retracement (0.618 금 영역)
+   - C/A: 0.80–1.80 ratio (1.0–1.618 이상적)
+3. **2단계 포지셔닝**:
+   - 탐색적 진입 (2% 자본) → 4봉 내 확인 시 8% 추가 (RSI 다이버전스/MACD 반전/스토캐스틱 크로스)
+   - 미확인 시 탐색적 포지션 자동 종료
+4. **자본 보존 익절**: 50% 부분 익절 → 브레이크이븐 스탑 → 트레일링 스탑 (3×ATR)
+5. **BTC 매크로 바이어스**: EMA(200)/EMA(500) 기반 Long/Short/Neutral 필터링
+6. **엔딩 다이애고널/트라이앵글 감지**: 웨지/삼각 패턴 식별 → 조기 청산 또는 진입 억제
+
+#### 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| zigzag_threshold | 0.03 | ZigZag 피봇 최소 변동 (3%) |
+| zigzag_threshold_minor | 0.015 | 소 패턴 ZigZag (1.5%) |
+| ema_periods | [20,50,100,200,500] | EMA 기간 세트 |
+| rsi_period / rsi_fast | 14 / 9 | RSI 기간 (표준/다이나믹) |
+| macd_fast/slow/signal | 12/26/9 | MACD 파라미터 |
+| stoch_k/stoch_d | 14/3 | Stochastic 파라미터 |
+| b_retrace_min/max | 0.40/0.72 | B wave Fibonacci 리트레이스 범위 |
+| ca_ratio_min/max | 0.80/1.80 | C/A 비율 범위 |
+| exploratory_pct | 0.02 | 탐색적 진입 자본 (2%) |
+| primary_pct | 0.08 | 확인 후 추가 자본 (8%) |
+| partial_tp_pct | 0.50 | 부분 익절 비율 (50%) |
+| nominal_leverage | 20 | 공칭 레버리지 |
+| max_margin_pct | 0.10 | 총 자본 대비 최대 마진 (10%) |
+| confirmation_bars | 4 | 확인 대기 봉 수 |
+| max_hold_bars | 96 | 최대 보유 (4h×96 = 16일) |
+| pyramid_enabled | True | 미실현 이익 피라미딩 |
+
+#### 백테스트
+
+```python
+from quantbox.strategy.elliott import ElliottConfig, compute_elliott_signals
+import numpy as np
+
+# 4h OHLCV 데이터
+config = ElliottConfig()
+signals = compute_elliott_signals(close_4h, high_4h, low_4h, config)
+# signals: 1 = Long, -1 = Short, 0 = Hold
 ```
 
 ### 3.6 v7.0: Multi-Timeframe Confirmation + Independent 4H Trading
@@ -525,6 +586,7 @@ quantbox/
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 계층
 │   ├── rubberband.py       # Rubber Band Scalper (Numba 가속)
+│   ├── elliott.py          # Elliott Wave 전략 (매옥남 메소드, Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
 ├── backtest/               # 백테스팅
