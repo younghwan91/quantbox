@@ -169,7 +169,7 @@ class QuantBoxSettings(BaseSettings):
     rb_min_rr_for_leverage: float = 0.30      # 레버리지 허용 최소 R:R 비율
 
     # ── v10.0 Symbol Whitelist & Dynamic Capital ──
-    rb_symbol_whitelist: str = 'FILUSDT,NEARUSDT,ADAUSDT,XLMUSDT,ETHUSDT,BCHUSDT,ARBUSDT,UNIUSDT,PEPEUSDT,XRPUSDT,FETUSDT,INJUSDT,SOLUSDT,AVAXUSDT,AAVEUSDT'
+    rb_symbol_whitelist: str = 'FILUSDT,1000PEPEUSDT,XRPUSDT,XLMUSDT,ADAUSDT,FETUSDT,ETHUSDT,ARBUSDT,1000SHIBUSDT,LINKUSDT,ATOMUSDT,OPUSDT,DOTUSDT,NEARUSDT,AAVEUSDT,BCHUSDT,HBARUSDT,SOLUSDT,ICPUSDT,BNBUSDT'
     rb_dynamic_capital_enabled: bool = True  # balance / max(1, n_active+1) 동적 자본 배분
 
     # ── Regime Protection ──
