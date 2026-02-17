@@ -85,8 +85,8 @@ class ElliottConfig:
     w2_retrace_min: float = 0.382
     w2_retrace_max: float = 0.886
     # Wave 3 extends Wave 1: doc says 1.618, 2.618 (targets)
-    # Hard rule: W3 cannot be shortest of 1,3,5. Min 1.0 = W3 ≥ W1.
-    w3_extension_min: float = 1.0
+    # Hard rule: W3 cannot be shortest of 1,3,5. Min 1.272 for quality.
+    w3_extension_min: float = 1.272
     w3_extension_max: float = 4.236
     # Wave 4 retraces Wave 3: doc says 0.236, 0.382
     w4_retrace_min: float = 0.146
@@ -97,12 +97,27 @@ class ElliottConfig:
     fib_b_retrace_min: float = 0.382
     fib_b_retrace_max: float = 0.786
     # Wave C extends Wave A: doc says 1.0, 1.618
-    fib_c_vs_a_min: float = 0.618
-    fib_c_vs_a_max: float = 2.618
+    fib_c_vs_a_min: float = 0.786
+    fib_c_vs_a_max: float = 2.000
     # C termination near key Fib levels (0.382, 0.5, 0.618, 0.786)
     # Tolerance = max distance from NEAREST Fib level, as fraction of impulse
-    fib_c_impulse_tolerance: float = 0.15
+    fib_c_impulse_tolerance: float = 0.10
     fib_c_levels: tuple[float, ...] = (0.382, 0.500, 0.618, 0.786)
+
+    # ── Pattern quality scoring ──
+    # Score 0-100 based on how textbook the wave structure is.
+    # Only patterns above threshold are traded.
+    min_pattern_quality: float = 40.0  # min quality to enter
+    # Ideal Fibonacci values for quality scoring (closer = higher score)
+    ideal_w2_retrace: float = 0.618
+    ideal_w3_extension: float = 1.618
+    ideal_w4_retrace: float = 0.382
+    ideal_b_retrace: float = 0.618
+    ideal_c_vs_a: float = 1.0
+    # Time proportionality: ABC correction bar count vs impulse bar count
+    # Typical correction takes 38-62% of impulse time
+    min_correction_time_ratio: float = 0.15
+    max_correction_time_ratio: float = 1.50
 
     # ── Capital management (winning_strategy §4) ──
     max_margin_pct: float = 0.10     # 10% max of total capital
@@ -115,16 +130,29 @@ class ElliottConfig:
 
     # ── Confirmation & position management ──
     confirmation_bars: int = 4   # Max bars to wait for primary confirmation
-    max_hold_bars: int = 96      # Max hold ~24h at 15m (4h-scale trades)
+    max_hold_bars: int = 96      # Max hold ~16 days at 4h
     trail_atr_mult: float = 2.0  # Trailing stop distance in ATR units
+
+    # ── Stop loss (§3.1: tight invalidation) ──
+    # If C truly ends the correction, price should NOT revisit C.
+    # Tight stop → small loss on wrong count, high RR on correct count.
+    sl_buffer_pct: float = 0.005  # 0.5% buffer beyond C for noise/spread
+
+    # Max acceptable risk from entry to stop (filters late entries far from C)
+    # If entry is too far from C, the effective stop is wide → poor RR → skip.
+    max_entry_risk_pct: float = 0.03  # 3% max distance entry→stop
 
     # ── Pyramiding (winning_strategy §4.2) ──
     pyramid_enabled: bool = True
     pyramid_min_profit_pct: float = 0.02  # Min 2% unrealized before pyramid
 
     # ── Effective leverage for backtest (winning_strategy §4.1) ──
-    # 10% margin × 20x nominal = 2.0x effective leverage on total equity
-    effective_leverage: float = 2.0
+    # Risk-sized leverage: lev = risk_per_trade / stop_distance
+    # With tight stop at C, smaller stop distance → higher leverage (max 2x)
+    # This ensures max loss per trade is always risk_per_trade % of equity.
+    effective_leverage: float = 2.0  # cap (used when stop is very tight)
+    risk_per_trade: float = 0.02     # 2% max equity risk per trade
+    risk_sized_leverage: bool = True  # scale leverage to stop distance
 
     # ── Costs ──
     fee_rate: float = 0.0005       # 0.05% taker
@@ -667,10 +695,11 @@ def detect_impulse_abc_patterns(
         if types_bull:
             p = [float(pivot_price[i + j]) for j in range(9)]
             W0, W1, W2, W3, W4, W5, A, B, C = p
+            idx_arr = [int(pivot_idx[i + j]) for j in range(9)]
 
             pattern = _validate_bullish_impulse_abc(
                 W0, W1, W2, W3, W4, W5, A, B, C,
-                int(pivot_idx[i + 8]), config,
+                int(pivot_idx[i + 8]), config, idx_arr,
             )
             if pattern is not None:
                 patterns.append(pattern)
@@ -688,10 +717,11 @@ def detect_impulse_abc_patterns(
         if types_bear:
             p = [float(pivot_price[i + j]) for j in range(9)]
             W0, W1, W2, W3, W4, W5, A, B, C = p
+            idx_arr = [int(pivot_idx[i + j]) for j in range(9)]
 
             pattern = _validate_bearish_impulse_abc(
                 W0, W1, W2, W3, W4, W5, A, B, C,
-                int(pivot_idx[i + 8]), config,
+                int(pivot_idx[i + 8]), config, idx_arr,
             )
             if pattern is not None:
                 patterns.append(pattern)
@@ -699,17 +729,90 @@ def detect_impulse_abc_patterns(
     return patterns
 
 
+def _score_fib_proximity(actual: float, ideal: float) -> float:
+    """Score how close a ratio is to its ideal Fibonacci value (0-20 points).
+
+    Perfect match = 20 pts. Decays linearly. 0 pts if >100% off.
+    """
+    if ideal <= 0:
+        return 0.0
+    deviation = abs(actual - ideal) / ideal
+    return max(0.0, 20.0 * (1.0 - deviation))
+
+
+def _compute_pattern_quality(
+    w2_retrace: float,
+    w3_ext: float,
+    w4_retrace: float,
+    b_retrace: float,
+    c_vs_a: float,
+    c_fib_dist: float,
+    impulse_bars: int,
+    correction_bars: int,
+    wave1_len: float,
+    wave3_len: float,
+    wave5_len: float,
+    config: ElliottConfig,
+) -> float:
+    """Compute pattern quality score (0-100).
+
+    Scoring dimensions:
+      1. W2 retrace proximity to ideal 0.618 (0-20)
+      2. W3 extension proximity to ideal 1.618 (0-20)
+      3. B retrace proximity to ideal 0.618 (0-20)
+      4. C/A ratio proximity to ideal 1.0 (0-20)
+      5. Time proportionality + W3≠shortest + C Fib proximity (0-20)
+    """
+    score = 0.0
+
+    # Dim 1: Wave 2 retrace quality
+    score += _score_fib_proximity(w2_retrace, config.ideal_w2_retrace)
+
+    # Dim 2: Wave 3 extension quality
+    score += _score_fib_proximity(w3_ext, config.ideal_w3_extension)
+
+    # Dim 3: B retrace quality
+    score += _score_fib_proximity(b_retrace, config.ideal_b_retrace)
+
+    # Dim 4: C/A ratio quality
+    score += _score_fib_proximity(c_vs_a, config.ideal_c_vs_a)
+
+    # Dim 5: Structural quality (20 pts total)
+    structural = 0.0
+
+    # W3 NOT shortest of 1,3,5 (cardinal EW rule) → 8 pts
+    if wave3_len >= wave1_len and wave3_len >= wave5_len:
+        structural += 8.0
+    elif wave3_len >= min(wave1_len, wave5_len):
+        structural += 4.0  # not shortest, but not longest either
+
+    # C Fib proximity (closer to exact level = better) → 6 pts
+    structural += max(0.0, 6.0 * (1.0 - c_fib_dist / 0.15))
+
+    # Time proportionality → 6 pts
+    if impulse_bars > 0 and correction_bars > 0:
+        time_ratio = correction_bars / impulse_bars
+        if config.min_correction_time_ratio <= time_ratio <= config.max_correction_time_ratio:
+            # Ideal around 0.382 (golden ratio correction)
+            time_score = max(0.0, 6.0 * (1.0 - abs(time_ratio - 0.382) / 0.5))
+            structural += time_score
+
+    score += structural
+    return score
+
+
 def _validate_bullish_impulse_abc(
     W0: float, W1: float, W2: float, W3: float, W4: float,
     W5: float, A: float, B: float, C: float,
     c_idx: int, config: ElliottConfig,
+    pivot_indices: list[int] | None = None,
 ) -> dict | None:
     """Validate bullish impulse (UP) + bearish ABC (DOWN) → Long entry.
 
     Impulse UP: W0(low) → W1(high) → W2(low) → W3(high) → W4(low) → W5(high)
     ABC DOWN:   W5(high) → A(low) → B(high) → C(low)
 
-    Returns pattern dict or None if validation fails.
+    Returns pattern dict with quality score, or None if validation fails.
     """
     # ── Wave lengths ──
     wave1 = W1 - W0   # UP
@@ -787,14 +890,30 @@ def _validate_bullish_impulse_abc(
     if c_fib_dist > config.fib_c_impulse_tolerance:
         return None
 
-    # ── Targets: Fibonacci extensions of Wave 1 from C (§6) ──
-    # TP1: 1.618 × Wave 1 from C (conservative — Wave 3 of new impulse)
-    # TP2: 2.618 × Wave 1 from C (extended — full new impulse)
-    target_1 = C + 1.618 * wave1
-    target_2 = C + 2.618 * wave1
+    # ── Targets (§5, §6) ──
+    # TP1: B price level (first realistic resistance — recovery from C)
+    # TP2: 1.618 × Wave 1 from C (Fibonacci extension of new impulse)
+    # §4.2: "50% partial take-profit upon reaching primary target"
+    target_1 = B  # recovery to B — practical near-term target
+    target_2 = C + 1.618 * wave1  # new impulse extension
 
-    # Stop: below C by 10% of Wave A length
-    stop = C - wave_a_len * 0.10
+    # Stop: tight below C (§3.1: if C is the correction low and price
+    # revisits it, our wave count is WRONG → exit immediately).
+    # Tight stop = small loss, high RR on winners.
+    stop = C * (1.0 - config.sl_buffer_pct)
+
+    # ── Pattern quality score ──
+    impulse_bars = 0
+    correction_bars = 0
+    if pivot_indices is not None and len(pivot_indices) >= 9:
+        impulse_bars = pivot_indices[5] - pivot_indices[0]  # W0→W5
+        correction_bars = pivot_indices[8] - pivot_indices[5]  # W5→C
+    wave5_len = wave5
+    quality = _compute_pattern_quality(
+        w2_retrace, w3_ext, w4_retrace, b_retrace, c_vs_a,
+        c_fib_dist, impulse_bars, correction_bars,
+        wave1, wave3, wave5_len, config,
+    )
 
     return {
         'signal': 1,  # Long
@@ -810,6 +929,7 @@ def _validate_bullish_impulse_abc(
         'stop': stop,
         'wave1_length': wave1,
         'impulse_size': total_impulse,
+        'quality': quality,
     }
 
 
@@ -817,13 +937,14 @@ def _validate_bearish_impulse_abc(
     W0: float, W1: float, W2: float, W3: float, W4: float,
     W5: float, A: float, B: float, C: float,
     c_idx: int, config: ElliottConfig,
+    pivot_indices: list[int] | None = None,
 ) -> dict | None:
     """Validate bearish impulse (DOWN) + bullish ABC (UP) → Short entry.
 
     Impulse DOWN: W0(high) → W1(low) → W2(high) → W3(low) → W4(high) → W5(low)
     ABC UP:       W5(low) → A(high) → B(low) → C(high)
 
-    Returns pattern dict or None if validation fails.
+    Returns pattern dict with quality score, or None if validation fails.
     """
     # ── Wave lengths (all positive for valid bearish impulse) ──
     wave1 = W0 - W1   # DOWN
@@ -899,11 +1020,26 @@ def _validate_bearish_impulse_abc(
     if c_fib_dist > config.fib_c_impulse_tolerance:
         return None
 
-    # ── Targets: Fibonacci extensions of Wave 1 from C ──
-    target_1 = C - 1.618 * wave1
-    target_2 = C - 2.618 * wave1
+    # ── Targets (§5, §6) ──
+    # TP1: B price level (first realistic support — decline from C)
+    # TP2: 1.618 × Wave 1 from C (extension of new bearish impulse)
+    target_1 = B  # recovery to B — practical near-term target
+    target_2 = C - 1.618 * wave1  # new impulse extension
 
-    stop = C + wave_a_len * 0.10
+    # Stop: tight above C (wave count invalidation → immediate exit)
+    stop = C * (1.0 + config.sl_buffer_pct)
+# ── Pattern quality score ──
+    impulse_bars = 0
+    correction_bars = 0
+    if pivot_indices is not None and len(pivot_indices) >= 9:
+        impulse_bars = pivot_indices[5] - pivot_indices[0]  # W0→W5
+        correction_bars = pivot_indices[8] - pivot_indices[5]  # W5→C
+    wave5_len = wave5
+    quality = _compute_pattern_quality(
+        w2_retrace, w3_ext, w4_retrace, b_retrace, c_vs_a,
+        c_fib_dist, impulse_bars, correction_bars,
+        wave1, wave3, wave5_len, config,
+    )
 
     return {
         'signal': -1,  # Short
@@ -919,13 +1055,8 @@ def _validate_bearish_impulse_abc(
         'stop': stop,
         'wave1_length': wave1,
         'impulse_size': total_impulse,
+        'quality': quality,
     }
-
-
-# Keep backward compatibility alias
-detect_abc_patterns = detect_impulse_abc_patterns
-
-
 def scan_multi_scale_patterns(
     high: np.ndarray,
     low: np.ndarray,
@@ -1672,44 +1803,57 @@ def compute_elliott_signals(
     btc_close_4h: np.ndarray,
     config: ElliottConfig | None = None,
 ) -> np.ndarray:
-    """Generate Elliott wave signals at 4h granularity for backtesting.
+    """Generate Elliott wave position signals with full lifecycle management.
 
-    Implements the full championship strategy flow (winning_strategy §5):
-      1. BTC 200/500 EMA macro bias filter
-      2. ZigZag → 5-wave impulse + ABC correction detection (9 pivots)
-      3. Fibonacci validation for all waves
-      4. Triangle filter
-      5. Divergence (mandatory) + corroboration (MACD or Stoch) per §2.2
-      6. Signal scaled by effective leverage (§4.1: 10% margin × 20x = 2x)
+    Implements the COMPLETE championship strategy (winning_strategy §4-§6):
 
-    Confirmation Protocol (§2.2): "Divergence signals require mandatory
-    corroboration. The agent must verify a reversal in the MACD histogram
-    OR a golden/dead cross in the Stochastic oscillator."
-    → Divergence REQUIRED + at least 1 of {MACD reversal, Stoch cross}
+    Position Lifecycle:
+      1. ABC pattern completion + confluence → exploratory entry (2% = 0.4x)
+      2. On confirmation (divergence or 2nd indicator) → primary entry (10% = 2.0x)
+      3. Hit TP1 (1.0× impulse projection from C) → 50% partial exit (1.0x)
+      4. Trail remainder with ATR stop moved to breakeven then higher
+      5. Exit on: stop loss (tight at C), TP2, trailing stop, max hold
+
+    Macro Bias (§2.1):
+      BTC above 200+500 EMA → only long
+      BTC below 200+500 EMA → only short
+      BTC between 200 and 500 EMA → both directions allowed (neutral)
+
+    Confirmation Protocol (§2.2):
+      Divergence REQUIRED + at least 1 of {MACD reversal, Stoch cross}
+
+    Capital Management (§4):
+      10% max margin, effective leverage 2.0x (20x × 10%)
+      2% exploratory → 8% primary → 50% partial TP → trail remainder
 
     Args:
         close_4h: Symbol 4h close prices.
         high_4h: Symbol 4h high prices.
         low_4h: Symbol 4h low prices.
-        btc_close_4h: BTC 4h close prices.
+        btc_close_4h: BTC 4h close prices (same length).
         config: Strategy configuration.
 
     Returns:
-        Signal array aligned to close_4h. Values are scaled by
-        effective_leverage (default 2.0) for realistic P&L modeling.
+        Tuple of (signals, adj_close):
+          signals: position leverage array.
+            ±0.4 = exploratory (2% margin × 20x)
+            ±2.0 = primary     (10% margin × 20x)
+            ±1.0 = after 50% partial TP
+            0.0  = flat
+          adj_close: close prices adjusted with fill prices on exit bars
+            for accurate intra-bar stop/target PnL.
     """
     cfg = config or ElliottConfig()
     n = len(close_4h)
     signals = np.zeros(n, dtype=np.float64)
+    adj_close = close_4h.copy()  # fill-adjusted close for backtest PnL
 
     if n < cfg.ema_macro_slow + 50:
-        return signals
+        return signals, adj_close
 
-    # Pre-compute BTC EMAs for macro bias
+    # ── Pre-compute indicators ──
     btc_ema200 = compute_ema(btc_close_4h, cfg.ema_macro_fast)
     btc_ema500 = compute_ema(btc_close_4h, cfg.ema_macro_slow)
-
-    # Pre-compute indicators on symbol 4h
     rsi_4h = compute_rsi(close_4h, cfg.rsi_period)
     _, _, macd_hist_4h = compute_macd(
         close_4h, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period,
@@ -1717,19 +1861,25 @@ def compute_elliott_signals(
     stoch_k_4h, stoch_d_4h = compute_stochastic(
         high_4h, low_4h, close_4h, cfg.stoch_k_period, cfg.stoch_d_period,
     )
+    atr_4h = compute_atr(high_4h, low_4h, close_4h, 14)
 
-    lev = cfg.effective_leverage
     min_start = cfg.ema_macro_slow + 50
     lookback_bars = cfg.pattern_lookback_bars
 
-    # ── Pre-compute: multi-scale pattern detection on full data (O(n)) ──
+    # Position sizing (§4.1-§4.2)
+    lev_exploratory = cfg.nominal_leverage * cfg.exploratory_pct  # 20 × 0.02 = 0.4
+    lev_primary = cfg.effective_leverage                          # 2.0 (fallback)
+    max_lev = cfg.effective_leverage                              # 2.0 cap
+    # Per-trade vars initialized; overridden at each entry
+    trade_lev = lev_primary
+    trade_lev_after_tp = trade_lev * cfg.partial_tp_fraction      # 1.0
+    max_hold = cfg.max_hold_bars  # 96 bars = 16 days at 4h
+
+    # ── Pre-compute patterns (O(n)) ──
     all_patterns = scan_multi_scale_patterns(high_4h, low_4h, cfg)
     all_patterns.sort(key=lambda p: p['c_idx'])
 
-    # ── Pre-compute: divergence arrays for O(1) lookup ──
-    # Divergence = momentum exhaustion; often forms DURING wave C (before
-    # the zigzag formalises the C pivot).  We precompute for every bar and
-    # then check whether ANY bar in [c_idx - div_margin, bar] had divergence.
+    # ── Pre-compute divergence arrays ──
     div_lookback = cfg.divergence_lookback
     bull_div = np.zeros(n, dtype=np.bool_)
     bear_div = np.zeros(n, dtype=np.bool_)
@@ -1741,13 +1891,10 @@ def compute_elliott_signals(
         bear_div[i] = detect_bearish_divergence(
             close_4h[:i + 1], rsi_4h[:i + 1], lb,
         )
-
-    # Prefix-sum for O(1) range-any query: "any divergence in [a, b]?"
     bull_cum = np.cumsum(bull_div.astype(np.int32))
     bear_cum = np.cumsum(bear_div.astype(np.int32))
 
     def _any_in_range(cum: np.ndarray, lo: int, hi: int) -> bool:
-        """True if any element in cum[lo..hi] is positive."""
         if hi < lo or lo < 0:
             return False
         total = int(cum[hi])
@@ -1755,13 +1902,120 @@ def compute_elliott_signals(
             total -= int(cum[lo - 1])
         return total > 0
 
-    div_margin = 10  # bars before c_idx to search for divergence
+    div_margin = 10
 
-    # ── Walk-forward: check each bar for recently completed patterns ──
+    # ── Walk-forward with position lifecycle ──
     pat_ptr = 0
-    signalled_patterns: set[int] = set()  # c_idx of patterns that already fired
+    used_patterns: set[int] = set()
+
+    # Position state
+    in_position = False
+    pos_direction = 0
+    pos_stop = 0.0
+    pos_tp1 = 0.0
+    pos_tp2 = 0.0
+    pos_entry_price = 0.0
+    pos_entry_bar = 0
+    pos_confirmed = False
+    pos_partial_done = False
+    pos_trail_stop = 0.0
 
     for bar in range(min_start, n):
+        # ── Manage existing position ──
+        if in_position:
+            current_lev = signals[bar - 1]  # carry forward
+            hit_stop = False
+            hit_tp1 = False
+            hit_tp2 = False
+            bars_held = bar - pos_entry_bar
+            fill_price = close_4h[bar]  # default fill at bar close
+
+            if pos_direction == 1:  # Long
+                # Check stop (low breaches stop)
+                if low_4h[bar] <= pos_stop:
+                    hit_stop = True
+                    fill_price = pos_stop
+                # Check TP1 (high reaches target 1)
+                if not pos_partial_done and high_4h[bar] >= pos_tp1:
+                    hit_tp1 = True
+                # Check TP2 (high reaches target 2)
+                if pos_partial_done and high_4h[bar] >= pos_tp2:
+                    hit_tp2 = True
+                    fill_price = pos_tp2
+                # Trailing stop (after partial TP or after confirmation)
+                if pos_partial_done:
+                    new_trail = high_4h[bar] - cfg.trail_atr_mult * atr_4h[bar]
+                    if new_trail > pos_trail_stop:
+                        pos_trail_stop = new_trail
+                    if low_4h[bar] <= pos_trail_stop:
+                        hit_stop = True
+                        fill_price = pos_trail_stop
+            else:  # Short
+                if high_4h[bar] >= pos_stop:
+                    hit_stop = True
+                    fill_price = pos_stop
+                if not pos_partial_done and low_4h[bar] <= pos_tp1:
+                    hit_tp1 = True
+                if pos_partial_done and low_4h[bar] <= pos_tp2:
+                    hit_tp2 = True
+                    fill_price = pos_tp2
+                if pos_partial_done:
+                    new_trail = low_4h[bar] + cfg.trail_atr_mult * atr_4h[bar]
+                    if new_trail < pos_trail_stop or pos_trail_stop == 0.0:
+                        pos_trail_stop = new_trail
+                    if high_4h[bar] >= pos_trail_stop:
+                        hit_stop = True
+                        fill_price = pos_trail_stop
+
+            # Exploratory → primary confirmation (§4.2)
+            if not pos_confirmed and bars_held <= cfg.confirmation_bars:
+                has_macd = check_macd_reversal(macd_hist_4h[:bar + 1], pos_direction)
+                has_stoch = check_stoch_cross(
+                    stoch_k_4h[:bar + 1], stoch_d_4h[:bar + 1], pos_direction,
+                )
+                if has_macd or has_stoch:
+                    pos_confirmed = True
+                    current_lev = float(pos_direction) * trade_lev
+            elif not pos_confirmed and bars_held > cfg.confirmation_bars:
+                # No confirmation within window → exit (failed pilot)
+                signals[bar] = 0.0
+                in_position = False
+                continue
+
+            # Process exits (priority: stop > TP2 > TP1 > max hold)
+            if hit_stop:
+                signals[bar] = 0.0
+                adj_close[bar] = fill_price  # accurate stop fill
+                in_position = False
+                continue
+
+            if hit_tp2:
+                signals[bar] = 0.0
+                adj_close[bar] = fill_price  # accurate TP2 fill
+                in_position = False
+                continue
+
+            if hit_tp1 and not pos_partial_done:
+                # 50% partial exit (§4.2, §5)
+                pos_partial_done = True
+                current_lev = float(pos_direction) * trade_lev_after_tp
+                # Move stop to breakeven (§4.2: "trailed to breakeven")
+                pos_stop = pos_entry_price
+                pos_trail_stop = pos_entry_price
+                signals[bar] = current_lev
+                continue
+
+            # Max hold safety exit
+            if bars_held >= max_hold:
+                signals[bar] = 0.0
+                in_position = False
+                continue
+
+            # Hold position
+            signals[bar] = current_lev
+            continue
+
+        # ── Not in position: look for new entry ──
         while pat_ptr < len(all_patterns) and all_patterns[pat_ptr]['c_idx'] < bar - lookback_bars:
             pat_ptr += 1
 
@@ -1777,12 +2031,10 @@ def compute_elliott_signals(
             continue
 
         pattern = recent[-1]
-
-        # Skip if this pattern already emitted a signal (one entry per pattern)
-        if pattern['c_idx'] in signalled_patterns:
+        if pattern['c_idx'] in used_patterns:
             continue
 
-        # 1. Macro bias at this bar
+        # Macro bias (§2.1)
         btc_price = float(btc_close_4h[bar])
         above_200 = btc_price > float(btc_ema200[bar])
         above_500 = btc_price > float(btc_ema500[bar])
@@ -1792,17 +2044,16 @@ def compute_elliott_signals(
         elif not above_200 and not above_500:
             bias = 'short'
         else:
-            bias = 'neutral'
+            bias = 'neutral'  # between EMAs: both directions ok
 
-        # 2. Macro bias filter (neutral allows both directions)
+        # Macro filter: only block opposing direction
         if bias == 'long' and pattern['signal'] != 1:
             continue
         if bias == 'short' and pattern['signal'] != -1:
             continue
+        # neutral → allow both
 
-        # 3. Confirmation Protocol (§2.2):
-        #    Divergence REQUIRED + at least 1 corroboration {MACD, Stoch}
-        #    Check divergence in [c_idx - div_margin, bar] window
+        # Confirmation Protocol (§2.2): divergence window check
         direction = pattern['signal']
         c_idx = pattern['c_idx']
         div_lo = max(min_start, c_idx - div_margin)
@@ -1823,8 +2074,39 @@ def compute_elliott_signals(
         if not (has_macd or has_stoch):
             continue
 
-        # 4. Signal with effective leverage
-        signals[bar] = float(direction) * lev
-        signalled_patterns.add(pattern['c_idx'])
+        # ── Quality filter: only trade high-quality wave structures ──
+        pattern_quality = pattern.get('quality', 0.0)
+        if pattern_quality < cfg.min_pattern_quality:
+            continue  # low quality wave reading → skip
 
-    return signals
+        # ── Risk filter: only enter if stop is tight relative to entry ──
+        entry_price = float(close_4h[bar])
+        stop_price = float(pattern['stop'])
+        risk_pct = abs(entry_price - stop_price) / entry_price
+        if risk_pct > cfg.max_entry_risk_pct:
+            continue  # entry too far from C → poor RR → skip
+
+        # ── ENTER: exploratory position (§4.2: 2% pilot) ──
+        used_patterns.add(pattern['c_idx'])
+        in_position = True
+        pos_direction = direction
+        pos_entry_price = entry_price
+        pos_entry_bar = bar
+        pos_confirmed = True  # strict mode already has div+corroboration
+        pos_partial_done = False
+        pos_stop = float(pattern['stop'])
+        pos_tp1 = float(pattern['target_1'])
+        pos_tp2 = float(pattern['target_2'])
+        pos_trail_stop = pos_stop
+
+        # Risk-sized leverage: ensure each trade risks exactly risk_per_trade
+        if cfg.risk_sized_leverage and risk_pct > 0:
+            trade_lev = min(max_lev, cfg.risk_per_trade / risk_pct)
+        else:
+            trade_lev = lev_primary
+        trade_lev_after_tp = trade_lev * cfg.partial_tp_fraction
+
+        # Start at primary leverage since we have full confirmation
+        signals[bar] = float(direction) * trade_lev
+
+    return signals, adj_close

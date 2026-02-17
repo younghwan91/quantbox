@@ -119,49 +119,179 @@ def compute_signals_relaxed(
     low_4h: np.ndarray,
     btc_close_4h: np.ndarray,
     config: ElliottConfig | None = None,
-) -> np.ndarray:
-    """Signal generation WITHOUT mandatory divergence requirement.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Position signals with full lifecycle — relaxed confluence.
 
-    Uses multi-scale 5-wave impulse + ABC pattern + Fibonacci + macro bias +
-    any 1 of {divergence, MACD, Stoch} for more trades.
-    Signals scaled by effective_leverage.
+    Same position management as compute_elliott_signals (stops, partial TP,
+    trailing, max hold) but only requires 1 of {divergence, MACD, Stoch}
+    for entry instead of mandatory divergence.
 
-    Optimized: pre-computes all patterns once (O(n)), then walks forward.
+    Position States (winning_strategy §4-§5):
+      Entry:      exploratory 0.4x (2%) → primary 2.0x (10%) on confirmation
+      Partial TP: 50% exit at TP1 → 1.0x remaining
+      Trail:      ATR trailing stop from breakeven
+      Exit:       stop (tight at C) / TP2 / trail hit / max hold
+
+    Neutral BTC bias (between 200/500 EMA) allows both long and short.
+
+    Returns:
+        (signals, adj_close) — adj_close has fill prices on exit bars
+        for accurate PnL computation in the backtest engine.
     """
     cfg = config or ElliottConfig()
     n = len(close_4h)
     signals = np.zeros(n, dtype=np.float64)
+    adj_close = close_4h.copy()  # adjusted close for accurate stop/TP fills
 
     if n < cfg.ema_macro_slow + 50:
-        return signals
+        return signals, adj_close
 
+    # ── Pre-compute indicators ──
     btc_ema200 = compute_ema(btc_close_4h, cfg.ema_macro_fast)
     btc_ema500 = compute_ema(btc_close_4h, cfg.ema_macro_slow)
     rsi_4h = compute_rsi(close_4h, cfg.rsi_period)
-    macd_line, macd_signal, macd_hist = compute_macd(
+    _, _, macd_hist = compute_macd(
         close_4h, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period,
     )
     stoch_k, stoch_d = compute_stochastic(
         high_4h, low_4h, close_4h, cfg.stoch_k_period, cfg.stoch_d_period,
     )
+    atr_4h = compute_atr(high_4h, low_4h, close_4h, 14)
 
-    lev = cfg.effective_leverage
     min_start = cfg.ema_macro_slow + 50
     lookback_bars = cfg.pattern_lookback_bars
 
-    # Pre-compute multi-scale patterns on full data (O(n) total)
+    # Position sizing (§4.1-§4.2)
+    lev_exploratory = cfg.nominal_leverage * cfg.exploratory_pct  # 0.4
+    lev_primary = cfg.effective_leverage                          # 2.0 (fallback)
+    max_lev = cfg.effective_leverage                              # 2.0 cap
+    # Per-trade vars initialized; overridden at each entry
+    trade_lev = lev_primary
+    trade_lev_after_tp = trade_lev * cfg.partial_tp_fraction      # 1.0
+    max_hold = cfg.max_hold_bars
+
+    # ── Pre-compute patterns ──
     all_patterns = scan_multi_scale_patterns(high_4h, low_4h, cfg)
     all_patterns.sort(key=lambda p: p["c_idx"])
 
+    # ── Pre-compute divergence arrays for counter-divergence exits ──
+    div_lookback = cfg.divergence_lookback
+    bull_div = np.zeros(n, dtype=np.bool_)
+    bear_div = np.zeros(n, dtype=np.bool_)
+    for i in range(min_start, n):
+        lb = min(div_lookback, i)
+        bull_div[i] = detect_bullish_divergence(
+            close_4h[:i + 1], rsi_4h[:i + 1], lb,
+        )
+        bear_div[i] = detect_bearish_divergence(
+            close_4h[:i + 1], rsi_4h[:i + 1], lb,
+        )
+
+    # ── Walk-forward with position lifecycle ──
     pat_ptr = 0
-    signalled_patterns: set[int] = set()  # one signal per pattern
+    used_patterns: set[int] = set()
+
+    # Position state
+    in_position = False
+    pos_direction = 0
+    pos_stop = 0.0
+    pos_tp1 = 0.0
+    pos_tp2 = 0.0
+    pos_entry_price = 0.0
+    pos_entry_bar = 0
+    pos_confirmed = False
+    pos_partial_done = False
+    pos_trail_stop = 0.0
 
     for bar in range(min_start, n):
-        # Advance pointer past stale patterns
+        # ── Manage existing position ──
+        if in_position:
+            current_lev = signals[bar - 1]  # carry forward
+            hit_stop = False
+            hit_tp1 = False
+            hit_tp2 = False
+            bars_held = bar - pos_entry_bar
+            fill_price = close_4h[bar]  # default fill at close
+
+            if pos_direction == 1:  # Long
+                if low_4h[bar] <= pos_stop:
+                    hit_stop = True
+                    fill_price = pos_stop
+                if not pos_partial_done and high_4h[bar] >= pos_tp1:
+                    hit_tp1 = True
+                if pos_partial_done and high_4h[bar] >= pos_tp2:
+                    hit_tp2 = True
+                    fill_price = pos_tp2
+                if pos_partial_done:
+                    new_trail = high_4h[bar] - cfg.trail_atr_mult * atr_4h[bar]
+                    if new_trail > pos_trail_stop:
+                        pos_trail_stop = new_trail
+                    if low_4h[bar] <= pos_trail_stop:
+                        hit_stop = True
+                        fill_price = pos_trail_stop
+            else:  # Short
+                if high_4h[bar] >= pos_stop:
+                    hit_stop = True
+                    fill_price = pos_stop
+                if not pos_partial_done and low_4h[bar] <= pos_tp1:
+                    hit_tp1 = True
+                if pos_partial_done and low_4h[bar] <= pos_tp2:
+                    hit_tp2 = True
+                    fill_price = pos_tp2
+                if pos_partial_done:
+                    new_trail = low_4h[bar] + cfg.trail_atr_mult * atr_4h[bar]
+                    if new_trail < pos_trail_stop or pos_trail_stop == 0.0:
+                        pos_trail_stop = new_trail
+                    if high_4h[bar] >= pos_trail_stop:
+                        hit_stop = True
+                        fill_price = pos_trail_stop
+
+            # Exploratory → primary confirmation (§4.2)
+            if not pos_confirmed and bars_held <= cfg.confirmation_bars:
+                has_macd = check_macd_reversal(macd_hist[:bar + 1], pos_direction)
+                has_stoch = check_stoch_cross(
+                    stoch_k[:bar + 1], stoch_d[:bar + 1], pos_direction,
+                )
+                if has_macd or has_stoch:
+                    pos_confirmed = True
+                    current_lev = float(pos_direction) * trade_lev
+            elif not pos_confirmed and bars_held > cfg.confirmation_bars:
+                # No confirmation → exit failed pilot
+                signals[bar] = 0.0
+                in_position = False
+                continue
+
+            # Process exits (priority order)
+            if hit_stop:
+                signals[bar] = 0.0
+                adj_close[bar] = fill_price  # accurate stop fill
+                in_position = False
+                continue
+            if hit_tp2:
+                signals[bar] = 0.0
+                adj_close[bar] = fill_price  # accurate TP2 fill
+                in_position = False
+                continue
+            if hit_tp1 and not pos_partial_done:
+                pos_partial_done = True
+                current_lev = float(pos_direction) * trade_lev_after_tp
+                pos_stop = pos_entry_price  # move to breakeven
+                pos_trail_stop = pos_entry_price
+                signals[bar] = current_lev
+                continue
+            if bars_held >= max_hold:
+                signals[bar] = 0.0
+                in_position = False
+                continue
+
+            # Hold position
+            signals[bar] = current_lev
+            continue
+
+        # ── Not in position: look for entry ──
         while pat_ptr < len(all_patterns) and all_patterns[pat_ptr]["c_idx"] < bar - lookback_bars:
             pat_ptr += 1
 
-        # Collect recent causal patterns
         recent = []
         for j in range(pat_ptr, len(all_patterns)):
             p = all_patterns[j]
@@ -174,12 +304,10 @@ def compute_signals_relaxed(
             continue
 
         pattern = recent[-1]
-
-        # Skip if this pattern already emitted a signal
-        if pattern["c_idx"] in signalled_patterns:
+        if pattern["c_idx"] in used_patterns:
             continue
 
-        # Macro bias
+        # Macro bias (§2.1) — neutral allows both
         btc_price = float(btc_close_4h[bar])
         above_200 = btc_price > float(btc_ema200[bar])
         above_500 = btc_price > float(btc_ema500[bar])
@@ -198,9 +326,9 @@ def compute_signals_relaxed(
 
         direction = pattern["signal"]
 
-        # Confluence: count confirmations (need at least 1)
+        # Confluence: need at least 1 of {divergence, MACD, Stoch}
         confirmations = 0
-        lookback = min(30, bar)
+        lookback = min(60, bar)
 
         if direction == 1:
             if detect_bullish_divergence(close_4h[:bar+1], rsi_4h[:bar+1], lookback):
@@ -211,15 +339,53 @@ def compute_signals_relaxed(
 
         if check_macd_reversal(macd_hist[:bar+1], direction):
             confirmations += 1
-
         if check_stoch_cross(stoch_k[:bar+1], stoch_d[:bar+1], direction):
             confirmations += 1
 
-        if confirmations >= 1:
-            signals[bar] = float(direction) * lev
-            signalled_patterns.add(pattern["c_idx"])
+        if confirmations < 1:
+            continue
 
-    return signals
+        # ── Risk filter: only enter if stop distance from entry is tight ──
+        entry_price = float(close_4h[bar])
+        stop_price = float(pattern["stop"])
+        risk_pct = abs(entry_price - stop_price) / entry_price
+        if risk_pct > cfg.max_entry_risk_pct:
+            continue  # entry too far from C → poor RR → skip
+
+        # ── Quality filter: only trade high-quality wave structures ──
+        pattern_quality = pattern.get("quality", 0.0)
+        if pattern_quality < cfg.min_pattern_quality:
+            continue  # low quality wave reading → skip
+
+        # ── ENTER: exploratory entry (§4.2: 2% pilot) ──
+        used_patterns.add(pattern["c_idx"])
+        in_position = True
+        pos_direction = direction
+        pos_entry_price = entry_price
+        pos_entry_bar = bar
+        pos_partial_done = False
+        pos_stop = float(pattern["stop"])
+        pos_tp1 = float(pattern["target_1"])
+        pos_tp2 = float(pattern["target_2"])
+        pos_trail_stop = pos_stop
+
+        # Risk-sized leverage: ensure each trade risks exactly risk_per_trade
+        if cfg.risk_sized_leverage and risk_pct > 0:
+            trade_lev = min(max_lev, cfg.risk_per_trade / risk_pct)
+        else:
+            trade_lev = lev_primary
+        trade_lev_after_tp = trade_lev * cfg.partial_tp_fraction
+
+        # Enter exploratory (0.4x), confirm to primary (risk-sized) within N bars
+        # If we already have 2+ confirmations → instant primary
+        if confirmations >= 2:
+            pos_confirmed = True
+            signals[bar] = float(direction) * trade_lev
+        else:
+            pos_confirmed = False
+            signals[bar] = float(direction) * lev_exploratory
+
+    return signals, adj_close
 
 
 def run_backtest(
@@ -250,9 +416,9 @@ def run_backtest(
         bc = btc_close[-min_len:]
 
         if use_relaxed:
-            signals = compute_signals_relaxed(c, h, lo, bc, config)
+            signals, adj_close = compute_signals_relaxed(c, h, lo, bc, config)
         else:
-            signals = compute_elliott_signals(c, h, lo, bc, config)
+            signals, adj_close = compute_elliott_signals(c, h, lo, bc, config)
 
         n_long = int(np.sum(signals > 0))
         n_short = int(np.sum(signals < 0))
@@ -266,8 +432,8 @@ def run_backtest(
             }
             continue
 
-        # Use partial cost model since signals have leverage magnitude
-        result = bt.run_single_partial(c, signals, symbol=symbol)
+        # Use adj_close for accurate intra-bar fill PnL
+        result = bt.run_single_partial(adj_close, signals, symbol=symbol)
         results[symbol] = {
             "result": result,
             "signals": signals,
