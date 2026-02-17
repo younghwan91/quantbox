@@ -232,7 +232,7 @@ class TestRegimeSwitchConfigV5:
         assert cfg.entry_mode == 'confidence'  # v6.0 default
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
-        assert cfg.btc_directional_period == 0  # v10.2: Risk-Off disabled
+        assert cfg.btc_directional_period == 48  # v11.0: Maeoknam A/B winner
         assert cfg.min_confidence == 1  # v10.0: lowered, MTF as quality gate
         assert cfg.confidence_leverage_step == 0.0
         assert cfg.rsi_period == 14
