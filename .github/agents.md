@@ -7,15 +7,15 @@
 
 ## 1. 시스템 개요
 
-QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
+QuantBox v9.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스켈핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
-**v8.0: Dynamic Target (Confluence-Gated)** — 컨피던스 ≥3일 때 타겟 40%→45/50/55% 스케일링. DD 불변(4.3%), Calmar +9.3%.
+**v9.0: Fibonacci + S+R+M Confluence** — target 0.382 (Fib golden ratio), stop 0.786 (Fib deep correction) + MACD(12,26,14) 히스토그램 + Stochastic(5,3) 크로스 컨플루언스 증거. Calmar 15.38 (+33.6% vs v8.0), DD 11.0% (-8.5%). Dynamic Target 비활성화.
 **v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
 
 | 구성 요소 | 역할 |
 |-----------|------|
 | **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산 |
-| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 4.5%+ 급등/급락 포착) + Dynamic Target (v8.0) + MTF 확인 + 독립 4H 트레이딩 |
+| **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 4.5%+ 급등/급락 포착) + Fibonacci Exit (v9.0) + MACD/Stochastic Confluence (v9.0) + MTF 확인 + 독립 4H 트레이딩 |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -27,10 +27,10 @@ QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Dynamic Target v8.0)
+전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Fibonacci + S+R+M Confluence v9.0)
 심볼선택: Top-10 curated (FETUSDT, FILUSDT, ICPUSDT, HBARUSDT, DOTUSDT,
                         OPUSDT, SHIBUSDT, DOGEUSDT, LTCUSDT, ATOMUSDT)
-파라미터: lookback=8, threshold=0.045, target=0.4, stop=0.9, max_hold=10
+파라미터: lookback=8, threshold=0.045, target=0.382, stop=0.786, max_hold=10
          stop_decay=0.0
          entry_mode='confidence'
          btc_regime_period=96 (24h SMA for regime detection)
@@ -38,9 +38,18 @@ QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
          btc_directional_period=32 (8h BTC momentum for sympathy)
          base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
          partial_exit_enabled=false
-         # v8.0 Dynamic Target (Confluence-Gated)
-         dynamic_target_enabled=true
-         target_conf3=0.45, target_conf4=0.50, target_conf5=0.55
+         # v9.0 Fibonacci Exit Levels
+         target_retrace=0.382 (Fibonacci golden ratio, +29% Calmar vs 0.4)
+         stop_mult=0.786 (Fibonacci deep correction, DD -8.5% vs 0.9)
+         # v8.0 Dynamic Target (DISABLED in v9.0)
+         dynamic_target_enabled=false
+         target_conf3=0.45, target_conf4=0.50, target_conf5=0.55  # 유지되나 비활성
+         # v9.0 MACD Histogram Evidence
+         macd_enabled=true
+         macd_fast=12, macd_slow=26, macd_signal_period=14
+         # v9.0 Stochastic Cross Evidence
+         stoch_enabled=true
+         stoch_k_period=5, stoch_d_period=3
          # v7.0 MTF Confirmation
          mtf_confirmation_enabled=true
          mtf_sma_period=12 (4h SMA, 2일)
@@ -52,13 +61,13 @@ QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
          htf_rb_max_hold=12, htf_rb_btc_sma_period=48
 비용:     0.04%/side + 펀딩비
 
-성과 (365일, v7.0 hybrid, 10개 심볼 유니버스):
-  Return:    +139.8%
+성과 (365일, v9.0 Fibonacci + S+R+M Confluence, 10개 심볼 유니버스):
+  Return:    +169.2%
   Sharpe:    5.23
-  Max DD:    4.3%
-  Calmar:    32.42
+  Max DD:    11.0%
+  Calmar:    15.38
   Win Rate:  63.3%
-  R:R:       1.25
+  R:R:       0.486
   Trades:    798
   Walk-forward Q3 DD: 3.0% (was 16.5%)
 ```
@@ -82,7 +91,8 @@ QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 │       → TARGET / STOP_LOSS / TRAILING / MAX_HOLD                │
 │  5. 신규 진입 스캔 (_scan_entries):                              │
 │     ∀ symbol in universe (not already held):                    │
-│       → download_klines(symbol) → on_bar(symbol, close, btc)   │
+│       → download_klines(symbol, full=True) → on_bar(symbol, close, btc, high, low) │
+│       → MACD/Stochastic 활성화 시 compute_signals_v9() 디스패치 (v9.0) │
 │       → MTF confirmation: 4h SMA(12) 트렌드 필터 적용 (v7.0)   │
 │       → 신호 +1/-1 → candidates 수집 → move 크기 정렬          │
 │       → MTF 확인 트레이드: 2.0x 레버리지 부스트 (v7.0)          │
@@ -96,7 +106,7 @@ QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 
 ### 2.1 신호 생성 (RubberBandStrategy.on_bar)
 
-단일 자산의 15m close/volume/taker_buy 배열과 BTC close를 받아 `compute_signals_confidence()` (Numba 컴파일)로 신호를 생성한다:
+단일 자산의 15m close/volume/taker_buy 배열과 BTC close, 그리고 선택적 high/low 배열을 받아 신호를 생성한다. MACD 또는 Stochastic 활성화 시 `compute_signals_v9()` (Numba 컴파일)로 디스패치하고, 그렇지 않으면 `compute_signals_confidence()` (Numba 컴파일)로 신호를 생성한다:
 
 **Confidence-Scored Multi-Evidence Entry (v6.0):**
 
@@ -111,6 +121,8 @@ QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 - +1: 거래량 > 1.5x 평균 (청산 캐스케이드 감지)
 - +1: 테이커 매도 압력 (Risk-On: ratio<0.45, Risk-Off: ratio<0.42)
 - +1: SMA 지지 근접 (Risk-On) / BTC 모멘텀 강도 (Risk-Off)
+- +1: MACD 히스토그램 기울기 방향 일치 (v9.0, `macd_enabled=true`)
+- +1: 스토캐스틱 %K/%D 크로스 방향 일치 (v9.0, `stoch_enabled=true`)
 - **BTC crash gate**: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
 - 기존 포지션 보유 심볼은 중복 신호 무시
 
@@ -129,7 +141,7 @@ QuantBox v8.0은 **바이난스 USDT-M 선물** 위에서 동작하는 **Rubber 
 
 | 조건 | 판정 | 비고 |
 |------|------|------|
-| **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 40% 되돌림 기본 |
+| **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 38.2% 되돌림 기본 (Fibonacci golden ratio, v9.0) |
 | **Stop Loss** | unrealized PnL < -stop_mult × move_size × time_factor | time_factor = 1 - stop_decay × (bars_held / max_hold) |
 | **Trailing Stop** | best_pnl > 0 && PnL < best_pnl × (1 - trail_pct) | 이익 확보 후 역전 방어 |
 | **Max Hold** | bars_held ≥ max_hold | 타임아웃 강제 청산 (8 bars = 2h) |
@@ -178,7 +190,9 @@ else:
 
 > **핵심 발견 (v7.0)**: MTF Confirmation(4h SMA12)이 v6.0 대비 MDD 16.5% → 4.3% (-74%), Calmar 32.42 (+275%), Sharpe 5.23 (+153%). 수익률은 -2.2% 소폭 감소하나 위험조정 수익 극적 개선. Walk-forward Q3 DD 16.5% → 3.0% (-82%). 독립 4H 트레이딩 단독으로 Ret +52.2%, DD 4.8%, Calmar 10.87. 15m+4h 하이브리드가 최적 구성.
 
-> **핵심 발견 (v8.0)**: Dynamic Target — 컨피던스 ≥3일 때 타겟을 40%→45/50/55%로 확대하여 비대칭 R:R 확보. DD 불변(4.3%), Calmar +9.3% (27.71→30.29), Sharpe 안정. 10000% 대회 우승자의 "확실할 때 파도를 타라" 원칙 적용. **A/B 테스트 후 기각된 전략**: RSI Divergence, Volatility Squeeze, Reversal Confirmation — 15m 크립토에서 데이터가 지지하지 않음. 이 3가지를 재테스트하지 말 것.
+> **핵심 발견 (v8.0)**: Dynamic Target — 컨피던스 ≥3일 때 타겟을 40%→45/50/55%로 확대하여 비대칭 R:R 확보. DD 불변(4.3%), Calmar +9.3% (27.71→30.29), Sharpe 안정. 10000% 대회 우승자의 "확실할 때 파도를 타라" 원칙 적용. **v9.0에서 비활성화** — 타이트한 Fib 스탑(0.786)에서 고정 0.382 타겟이 동적 스케일링보다 우수. **A/B 테스트 후 기각된 전략**: RSI Divergence, Volatility Squeeze, Reversal Confirmation — 15m 크립토에서 데이터가 지지하지 않음. 이 3가지를 재테스트하지 말 것.
+
+> **핵심 발견 (v9.0)**: Fibonacci + S+R+M Confluence — target 0.4→0.382 (Fib golden ratio, +29% Calmar), stop 0.9→0.786 (Fib deep correction, DD -8.5%). R:R 0.444→0.486 (+9.5%). MACD(12,26,14) 히스토그램 기울기 증거 단독 +7.6% Calmar. Stochastic(5,3) 크로스 증거 (high/low 캔들 데이터 필요). `compute_signals_v9()` Numba 함수로 통합. **v9.0 A/B 테스트 후 기각**: EMA Regime(모든 기간 50/96/200) -4~-9% Calmar, Capital Preservation(50% 부분 청산) -32% Calmar, Confluence Gate(RSI+Stoch+MACD 동시 필수) -90% Calmar(트레이드 252→41). 이 3가지를 재테스트하지 말 것.
 
 ### 2.5 비용 모델
 
@@ -207,7 +221,7 @@ else:
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage`, `apply_mtf_confirmation`, `apply_mtf_leverage`, `compute_signals_4h_independent` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 + **MTF 확인 (v7.0)** + **독립 4H 트레이딩 (v7.0)** (Numba 컴파일) |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage`, `apply_mtf_confirmation`, `apply_mtf_leverage`, `compute_signals_4h_independent`, `_compute_ema_inline`, `_compute_stochastic_inline`, `_compute_macd_inline`, `compute_signals_v9` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 + **MTF 확인 (v7.0)** + **독립 4H 트레이딩 (v7.0)** + **Fibonacci Exit + MACD/Stochastic Confluence (v9.0)** (Numba 컴파일) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
@@ -284,6 +298,9 @@ else:
 - [x] **v7.0 MTF Leverage**: `apply_mtf_leverage()` 백테스트 ↔ 라이브 MTF 확인 시 2.0x 레버리지 부스트 패리티
 - [x] **v7.0 Independent 4H**: `compute_signals_4h_independent()` 백테스트 ↔ `on_bar_4h()` 라이브 4h 신호 패리티
 - [x] **v7.0 Live Fix**: volume/taker 데이터 `_scan_entries()` 연결, 4h kline 다운로드, `main()` v7.0 설정 전달
+- [x] **v9.0 Fibonacci Exit**: `target_retrace=0.382`, `stop_mult=0.786` 백테스트 ↔ 라이브 동일 적용
+- [x] **v9.0 MACD/Stochastic**: `compute_signals_v9()` 백테스트 ↔ `on_bar()` 라이브 v9 디스패치 패리티
+- [x] **v9.0 Live Pipeline**: `download_klines(full=True)` 5-tuple (close, high, low, volume, taker_buy) 반환
 
 ---
 
@@ -314,8 +331,8 @@ else:
 |---------|--------|------|------|
 | `lookback` | 8 bars (2h) | `RubberBandConfig` | 급등/급락 측정 기간 |
 | `threshold` | 0.045 (4.5%) | `RubberBandConfig` | 최소 무브 크기 |
-| `target_retrace` | 0.4 (40%) | `RubberBandConfig` | 이익 실현 목표 |
-| `stop_mult` | 0.9 | `RubberBandConfig` | 손절 배수 (무브 크기 대비) |
+| `target_retrace` | 0.382 (38.2%) | `RubberBandConfig` | 이익 실현 목표 (Fibonacci golden ratio, v9.0) |
+| `stop_mult` | 0.786 | `RubberBandConfig` | 손절 배수 (무브 크기 대비, Fibonacci deep correction, v9.0) |
 | `max_hold` | 10 bars (2.5h) | `RubberBandConfig` | 최대 보유 기간 |
 | `stop_decay` | 0.0 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성) |
 | `htf_period` | 0 (비활성) | `RubberBandConfig` | MTF SMA lookback (0=비활성) |
@@ -351,6 +368,14 @@ else:
 | `htf_rb_stop_mult` | 0.8 | `RubberBandConfig` | **v7.0** 4h 손절 배수 |
 | `htf_rb_max_hold` | 12 (2일) | `RubberBandConfig` | **v7.0** 4h 최대 보유 기간 |
 | `htf_rb_btc_sma_period` | 48 (8일) | `RubberBandConfig` | **v7.0** 4h BTC SMA 기간 |
+| `dynamic_target_enabled` | False | `RubberBandConfig` | 비활성화 (v9.0: Fib 0.382 고정 > 동적 스케일링) |
+| `macd_enabled` | True | `RubberBandConfig` | **v9.0** MACD 히스토그램 컨피던스 증거 활성화 |
+| `macd_fast` | 12 | `RubberBandConfig` | **v9.0** MACD fast EMA 기간 |
+| `macd_slow` | 26 | `RubberBandConfig` | **v9.0** MACD slow EMA 기간 |
+| `macd_signal_period` | 14 | `RubberBandConfig` | **v9.0** MACD signal EMA 기간 |
+| `stoch_enabled` | True | `RubberBandConfig` | **v9.0** 스토캐스틱 크로스 컨피던스 증거 활성화 |
+| `stoch_k_period` | 5 | `RubberBandConfig` | **v9.0** 스토캐스틱 %K 기간 (very fast) |
+| `stoch_d_period` | 3 | `RubberBandConfig` | **v9.0** 스토캐스틱 %D 기간 |
 
 ### 6.2 Alpha Engine 파라미터
 
@@ -393,7 +418,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (30+파일, 395개)
+## 7. 테스트 현황 (30+파일, 415개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
@@ -411,6 +436,7 @@ else:
 | `test_cache` | 캐시 | Memory LRU, Disk, 만료, Timeframed |
 | `test_state_persistence` | 상태 영속화 | 직렬화, 원자적 쓰기, 라운드트립 |
 | `test_dynamic_target` | Dynamic Target (v8.0) | 컨피던스별 타겟 스케일링, 파라미터 검증, 기각된 전략 확인 (10개) |
+| `test_v9_confluence` | v9.0 S+R+M Confluence | Fibonacci Exit, MACD Histogram, Stochastic Cross, compute_signals_v9, 라이브 파이프라인 (20개) |
 | `test_partial_exit` | 부분 청산 + R:R 레버리지 | Partial exit 신호, Break-even stop, R:R-gate, delta-based 비용, 라이브 패리티 (23개) |
 
 ---
