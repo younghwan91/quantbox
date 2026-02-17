@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 11.4.0  
-> 최종 업데이트: 2025년 7월 15일
+> 버전: 11.5.0  
+> 최종 업데이트: 2025년 7월 21일
 
 ---
 
@@ -12,7 +12,7 @@
 1. [개요](#1-개요)
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
 3. [🔥 Rubber Band Scalper (v2.0)](#3-rubber-band-scalper)
-3.5. [🌊 Elliott Wave Strategy (v11.4)](#35-elliott-wave-strategy)
+3.5. [🌊 Elliott Wave Strategy (v11.5)](#35-elliott-wave-strategy)
 4. [아키텍처 이해](#4-아키텍처-이해)
 5. [핵심 모듈 상세](#5-핵심-모듈-상세)
 6. [데이터 관리](#6-데이터-관리)
@@ -122,9 +122,28 @@ result = bt.run_single(close, signals, "BTCUSDT")
 print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
 ```
 
-### 3.5 Elliott Wave Strategy (v11.4)
+### 3.5 Elliott Wave Strategy (v11.5)
 
-매옥남 챔피언십 메소드 — Elliott Wave ABC 패턴 + Fibonacci 비율 검증 기반 전략.
+매옥남 챔피언십 메소드 — Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage 기반 전략.
+
+#### v11.5 핵심 개선:
+- **Quality Scoring**: W2/W3/B retrace, C:A ratio, 구조적 규칙 5차원 0-100점 스코어. 임계값 40점 이하 패턴 제거
+- **Risk-Sized Leverage**: `lev = min(2.0, risk_per_trade / stop_dist)` — 트레이드당 최대 2% 위험으로 일관된 리스크
+- **Tight Stops at C**: C 완료 지점 ±0.5% — 예측이 틀리면 즉시 소규모 손절, 맞으면 높은 R:R
+- **adj_close**: 스탑/TP 체결 시 인트라바 가격으로 PnL 계산 (close-to-close 대신)
+- **Tighter Fibonacci Ranges**: W3 extension min 1.272, C/A 0.786-2.000, C Fib tolerance 0.10
+- **Risk Filter**: entry-to-stop 거리 최대 3% 제한
+
+#### 백테스트 결과 (365일, 20심볼, relaxed mode):
+| 지표 | 값 |
+|------|-----|
+| Active Symbols | 8 |
+| Total Trades | 12 |
+| Win Rate | 66.7% |
+| Portfolio Return | +1.24% |
+| Portfolio MaxDD | 1.55% |
+| Sharpe Ratio | 0.59 |
+| Calmar Ratio | 0.80 |
 
 #### 실행 방법
 
@@ -169,6 +188,12 @@ python -m quantbox.scalper --strategy elliott
 | confirmation_bars | 4 | 확인 대기 봉 수 |
 | max_hold_bars | 96 | 최대 보유 (4h×96 = 16일) |
 | pyramid_enabled | True | 미실현 이익 피라미딩 |
+| sl_buffer_pct | 0.005 | 스탑 버퍼 (C 지점 ±0.5%) |
+| max_entry_risk_pct | 0.03 | 최대 entry-to-stop 거리 (3%) |
+| min_pattern_quality | 40.0 | 최소 패턴 품질 점수 (0-100) |
+| risk_per_trade | 0.02 | 트레이드당 자기자본 위험 (2%) |
+| risk_sized_leverage | True | 스탑 거리 기반 레버리지 자동 조정 |
+| trail_atr_mult | 2.0 | 트레일링 스탑 ATR 배수 |
 
 #### 백테스트
 
@@ -178,8 +203,9 @@ import numpy as np
 
 # 4h OHLCV 데이터
 config = ElliottConfig()
-signals = compute_elliott_signals(close_4h, high_4h, low_4h, config)
-# signals: 1 = Long, -1 = Short, 0 = Hold
+signals, adj_close = compute_elliott_signals(close_4h, high_4h, low_4h, btc_close)
+# signals: leverage-weighted direction (-2.0 ~ +2.0), 0 = flat
+# adj_close: fill-price adjusted close for accurate PnL
 ```
 
 ### 3.6 v7.0: Multi-Timeframe Confirmation + Independent 4H Trading
