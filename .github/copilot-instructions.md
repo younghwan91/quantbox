@@ -3,6 +3,10 @@
 이 문서는 바이낸스 USDT-M 선물 **러버밴드 스캘핑 시스템** 'QuantBox'의 절대적인 개발 지침입니다.
 우리의 목표는 **학술적 연구가 아닌, 실제 시장에서 수익을 내는 시스템**을 구축하는 것입니다.
 
+Execute a partial 50% liquidation upon any profit to secure capital, followed by an immediate transition to a break-even stop-loss to eliminate downside risk and convert leverage into a strategic asset. 
+
+By prioritizing capital preservation and net savings over gross performance, this disciplined framework minimizes drawdowns and stabilizes equity growth, ensuring that market volatility functions as an efficiency multiplier rather than a liability.
+
 ## 🚨 최우선 원칙 (Strict Rules)
 
 1.  **Real Data Only (No Mock Data)**

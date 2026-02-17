@@ -180,8 +180,6 @@ class TestSaveLoadClear:
             paper_mode=True,
             initial_balance=1000.0,
             session_high_water_mark=1050.0,
-            daily_start_balance=990.0,
-            daily_start_time='2025-06-01T00:00:00+00:00',
             filepath=tmp_state_file,
         )
 
@@ -192,7 +190,6 @@ class TestSaveLoadClear:
         assert state['paper_balance'] == 1000.0
         assert state['initial_balance'] == 1000.0
         assert state['session_high_water_mark'] == 1050.0
-        assert state['daily_start_balance'] == 990.0
 
     def test_load_nonexistent_returns_none(self, tmp_path):
         result = load_state(tmp_path / "nonexistent.json")

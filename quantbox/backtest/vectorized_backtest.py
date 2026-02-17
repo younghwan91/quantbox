@@ -60,6 +60,110 @@ class BacktestResult:
 
 
 @numba.jit(nopython=True, cache=True)
+def _backtest_core_partial(
+    close: np.ndarray,
+    signals: np.ndarray,
+    cost_per_side: float,
+    funding_per_bar: float,
+) -> tuple:
+    """Core backtest loop with delta-based costs for partial exits (Numba).
+
+    Handles fractional signal magnitudes (e.g., ±0.5 from partial close).
+    Cost is based on position DELTA (|new - old|), not close+reopen.
+    Trades are counted as full lifecycle (entry to final flat).
+
+    Identical to _backtest_core for non-partial scenarios (0↔±1↔∓1).
+    """
+    n = len(close)
+    equity = np.ones(n)
+    trade_returns = np.zeros(1000)
+    position = 0.0
+    prev_signal = 0.0
+    n_trades = 0
+    n_wins = 0
+    bars_in_market = 0
+    peak = 1.0
+    max_dd = 0.0
+    trade_entry_eq = 1.0
+    gross_profit = 0.0
+    gross_loss = 0.0
+
+    for i in range(1, n):
+        ret = close[i] / close[i - 1] - 1.0
+        bar_pnl = position * ret
+
+        new_pos = signals[i]
+        if new_pos != prev_signal:
+            # Delta-based cost: only charge for the CHANGE in position
+            cost = abs(new_pos - prev_signal) * cost_per_side
+            bar_pnl -= cost
+
+            # Trade close: signal goes to 0 from non-zero
+            if new_pos == 0.0 and prev_signal != 0.0:
+                eq_after = equity[i - 1] * (1.0 + bar_pnl)
+                trade_ret = eq_after / trade_entry_eq - 1.0
+                if n_trades < len(trade_returns):
+                    trade_returns[n_trades] = trade_ret
+                n_trades += 1
+                if trade_ret > 0:
+                    n_wins += 1
+                    gross_profit += trade_ret
+                else:
+                    gross_loss += abs(trade_ret)
+
+            # Trade open: signal goes from 0 to non-zero
+            if prev_signal == 0.0 and new_pos != 0.0:
+                trade_entry_eq = equity[i - 1] * (1.0 + bar_pnl)
+
+        if position != 0.0:
+            bar_pnl -= abs(position) * funding_per_bar
+            bars_in_market += 1
+
+        equity[i] = equity[i - 1] * (1.0 + bar_pnl)
+        position = new_pos
+        prev_signal = new_pos
+
+        if equity[i] > peak:
+            peak = equity[i]
+        dd = (peak - equity[i]) / peak
+        if dd > max_dd:
+            max_dd = dd
+
+    if position != 0.0:
+        trade_ret = equity[-1] / trade_entry_eq - 1.0
+        if n_trades < len(trade_returns):
+            trade_returns[n_trades] = trade_ret
+        n_trades += 1
+        if trade_ret > 0:
+            n_wins += 1
+            gross_profit += trade_ret
+        else:
+            gross_loss += abs(trade_ret)
+
+    total_return = equity[-1] / equity[0] - 1.0
+
+    rets = np.empty(n - 1)
+    for i in range(n - 1):
+        rets[i] = equity[i + 1] / equity[i] - 1.0
+    mean_r = np.mean(rets)
+    std_r = np.std(rets)
+    sharpe = mean_r / std_r * np.sqrt(96.0 * 365.25) if std_r > 0 else 0.0
+
+    win_rate = n_wins / n_trades * 100.0 if n_trades > 0 else 0.0
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
+    avg_ret = 0.0
+    if n_trades > 0:
+        s = 0.0
+        for j in range(min(n_trades, len(trade_returns))):
+            s += trade_returns[j]
+        avg_ret = s / n_trades
+
+    return (equity, total_return, sharpe, max_dd, win_rate,
+            n_trades, bars_in_market, profit_factor, avg_ret,
+            trade_returns[:min(n_trades, len(trade_returns))])
+
+
+@numba.jit(nopython=True, cache=True)
 def _backtest_core(
     close: np.ndarray,
     signals: np.ndarray,
@@ -205,12 +309,47 @@ class VectorizedBacktest:
             equity_curve=equity,
         )
 
+    def run_single_partial(
+        self,
+        close: np.ndarray,
+        signals: np.ndarray,
+        symbol: str = "UNKNOWN",
+    ) -> BacktestResult:
+        """Run backtest with delta-based cost model for partial exits.
+
+        Uses _backtest_core_partial which charges cost on position DELTA
+        (|new - old|) instead of close+reopen. Required for partial
+        exit signals (±0.5). Identical results for non-partial scenarios.
+        """
+        equity, total_ret, sharpe, max_dd, wr, n_trades, bars_in, pf, avg_ret, _ = (
+            _backtest_core_partial(
+                close.astype(np.float64),
+                signals.astype(np.float64),
+                self.config.cost_per_side,
+                self.config.funding_per_bar,
+            )
+        )
+
+        return BacktestResult(
+            symbol=symbol,
+            total_return_pct=total_ret * 100,
+            sharpe=sharpe,
+            max_drawdown_pct=max_dd * 100,
+            win_rate=wr,
+            n_trades=n_trades,
+            bars_in_market=bars_in,
+            profit_factor=pf,
+            avg_trade_return=avg_ret * 100,
+            equity_curve=equity,
+        )
+
     def run_portfolio(
         self,
         data: dict[str, pd.DataFrame],
         signal_func: Callable[[np.ndarray], np.ndarray],
         btc_close: np.ndarray | None = None,
         signal_func_with_regime: Callable | None = None,
+        leverage_func: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
     ) -> dict:
         """Run portfolio backtest across multiple assets.
 
@@ -221,6 +360,9 @@ class VectorizedBacktest:
             signal_func: Function(close) -> signals.
             btc_close: BTC close prices for regime filter.
             signal_func_with_regime: Function(close, btc_close) -> signals.
+            leverage_func: Optional function(close, raw_signals) -> leveraged_signals.
+                Applied after signal generation. Use apply_confidence_leverage
+                from rubberband.py to scale signals by move-confidence leverage.
 
         Returns:
             Dict with portfolio metrics, per-asset results, equity curve.
@@ -239,6 +381,10 @@ class VectorizedBacktest:
                 sigs = signal_func_with_regime(close, btc_close[:n_bars])
             else:
                 sigs = signal_func(close)
+
+            # Apply leverage scaling (e.g., move-confidence leverage)
+            if leverage_func is not None:
+                sigs = leverage_func(close, sigs)
 
             result = self.run_single(close, sigs, symbol=sym)
             per_asset.append(result)
@@ -280,6 +426,7 @@ class VectorizedBacktest:
         inverse_vol_weight: bool = True,
         dd_dampening_threshold: float = 0.0,
         dd_dampening_scale: float = 0.5,
+        leverage_func: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
     ) -> dict:
         """Run portfolio backtest with drawdown management.
 
@@ -318,6 +465,8 @@ class VectorizedBacktest:
         for sym in selected_symbols:
             close = data[sym]['Close'].values[:n_bars].astype(np.float64)
             sigs = signal_func(close)
+            if leverage_func is not None:
+                sigs = leverage_func(close, sigs)
             result = self.run_single(close, sigs, symbol=sym)
             per_asset_results[sym] = result
             eq = result.equity_curve[:n_bars]
