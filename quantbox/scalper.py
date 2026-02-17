@@ -52,6 +52,7 @@ from quantbox.core.settings import get_settings
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.rubberband import (
     RubberBandConfig, RubberBandStrategy, calculate_position_size,
+    compute_confidence_leverage,
 )
 
 load_dotenv()
@@ -470,8 +471,20 @@ class RubberBandScalper:
             entry_price=entry_price,
             move_size=move_size,
             stop_mult=cfg.stop_mult,
-            max_leverage=20.0,
+            max_leverage=cfg.max_leverage,
         )
+
+        # Dynamic leverage: override with move-confidence scaling
+        if cfg.dynamic_leverage_enabled:
+            conf_lev = compute_confidence_leverage(
+                move_size=move_size,
+                threshold=cfg.threshold,
+                base_leverage=cfg.base_leverage,
+                leverage_scale=cfg.leverage_scale,
+                max_leverage=cfg.max_leverage,
+            )
+            notional = per_slot_capital * conf_lev
+            leverage = conf_lev
 
         if notional < 10.0:  # Min notional $10
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
@@ -981,6 +994,10 @@ def main():
         htf_block_threshold=settings.rb_htf_block_threshold,
         htf_agree_discount=settings.rb_htf_agree_discount,
         htf_agree_stop_mult=settings.rb_htf_agree_stop_mult,
+        dynamic_leverage_enabled=settings.rb_dynamic_leverage_enabled,
+        base_leverage=settings.rb_base_leverage,
+        leverage_scale=settings.rb_leverage_scale,
+        max_leverage=settings.rb_max_leverage,
         max_concurrent=args.max_slots,
     )
 

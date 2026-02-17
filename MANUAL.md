@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 4.0.0  
-> 최종 업데이트: 2025년 7월 17일
+> 버전: 4.1.0  
+> 최종 업데이트: 2025년 7월 18일
 
 ---
 
@@ -277,6 +277,12 @@ FORMATION_HOURS=60             # 페어 선별에 사용할 과거 데이터 길
 # Regime Protection
 Z_SCORE_CAP=4.0                # |z| > cap 이면 진입 거부 (레짐 변화 방어)
 VOL_EXPANSION_GATE=2.0         # recent_std / formation_std > gate 이면 진입 거부
+
+# Dynamic Leverage (move-confidence, 365일 A/B 검증)
+RB_DYNAMIC_LEVERAGE_ENABLED=true  # 동적 레버리지 활성화 (move-confidence)
+RB_BASE_LEVERAGE=3.0              # 최소 레버리지 (threshold 수준 움직임)
+RB_LEVERAGE_SCALE=10.0            # 100% 초과 움직임당 레버리지 증가
+RB_MAX_LEVERAGE=7.0               # 최대 레버리지 안전 상한
 
 # BTC Crash Gate (매크로 방어)
 BTC_CRASH_GATE_ENABLED=true    # BTC 급락/급등 시 진입 차단 활성화
