@@ -347,10 +347,12 @@ class TestABCPatternDetection:
         p = patterns[0]
         assert p['signal'] == 1  # Long
         assert p['type'] == 'bullish_impulse_abc_long'
-        # Fibonacci extension targets from C
-        assert p['target_1'] == pytest.approx(165.0 + 1.618 * 50.0, rel=1e-3)
-        assert p['target_2'] == pytest.approx(165.0 + 2.618 * 50.0, rel=1e-3)
-        assert p['stop'] < 165.0  # Below C
+        # TP1 = B level (near-term target), TP2 = C + 1.618 × wave1
+        assert p['target_1'] == pytest.approx(230.0, rel=1e-3)  # B price
+        assert p['target_2'] == pytest.approx(165.0 + 1.618 * 50.0, rel=1e-3)
+        assert p['stop'] == pytest.approx(165.0 * 0.995, rel=1e-3)  # C × (1 - 0.5%)
+        assert 'quality' in p
+        assert p['quality'] > 0  # should have positive quality score
 
     def test_valid_bullish_abc_short(self):
         """Valid 5-wave bearish impulse + bullish ABC → short signal.
@@ -381,6 +383,8 @@ class TestABCPatternDetection:
         p = patterns[0]
         assert p['signal'] == -1  # Short
         assert p['type'] == 'bearish_impulse_abc_short'
+        assert 'quality' in p
+        assert p['quality'] > 0  # should have positive quality score
 
     def test_invalid_b_exceeds_origin(self):
         """B exceeding W5 (A origin) invalidates the pattern."""
@@ -634,16 +638,17 @@ class TestBacktestSignals:
         high = df['high'].values[-600:].astype(np.float64)
         low = df['low'].values[-600:].astype(np.float64)
 
-        signals = compute_elliott_signals(close, high, low, close)
+        signals, _ = compute_elliott_signals(close, high, low, close)
         assert len(signals) == len(close)
 
     def test_signals_are_valid_values(self, btc_4h_data):
-        """Signals must be -1, 0, or +1."""
+        """Signals must be valid leverage values: 0, ±0.4, ±1.0, ±2.0."""
         df = btc_4h_data
         close = df['close'].values[-600:].astype(np.float64)
         high = df['high'].values[-600:].astype(np.float64)
         low = df['low'].values[-600:].astype(np.float64)
 
-        signals = compute_elliott_signals(close, high, low, close)
+        signals, _ = compute_elliott_signals(close, high, low, close)
+        valid_values = {-2.0, -1.0, -0.4, 0.0, 0.4, 1.0, 2.0}
         unique = set(signals)
-        assert unique.issubset({-1.0, 0.0, 1.0})
+        assert unique.issubset(valid_values), f"Unexpected signal values: {unique - valid_values}"
