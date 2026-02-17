@@ -103,6 +103,12 @@ class QuantBoxSettings(BaseSettings):
     rb_htf_agree_discount: float = 0.85   # Threshold discount when HTF agrees
     rb_htf_agree_stop_mult: float = 0.95  # Stop multiplier when HTF agrees
 
+    # ── Dynamic Leverage (move-confidence scaling, 365-day validated) ──
+    rb_dynamic_leverage_enabled: bool = True  # Enable move-confidence leverage
+    rb_base_leverage: float = 3.0             # Minimum leverage for threshold-level moves
+    rb_leverage_scale: float = 10.0           # Lev gain per 100% excess move
+    rb_max_leverage: float = 7.0              # Hard cap on leverage
+
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부

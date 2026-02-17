@@ -8,14 +8,17 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v4.0 — 365-Day Validated)
+### 🔥 Rubber Band Scalper (v4.1 — Dynamic Leverage)
 - **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
+- **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (큰 움직임 = 높은 확신 = 더 높은 레버리지)
+  - 보수적 모드: Base=3x, Max=7x (기본값, +132% 365일 검증)
+  - 경쟁 모드: Base=5x, Max=15x (Top-10, +20,012% 365일 검증, Sharpe 2.25)
 - **MTF**: 비활성화 (장기 성능 저하 확인 — A/B 테스트 결과 No MTF이 최적)
-- **Live/Backtest Parity**: entry_stop_mult 저장으로 실거래/백테스트 스탑 완전 일치
+- **Live/Backtest Parity**: entry_stop_mult 저장 + 동일 레버리지 계산으로 일치 보장
 - **365-Day Validated**: 30 심볼 × 35,040봉, 7/7 견고성 점수, 9/10 롤링 윈도우 수익
 - **Volatility Selection**: 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일마다 리밸런싱)
 - **DD-Managed Portfolio**: 역변동성 가중 + 포트폴리오 DD 기반 노출 축소
-- **Numba 가속**: 신호 생성, 백테스트, 변동성 계산 모두 `@numba.jit(nopython=True)` 컴파일
+- **Numba 가속**: 신호 생성, 백테스트, 레버리지 스케일링, 변동성 계산 모두 `@numba.jit(nopython=True)` 컴파일
 - **Alpha Engine**: 멀티팩터 신호 엔진 (볼륨, 모멘텀, ATR 적응, 트레일링 스탑, 테이커 비율)
 - **LimitChaser 실행**: maker-only 체결로 슬리피지 최소화
 - **위험 관리**: Max DD 차단기, 일일 손실 제한, 포지션 사이징 (1% risk/trade)
@@ -125,22 +128,18 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (287개)
+tests/                      # 유닛 테스트 (303개)
 \`\`\`
 
-## 📈 성과 지표 (v3.3: Enhanced MTF + decay=0.3, Top-3)
+## 📈 성과 지표 (v4.1: Dynamic Leverage, 365일 검증)
 
-| 지표 | 결과 |
-|------|------|
-| Portfolio Return | +63.18% (90일, top-3 vol-selected) |
-| Sharpe Ratio | 6.52 |
-| Max Drawdown (post-warmup) | 7.08% |
-| Calmar Ratio | 8.92 |
-| Win Rate | 56.5% |
-| Avg Win / Avg Loss | 1.353% / 1.498% (RR 0.90) |
-| Profit Factor | 1.17 |
-| Total Trades (selected symbols) | 1,394 |
-| Trades/Day | ~15.5 |
+| 지표 | 1x (기준선) | 보수적 (3-7x) | 경쟁모드 (5-15x, Top-10) |
+|------|------------|---------------|------------------------|
+| Portfolio Return | +18.4% | +132% | +20,012% |
+| Max Drawdown | 16.3% | 49.9% | 62.8% |
+| Calmar Ratio | 1.13 | 2.65 | 318.58 |
+| Sharpe Ratio | 0.81 | 1.14 | 2.25 |
+| Rolling Window (90d) | 9/10 수익 | - | 9/10 수익 |
 
 ## 🧪 테스트
 
