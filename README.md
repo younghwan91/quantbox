@@ -8,12 +8,17 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v5.0 — Regime-Switch Dual Entry)
+### 🔥 Rubber Band Scalper (v6.0 — Confidence-Scored Multi-Evidence)
 - **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **Regime-Switch Dual Entry (v5.0)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
+- **Confidence-Scored Entry (v6.0)**: 멀티 증거 기반 컨피던스 필터링 + 졸업 레버리지
+  - RSI, 거래량 스파이크, 테이커 매수/매도 비율, SMA 거리, BTC 모멘텀 5가지 증거
+  - min_confidence=2: 34개 저품질 트레이드 필터링 → Calmar +9%, 동일 DD
+  - 선택적 졸업 레버리지: 증거 많을수록 포지션 확대
+  - **Conservative**: Calmar 8.76, Sharpe 2.05, DD 16.9% (flat 1.5x)
+  - **Moderate**: Calmar 9.99, Sharpe 2.03, DD 22.4% (base=1.0, step=1.0, max=2.0)
+- **Regime-Switch Dual Entry (v5.0 base)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
   - Risk-On (BTC > SMA96): Classic Pullback — 자산 자체 상승추세에서 조정 시 매수
   - Risk-Off (BTC < SMA96): Sympathy Pullback — BTC 하락 시 동반 하락하는 자산 매수
-  - **Calmar 6.70**, Sharpe 1.89, WR 61.7%, R:R 1.25, 13/13 롤링 윈도우
 - **Optimized Stop/Target**: stop=0.9x, target=40% → 실현 R:R 1.25
 - **Flat 1.5x Leverage**: R:R 1.25로 레버리지 정당화
   - R:R ≥ 0.30 안전 게이트 유지
@@ -45,7 +50,7 @@
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
-- **Walk-Forward 검증**: 365일 롤링 윈도우 13/13 수익, Calmar 6.70, Sharpe 1.89
+- **Walk-Forward 검증**: 365일 롤링 윈도우, Calmar 8.76, Sharpe 2.05
 
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
@@ -133,21 +138,21 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (352개)
+tests/                      # 유닛 테스트 (367개)
 \`\`\`
 
-## 📈 성과 지표 (v5.0: Regime-Switch Dual Entry, 365일 Top-10)
+## 📈 성과 지표 (v6.0: Confidence-Scored, 365일 Top-10)
 
-| 지표 | v4.2 Baseline | v4.4 1.5x | v5.0 RS ★ |
-|------|--------------|-----------|----------|
-| Portfolio Return | +58.1% | +95.0% | **+116.8%** |
-| Max Drawdown | 15.4% | 19.1% | **17.4%** |
-| Calmar Ratio | 3.78 | 4.98 | **6.70** |
-| Sharpe Ratio | 1.63 | 1.61 | **1.89** |
-| Win Rate | 61.6% | 59.2% | **61.7%** |
-| R:R (Realized) | 0.99 | 1.10 | **1.25** |
-| Trades | — | — | **832** |
-| Rolling 90-day | 12/13 | 12/13 | **13/13** |
+| 지표 | v4.4 1.5x | v5.0 RS | v6.0 Conf ★ |
+|------|-----------|---------|-------------|
+| Portfolio Return | +95.0% | +135.6% | **+148.1%** |
+| Max Drawdown | 19.1% | 16.9% | **16.9%** |
+| Calmar Ratio | 4.98 | 8.03 | **8.76** |
+| Sharpe Ratio | 1.61 | 1.96 | **2.05** |
+| Win Rate | 59.2% | 61.7% | **63.3%** |
+| R:R (Realized) | 1.10 | 1.25 | **1.25** |
+| Trades | — | 832 | **798** |
+| Rolling 90-day | 12/13 | 4/4 | **4/4** |
 
 ## 🧪 테스트
 

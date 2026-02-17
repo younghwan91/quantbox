@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 4.4.0  
-> 최종 업데이트: 2025년 7월 20일
+> 버전: 6.0.0  
+> 최종 업데이트: 2025년 7월 21일
 
 ---
 
@@ -284,10 +284,16 @@ RB_BASE_LEVERAGE=1.5              # 전 트레이드 1.5x 고정 (최적 sweet s
 RB_LEVERAGE_SCALE=0.0             # 컨피던스 스케일링 비활성화 (고정 레버리지)
 RB_MAX_LEVERAGE=1.5               # base와 동일 (안전 상한)
 
-# Regime-Switch Dual Entry (v5.0, 365일 A/B 검증)
-RB_ENTRY_MODE=regime_switch        # 진입 모드: regime_switch | btc_directional | raw
+# Regime-Switch + Confidence Scoring (v6.0, 365일 A/B 검증)
+RB_ENTRY_MODE=confidence           # 진입 모드: confidence | regime_switch | btc_directional | raw
 RB_BTC_REGIME_PERIOD=96            # BTC SMA period for regime detection (96봉 = 24시간)
 RB_ASSET_TREND_PERIOD=192          # Asset SMA period for classic pullback (192봉 = 48시간)
+
+# Confidence Scoring (v6.0, 365일 A/B 검증)
+RB_MIN_CONFIDENCE=2                # 최소 증거 점수 (1-5, 2=최적: +9% Calmar, 동일 DD)
+RB_CONFIDENCE_LEVERAGE_STEP=0.0    # 컨피던스당 추가 레버리지 (0=고정, 1.0=moderate)
+RB_RSI_PERIOD=14                   # RSI 계산 기간
+RB_VOL_PERIOD=20                   # 거래량 SMA 기간 (스파이크 감지)
 
 # BTC Directional Alignment (v4.2, Risk-Off 모드에서 사용)
 RB_BTC_DIRECTIONAL_ENABLED=true   # BTC 방향 정렬: Long→BTC하락, Short→BTC상승 시만 진입
