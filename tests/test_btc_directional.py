@@ -175,7 +175,7 @@ class TestConfigDefaults:
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_enabled is True
-        assert cfg.btc_directional_period == 32
+        assert cfg.btc_directional_period == 0  # v10.2: Risk-Off disabled
 
     def test_custom_period(self):
         cfg = RubberBandConfig(btc_directional_period=48)
