@@ -276,7 +276,7 @@ class TestConfidenceConfig:
         assert cfg.max_hold == 20  # v10.0
         assert cfg.stoch_k_period == 3  # v10.0
         assert cfg.dynamic_capital_enabled is True  # v10.0
-        assert len(cfg.symbol_whitelist) == 15  # v10.0 Top-15
+        assert len(cfg.symbol_whitelist) == 20  # v11.1 Top-20
 
     def test_custom_confidence_params(self):
         cfg = RubberBandConfig(
