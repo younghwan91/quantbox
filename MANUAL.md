@@ -2,7 +2,7 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 8.0.0  
+> 버전: 9.0.0  
 > 최종 업데이트: 2026년 2월 17일
 
 ---
@@ -86,8 +86,8 @@ python -m quantbox.scalper
 |----------|--------|------|
 | lookback | 8 | 이동 측정 기간 (봉 수, 8×15m = 2시간) |
 | threshold | 0.045 | 최소 진입 이동 폭 (4.5% — 노이즈 필터링) |
-| target_retrace | 0.4 | 이익 실현: 이동 폭의 40% 되돌림 (R:R 1.10) |
-| stop_mult | 0.9 | 손절: 이동 폭의 0.9배 (DD 12.7%) |
+| target_retrace | 0.382 | 이익 실현: 이동 폭의 38.2% 되돌림 (Fibonacci golden ratio, v9.0) |
+| stop_mult | 0.786 | 손절: 이동 폭의 0.786배 (Fibonacci deep correction, v9.0) |
 | max_hold | 10 | 최대 보유 기간 (봉 수, 2.5시간) |
 | stop_decay | 0.0 | 시간감쇠 비활성화 (장기 안정성 확보) |
 | htf_period | 0 | MTF SMA 기간 (0=비활성화 — 장기 성능 저하) |
@@ -149,9 +149,9 @@ v7.0은 두 가지 핵심 업그레이드를 도입합니다:
 - `RubberBandStrategy.on_bar_4h()` — 4h 봉 데이터 시 신호 생성
 - `RubberBandStrategy.update_htf_data()` — 4h 데이터 저장
 
-### 3.7 v8.0: Dynamic Target (Confluence-Gated)
+### 3.7 v8.0: Dynamic Target (v9.0에서 비활성화)
 
-v8.0은 컨피던스 점수에 따라 이익 실현 타겟을 동적으로 확대합니다. 확신이 높을 때 더 큰 수익을 추구하는 "비대칭 R:R" 원칙입니다.
+v8.0은 컨피던스 점수에 따라 이익 실현 타겟을 동적으로 확대합니다. **v9.0에서 비활성화됨** — 타이트한 Fib 스탑(0.786)에서 고정 0.382 타겟이 동적 스케일링보다 우수합니다. conf3/4/5 필드는 유지되나 비활성 상태.
 
 **원리**: 10000% 대회 우승자의 "확실할 때 파도를 타라" 전략에서 영감
 
@@ -176,10 +176,10 @@ v8.0은 컨피던스 점수에 따라 이익 실현 타겟을 동적으로 확�
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| RB_DYNAMIC_TARGET_ENABLED | true | 컨피던스 기반 동적 타겟 활성화 |
-| RB_TARGET_CONF3 | 0.45 | conf=3 타겟 (45%) |
-| RB_TARGET_CONF4 | 0.50 | conf=4 타겟 (50%) |
-| RB_TARGET_CONF5 | 0.55 | conf=5 타겟 (55%) |
+| RB_DYNAMIC_TARGET_ENABLED | false | 비활성화 (v9.0: Fib 0.382 고정 > 동적 스케일링) |
+| RB_TARGET_CONF3 | 0.45 | conf=3 타겟 (45%) — v9.0에서 비활성 |
+| RB_TARGET_CONF4 | 0.50 | conf=4 타겟 (50%) — v9.0에서 비활성 |
+| RB_TARGET_CONF5 | 0.55 | conf=5 타겟 (55%) — v9.0에서 비활성 |
 
 #### 3.6.3 MTF 파라미터
 
@@ -196,11 +196,71 @@ v8.0은 컨피던스 점수에 따라 이익 실현 타겟을 동적으로 확�
 | RB_HTF_RB_MAX_HOLD | 12 | 12봉 (2일) |
 | RB_HTF_RB_BTC_SMA_PERIOD | 48 | BTC SMA (8일) |
 
+### 3.8 v9.0: Fibonacci + S+R+M Confluence
+
+v9.0은 피보나치 기반 정밀 Exit Level과 MACD/Stochastic 컨플루언스 증거를 도입합니다. v8.0 대비 Calmar +33.6% (11.50→15.38), DD -8.5% (12.0%→11.0%).
+
+#### 3.8.1 Fibonacci Exit Levels
+
+기존 arbitrary 0.4/0.9 값을 피보나치 수열에서 파생된 값으로 교체:
+
+| 파라미터 | v8.0 | v9.0 | 변화 |
+|----------|------|------|------|
+| target_retrace | 0.4 | **0.382** (Fibonacci golden ratio) | R:R개선, +29% Calmar |
+| stop_mult | 0.9 | **0.786** (Fibonacci deep correction) | DD -8.5%, 타이트 스탑 |
+| R:R | 0.444 | **0.486** | +9.5% |
+
+#### 3.8.2 MACD Histogram Evidence (NEW)
+
+MACD 히스토그램 기울기가 트레이드 방향과 일치하면 +1 컨피던스를 추가합니다. 단독으로 +7.6% Calmar 개선.
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| RB_MACD_ENABLED | true | MACD 히스토그램 컨피던스 증거 활성화 |
+| RB_MACD_FAST | 12 | MACD fast EMA 기간 |
+| RB_MACD_SLOW | 26 | MACD slow EMA 기간 |
+| RB_MACD_SIGNAL_PERIOD | 14 | MACD signal EMA 기간 (14=최적) |
+
+#### 3.8.3 Stochastic Cross Evidence (NEW)
+
+스토캐스틱 %K가 %D를 트레이드 방향으로 크로스하면 +1 컨피던스를 추가합니다. Very fast 설정(5,3)은 스캘핑에 최적화. high/low 캔들 데이터를 요구하며 라이브 파이프라인에 추가됨.
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| RB_STOCH_ENABLED | true | 스토캐스틱 크로스 컨피던스 증거 활성화 |
+| RB_STOCH_K_PERIOD | 5 | 스토캐스틱 %K 기간 (5=very fast, 스캘핑 최적) |
+| RB_STOCH_D_PERIOD | 3 | 스토캐스틱 %D 기간 |
+
+#### 3.8.4 Live Pipeline 확장 (v9.0)
+
+- `download_klines(full=True)`: 5-tuple 반환 (close, high, low, volume, taker_buy)
+- `update_market_data()`: optional high/low 배열 수용
+- `on_bar()`: MACD 또는 Stochastic 활성화 시 `compute_signals_v9()` 디스패치
+
+#### 3.8.5 v9.0 Numba 함수
+
+| 함수 | 반환 | 설명 |
+|------|------|------|
+| `_compute_ema_inline(arr, period)` | EMA array | SMA warm-up 포함 EMA 계산 |
+| `_compute_stochastic_inline(high, low, close, k, d)` | (K, D) | 스토캐스틱 오실레이터 |
+| `_compute_macd_inline(close, fast, slow, signal)` | (line, signal, histogram) | MACD 전체 |
+| `compute_signals_v9(...)` | signals array | MACD/Stochastic 증거 포함 v9 신호 함수 |
+
+#### 3.8.6 A/B 테스트 기각 기록 (v9.0 — DO NOT RE-TEST)
+
+| 전략 | 결과 | 판정 |
+|------|------|------|
+| EMA Regime (50/96/200 모든 기간) | -4% ~ -9% Calmar | ❌ REJECTED |
+| Capital Preservation (50% 부분 청산) | -32% Calmar | ❌ REJECTED |
+| Confluence Gate (RSI+Stoch+MACD 동시 필수) | -90% Calmar (트레이드 252→41) | ❌ REJECTED |
+
+> ⚠️ 위 3가지 전략은 v9.0 컨텍스트에서 철저한 A/B 테스트를 거쳐 기각됨. 재테스트 금지.
+
 #### 3.6.4 Live Parity Fix (v7.0)
 
 - volume/taker 데이터를 scalper의 `_scan_entries()`에 연결 (기존 누락 수정)
 - 4h kline 다운로드 추가
-- `main()`에서 v6.0/v7.0 모든 설정을 전달하도록 수정
+- `main()`에서 v6.0/v7.0/v9.0 모든 설정을 전달하도록 수정
 
 ---
 
@@ -383,13 +443,22 @@ RB_MTF_CONFIRMATION_ENABLED=true   # 4h 트렌드 확인 활성화
 RB_MTF_SMA_PERIOD=12               # 4h SMA 기간 (12봉 = 2일)
 RB_MTF_LEVERAGE_MULT=2.0           # MTF 확인 후 레버리지 배수 (2.0x → 실효 3.0x)
 
-# v8.0 Dynamic Target (Confluence-Gated)
-# 컨피던스 ≥3일 때 타겟 스케일링: conf3→45%, conf4→50%, conf5→55%
-# DD 불변 (4.3%), Calmar +9.3% (27.71→30.29)
-RB_DYNAMIC_TARGET_ENABLED=true     # 컨피던스 기반 동적 타겟 활성화
-RB_TARGET_CONF3=0.45               # conf=3 타겟 (45%)
-RB_TARGET_CONF4=0.50               # conf=4 타겟 (50%)
-RB_TARGET_CONF5=0.55               # conf=5 타겟 (55%)
+# v8.0 Dynamic Target (DISABLED in v9.0 — Fib discipline outperforms)
+# 피보나치 0.382 고정 목표가 동적 스케일링보다 우수. 타이트한 스탑(0.786)에 빠른 TP 필요.
+RB_DYNAMIC_TARGET_ENABLED=false    # 비활성화: Fib 0.382 고정 > 동적 스케일링
+RB_TARGET_CONF3=0.45               # conf=3 타겟 (사용 안 함)
+RB_TARGET_CONF4=0.50               # conf=4 타겟 (사용 안 함)
+RB_TARGET_CONF5=0.55               # conf≥5 타겟 (사용 안 함)
+
+# v9.0 S+R+M Confluence Pipeline (A/B validated, Calmar +33.6%)
+# MACD 히스토그램 반전 + 스토캐스틱 %K/%D 크로스 = 추가 컨피던스 증거
+RB_MACD_ENABLED=true               # MACD 히스토그램 기울기 컨피던스 증거
+RB_MACD_FAST=12                    # MACD fast EMA 기간
+RB_MACD_SLOW=26                    # MACD slow EMA 기간
+RB_MACD_SIGNAL_PERIOD=14           # MACD signal EMA 기간 (14=최적)
+RB_STOCH_ENABLED=true              # 스토캐스틱 크로스 컨피던스 증거
+RB_STOCH_K_PERIOD=5                # 스토캐스틱 %K 기간 (5=very fast, 최적)
+RB_STOCH_D_PERIOD=3                # 스토캐스틱 %D 기간
 
 # v7.0 Independent 4H Rubber Band
 # 4h 타임프레임에서 독립적으로 평균회귀 트레이딩
