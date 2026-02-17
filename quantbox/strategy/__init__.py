@@ -10,7 +10,15 @@ from quantbox.strategy.rubberband import (
     RubberBandStrategy,
     compute_signals,
     compute_signals_mtf,
+    compute_signals_with_btc_directional,
+    compute_signals_regime_switch,
+    compute_signals_confidence,
+    compute_signals_4h_independent,
+    apply_mtf_confirmation,
+    apply_mtf_leverage,
     calculate_position_size,
+    compute_confidence_leverage,
+    apply_confidence_leverage,
 )
 from quantbox.strategy.alpha_engine import (
     AlphaConfig,
@@ -30,7 +38,12 @@ __all__ = [
     "RubberBandConfig",
     "RubberBandStrategy",
     "compute_signals",
+    "compute_signals_with_btc_directional",
+    "compute_signals_regime_switch",
+    "compute_signals_confidence",
     "calculate_position_size",
+    "compute_confidence_leverage",
+    "apply_confidence_leverage",
     # Alpha engine (enhanced + hybrid)
     "AlphaConfig",
     "AlphaStrategy",

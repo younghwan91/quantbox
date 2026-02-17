@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 3.3.0  
-> 최종 업데이트: 2025년 7월 14일
+> 버전: 10.0.0  
+> 최종 업데이트: 2026년 2월 17일
 
 ---
 
@@ -85,15 +85,15 @@ python -m quantbox.scalper
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | lookback | 8 | 이동 측정 기간 (봉 수, 8×15m = 2시간) |
-| threshold | 0.025 | 최소 진입 이동 폭 (2.5%) |
-| target_retrace | 0.5 | 이익 실현: 이동 폭의 50% 되돌림 |
-| stop_mult | 1.0 | 손절: 이동 폭의 1배 |
-| max_hold | 8 | 최대 보유 기간 (봉 수) |
-| stop_decay | 0.3 | 시간감쇠 계수 (30% 감쇠 by max_hold) |
-| htf_period | 64 | MTF SMA 기간 (16시간, 0=비활성) |
-| htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%) |
-| htf_agree_discount | 0.85 | HTF 동의 시 진입 임계값 할인 (15% 낮춤) |
-| htf_agree_stop_mult | 0.95 | HTF 동의 시 스톱 배수 (5% 타이트) |
+| threshold | 0.045 | 최소 진입 이동 폭 (4.5% — 노이즈 필터링) |
+| target_retrace | 0.382 | 이익 실현: 이동 폭의 38.2% 되돌림 (Fibonacci golden ratio, v9.0) |
+| stop_mult | 0.786 | 손절: 이동 폭의 0.786배 (Fibonacci deep correction, v9.0) |
+| max_hold | 10 | 최대 보유 기간 (봉 수, 2.5시간) |
+| stop_decay | 0.0 | 시간감쇠 비활성화 (장기 안정성 확보) |
+| htf_period | 0 | MTF SMA 기간 (0=비활성화 — 장기 성능 저하) |
+| htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%, MTF 비활성 시 미사용) |
+| htf_agree_discount | 0.85 | HTF 동의 시 진입 임계값 할인 (MTF 비활성 시 미사용) |
+| htf_agree_stop_mult | 0.95 | HTF 동의 시 스톱 배수 (MTF 비활성 시 미사용) |
 | max_concurrent | 5 | 최대 동시 포지션 |
 | risk_per_trade | 0.01 | 트레이드당 리스크 (자본의 1%) |
 
@@ -120,6 +120,147 @@ signals = compute_signals(close, 8, 0.025, 0.5, 1.0, 8)
 result = bt.run_single(close, signals, "BTCUSDT")
 print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
 ```
+
+### 3.6 v7.0: Multi-Timeframe Confirmation + Independent 4H Trading
+
+v7.0은 두 가지 핵심 업그레이드를 도입합니다:
+
+#### 3.6.1 MTF Confirmation (4h 트렌드 확인)
+
+4h SMA(12)로 15m 진입을 필터링합니다. 역추세 트레이드를 차단하여 MDD를 극적으로 줄입니다.
+
+| 지표 | v6.0 (15m only) | v7.0 hybrid | 변화 |
+|------|-----------------|-------------|------|
+| Return | +143.0% | +139.8% | -2.2% |
+| MDD | 16.5% | 4.3% | **-73.9%** |
+| Calmar | 8.65 | 32.42 | **+274.8%** |
+| Sharpe | 2.07 | 5.23 | **+153%** |
+
+- Walk-forward Q3 (worst quarter) DD: 16.5% → 3.0% (-82%)
+- `apply_mtf_confirmation()` — Numba 컴파일, 4h SMA 방향과 15m 신호 비교
+- `apply_mtf_leverage()` — MTF 확인된 트레이드에 2.0x 레버리지 부스트 (실효 3.0x)
+
+#### 3.6.2 Independent 4H Rubber Band
+
+4h 타임프레임에서 독립적으로 평균회귀 트레이딩합니다. 15m과 별개로 동작합니다.
+
+- 4h-only 성과: Ret +52.2%, DD 4.8%, Calmar 10.87
+- `compute_signals_4h_independent()` — Numba 컴파일 4h 신호 생성
+- `RubberBandStrategy.on_bar_4h()` — 4h 봉 데이터 시 신호 생성
+- `RubberBandStrategy.update_htf_data()` — 4h 데이터 저장
+
+### 3.7 v8.0: Dynamic Target (v9.0에서 비활성화)
+
+v8.0은 컨피던스 점수에 따라 이익 실현 타겟을 동적으로 확대합니다. **v9.0에서 비활성화됨** — 타이트한 Fib 스탑(0.786)에서 고정 0.382 타겟이 동적 스케일링보다 우수합니다. conf3/4/5 필드는 유지되나 비활성 상태.
+
+**원리**: 10000% 대회 우승자의 "확실할 때 파도를 타라" 전략에서 영감
+
+| 컨피던스 | 타겟 | 설명 |
+|----------|------|------|
+| ≤ 2 | 40% (기본) | 기존과 동일 |
+| 3 | 45% | 3개 증거 확인 시 |
+| 4 | 50% | 4개 증거 확인 시 |
+| 5 | 55% | 전 증거 확인 시 |
+
+**A/B 검증 결과:**
+- DD 불변: 4.3% (동일)
+- Calmar +9.3%: 27.71 → 30.29
+- Sharpe 안정
+
+**테스트 후 기각된 전략:**
+- RSI Divergence — 데이터가 지지하지 않음
+- Volatility Squeeze — 데이터가 지지하지 않음
+- Reversal Confirmation — 데이터가 지지하지 않음
+
+#### 3.7.1 Dynamic Target 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| RB_DYNAMIC_TARGET_ENABLED | false | 비활성화 (v9.0: Fib 0.382 고정 > 동적 스케일링) |
+| RB_TARGET_CONF3 | 0.45 | conf=3 타겟 (45%) — v9.0에서 비활성 |
+| RB_TARGET_CONF4 | 0.50 | conf=4 타겟 (50%) — v9.0에서 비활성 |
+| RB_TARGET_CONF5 | 0.55 | conf=5 타겟 (55%) — v9.0에서 비활성 |
+
+#### 3.6.3 MTF 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| RB_MTF_CONFIRMATION_ENABLED | true | 4h 트렌드 확인 활성화 |
+| RB_MTF_SMA_PERIOD | 12 | 4h SMA 기간 (12봉 = 2일) |
+| RB_MTF_LEVERAGE_MULT | 2.0 | MTF 확인 후 레버리지 배수 (실효 3.0x) |
+| RB_HTF_INDEPENDENT_ENABLED | true | 독립 4시간 트레이딩 활성화 |
+| RB_HTF_RB_LOOKBACK | 3 | 4h lookback (12시간) |
+| RB_HTF_RB_THRESHOLD | 0.10 | 10% 임계값 |
+| RB_HTF_RB_TARGET_RETRACE | 0.5 | 50% 되돌림 목표 |
+| RB_HTF_RB_STOP_MULT | 0.8 | 0.8x 손절 |
+| RB_HTF_RB_MAX_HOLD | 12 | 12봉 (2일) |
+| RB_HTF_RB_BTC_SMA_PERIOD | 48 | BTC SMA (8일) |
+
+### 3.8 v9.0: Fibonacci + S+R+M Confluence
+
+v9.0은 피보나치 기반 정밀 Exit Level과 MACD/Stochastic 컨플루언스 증거를 도입합니다. v8.0 대비 Calmar +33.6% (11.50→15.38), DD -8.5% (12.0%→11.0%).
+
+#### 3.8.1 Fibonacci Exit Levels
+
+기존 arbitrary 0.4/0.9 값을 피보나치 수열에서 파생된 값으로 교체:
+
+| 파라미터 | v8.0 | v9.0 | 변화 |
+|----------|------|------|------|
+| target_retrace | 0.4 | **0.382** (Fibonacci golden ratio) | R:R개선, +29% Calmar |
+| stop_mult | 0.9 | **0.786** (Fibonacci deep correction) | DD -8.5%, 타이트 스탑 |
+| R:R | 0.444 | **0.486** | +9.5% |
+
+#### 3.8.2 MACD Histogram Evidence (NEW)
+
+MACD 히스토그램 기울기가 트레이드 방향과 일치하면 +1 컨피던스를 추가합니다. 단독으로 +7.6% Calmar 개선.
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| RB_MACD_ENABLED | true | MACD 히스토그램 컨피던스 증거 활성화 |
+| RB_MACD_FAST | 12 | MACD fast EMA 기간 |
+| RB_MACD_SLOW | 26 | MACD slow EMA 기간 |
+| RB_MACD_SIGNAL_PERIOD | 14 | MACD signal EMA 기간 (14=최적) |
+
+#### 3.8.3 Stochastic Cross Evidence (NEW)
+
+스토캐스틱 %K가 %D를 트레이드 방향으로 크로스하면 +1 컨피던스를 추가합니다. Very fast 설정(5,3)은 스캘핑에 최적화. high/low 캔들 데이터를 요구하며 라이브 파이프라인에 추가됨.
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| RB_STOCH_ENABLED | true | 스토캐스틱 크로스 컨피던스 증거 활성화 |
+| RB_STOCH_K_PERIOD | 5 | 스토캐스틱 %K 기간 (5=very fast, 스캘핑 최적) |
+| RB_STOCH_D_PERIOD | 3 | 스토캐스틱 %D 기간 |
+
+#### 3.8.4 Live Pipeline 확장 (v9.0)
+
+- `download_klines(full=True)`: 5-tuple 반환 (close, high, low, volume, taker_buy)
+- `update_market_data()`: optional high/low 배열 수용
+- `on_bar()`: MACD 또는 Stochastic 활성화 시 `compute_signals_v9()` 디스패치
+
+#### 3.8.5 v9.0 Numba 함수
+
+| 함수 | 반환 | 설명 |
+|------|------|------|
+| `_compute_ema_inline(arr, period)` | EMA array | SMA warm-up 포함 EMA 계산 |
+| `_compute_stochastic_inline(high, low, close, k, d)` | (K, D) | 스토캐스틱 오실레이터 |
+| `_compute_macd_inline(close, fast, slow, signal)` | (line, signal, histogram) | MACD 전체 |
+| `compute_signals_v9(...)` | signals array | MACD/Stochastic 증거 포함 v9 신호 함수 |
+
+#### 3.8.6 A/B 테스트 기각 기록 (v9.0 — DO NOT RE-TEST)
+
+| 전략 | 결과 | 판정 |
+|------|------|------|
+| EMA Regime (50/96/200 모든 기간) | -4% ~ -9% Calmar | ❌ REJECTED |
+| Capital Preservation (50% 부분 청산) | -32% Calmar | ❌ REJECTED |
+| Confluence Gate (RSI+Stoch+MACD 동시 필수) | -90% Calmar (트레이드 252→41) | ❌ REJECTED |
+
+> ⚠️ 위 3가지 전략은 v9.0 컨텍스트에서 철저한 A/B 테스트를 거쳐 기각됨. 재테스트 금지.
+
+#### 3.6.4 Live Parity Fix (v7.0)
+
+- volume/taker 데이터를 scalper의 `_scan_entries()`에 연결 (기존 누락 수정)
+- 4h kline 다운로드 추가
+- `main()`에서 v6.0/v7.0/v9.0 모든 설정을 전달하도록 수정
 
 ---
 
@@ -278,14 +419,72 @@ FORMATION_HOURS=60             # 페어 선별에 사용할 과거 데이터 길
 Z_SCORE_CAP=4.0                # |z| > cap 이면 진입 거부 (레짐 변화 방어)
 VOL_EXPANSION_GATE=2.0         # recent_std / formation_std > gate 이면 진입 거부
 
-# BTC Crash Gate (매크로 방어)
-BTC_CRASH_GATE_ENABLED=true    # BTC 급락/급등 시 진입 차단 활성화
-BTC_CRASH_WINDOW=8             # 최근 N봉 체크 (15분봉 기준 = 2시간)
-BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 진입 차단
+# Dynamic Leverage (v4.4: flat 1.5x, 365일 A/B 검증)
+RB_DYNAMIC_LEVERAGE_ENABLED=true  # 레버리지 파이프라인 활성화
+RB_BASE_LEVERAGE=1.5              # 전 트레이드 1.5x 고정 (최적 sweet spot)
+RB_LEVERAGE_SCALE=0.0             # 컨피던스 스케일링 비활성화 (고정 레버리지)
+RB_MAX_LEVERAGE=1.5               # base와 동일 (안전 상한)
 
-# 드로다운 & 손실 제한
+# Regime-Switch + Confidence Scoring (v6.0, 365일 A/B 검증)
+RB_ENTRY_MODE=confidence           # 진입 모드: confidence | regime_switch | btc_directional | raw
+RB_BTC_REGIME_PERIOD=96            # BTC SMA period for regime detection (96봉 = 24시간)
+RB_ASSET_TREND_PERIOD=192          # Asset SMA period for classic pullback (192봉 = 48시간)
+
+# Confidence Scoring (v6.0, 365일 A/B 검증)
+RB_MIN_CONFIDENCE=2                # 최소 증거 점수 (1-5, 2=최적: +9% Calmar, 동일 DD)
+RB_CONFIDENCE_LEVERAGE_STEP=0.0    # 컨피던스당 추가 레버리지 (0=고정, 1.0=moderate)
+RB_RSI_PERIOD=14                   # RSI 계산 기간
+RB_VOL_PERIOD=20                   # 거래량 SMA 기간 (스파이크 감지)
+
+# v7.0 Multi-Timeframe Confirmation (365일 A/B 검증)
+# 4h SMA(12) 트렌드 필터로 15m 역추세 진입 차단
+# MDD 16.5% → 4.3% (-74%), Calmar 8.65 → 32.42 (+275%), Sharpe 2.07 → 5.23 (+153%)
+RB_MTF_CONFIRMATION_ENABLED=true   # 4h 트렌드 확인 활성화
+RB_MTF_SMA_PERIOD=12               # 4h SMA 기간 (12봉 = 2일)
+RB_MTF_LEVERAGE_MULT=2.0           # MTF 확인 후 레버리지 배수 (2.0x → 실효 3.0x)
+
+# v8.0 Dynamic Target (DISABLED in v9.0 — Fib discipline outperforms)
+# 피보나치 0.382 고정 목표가 동적 스케일링보다 우수. 타이트한 스탑(0.786)에 빠른 TP 필요.
+RB_DYNAMIC_TARGET_ENABLED=false    # 비활성화: Fib 0.382 고정 > 동적 스케일링
+RB_TARGET_CONF3=0.45               # conf=3 타겟 (사용 안 함)
+RB_TARGET_CONF4=0.50               # conf=4 타겟 (사용 안 함)
+RB_TARGET_CONF5=0.55               # conf≥5 타겟 (사용 안 함)
+
+# v9.0 S+R+M Confluence Pipeline (A/B validated, Calmar +33.6%)
+# MACD 히스토그램 반전 + 스토캐스틱 %K/%D 크로스 = 추가 컨피던스 증거
+RB_MACD_ENABLED=true               # MACD 히스토그램 기울기 컨피던스 증거
+RB_MACD_FAST=12                    # MACD fast EMA 기간
+RB_MACD_SLOW=26                    # MACD slow EMA 기간
+RB_MACD_SIGNAL_PERIOD=14           # MACD signal EMA 기간 (14=최적)
+RB_STOCH_ENABLED=true              # 스토캐스틱 크로스 컨피던스 증거
+RB_STOCH_K_PERIOD=5                # 스토캐스틱 %K 기간 (5=very fast, 최적)
+RB_STOCH_D_PERIOD=3                # 스토캐스틱 %D 기간
+
+# v7.0 Independent 4H Rubber Band
+# 4h 타임프레임에서 독립적으로 평균회귀 트레이딩
+# 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
+RB_HTF_INDEPENDENT_ENABLED=true    # 독립 4시간 트레이딩 활성화
+RB_HTF_RB_LOOKBACK=3               # 4h lookback (12시간)
+RB_HTF_RB_THRESHOLD=0.10           # 10% 임계값
+RB_HTF_RB_TARGET_RETRACE=0.5       # 50% 되돌림 목표
+RB_HTF_RB_STOP_MULT=0.8            # 0.8x 손절
+RB_HTF_RB_MAX_HOLD=12              # 12봉 (2일)
+RB_HTF_RB_BTC_SMA_PERIOD=48        # BTC SMA (8일)
+
+# BTC Directional Alignment (v4.2, Risk-Off 모드에서 사용)
+RB_BTC_DIRECTIONAL_ENABLED=true   # BTC 방향 정렬: Long→BTC하락, Short→BTC상승 시만 진입
+RB_BTC_DIRECTIONAL_PERIOD=48      # BTC 모멘텀 lookback (48봉 = 12시간)
+
+# Capital Preservation (v4.4: 부분 청산 비활성화 — tighter stop이 DD 충분히 억제)
+RB_PARTIAL_EXIT_ENABLED=false     # 부분 청산 비활성화 (stop=0.9에서 오히려 손해)
+RB_PARTIAL_EXIT_FRACTION=0.5      # 부분 청산 비율 (0.5 = 50%)
+
+# R:R-Gated Leverage (v4.4, 365일 A/B 검증)
+RB_RR_LEVERAGE_ENABLED=true       # R:R 기준 레버리지 게이트: 손익비 높을 때만 레버리지
+RB_MIN_RR_FOR_LEVERAGE=0.30       # 레버리지 허용 최소 R:R 비율
+
+# 드로다운 제한
 MAX_DRAWDOWN_PCT=0.10          # 세션 HWM 대비 최대 허용 드로다운 (10%)
-DAILY_LOSS_LIMIT_PCT=0.05      # 당일 시작 잔고 대비 최대 허용 손실 (5%)
 
 # 비용 모델
 TRADING_FEE=0.0005             # 거래 수수료 (0.05%)
@@ -940,27 +1139,10 @@ DYNAMIC_EXIT_RANGE=0.7
 
 | # | Gate | 대상 | 설정 | 기본값 |
 |---|------|------|------|--------|
-| 1 | **BTC Crash Gate** | 시장 전체 | `BTC_CRASH_THRESHOLD` | ±3% |
-| 2 | **Z-Score Cap** | 개별 페어 | `Z_SCORE_CAP` | \|z\| > 4.0 |
-| 3 | **Vol Expansion Gate** | 개별 페어 | `VOL_EXPANSION_GATE` | ratio > 2.0x |
-| 4 | **Entry Z-Score Threshold** | 개별 페어 | `ENTRY_ZSCORE` | \|z\| >= 2.0 |
-| 5 | **자본 충분성** | 슬롯 | - | min notional 이상 |
-
-**BTC Crash Gate 상세:**
-
-BTC가 최근 N봉(기본 8봉 = 2시간) 동안 ±3% 이상 움직이면 **모든 페어의 신규 진입을 차단**합니다.
-
-- **목적**: 시장 전체 상관관계 급등 시 페어 스프레드의 평균회귀 전제 자체가 깨지는 것을 방어
-- **실전 사례**: 2026-02-13 BTC $70K→$65K (-7.1%), AI 공포 + 테크 셀오프 → 7연속 SL 방지
-- **Fail-open**: API 에러 시 차단하지 않음 (보수적 안전장치)
-- **기존 포지션**: 영향 없음 (모니터링/청산은 정상 동작)
-- **Discord 상태**: `!status` 명령에 BTC 🟢/🔴 표시
-
-```bash
-BTC_CRASH_GATE_ENABLED=true    # 활성화/비활성화
-BTC_CRASH_WINDOW=8             # 최근 N봉 (15분봉 기준)
-BTC_CRASH_THRESHOLD=0.03       # |수익률| > 3% 이면 차단
-```
+| 1 | **Z-Score Cap** | 개별 페어 | `Z_SCORE_CAP` | \|z\| > 4.0 |
+| 2 | **Vol Expansion Gate** | 개별 페어 | `VOL_EXPANSION_GATE` | ratio > 2.0x |
+| 3 | **Entry Z-Score Threshold** | 개별 페어 | `ENTRY_ZSCORE` | \|z\| >= 2.0 |
+| 4 | **자본 충분성** | 슬롯 | - | min notional 이상 |
 
 ### 7.6 커스텀 전략 구현 예시
 
