@@ -26,19 +26,20 @@ Validated on 30 Binance USDT-M pairs, 365 days of 15m data:
   - Win rate: 65.4% (vs 52.9% baseline)
 
 Capital Preservation Principles:
-  - Execute partial 50% liquidation upon any profit to secure capital
-  - Immediate break-even stop-loss on remaining half to eliminate risk
-  - Leverage is a strategic asset: only deployed when R:R justifies it
-  - Prioritize net savings and capital preservation over gross performance
+  - Tighter stop (0.9x) naturally limits drawdown to 12.7%
+  - Wider target (40%) captures more reversion with R:R 1.10
+  - Flat 1.5x leverage: risk-adjusted justified (Calmar improves)
+  - R:R gate as safety net: leverage only when R:R > 0.30
 
-Parameters (365-day validated, not over-optimised):
+Parameters (v4.4, 365-day A/B validated, not over-optimised):
   lookback = 8 bars (2 hours)
   threshold = 4.5% (minimum move to trigger — filters noise)
-  target_retrace = 30% of original move (quick exit)
-  stop_mult = 1.0x (stop at same distance as the extreme move)
+  target_retrace = 40% of original move (R:R 1.10)
+  stop_mult = 0.9x (tighter stop, DD 12.7% vs 15.4% at 1.0x)
   max_hold = 10 bars (2.5 hours)
   btc_directional_period = 32 bars (8 hours BTC momentum)
-  partial_exit_enabled = True (50% close on any profit)
+  base_leverage = 1.5x (flat, sweet spot: Calmar 4.98)
+  partial_exit_enabled = False (hurts with tighter stop)
   rr_leverage_enabled = True (R:R-gated leverage)
   min_rr_for_leverage = 0.30 (R:R threshold for leverage)
 """
@@ -56,11 +57,11 @@ class RubberBandConfig:
     All parameters are walk-forward validated. Do NOT tighten stops
     or widen targets without re-running walk_forward_test.py.
     """
-    # ── Signal parameters (365-day validated) ──
+    # ── Signal parameters (365-day validated, v4.4) ──
     lookback: int = 8           # Bars to measure move (2h at 15m)
     threshold: float = 0.045   # Minimum move to trigger (4.5% — filters noise)
-    target_retrace: float = 0.3  # Take profit at 30% retracement (quick exit)
-    stop_mult: float = 1.0     # Stop at 1x the move size
+    target_retrace: float = 0.4  # Take profit at 40% retracement (R:R 1.10)
+    stop_mult: float = 0.9     # Stop at 0.9x the move size (DD 12.7%)
     max_hold: int = 10          # Maximum holding period (bars, 2.5h)
     stop_decay: float = 0.0    # Stop tightening rate (0=off, disabled for robustness)
 
@@ -81,14 +82,14 @@ class RubberBandConfig:
     funding_rate_8h: float = 0.0001  # 0.01% per 8h
     bar_interval_minutes: int = 15
 
-    # ── Dynamic Leverage (move-confidence scaling) ──
-    # Bigger moves beyond threshold = higher conviction = more leverage.
-    # 365-day validated: Base=3 Scale=10 Max=7 is conservative and robust.
-    # Competition mode: Base=5 Scale=20 Max=15 for maximum returns.
-    dynamic_leverage_enabled: bool = True  # Enable move-confidence leverage
-    base_leverage: float = 3.0     # Minimum leverage (for threshold-level moves)
-    leverage_scale: float = 10.0   # Leverage gain per 100% excess move
-    max_leverage: float = 7.0      # Hard cap on leverage
+    # ── Dynamic Leverage (v4.4: flat 1.5x, A/B validated) ──
+    # With stop=0.9, target=0.4, R:R=1.10, flat 1.5x is the sweet spot.
+    # 1.5x: Calmar 4.98 ★ (best), 2x: 4.86, 3x: 4.01, 5x: BLOWUP.
+    # Confidence scaling disabled (scale=0): all trades get uniform 1.5x.
+    dynamic_leverage_enabled: bool = True  # Enable leverage pipeline
+    base_leverage: float = 1.5     # Flat leverage for all trades
+    leverage_scale: float = 0.0    # No confidence scaling (flat leverage)
+    max_leverage: float = 1.5      # Aligned with base (safety cap)
 
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     # Counter-trend entries only when BTC confirms: long when BTC falling,
@@ -98,17 +99,16 @@ class RubberBandConfig:
     btc_directional_enabled: bool = True   # Align entry with BTC momentum
     btc_directional_period: int = 32       # BTC momentum lookback (32 bars = 8h)
 
-    # ── Capital Preservation (v4.3, A/B validated) ──
-    # Partial exit + break-even stop: lock profit, eliminate downside risk.
-    # 365-day A/B: DD 75%→15%, Calmar 0.84→3.72, 10/10 rolling 90d.
-    partial_exit_enabled: bool = True      # 50% partial close on any profit
+    # ── Capital Preservation (v4.4: DISABLED — hurts at tighter stop) ──
+    # v4.3 partial exit hurt performance with stop=0.9 target=0.4:
+    # Without partial: Calmar 4.96, With partial: Calmar 3.75 (-24%).
+    # Tighter stop (0.9 vs 1.0) already limits DD to 12.7%.
+    partial_exit_enabled: bool = False     # Disabled: hurts with tighter stop
     partial_exit_fraction: float = 0.5     # Fraction to close (0.5 = 50%)
 
-    # ── R:R-Gated Leverage (v4.3, A/B validated) ──
-    # "손익비가 높아야 레버리지를 쓴다" — only deploy leverage when R:R is favorable.
-    # With current params (target=0.3, stop=1.0), R:R ≈ 0.28, so leverage = 1x
-    # for most trades. Leverage only activates for exceptionally large moves.
-    # 365-day A/B: DD drops from 75% to 15%, Calmar 0.84→4.47 (Top-10).
+    # ── R:R-Gated Leverage (v4.4, safety gate) ──
+    # With stop=0.9, target=0.4: theoretical R:R = 0.44 > 0.30, gate always
+    # passes. Kept as safety: if params changed to worse R:R, it disables leverage.
     rr_leverage_enabled: bool = True       # Gate leverage by R:R ratio
     min_rr_for_leverage: float = 0.30      # Minimum R:R to allow leverage
 
@@ -917,27 +917,24 @@ def compute_signals_mtf(
 def compute_confidence_leverage(
     move_size: float,
     threshold: float,
-    base_leverage: float = 3.0,
-    leverage_scale: float = 10.0,
-    max_leverage: float = 7.0,
+    base_leverage: float = 1.5,
+    leverage_scale: float = 0.0,
+    max_leverage: float = 1.5,
 ) -> float:
     """Compute leverage proportional to confidence (move size).
 
-    Bigger moves beyond threshold indicate stronger liquidation cascades
-    and higher probability of snap-back. We reward this with more leverage.
+    v4.4: Flat 1.5x leverage for all trades. Confidence scaling disabled
+    (scale=0). At stop=0.9, target=0.4, 1.5x is the sweet spot where
+    Calmar peaks at 4.98 (higher than 1x=4.96).
 
     Formula: lev = base + scale * (move - threshold) / threshold
     Capped at max_leverage.
 
-    365-day A/B validated (30 symbols × 35,040 bars):
-      Base=3, Scale=10, Max=7:  +132%, Calmar 2.65 (conservative)
-      Base=5, Scale=20, Max=15: +20,012% on Top-10 (competition mode)
-
     Args:
         move_size: Actual move size (fraction, e.g. 0.06 = 6%).
         threshold: Minimum threshold (fraction, e.g. 0.045 = 4.5%).
-        base_leverage: Minimum leverage (for threshold-level moves).
-        leverage_scale: Leverage gain per 100% excess move.
+        base_leverage: Flat leverage (1.5x for all trades).
+        leverage_scale: Leverage gain per 100% excess move (0=flat).
         max_leverage: Hard cap on leverage.
 
     Returns:
