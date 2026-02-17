@@ -5,8 +5,8 @@ Tests for Discord Bot command system.
 1. BotCommand / CommandType 데이터 구조
 2. TradingBot._parse_command() 파싱 로직
 3. DiscordBotRunner 큐 동작 (get_command, get_all_commands)
-4. LivePairTrader 명령 처리 (_handle_command, _cmd_*)
-5. run_cycle에서 봇 명령 통합 (pause, stop)
+4. RubberBandScalper 명령 처리 (_handle_command, _cmd_*)
+5. _cycle에서 봇 명령 통합 (pause, stop)
 """
 
 import asyncio
@@ -227,3 +227,140 @@ class TestDiscordBotRunner:
 
         mock_thread.join.assert_called_once_with(timeout=1.0)
 
+
+# ============================================================
+# RubberBandScalper command handlers
+# ============================================================
+
+
+class TestScalperCommandHandlers:
+    """RubberBandScalper의 _cmd_* 메서드 테스트."""
+
+    @pytest.fixture
+    def scalper(self, monkeypatch):
+        monkeypatch.setenv("BINANCE_API_KEY", "test_key")
+        monkeypatch.setenv("BINANCE_API_SECRET", "test_secret")
+        monkeypatch.setenv("BINANCE_TESTNET", "true")
+        with patch("quantbox.scalper.Client"):
+            from quantbox.scalper import RubberBandScalper
+            s = RubberBandScalper(paper_mode=True)
+            s.discord = MagicMock()
+            s._initial_balance = 1000.0
+            return s
+
+    def test_cmd_status_no_positions(self, scalper):
+        result = scalper._cmd_status()
+        assert "QuantBox Status" in result
+        assert "No open positions" in result
+        assert "0/" in result
+
+    def test_cmd_status_with_position(self, scalper):
+        scalper.strategy.open_position(
+            symbol='BTCUSDT', signal=1, entry_price=50000.0,
+            notional=1000.0, leverage=2, move_size=0.04,
+        )
+        result = scalper._cmd_status()
+        assert "BTCUSDT" in result
+        assert "L" in result
+        assert "1/" in result
+
+    def test_cmd_status_paused(self, scalper):
+        scalper._paused = True
+        result = scalper._cmd_status()
+        assert "PAUSED" in result
+
+    def test_cmd_pnl_no_trades(self, scalper):
+        result = scalper._cmd_pnl()
+        assert "No trades" in result
+
+    def test_cmd_pnl_with_trades(self, scalper):
+        scalper._trade_history = [
+            {'symbol': 'BTCUSDT', 'pnl_usd': 5.0, 'pnl_pct': 0.5,
+             'signal': 1, 'entry_price': 50000, 'exit_price': 50250,
+             'notional': 1000, 'bars_held': 3, 'reason': 'target'},
+            {'symbol': 'ETHUSDT', 'pnl_usd': -2.0, 'pnl_pct': -0.2,
+             'signal': -1, 'entry_price': 3000, 'exit_price': 3006,
+             'notional': 1000, 'bars_held': 5, 'reason': 'stop'},
+        ]
+        scalper.get_balance = MagicMock(return_value=1003.0)
+        result = scalper._cmd_pnl()
+        assert "$+3.00" in result
+        assert "Win Rate" in result
+        assert "50.0%" in result
+        assert "BTCUSDT" in result
+
+    def test_cmd_pause(self, scalper):
+        assert scalper._paused is False
+        result = scalper._cmd_pause()
+        assert scalper._paused is True
+        assert "paused" in result.lower()
+
+    def test_cmd_pause_already(self, scalper):
+        scalper._paused = True
+        result = scalper._cmd_pause()
+        assert "Already" in result
+
+    def test_cmd_resume(self, scalper):
+        scalper._paused = True
+        result = scalper._cmd_resume()
+        assert scalper._paused is False
+        assert "resumed" in result.lower()
+
+    def test_cmd_resume_already(self, scalper):
+        result = scalper._cmd_resume()
+        assert "Already" in result
+
+    def test_cmd_stop(self, scalper):
+        scalper.download_klines = MagicMock(return_value=None)
+        result = scalper._cmd_stop()
+        assert scalper._stop_requested is True
+        assert "Stopping" in result
+
+    def test_cmd_close_all_no_positions(self, scalper):
+        result = scalper._cmd_close_all()
+        assert "No positions" in result
+
+    def test_cmd_close_slot_invalid(self, scalper):
+        result = scalper._cmd_close_slot(99)
+        assert "No positions" in result
+
+    def test_cmd_blacklist_view(self, scalper):
+        scalper.config.exclude_symbols.append('XYZUSDT')
+        result = scalper._cmd_blacklist()
+        assert "XYZUSDT" in result
+        assert "Blacklist" in result
+
+    def test_cmd_blacklist_clear(self, scalper):
+        scalper.config.exclude_symbols.append('XYZUSDT')
+        original_len = len(scalper.config.exclude_symbols)
+        result = scalper._cmd_blacklist({'action': 'clear'})
+        assert "cleared" in result.lower()
+        assert len(scalper.config.exclude_symbols) == 0
+
+    def test_handle_command_dispatches(self, scalper):
+        """_handle_command가 각 CommandType을 올바른 핸들러로 보낸다."""
+        result = scalper._handle_command(
+            BotCommand(command=CommandType.STATUS)
+        )
+        assert "QuantBox Status" in result
+
+        result = scalper._handle_command(
+            BotCommand(command=CommandType.PAUSE)
+        )
+        assert scalper._paused is True
+
+    def test_process_bot_commands_no_runner(self, scalper):
+        """_bot_runner=None이면 에러 없이 건너뛴다."""
+        scalper._bot_runner = None
+        scalper._process_bot_commands()  # should not raise
+
+    def test_process_bot_commands_with_queue(self, scalper):
+        """큐에 쌓인 명령이 순서대로 처리된다."""
+        runner = DiscordBotRunner(token="fake", channel_id=1)
+        scalper._bot_runner = runner
+
+        runner.command_queue.put(BotCommand(command=CommandType.PAUSE))
+        runner.command_queue.put(BotCommand(command=CommandType.STATUS))
+
+        scalper._process_bot_commands()
+        assert scalper._paused is True
