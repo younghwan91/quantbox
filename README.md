@@ -8,17 +8,15 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v4.4 — Optimized R:R + Flat Leverage)
+### 🔥 Rubber Band Scalper (v5.0 — Regime-Switch Dual Entry)
 - **Alpha**: 4.5% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **Optimized Stop/Target (v4.4)**: stop=0.9x, target=40% → 실현 R:R 1.10, DD 12.7%
-  - 타이트한 스톱(0.9x)이 DD를 15.4%→12.7%로 자연 억제
-  - 넓은 타겟(40%)이 더 많은 리버전 수익 포착
-  - Partial exit 비활성화: 타이트 스톱에서 오히려 성능 저하 (Calmar 3.75 vs 4.96)
-- **Flat 1.5x Leverage (v4.4)**: R:R 1.10으로 레버리지 정당화
-  - 1.5x에서 Calmar 최대 (4.98 ★), 2x부터 DD 급증
-  - R:R ≥ 0.30 안전 게이트 유지 (현재 R:R=0.44, 항상 통과)
-- **BTC Directional Alignment**: BTC 방향 정렬 필터 — 시장 전체가 같은 방향일 때만 진입
-  - 개별 종목의 특이적 움직임(비복귀 가능) 대비 시장 전체 움직임(복귀 가능)을 구분
+- **Regime-Switch Dual Entry (v5.0)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
+  - Risk-On (BTC > SMA96): Classic Pullback — 자산 자체 상승추세에서 조정 시 매수
+  - Risk-Off (BTC < SMA96): Sympathy Pullback — BTC 하락 시 동반 하락하는 자산 매수
+  - **Calmar 6.70**, Sharpe 1.89, WR 61.7%, R:R 1.25, 13/13 롤링 윈도우
+- **Optimized Stop/Target**: stop=0.9x, target=40% → 실현 R:R 1.25
+- **Flat 1.5x Leverage**: R:R 1.25로 레버리지 정당화
+  - R:R ≥ 0.30 안전 게이트 유지
 - **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (R:R 게이트와 연동)
 - **MTF**: 비활성화 (장기 성능 저하 확인 — A/B 테스트 결과 No MTF이 최적)
 - **Live/Backtest Parity**: entry_stop_mult 저장 + 동일 레버리지 계산으로 일치 보장
@@ -47,7 +45,7 @@
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
-- **Walk-Forward 검증**: 365일 롤링 윈도우 9/10 수익, Calmar 1.13, Sharpe 0.81
+- **Walk-Forward 검증**: 365일 롤링 윈도우 13/13 수익, Calmar 6.70, Sharpe 1.89
 
 ### 실거래 안전장치
 - **Limit Chaser**: 지정가 추격 주문으로 슬리피지 최소화
@@ -135,20 +133,21 @@ quantbox/
 └── scalper.py              # Rubber Band 실거래 트레이더
 
 scripts/                    # 연구/분석 스크립트
-tests/                      # 유닛 테스트 (338개)
+tests/                      # 유닛 테스트 (352개)
 \`\`\`
 
-## 📈 성과 지표 (v4.4: Optimized R:R + Flat 1.5x Leverage, 365일 검증)
+## 📈 성과 지표 (v5.0: Regime-Switch Dual Entry, 365일 Top-10)
 
-| 지표 | v4.2 Baseline | v4.3 (Partial) | v4.4 1x | v4.4 1.5x ★ |
-|------|--------------|----------------|---------|-------------|
-| Portfolio Return (Top-10) | +58.1% | +50.4% | +62.9% | **+95.0%** |
-| Max Drawdown | 15.4% | 15.9% | **12.7%** | 19.1% |
-| Calmar Ratio | 3.78 | 3.17 | 4.96 | **4.98** |
-| Sharpe Ratio | 1.63 | 1.54 | **1.67** | 1.61 |
-| Win Rate | 61.6% | 65.0% | 59.3% | 59.2% |
-| R:R (Realized) | 0.99 | 0.90 | **1.10** | **1.10** |
-| Rolling 90-day | 12/13 | 11/13 | **12/13** | **12/13** |
+| 지표 | v4.2 Baseline | v4.4 1.5x | v5.0 RS ★ |
+|------|--------------|-----------|----------|
+| Portfolio Return | +58.1% | +95.0% | **+116.8%** |
+| Max Drawdown | 15.4% | 19.1% | **17.4%** |
+| Calmar Ratio | 3.78 | 4.98 | **6.70** |
+| Sharpe Ratio | 1.63 | 1.61 | **1.89** |
+| Win Rate | 61.6% | 59.2% | **61.7%** |
+| R:R (Realized) | 0.99 | 1.10 | **1.25** |
+| Trades | — | — | **832** |
+| Rolling 90-day | 12/13 | 12/13 | **13/13** |
 
 ## 🧪 테스트
 
