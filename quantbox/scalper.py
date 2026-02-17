@@ -57,6 +57,7 @@ from quantbox.strategy.rubberband import (
     RubberBandConfig, RubberBandStrategy, calculate_position_size,
     compute_confidence_leverage,
 )
+from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
 
 load_dotenv()
 
@@ -135,10 +136,18 @@ class RubberBandScalper:
         self,
         paper_mode: bool = False,
         config: RubberBandConfig | None = None,
+        strategy_name: str = 'rubberband',
+        elliott_config: ElliottConfig | None = None,
     ):
         self.paper_mode = paper_mode
         self.config = config or RubberBandConfig()
-        self.strategy = RubberBandStrategy(self.config)
+        self.strategy_name = strategy_name
+
+        if strategy_name == 'elliott':
+            self.elliott_config = elliott_config or ElliottConfig()
+            self.strategy = ElliottStrategy(self.elliott_config)
+        else:
+            self.strategy = RubberBandStrategy(self.config)
 
         # Binance client
         settings = get_settings()
@@ -823,64 +832,69 @@ class RubberBandScalper:
         lookback_price = close_prices[-cfg.lookback - 1]
         move_size = abs(entry_price / lookback_price - 1.0)
 
-        # Position sizing — v10.0: dynamic capital allocation
-        if cfg.dynamic_capital_enabled:
-            n_active = self.strategy.n_active
-            per_slot_capital = balance / max(1, n_active + 1)
-            # Safety: cap at 50% of balance to prevent over-concentration
-            per_slot_capital = min(per_slot_capital, balance * 0.5)
+        # ── Elliott: 2% exploratory sizing (winning_strategy §4.2) ──
+        if self.strategy_name == 'elliott':
+            ecfg = getattr(self, 'elliott_config', ElliottConfig())
+            margin = balance * ecfg.exploratory_pct
+            leverage = ecfg.nominal_leverage
+            notional = margin * leverage
+            if notional < 10.0:
+                logger.debug(f"[{symbol}] Elliott notional too small: ${notional:.2f}")
+                return False
         else:
-            per_slot_capital = balance / cfg.max_concurrent
-        notional, leverage = calculate_position_size(
-            capital=per_slot_capital,
-            risk_per_trade=cfg.risk_per_trade,
-            entry_price=entry_price,
-            move_size=move_size,
-            stop_mult=cfg.stop_mult,
-            max_leverage=cfg.max_leverage,
-        )
-
-        # Dynamic leverage: override with move-confidence scaling
-        if cfg.dynamic_leverage_enabled:
-            if cfg.rr_leverage_enabled:
-                # v4.3: R:R-gated leverage — only deploy when R:R justifies it
-                from quantbox.strategy.rubberband import compute_rr_gated_leverage
-                conf_lev = compute_rr_gated_leverage(
-                    move_size=move_size,
-                    threshold=cfg.threshold,
-                    target_retrace=cfg.target_retrace,
-                    stop_mult=cfg.stop_mult,
-                    cost_per_side=cfg.cost_per_side,
-                    base_leverage=cfg.base_leverage,
-                    leverage_scale=cfg.leverage_scale,
-                    max_leverage=cfg.max_leverage,
-                    min_rr=cfg.min_rr_for_leverage,
-                )
+            # Position sizing — v10.0: dynamic capital allocation
+            if cfg.dynamic_capital_enabled:
+                n_active = self.strategy.n_active
+                per_slot_capital = balance / max(1, n_active + 1)
+                # Safety: cap at 50% of balance to prevent over-concentration
+                per_slot_capital = min(per_slot_capital, balance * 0.5)
             else:
-                conf_lev = compute_confidence_leverage(
-                    move_size=move_size,
-                    threshold=cfg.threshold,
-                    base_leverage=cfg.base_leverage,
-                    leverage_scale=cfg.leverage_scale,
-                    max_leverage=cfg.max_leverage,
-                )
-            notional = per_slot_capital * conf_lev
-            leverage = conf_lev
+                per_slot_capital = balance / cfg.max_concurrent
+            notional, leverage = calculate_position_size(
+                capital=per_slot_capital,
+                risk_per_trade=cfg.risk_per_trade,
+                entry_price=entry_price,
+                move_size=move_size,
+                stop_mult=cfg.stop_mult,
+                max_leverage=cfg.max_leverage,
+            )
 
-        # ═══ v10.2 PARITY FIX: Apply MTF leverage multiplier ═══
-        # In backtest: apply_mtf_leverage(signals, mult) scales signal magnitude
-        # which _backtest_core uses as position size (position * bar_return).
-        # In live: on_bar() returns ±1 (no magnitude), so we apply the same
-        # multiplier here via the was_mtf_confirmed() side-channel.
-        # Effective leverage: base(1.5) × mtf_mult(2.5) = 3.75x per trade.
-        if cfg.mtf_confirmation_enabled and cfg.mtf_leverage_mult > 1.0:
-            if self.strategy.was_mtf_confirmed(symbol):
-                leverage *= cfg.mtf_leverage_mult
-                notional = per_slot_capital * leverage
-                logger.debug(
-                    f"[{symbol}] MTF leverage boost: "
-                    f"{leverage/cfg.mtf_leverage_mult:.2f}x → {leverage:.2f}x"
-                )
+            # Dynamic leverage: override with move-confidence scaling
+            if cfg.dynamic_leverage_enabled:
+                if cfg.rr_leverage_enabled:
+                    # v4.3: R:R-gated leverage — only deploy when R:R justifies it
+                    from quantbox.strategy.rubberband import compute_rr_gated_leverage
+                    conf_lev = compute_rr_gated_leverage(
+                        move_size=move_size,
+                        threshold=cfg.threshold,
+                        target_retrace=cfg.target_retrace,
+                        stop_mult=cfg.stop_mult,
+                        cost_per_side=cfg.cost_per_side,
+                        base_leverage=cfg.base_leverage,
+                        leverage_scale=cfg.leverage_scale,
+                        max_leverage=cfg.max_leverage,
+                        min_rr=cfg.min_rr_for_leverage,
+                    )
+                else:
+                    conf_lev = compute_confidence_leverage(
+                        move_size=move_size,
+                        threshold=cfg.threshold,
+                        base_leverage=cfg.base_leverage,
+                        leverage_scale=cfg.leverage_scale,
+                        max_leverage=cfg.max_leverage,
+                    )
+                notional = per_slot_capital * conf_lev
+                leverage = conf_lev
+
+            # ═══ v10.2 PARITY FIX: Apply MTF leverage multiplier ═══
+            if cfg.mtf_confirmation_enabled and cfg.mtf_leverage_mult > 1.0:
+                if self.strategy.was_mtf_confirmed(symbol):
+                    leverage *= cfg.mtf_leverage_mult
+                    notional = per_slot_capital * leverage
+                    logger.debug(
+                        f"[{symbol}] MTF leverage boost: "
+                        f"{leverage/cfg.mtf_leverage_mult:.2f}x → {leverage:.2f}x"
+                    )
 
         if notional < 10.0:  # Min notional $10
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
@@ -1114,6 +1128,149 @@ class RubberBandScalper:
         })
         return True
 
+    # ── Elliott: Add-to-position methods ──
+
+    def _add_to_position(
+        self, symbol: str, current_price: float, balance: float,
+    ) -> bool:
+        """Add primary capital (8%) to an exploratory Elliott position.
+
+        Called when update_position returns 'confirm_entry' — the
+        divergence + MACD/Stochastic confluence has been validated.
+
+        Args:
+            symbol: Trading symbol.
+            current_price: Current market price.
+            balance: Current account balance.
+
+        Returns:
+            True if additional capital was deployed.
+        """
+        pos = self.strategy._positions.get(symbol)
+        if pos is None:
+            return False
+
+        ecfg = getattr(self, 'elliott_config', ElliottConfig())
+        add_margin = balance * ecfg.primary_pct
+        add_notional = add_margin * ecfg.nominal_leverage
+        if add_notional < 10.0:
+            return False
+
+        add_qty = add_notional / current_price
+        add_qty = self._round_qty(add_qty, symbol)
+        if add_qty <= 0:
+            return False
+
+        side = 'BUY' if pos['signal'] == 1 else 'SELL'
+        result = self._place_order(symbol, side, add_qty)
+        if result is None:
+            return False
+
+        fill_price = float(result['avgPrice'])
+        fill_qty = float(result['executedQty'])
+
+        # Update position with blended entry
+        old_notional = pos['notional']
+        new_notional = fill_qty * fill_price
+        total_notional = old_notional + new_notional
+        blended_entry = (
+            (pos['entry_price'] * old_notional + fill_price * new_notional)
+            / total_notional
+        )
+        pos['entry_price'] = blended_entry
+        pos['notional'] = total_notional
+
+        logger.info(
+            f"[{symbol}] CONFIRMED: Added 8% (${new_notional:.2f}) → "
+            f"total ${total_notional:.2f} @ blended ${blended_entry:.4f}"
+        )
+        self.discord.send(embed={
+            'title': f"✅ {symbol} CONFIRMED — Primary Entry",
+            'color': 0x2196F3,
+            'description': 'Divergence validated. Upgraded to 10% margin.',
+            'fields': [
+                {'name': 'Added', 'value': f'${new_notional:.2f}', 'inline': True},
+                {'name': 'Total', 'value': f'${total_notional:.2f}', 'inline': True},
+                {'name': 'Blended Entry', 'value': f'${blended_entry:.4f}', 'inline': True},
+            ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+        })
+        return True
+
+    def _pyramid_position(
+        self, symbol: str, current_price: float, balance: float,
+    ) -> bool:
+        """Pyramid into a winning Elliott position using unrealized profits.
+
+        Called when update_position returns 'pyramid' — Wave 3/C momentum
+        confirmed with EMA alignment. Uses unrealized profit as margin.
+
+        Args:
+            symbol: Trading symbol.
+            current_price: Current market price.
+            balance: Current account balance.
+
+        Returns:
+            True if pyramid order was filled.
+        """
+        pos = self.strategy._positions.get(symbol)
+        if pos is None:
+            return False
+
+        # Unrealized PnL
+        if pos['signal'] == 1:
+            gain_pct = (current_price - pos['entry_price']) / pos['entry_price']
+        else:
+            gain_pct = (pos['entry_price'] - current_price) / pos['entry_price']
+
+        unrealized = gain_pct * pos['notional']
+        if unrealized < 20.0:  # Min $20 profit for pyramid
+            return False
+
+        ecfg = getattr(self, 'elliott_config', ElliottConfig())
+        # Use unrealized profit as margin for pyramid
+        pyramid_notional = min(unrealized * ecfg.nominal_leverage, pos['notional'] * 0.5)
+        pyramid_qty = pyramid_notional / current_price
+        pyramid_qty = self._round_qty(pyramid_qty, symbol)
+        if pyramid_qty <= 0:
+            return False
+
+        side = 'BUY' if pos['signal'] == 1 else 'SELL'
+        result = self._place_order(symbol, side, pyramid_qty)
+        if result is None:
+            return False
+
+        fill_price = float(result['avgPrice'])
+        fill_qty = float(result['executedQty'])
+        new_notional = fill_qty * fill_price
+
+        # Update position
+        old_notional = pos['notional']
+        total_notional = old_notional + new_notional
+        blended = (
+            (pos['entry_price'] * old_notional + fill_price * new_notional)
+            / total_notional
+        )
+        pos['entry_price'] = blended
+        pos['notional'] = total_notional
+
+        logger.info(
+            f"[{symbol}] PYRAMID: Added ${new_notional:.2f} from "
+            f"${unrealized:.2f} unrealized → total ${total_notional:.2f}"
+        )
+        self.discord.send(embed={
+            'title': f"📈 {symbol} PYRAMID — Wave 3/C Momentum",
+            'color': 0x4CAF50,
+            'description': 'Pyramiding with unrealized profits. Stop trailed to BE.',
+            'fields': [
+                {'name': 'Added', 'value': f'${new_notional:.2f}', 'inline': True},
+                {'name': 'Total', 'value': f'${total_notional:.2f}', 'inline': True},
+                {'name': 'Unrealized', 'value': f'${unrealized:.2f}', 'inline': True},
+            ],
+            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+        })
+        return True
+
     def _close_position(
         self, symbol: str, reason: str, current_price: float,
     ) -> bool:
@@ -1282,9 +1439,14 @@ class RubberBandScalper:
         # 3. Fetch BTC klines for regime filter
         btc_close = self.download_klines('BTCUSDT', 200)
 
-        # 3b. v7.0: Fetch BTC 4h klines for MTF confirmation
+        # 3b. v7.0: Fetch BTC 4h klines for MTF / Elliott macro bias
         btc_close_4h = None
-        if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
+        if self.strategy_name == 'elliott':
+            # Elliott needs 600+ bars of BTC 4h for 200/500 EMA macro bias
+            btc_close_4h = self.download_klines('BTCUSDT', 600, interval='4h')
+            if btc_close_4h is not None:
+                self.strategy.update_btc_data(btc_close_4h)
+        elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
             btc_close_4h = self.download_klines('BTCUSDT', 100, interval='4h')
 
         # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
@@ -1301,6 +1463,15 @@ class RubberBandScalper:
             if exit_reason:
                 if exit_reason == 'partial_close':
                     self._partial_close_position(sym, current_price)
+                elif exit_reason == 'confirm_entry':
+                    # Elliott: upgrade 2% exploratory → add 8% primary
+                    self._add_to_position(sym, current_price, balance)
+                elif exit_reason == 'pyramid':
+                    # Elliott: pyramid using unrealized profits
+                    self._pyramid_position(sym, current_price, balance)
+                elif exit_reason == 'cancel_exploration':
+                    # Elliott: confirmation timed out → close pilot
+                    self._close_position(sym, exit_reason, current_price)
                 else:
                     self._close_position(sym, exit_reason, current_price)
 
@@ -1354,8 +1525,14 @@ class RubberBandScalper:
             # Wire up volume/taker/high/low data for v9 confluence scoring
             self.strategy.update_market_data(sym, volume, taker_buy, high, low)
 
-            # v7.0: Download 4h data for MTF confirmation
-            if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
+            # v7.0: Download 4h data for MTF confirmation / Elliott wave detection
+            if self.strategy_name == 'elliott':
+                # Elliott needs 600+ bars of 4h OHLC for 500 EMA + ZigZag
+                result_4h = self.download_klines(sym, 600, interval='4h', full=True)
+                if result_4h is not None:
+                    c4h, h4h, l4h, _, _ = result_4h
+                    self.strategy.update_htf_data(sym, c4h, h4h, l4h)
+            elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
                 close_4h = self.download_klines(sym, 100, interval='4h')
                 if close_4h is not None:
                     self.strategy.update_htf_data(sym, close_4h)
@@ -1889,7 +2066,7 @@ class RubberBandScalper:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='QuantBox Rubber Band Scalper'
+        description='QuantBox Scalper — Rubber Band / Elliott Wave'
     )
     parser.add_argument(
         '--paper', action='store_true',
@@ -1910,6 +2087,10 @@ def main():
     parser.add_argument(
         '--max-slots', type=int, default=None,
         help='Max concurrent positions (default: from .env/config)'
+    )
+    parser.add_argument(
+        '--strategy', choices=['rubberband', 'elliott'], default='rubberband',
+        help='Trading strategy: rubberband (default) or elliott (Maeoknam)'
     )
     args = parser.parse_args()
 
@@ -1975,7 +2156,11 @@ def main():
         htf_rb_btc_sma_period=settings.rb_htf_rb_btc_sma_period,
     )
 
-    scalper = RubberBandScalper(paper_mode=args.paper, config=config)
+    scalper = RubberBandScalper(
+        paper_mode=args.paper,
+        config=config,
+        strategy_name=args.strategy,
+    )
 
     if args.once:
         scalper.run_once()

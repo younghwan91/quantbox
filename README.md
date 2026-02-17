@@ -1,10 +1,10 @@
 # QuantBox 📈
 
-**암호화폐 Rubber Band Scalper — Binance USDT-M Futures**
+**암호화폐 Rubber Band Scalper + Elliott Wave — Binance USDT-M Futures**
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 
-단일 자산 평균회귀 스캘핑 프레임워크 (15분봉, Numba 가속)
+멀티 전략 스캘핑 프레임워크 (Rubber Band 15분봉 + Elliott Wave 4h봉, Numba 가속)
 
 ## 🌟 주요 기능
 
@@ -69,6 +69,11 @@
 
 ### 전략 프레임워크
 - **Rubber Band Mean-Reversion (v11.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-20 심볼 화이트리스트
+- **Elliott Wave Strategy (v11.4)**: 매옥남 챔피언십 메소드 — ZigZag ABC 패턴 + Fibonacci 비율 검증 + 탐색적/확인 2단계 포지셔닝 + 50% 부분 익절 + 브레이크이븐 스탑
+  - 4h 타임프레임, EMA(20/50/100/200/500), RSI(14/9), MACD(12/26/9), Stochastic(14/3)
+  - 자본 관리: 2% 탐색적 진입 → 8% 확인 후 추가 → 미실현 이익 피라미딩, 레버리지 20x
+  - BTC 매크로 바이어스: 200/500 EMA 기반 롱/숏 필터링
+  - Numba 가속 지표: EMA, RSI, MACD, Stochastic, ATR, ZigZag
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
@@ -110,14 +115,18 @@ pip install -e .
 ### Rubber Band Scalper (권장)
 
 ```bash
-# Paper trading (시뮬레이션)
+# Rubber Band (기본 전략)
 python -m quantbox.scalper --paper
+
+# Elliott Wave 전략
+python -m quantbox.scalper --strategy elliott --paper
 
 # 한 사이클만 실행
 python -m quantbox.scalper --paper --once
 
 # LIVE trading (실거래!)
 python -m quantbox.scalper
+python -m quantbox.scalper --strategy elliott
 ```
 
 ```python
@@ -152,6 +161,7 @@ quantbox/
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 컴포넌트
 │   ├── rubberband.py       # Rubber Band Scalper (기본, Numba 가속)
+│   ├── elliott.py          # Elliott Wave 전략 (매옥남 메소드, Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
 ├── backtest/               # 백테스팅 프레임워크
@@ -159,13 +169,13 @@ quantbox/
 ├── notifications/          # 알림 시스템
 │   ├── bot.py              # Discord Bot (양방향)
 │   └── discord.py          # Discord Webhook (단방향)
-└── scalper.py              # Rubber Band 실거래 트레이더
+└── scalper.py              # 멀티 전략 실거래 트레이더 (--strategy rubberband|elliott)
 
 scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
 ├── download_extended_data.py # 365일 확장 데이터 다운로드
 └── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
-tests/                      # 유닛 테스트 (457개)
+tests/                      # 유닛 테스트 (502개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
