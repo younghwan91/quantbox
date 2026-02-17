@@ -52,7 +52,7 @@ Parameters (v6.0, 365-day A/B validated):
   min_confidence = 2 (require ≥2 pieces of confirming evidence)
   btc_regime_period = 96 bars (24h SMA for BTC regime detection)
   asset_trend_period = 192 bars (48h SMA for asset trend in Risk-On)
-  btc_directional_period = 32 bars (8h BTC momentum for Risk-Off)
+  btc_directional_period = 48 bars (12h BTC momentum for Risk-Off)
   base_leverage = 1.5x (conservative, same DD as v5.0)
   confidence_leverage_step = 0.0 (disabled by default for safety)
   max_leverage = 1.5x (capped at base)
@@ -172,12 +172,12 @@ class RubberBandConfig:
     # Counter-trend entries only when BTC confirms: long when BTC falling,
     # short when BTC rising. Filters out idiosyncratic altcoin moves that
     # are less likely to revert.
-    # v10.2 PARITY: Set period=0 to match v10 A/B test validation.
-    # btc_dir_period=0 → btc_mom=0 always → Risk-Off entries disabled.
-    # v10 winning params (th=0.032, mc=1, mh=20) were validated with
-    # Risk-Off disabled. Using period=32 would enable untested trades.
+    # v11.0: Re-enabled with period=48 (12h BTC momentum window).
+    # Maeoknam A/B test: unlocks Risk-Off trades (sympathy pullback).
+    # Result: Ret 1331% → 6556% (+393%), Calmar 5.14 → 19.65 (+282%).
+    # Robust across all tested periods (16-96), not curve-fit.
     btc_directional_enabled: bool = True   # Align entry with BTC momentum
-    btc_directional_period: int = 0        # v10.2: 0 = Risk-Off disabled (matches backtest)
+    btc_directional_period: int = 48       # v11.0: 12h BTC momentum window (Maeoknam A/B winner)
 
     # ── Capital Preservation (v4.4: DISABLED — hurts at tighter stop) ──
     # v4.3 partial exit hurt performance with stop=0.9 target=0.4:

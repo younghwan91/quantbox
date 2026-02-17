@@ -158,7 +158,7 @@ class QuantBoxSettings(BaseSettings):
 
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
-    rb_btc_directional_period: int = 0        # v10.2: 0 = Risk-Off disabled (matches backtest)
+    rb_btc_directional_period: int = 48       # v11.0: 12h BTC momentum (Maeoknam A/B winner)
 
     # ── Capital Preservation (v4.4: DISABLED — hurts with tighter stop) ──
     rb_partial_exit_enabled: bool = False     # Disabled: Calmar 3.75 vs 4.96 without

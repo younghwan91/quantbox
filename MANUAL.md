@@ -473,7 +473,7 @@ RB_HTF_RB_BTC_SMA_PERIOD=48        # BTC SMA (8일)
 
 # BTC Directional Alignment (v4.2, Risk-Off 모드에서 사용)
 RB_BTC_DIRECTIONAL_ENABLED=true   # BTC 방향 정렬: Long→BTC하락, Short→BTC상승 시만 진입
-RB_BTC_DIRECTIONAL_PERIOD=32      # BTC 모멘텀 lookback (32봉 = 8시간)
+RB_BTC_DIRECTIONAL_PERIOD=48      # BTC 모멘텀 lookback (48봉 = 12시간)
 
 # Capital Preservation (v4.4: 부분 청산 비활성화 — tighter stop이 DD 충분히 억제)
 RB_PARTIAL_EXIT_ENABLED=false     # 부분 청산 비활성화 (stop=0.9에서 오히려 손해)
