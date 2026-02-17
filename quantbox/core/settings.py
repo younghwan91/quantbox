@@ -113,6 +113,14 @@ class QuantBoxSettings(BaseSettings):
     rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
     rb_btc_directional_period: int = 32       # BTC 모멘텀 lookback (32봉 = 8시간)
 
+    # ── Capital Preservation (v4.3, A/B validated) ──
+    rb_partial_exit_enabled: bool = True      # 50% 부분 청산 활성화 (수익 발생 즉시)
+    rb_partial_exit_fraction: float = 0.5     # 부분 청산 비율 (0.5 = 50%)
+
+    # ── R:R-Gated Leverage (v4.3, A/B validated) ──
+    rb_rr_leverage_enabled: bool = True       # R:R 기준 레버리지 게이트 활성화
+    rb_min_rr_for_leverage: float = 0.30      # 레버리지 허용 최소 R:R 비율
+
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부

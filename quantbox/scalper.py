@@ -476,13 +476,28 @@ class RubberBandScalper:
 
         # Dynamic leverage: override with move-confidence scaling
         if cfg.dynamic_leverage_enabled:
-            conf_lev = compute_confidence_leverage(
-                move_size=move_size,
-                threshold=cfg.threshold,
-                base_leverage=cfg.base_leverage,
-                leverage_scale=cfg.leverage_scale,
-                max_leverage=cfg.max_leverage,
-            )
+            if cfg.rr_leverage_enabled:
+                # v4.3: R:R-gated leverage — only deploy when R:R justifies it
+                from quantbox.strategy.rubberband import compute_rr_gated_leverage
+                conf_lev = compute_rr_gated_leverage(
+                    move_size=move_size,
+                    threshold=cfg.threshold,
+                    target_retrace=cfg.target_retrace,
+                    stop_mult=cfg.stop_mult,
+                    cost_per_side=cfg.cost_per_side,
+                    base_leverage=cfg.base_leverage,
+                    leverage_scale=cfg.leverage_scale,
+                    max_leverage=cfg.max_leverage,
+                    min_rr=cfg.min_rr_for_leverage,
+                )
+            else:
+                conf_lev = compute_confidence_leverage(
+                    move_size=move_size,
+                    threshold=cfg.threshold,
+                    base_leverage=cfg.base_leverage,
+                    leverage_scale=cfg.leverage_scale,
+                    max_leverage=cfg.max_leverage,
+                )
             notional = per_slot_capital * conf_lev
             leverage = conf_lev
 
@@ -548,6 +563,90 @@ class RubberBandScalper:
                  'inline': True},
                 {'name': 'Leverage', 'value': f'{lev_int}x', 'inline': True},
                 {'name': 'Move', 'value': f'{move_size*100:.2f}%', 'inline': True},
+            ],
+        })
+        return True
+
+    def _partial_close_position(
+        self, symbol: str, current_price: float,
+    ) -> bool:
+        """Partially close 50% of a position (v4.3 capital preservation).
+
+        Closes half the position to lock in profit. The remaining half
+        continues with a break-even stop. Does NOT remove the position
+        from the strategy — it stays tracked with partial_closed=True.
+
+        Returns True if partial close succeeded.
+        """
+        pos = self.strategy._positions.get(symbol)
+        if pos is None:
+            return False
+
+        fraction = self.config.partial_exit_fraction
+        full_quantity = pos['notional'] / pos['entry_price']
+        close_qty = self._round_qty(full_quantity * fraction, symbol)
+        if close_qty <= 0:
+            return False
+
+        # Reverse the entry side to close
+        side = 'SELL' if pos['signal'] == 1 else 'BUY'
+
+        result = self._place_order(symbol, side, close_qty)
+        if result is None:
+            # Failed: revert partial_closed flag
+            pos['partial_closed'] = False
+            return False
+
+        fill_price = float(result['avgPrice'])
+
+        # PnL on the partial close
+        if pos['signal'] == 1:
+            pnl_pct = (fill_price - pos['entry_price']) / pos['entry_price']
+        else:
+            pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
+
+        partial_notional = close_qty * fill_price
+        pnl_usd = pnl_pct * partial_notional
+        cost = partial_notional * self.config.cost_per_side
+        net_pnl = pnl_usd - cost
+
+        # Update position: reduce notional by closed amount
+        pos['notional'] -= partial_notional
+
+        # Paper mode
+        if self.paper_mode:
+            self._paper_balance += pnl_usd - cost
+
+        # Trade record (partial)
+        trade = {
+            'symbol': symbol,
+            'signal': pos['signal'],
+            'entry_price': pos['entry_price'],
+            'exit_price': fill_price,
+            'pnl_pct': pnl_pct * 100,
+            'pnl_usd': net_pnl,
+            'notional': partial_notional,
+            'bars_held': pos['bars_held'],
+            'reason': 'partial_close',
+            'time': datetime.now(timezone.utc).isoformat(),
+        }
+        self._trade_history.append(trade)
+
+        logger.info(
+            f"[{symbol}] PARTIAL CLOSE ({fraction*100:.0f}%): "
+            f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
+            f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+            f"→ remaining ${pos['notional']:.2f}, BE stop active"
+        )
+        self.discord.send(embed={
+            'title': f"🔒 {symbol} PARTIAL CLOSE ({fraction*100:.0f}%)",
+            'color': 0xFFC107,
+            'fields': [
+                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': 'Remaining', 'value': f'${pos["notional"]:.2f}',
+                 'inline': True},
+                {'name': 'Stop', 'value': 'Break-even', 'inline': True},
             ],
         })
         return True
@@ -682,7 +781,11 @@ class RubberBandScalper:
             current_price = close[-1]
             exit_reason = self.strategy.update_position(sym, current_price)
             if exit_reason:
-                self._close_position(sym, exit_reason, current_price)
+                if exit_reason == 'partial_close':
+                    # v4.3: partial close 50%, keep remaining with BE stop
+                    self._partial_close_position(sym, current_price)
+                else:
+                    self._close_position(sym, exit_reason, current_price)
 
         # 5. Look for new entries (skip if risk blocked)
         if not risk_blocked and not self._daily_halt:
@@ -1000,6 +1103,10 @@ def main():
         max_leverage=settings.rb_max_leverage,
         btc_directional_enabled=settings.rb_btc_directional_enabled,
         btc_directional_period=settings.rb_btc_directional_period,
+        partial_exit_enabled=settings.rb_partial_exit_enabled,
+        partial_exit_fraction=settings.rb_partial_exit_fraction,
+        rr_leverage_enabled=settings.rb_rr_leverage_enabled,
+        min_rr_for_leverage=settings.rb_min_rr_for_leverage,
         max_concurrent=args.max_slots,
     )
 
