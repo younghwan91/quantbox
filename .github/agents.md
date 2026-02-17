@@ -7,7 +7,7 @@
 
 ## 1. 시스템 개요
 
-QuantBox v4.2.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
+QuantBox v4.3.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubber Band 스캘핑 시스템**이다.
 단일 자산 평균회귀 전략으로, 급등/급락 후 스냅백(반등)을 포착하여 수익을 낸다.
 
 | 구성 요소 | 역할 |
@@ -78,6 +78,7 @@ QuantBox v4.2.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 | 그 외 | 0 | 진입 안 함 |
 
 - **BTC Directional Alignment (v4.2)**: Long 진입 시 BTC도 하락 중이어야, Short 진입 시 BTC도 상승 중이어야 진입 허용 (시장 전체 움직임과 상관된 되돌림만 포착)
+- **Partial Exit Signal (v4.3)**: `compute_signals_partial_exit_btc_directional()` — 3-Phase 포지션 추적 (0=flat, 1=full ±1.0, 2=half ±0.5). 진입 후 이익 발생 시 50% 부분 청산 → 잔여 50%에 손익분기 스탑 적용
 - BTC crash gate: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
 - 기존 포지션 보유 심볼은 중복 신호 무시
 
@@ -89,6 +90,8 @@ QuantBox v4.2.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 | **Stop Loss** | unrealized PnL < -stop_mult × move_size × time_factor | time_factor = 1 - stop_decay × (bars_held / max_hold) |
 | **Trailing Stop** | best_pnl > 0 && PnL < best_pnl × (1 - trail_pct) | 이익 확보 후 역전 방어 |
 | **Max Hold** | bars_held ≥ max_hold | 타임아웃 강제 청산 (8 bars = 2h) |
+| **Partial Close (v4.3)** | gain > 0 && not partial_closed | 50% 부분 청산, 이익 확보 |
+| **Break-even Stop (v4.3)** | partial_closed && gain ≤ 0 | 부분 청산 후 손익분기 방어 |
 
 ### 2.3 주문 실행 (LimitOrderChaser)
 
@@ -101,17 +104,23 @@ QuantBox v4.2.0은 **바이낸스 USDT-M 선물** 위에서 동작하는 **Rubbe
 6. 시장가 폴백 후 5회까지 체결 검증 (ACK 응답 대응)
 ```
 
-### 2.4 포지션 사이징 (calculate_position_size + compute_confidence_leverage)
+### 2.4 포지션 사이징 (calculate_position_size + R:R-Gated Leverage)
 
 ```python
 per_slot_capital = balance / max_concurrent   # 균등 배분 (5슬롯)
 
-# ── Dynamic Leverage (move-confidence, v4.1) ──
-# 기본 리스크 기반 사이징 → 동적 레버리지로 오버라이드
-if dynamic_leverage_enabled:
-    excess = (move_size - threshold) / threshold
-    leverage = base_leverage + leverage_scale * max(excess, 0)
-    leverage = min(leverage, max_leverage)
+# ── R:R-Gated Leverage (v4.3) ──
+# 손익비(R:R)가 충분히 높을 때만 레버리지 적용
+if rr_leverage_enabled:
+    expected_gain = move_size * target_retrace - 2 * cost_per_side
+    expected_loss = move_size * stop_mult + 2 * cost_per_side
+    rr = expected_gain / expected_loss
+    if rr < min_rr_for_leverage:  # 기본 0.30
+        leverage = 1.0  # 레버리지 비활성화
+    else:
+        excess = (move_size - threshold) / threshold
+        leverage = base_leverage + leverage_scale * max(excess, 0)
+        leverage = min(leverage, max_leverage)
     notional = per_slot_capital × leverage
 else:
     # Fallback: 리스크 역산 방식
@@ -121,6 +130,8 @@ else:
     leverage = min(position_size / per_slot_capital, max_leverage)
     notional = per_slot_capital × leverage
 ```
+
+> **핵심 발견 (v4.3)**: target=0.3, stop=1.0 기본 전략의 R:R ≈ 0.28로, min_rr=0.30 시 모든 트레이드에 leverage=1x 적용. DD 75%→15%로 5배 감소.
 
 ### 2.5 비용 모델
 
@@ -149,7 +160,7 @@ else:
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_confidence_leverage`, `apply_confidence_leverage` | 기본 평균회귀 신호 + BTC 방향 정렬 + 동적 레버리지 (Numba 컴파일) |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage` | 기본 평균회귀 신호 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 (Numba 컴파일) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
@@ -157,7 +168,7 @@ else:
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `vectorized_backtest.py` | `VectorizedBacktest`, `BacktestConfig`, `BacktestResult` | Numba 가속 백테스트. 단일/포트폴리오 지원 |
+| `vectorized_backtest.py` | `VectorizedBacktest`, `BacktestConfig`, `BacktestResult`, `_backtest_core_partial` | Numba 가속 백테스트. 단일/포트폴리오 지원. Delta-based 비용 모델 (부분 청산 대응) |
 
 ### 3.4 `quantbox/data/`
 
@@ -201,6 +212,7 @@ else:
 
 ### 4.3 포지션 관리
 - [ ] Target/Stop/Trailing/MaxHold 4중 청산 조건
+- [ ] Partial Close (v4.3) — 이익 발생 시 50% 부분 청산 + Break-even stop
 - [ ] 청산 실패 시 포지션 재등록 → 다음 사이클 재시도
 - [ ] 동일 심볼 중복 진입 방지 (`has_position()`)
 - [ ] max_hold 강제 청산 (타임아웃)
@@ -218,7 +230,9 @@ else:
 - [x] `vectorized_backtest.py`의 `_backtest_core`가 실거래 PnL 로직과 동일
 - [x] `entry_stop_mult` 패리티: Numba의 HTF agree 시 `stop_mult * htf_agree_stop_mult`가 live `update_position()`에서도 동일 적용
 - [x] `get_effective_stop_mult()`: 진입 시점의 HTF 상태를 미러링하여 정확한 stop 배수 계산
-- [x] `settings.py` → `scalper.py main()` 완전 연동: `.env`의 10개 RB 파라미터가 라이브에 자동 적용
+- [x] `settings.py` → `scalper.py main()` 완전 연동: `.env`의 14개 RB 파라미터가 라이브에 자동 적용
+- [x] Partial exit: `_partial_close_position()` 라이브 부분 청산 ↔ `_backtest_core_partial()` 백테스트 부분 청산 패리티
+- [x] R:R-gated leverage: `compute_rr_gated_leverage()` 라이브 ↔ `apply_rr_gated_leverage()` 백테스트 패리티
 
 ---
 
@@ -263,6 +277,10 @@ else:
 | `max_leverage` | 7.0 | `RubberBandConfig` | 레버리지 안전 상한 |
 | `btc_directional_enabled` | True | `RubberBandConfig` | BTC 방향 정렬 필터 활성화 |
 | `btc_directional_period` | 32 (8h) | `RubberBandConfig` | BTC 모멘텀 lookback (봉 수) |
+| `partial_exit_enabled` | True | `RubberBandConfig` | 부분 청산 + 손익분기 스탑 활성화 |
+| `partial_exit_fraction` | 0.5 (50%) | `RubberBandConfig` | 부분 청산 비율 |
+| `rr_leverage_enabled` | True | `RubberBandConfig` | R:R-Gated 레버리지 활성화 |
+| `min_rr_for_leverage` | 0.30 | `RubberBandConfig` | 레버리지 허용 최소 R:R 값 |
 
 ### 6.2 Alpha Engine 파라미터
 
@@ -305,7 +323,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (12파일, 287개)
+## 7. 테스트 현황 (30+파일, 338개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
@@ -321,6 +339,7 @@ else:
 | `test_config` | Config | 생성, 검증, 직렬화 |
 | `test_cache` | 캐시 | Memory LRU, Disk, 만료, Timeframed |
 | `test_state_persistence` | 상태 영속화 | 직렬화, 원자적 쓰기, 라운드트립 |
+| `test_partial_exit` | 부분 청산 + R:R 레버리지 | Partial exit 신호, Break-even stop, R:R-gate, delta-based 비용, 라이브 패리티 (23개) |
 
 ---
 

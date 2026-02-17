@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Alpha Engine**
 
-> 버전: 4.2.0  
-> 최종 업데이트: 2025년 7월 19일
+> 버전: 4.3.0  
+> 최종 업데이트: 2025년 7월 20일
 
 ---
 
@@ -287,6 +287,14 @@ RB_MAX_LEVERAGE=7.0               # 최대 레버리지 안전 상한
 # BTC Directional Alignment (v4.2, 365일 A/B 검증)
 RB_BTC_DIRECTIONAL_ENABLED=true   # BTC 방향 정렬: Long→BTC하락, Short→BTC상승 시만 진입
 RB_BTC_DIRECTIONAL_PERIOD=32      # BTC 모멘텀 lookback (32봉 = 8시간)
+
+# Capital Preservation (v4.3, 365일 A/B 검증)
+RB_PARTIAL_EXIT_ENABLED=true      # 50% 부분 청산: 수익 발생 즉시 절반 청산
+RB_PARTIAL_EXIT_FRACTION=0.5      # 부분 청산 비율 (0.5 = 50%)
+
+# R:R-Gated Leverage (v4.3, 365일 A/B 검증)
+RB_RR_LEVERAGE_ENABLED=true       # R:R 기준 레버리지 게이트: 손익비 높을 때만 레버리지
+RB_MIN_RR_FOR_LEVERAGE=0.30       # 레버리지 허용 최소 R:R 비율
 
 # BTC Crash Gate (매크로 방어)
 BTC_CRASH_GATE_ENABLED=true    # BTC 급락/급등 시 진입 차단 활성화
