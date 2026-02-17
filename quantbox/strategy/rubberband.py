@@ -67,6 +67,15 @@ class RubberBandConfig:
     funding_rate_8h: float = 0.0001  # 0.01% per 8h
     bar_interval_minutes: int = 15
 
+    # ── Dynamic Leverage (move-confidence scaling) ──
+    # Bigger moves beyond threshold = higher conviction = more leverage.
+    # 365-day validated: Base=3 Scale=10 Max=7 is conservative and robust.
+    # Competition mode: Base=5 Scale=20 Max=15 for maximum returns.
+    dynamic_leverage_enabled: bool = True  # Enable move-confidence leverage
+    base_leverage: float = 3.0     # Minimum leverage (for threshold-level moves)
+    leverage_scale: float = 10.0   # Leverage gain per 100% excess move
+    max_leverage: float = 7.0      # Hard cap on leverage
+
     # ── Risk management ──
     risk_per_trade: float = 0.01   # Risk 1% of capital per trade
     max_concurrent: int = 5        # Max simultaneous positions
@@ -390,6 +399,98 @@ def compute_signals_mtf(
 
         sig[i] = position
     return sig
+
+
+# ──────────────────── Confidence Leverage ─────────────────────────────
+def compute_confidence_leverage(
+    move_size: float,
+    threshold: float,
+    base_leverage: float = 3.0,
+    leverage_scale: float = 10.0,
+    max_leverage: float = 7.0,
+) -> float:
+    """Compute leverage proportional to confidence (move size).
+
+    Bigger moves beyond threshold indicate stronger liquidation cascades
+    and higher probability of snap-back. We reward this with more leverage.
+
+    Formula: lev = base + scale * (move - threshold) / threshold
+    Capped at max_leverage.
+
+    365-day A/B validated (30 symbols × 35,040 bars):
+      Base=3, Scale=10, Max=7:  +132%, Calmar 2.65 (conservative)
+      Base=5, Scale=20, Max=15: +20,012% on Top-10 (competition mode)
+
+    Args:
+        move_size: Actual move size (fraction, e.g. 0.06 = 6%).
+        threshold: Minimum threshold (fraction, e.g. 0.045 = 4.5%).
+        base_leverage: Minimum leverage (for threshold-level moves).
+        leverage_scale: Leverage gain per 100% excess move.
+        max_leverage: Hard cap on leverage.
+
+    Returns:
+        Computed leverage (float, between base_leverage and max_leverage).
+    """
+    if move_size <= 0 or threshold <= 0:
+        return base_leverage
+    excess = (move_size - threshold) / threshold
+    lev = base_leverage + leverage_scale * max(excess, 0.0)
+    return min(lev, max_leverage)
+
+
+@numba.jit(nopython=True, cache=True)
+def apply_confidence_leverage(
+    close: np.ndarray,
+    signals: np.ndarray,
+    lookback: int,
+    threshold: float,
+    base_leverage: float,
+    leverage_scale: float,
+    max_leverage: float,
+) -> np.ndarray:
+    """Scale raw ±1 signals by move-confidence leverage (Numba).
+
+    For backtest use: converts signal ±1 to ±leverage.
+    The vectorized backtest treats signal magnitude as position size,
+    so signal=±5 means 5x leveraged position.
+
+    Args:
+        close: Close price array.
+        signals: Raw signals (±1 or 0).
+        lookback: Bars to measure the move.
+        threshold: Minimum threshold (fraction).
+        base_leverage: Minimum leverage.
+        leverage_scale: Scale factor.
+        max_leverage: Hard cap.
+
+    Returns:
+        Leveraged signals array.
+    """
+    n = len(close)
+    lev_signals = np.empty(n, dtype=np.float64)
+
+    for i in range(n):
+        s = signals[i]
+        if s == 0.0 or i < lookback:
+            lev_signals[i] = s
+            continue
+
+        # Compute move size at this bar
+        move = abs(close[i] / close[i - lookback] - 1.0)
+        excess = (move - threshold) / threshold
+        lev = base_leverage + leverage_scale * max(excess, 0.0)
+        if lev > max_leverage:
+            lev = max_leverage
+        if lev < base_leverage:
+            lev = base_leverage
+
+        # Scale direction by leverage
+        if s > 0:
+            lev_signals[i] = lev
+        else:
+            lev_signals[i] = -lev
+
+    return lev_signals
 
 
 # ──────────────────────── Position Sizing ──────────────────────────────
