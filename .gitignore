@@ -1,18 +1,31 @@
-/__pycache__
-/data/*
-/training_data/*
-/saved_plots/*
-temp
-*.log
-logs/
-*.json
-# Python cache
+# ── Python cache & compiled artifacts ──
 __pycache__/
 *.pyc
-.venv/
-/reports
+*.pyo
+*.nbc
+*.nbi
 
-# Secrets & Environment
+# ── Numba AOT cache ──
+numba_cache/
+
+# ── Virtual environment ──
+.venv/
+
+# ── Test/IDE caches ──
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# ── Data (downloaded locally, not committed) ──
+/data/*
+!/data/.gitkeep
+
+# ── Logs (runtime output) ──
+logs/
+*.log
+
+# ── Secrets & Environment ──
 .env
 .env.*
 !.env.example
@@ -20,10 +33,12 @@ __pycache__/
 .secrets
 *.pem
 *.key
-
-# API Keys
 config.local.json
 secrets.json
-trading_code.egg-info/
-# Dev diary (local only)
+
+# ── Misc local-only dirs ──
+/training_data/
+/saved_plots/
+/reports/
+/temp/
 devlog/
