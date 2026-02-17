@@ -340,9 +340,11 @@ class RubberBandScalper:
                 return None
             close = np.array([float(k[4]) for k in klines], dtype=np.float64)
             if full:
+                high = np.array([float(k[2]) for k in klines], dtype=np.float64)
+                low = np.array([float(k[3]) for k in klines], dtype=np.float64)
                 volume = np.array([float(k[5]) for k in klines], dtype=np.float64)
                 taker_buy = np.array([float(k[9]) for k in klines], dtype=np.float64)
-                return close, volume, taker_buy
+                return close, high, low, volume, taker_buy
             return close
         except Exception as e:
             logger.error(f"Klines fetch failed for {symbol} ({interval}): {e}")
@@ -837,16 +839,16 @@ class RubberBandScalper:
             if self.strategy.has_position(sym):
                 continue
 
-            # v6.0: Download full klines (close + volume + taker) for confidence scoring
+            # v9.0: Download full klines (close + high + low + volume + taker)
             result = self.download_klines(sym, 200, full=True)
             if result is None:
                 continue
-            close, volume, taker_buy = result
+            close, high, low, volume, taker_buy = result
             if len(close) < self.config.lookback + 1:
                 continue
 
-            # Wire up volume/taker data for confidence scoring
-            self.strategy.update_market_data(sym, volume, taker_buy)
+            # Wire up volume/taker/high/low data for v9 confluence scoring
+            self.strategy.update_market_data(sym, volume, taker_buy, high, low)
 
             # v7.0: Download 4h data for MTF confirmation
             if self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
@@ -1150,11 +1152,19 @@ def main():
         mtf_confirmation_enabled=settings.rb_mtf_confirmation_enabled,
         mtf_sma_period=settings.rb_mtf_sma_period,
         mtf_leverage_mult=settings.rb_mtf_leverage_mult,
-        # v8.0: Dynamic target (scale target by confidence)
+        # v8.0: Dynamic target (disabled in v9.0 — Fib discipline outperforms)
         dynamic_target_enabled=settings.rb_dynamic_target_enabled,
         target_conf3=settings.rb_target_conf3,
         target_conf4=settings.rb_target_conf4,
         target_conf5=settings.rb_target_conf5,
+        # v9.0: S+R+M Confluence (MACD + Stochastic evidence)
+        macd_enabled=settings.rb_macd_enabled,
+        macd_fast=settings.rb_macd_fast,
+        macd_slow=settings.rb_macd_slow,
+        macd_signal_period=settings.rb_macd_signal_period,
+        stoch_enabled=settings.rb_stoch_enabled,
+        stoch_k_period=settings.rb_stoch_k_period,
+        stoch_d_period=settings.rb_stoch_d_period,
         # v7.0: Independent 4H rubber band
         htf_independent_enabled=settings.rb_htf_independent_enabled,
         htf_rb_lookback=settings.rb_htf_rb_lookback,

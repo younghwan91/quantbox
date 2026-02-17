@@ -89,11 +89,11 @@ class QuantBoxSettings(BaseSettings):
     dynamic_exit_base: float = 0.1  # 빠른 페어 exit z-score (half_life=min)
     dynamic_exit_range: float = 0.9  # max exit = base + range = 1.0
 
-    # ── Rubber Band Signal Parameters (v4.4, 365-day A/B validated) ──
+    # ── Rubber Band Signal Parameters (v9.0, Fibonacci discipline) ──
     rb_lookback: int = 8               # Bars to measure move (2h at 15m)
     rb_threshold: float = 0.045        # Minimum move to trigger (4.5%)
-    rb_target_retrace: float = 0.4     # Take profit at 40% retracement (R:R 1.10)
-    rb_stop_mult: float = 0.9          # Stop at 0.9x the move size (DD 12.7%)
+    rb_target_retrace: float = 0.382   # Fibonacci 0.382 target (v9.0, +29% Calmar vs 0.4)
+    rb_stop_mult: float = 0.786        # Fibonacci 0.786 stop (v9.0, -9.5% DD vs 0.9)
     rb_max_hold: int = 10              # Maximum holding period (bars, 2.5h)
     rb_stop_decay: float = 0.0         # Stop tightening disabled for robustness
 
@@ -127,13 +127,23 @@ class QuantBoxSettings(BaseSettings):
     rb_mtf_sma_period: int = 12               # 4h SMA 기간 (12봉 = 2일)
     rb_mtf_leverage_mult: float = 2.0         # MTF 확인 후 레버리지 배수 (2.0x → 3.0x 실효)
 
-    # ── v8.0 Dynamic Target (A/B validated, winning strategy insight) ──
-    # "확신할 때 파도를 타라" — 컨피던스 레벨에 따라 목표 스케일링.
-    # DD 변동 없음 (4.3%), Calmar +9.3% (27.71 → 30.29)
-    rb_dynamic_target_enabled: bool = True    # 컨피던스 기반 동적 목표 활성화
-    rb_target_conf3: float = 0.45             # confidence=3 목표 되돌림 (기본 0.4 대비)
-    rb_target_conf4: float = 0.50             # confidence=4 목표 되돌림
-    rb_target_conf5: float = 0.55             # confidence≥5 목표 되돌림
+    # ── v8.0 Dynamic Target (DISABLED in v9.0 — Fib discipline outperforms) ──
+    # Fib 0.382 fixed target > dynamic scaling. Tighter stop (0.786) requires faster TP.
+    rb_dynamic_target_enabled: bool = False   # 비활성화: Fib 0.382 고정 > 동적 스케일링
+    rb_target_conf3: float = 0.45             # confidence=3 목표 되돌림 (사용 안 함)
+    rb_target_conf4: float = 0.50             # confidence=4 목표 되돌림 (사용 안 함)
+    rb_target_conf5: float = 0.55             # confidence≥5 목표 되돌림 (사용 안 함)
+
+    # ── v9.0 S+R+M Confluence Pipeline (A/B validated, winning strategy) ──
+    # MACD 히스토그램 반전 + 스토캐스틱 %K/%D 크로스 = 추가 컨피던스 증거
+    # Combined with Fib exits: Calmar +33.6%, DD -8.5%
+    rb_macd_enabled: bool = True              # MACD 히스토그램 기울기 컨피던스 증거
+    rb_macd_fast: int = 12                    # MACD fast EMA 기간
+    rb_macd_slow: int = 26                    # MACD slow EMA 기간
+    rb_macd_signal_period: int = 14           # MACD signal EMA 기간 (14=최적)
+    rb_stoch_enabled: bool = True             # 스토캐스틱 크로스 컨피던스 증거
+    rb_stoch_k_period: int = 5                # 스토캐스틱 %K 기간 (5=very fast, 최적)
+    rb_stoch_d_period: int = 3                # 스토캐스틱 %D 기간
 
     # ── v7.0 Independent 4H Rubber Band ──
     # Trades mean-reversion on 4h timeframe independently from 15m.
@@ -310,6 +320,14 @@ class QuantBoxSettings(BaseSettings):
             'target_conf3': self.rb_target_conf3,
             'target_conf4': self.rb_target_conf4,
             'target_conf5': self.rb_target_conf5,
+            # v9.0 S+R+M Confluence
+            'macd_enabled': self.rb_macd_enabled,
+            'macd_fast': self.rb_macd_fast,
+            'macd_slow': self.rb_macd_slow,
+            'macd_signal_period': self.rb_macd_signal_period,
+            'stoch_enabled': self.rb_stoch_enabled,
+            'stoch_k_period': self.rb_stoch_k_period,
+            'stoch_d_period': self.rb_stoch_d_period,
             # v7.0 Independent 4H Rubber Band
             'htf_independent_enabled': self.rb_htf_independent_enabled,
             'htf_rb_lookback': self.rb_htf_rb_lookback,
