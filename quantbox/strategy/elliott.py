@@ -119,6 +119,17 @@ class ElliottConfig:
     min_correction_time_ratio: float = 0.15
     max_correction_time_ratio: float = 1.50
 
+    # ── Timing alpha filters (research: feature/elliott-wave-timing-alpha) ──
+    # W3/W1 velocity acceleration: >0 means W3 moved faster than W1 (momentum)
+    # Research best_refined: accel >= 0 (no deceleration)
+    min_impulse_accel: float = 0.0
+    # ABC correction time / impulse time — filters abnormally short corrections
+    # Research best_refined: ratio >= 0.20
+    min_corr_impulse_ratio: float = 0.20
+    # W3 bars / W1 bars — caps how much slower W3 can be in bar count
+    # Research best_refined: ratio <= 2.5
+    max_w3_w1_time_ratio: float = 2.5
+
     # ── Capital management (winning_strategy §4) ──
     max_margin_pct: float = 0.10     # 10% max of total capital
     exploratory_pct: float = 0.02    # 2% initial pilot
@@ -908,15 +919,33 @@ def _validate_bullish_impulse_abc(
     # ── Pattern quality score ──
     impulse_bars = 0
     correction_bars = 0
+    w1_bars = 0
+    w3_bars = 0
     if pivot_indices is not None and len(pivot_indices) >= 9:
         impulse_bars = pivot_indices[5] - pivot_indices[0]  # W0→W5
         correction_bars = pivot_indices[8] - pivot_indices[5]  # W5→C
+        w1_bars = pivot_indices[1] - pivot_indices[0]  # W0→W1
+        w3_bars = pivot_indices[3] - pivot_indices[2]  # W2→W3
     wave5_len = wave5
     quality = _compute_pattern_quality(
         w2_retrace, w3_ext, w4_retrace, b_retrace, c_vs_a,
         c_fib_dist, impulse_bars, correction_bars,
         wave1, wave3, wave5_len, config,
     )
+
+    # ── Timing alpha features ──
+    # impulse_accel: (W3 price / W3 bars) / (W1 price / W1 bars)
+    # > 1.0 = W3 faster (strong momentum), < 1.0 = W3 slower (deceleration)
+    impulse_accel = 0.0
+    w3_w1_time_ratio = 0.0
+    corr_impulse_ratio = 0.0
+    if w1_bars > 0 and w3_bars > 0:
+        w1_velocity = wave1 / w1_bars
+        w3_velocity = wave3 / w3_bars
+        impulse_accel = (w3_velocity / w1_velocity) - 1.0 if w1_velocity > 0 else 0.0
+        w3_w1_time_ratio = w3_bars / w1_bars
+    if impulse_bars > 0:
+        corr_impulse_ratio = correction_bars / impulse_bars
 
     return {
         'signal': 1,  # Long
@@ -933,6 +962,14 @@ def _validate_bullish_impulse_abc(
         'wave1_length': wave1,
         'impulse_size': total_impulse,
         'quality': quality,
+        # Timing alpha features
+        'impulse_accel': impulse_accel,
+        'corr_impulse_ratio': corr_impulse_ratio,
+        'w3_w1_time_ratio': w3_w1_time_ratio,
+        'w1_bars': w1_bars,
+        'w3_bars': w3_bars,
+        'impulse_bars': impulse_bars,
+        'correction_bars': correction_bars,
     }
 
 
@@ -1032,18 +1069,34 @@ def _validate_bearish_impulse_abc(
 
     # Stop: tight above C (wave count invalidation → immediate exit)
     stop = C * (1.0 + config.sl_buffer_pct)
-# ── Pattern quality score ──
+    # ── Pattern quality score ──
     impulse_bars = 0
     correction_bars = 0
+    w1_bars = 0
+    w3_bars = 0
     if pivot_indices is not None and len(pivot_indices) >= 9:
         impulse_bars = pivot_indices[5] - pivot_indices[0]  # W0→W5
         correction_bars = pivot_indices[8] - pivot_indices[5]  # W5→C
+        w1_bars = pivot_indices[1] - pivot_indices[0]  # W0→W1
+        w3_bars = pivot_indices[3] - pivot_indices[2]  # W2→W3
     wave5_len = wave5
     quality = _compute_pattern_quality(
         w2_retrace, w3_ext, w4_retrace, b_retrace, c_vs_a,
         c_fib_dist, impulse_bars, correction_bars,
         wave1, wave3, wave5_len, config,
     )
+
+    # ── Timing alpha features ──
+    impulse_accel = 0.0
+    w3_w1_time_ratio = 0.0
+    corr_impulse_ratio = 0.0
+    if w1_bars > 0 and w3_bars > 0:
+        w1_velocity = wave1 / w1_bars
+        w3_velocity = wave3 / w3_bars
+        impulse_accel = (w3_velocity / w1_velocity) - 1.0 if w1_velocity > 0 else 0.0
+        w3_w1_time_ratio = w3_bars / w1_bars
+    if impulse_bars > 0:
+        corr_impulse_ratio = correction_bars / impulse_bars
 
     return {
         'signal': -1,  # Short
@@ -1060,6 +1113,14 @@ def _validate_bearish_impulse_abc(
         'wave1_length': wave1,
         'impulse_size': total_impulse,
         'quality': quality,
+        # Timing alpha features
+        'impulse_accel': impulse_accel,
+        'corr_impulse_ratio': corr_impulse_ratio,
+        'w3_w1_time_ratio': w3_w1_time_ratio,
+        'w1_bars': w1_bars,
+        'w3_bars': w3_bars,
+        'impulse_bars': impulse_bars,
+        'correction_bars': correction_bars,
     }
 def scan_multi_scale_patterns(
     high: np.ndarray,
@@ -1413,6 +1474,14 @@ class ElliottStrategy:
         if bias == 'short' and pattern['signal'] != -1:
             return 0
 
+        # 4b. Timing alpha filter (same gates as backtest for parity)
+        if pattern.get('impulse_accel', 1.0) < cfg.min_impulse_accel:
+            return 0
+        if pattern.get('corr_impulse_ratio', 0.5) < cfg.min_corr_impulse_ratio:
+            return 0
+        if pattern.get('w3_w1_time_ratio', 1.0) > cfg.max_w3_w1_time_ratio:
+            return 0
+
         # 5. Store for position creation
         self._pending_patterns[symbol] = pattern
         self._mtf_confirmed[symbol] = True
@@ -1422,6 +1491,10 @@ class ElliottStrategy:
             f"B_retrace={pattern['b_retrace']:.3f} | "
             f"C/A={pattern['c_vs_a']:.3f} | "
             f"C_fib_dist={pattern['c_fib_dist']:.3f} | "
+            f"quality={pattern.get('quality', 0):.1f} | "
+            f"accel={pattern.get('impulse_accel', 0):.3f} | "
+            f"corr_ratio={pattern.get('corr_impulse_ratio', 0):.3f} | "
+            f"w3w1_time={pattern.get('w3_w1_time_ratio', 0):.2f} | "
             f"target_1={pattern['target_1']:.4f}"
         )
 
@@ -2103,6 +2176,16 @@ def compute_elliott_signals(
         pattern_quality = pattern.get('quality', 0.0)
         if pattern_quality < cfg.min_pattern_quality:
             continue  # low quality wave reading → skip
+
+        # ── Timing alpha filter (research: best_refined variant) ──
+        # Filters out decelerating impulses, rushed corrections, and
+        # abnormally slow W3 waves — all correlated with poor outcomes.
+        if pattern.get('impulse_accel', 1.0) < cfg.min_impulse_accel:
+            continue  # W3 slower than W1 → weak momentum → skip
+        if pattern.get('corr_impulse_ratio', 0.5) < cfg.min_corr_impulse_ratio:
+            continue  # correction too short → likely not real ABC → skip
+        if pattern.get('w3_w1_time_ratio', 1.0) > cfg.max_w3_w1_time_ratio:
+            continue  # W3 took too long vs W1 → exhaustion → skip
 
         # ── Risk filter: only enter if stop is tight relative to entry ──
         entry_price = float(close_4h[bar])
