@@ -175,7 +175,7 @@ class TestConfigDefaults:
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_enabled is True
-        assert cfg.btc_directional_period == 48  # v11.0: Maeoknam A/B winner
+        assert cfg.btc_directional_period == 48  # v11.0: A/B validated
 
     def test_custom_period(self):
         cfg = RubberBandConfig(btc_directional_period=48)

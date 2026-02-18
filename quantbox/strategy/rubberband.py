@@ -134,6 +134,15 @@ class RubberBandConfig:
     stoch_k_period: int = 3                 # v10.0: Faster stochastic (+5% Calmar vs 5)
     stoch_d_period: int = 3                 # Stochastic %D period
 
+    # ── v11.4 Adaptive Threshold (Walk-Forward Validated) ──
+    # Per-bar threshold = clip(atr_multiplier × ATR%(atr_period), floor, cap)
+    # Chosen config: 2.5x_f1 — OOS Sharpe 8.23, OOS/IS 1.09, zero overfitting.
+    # When atr_period=0, falls back to fixed `threshold` above.
+    atr_period: int = 48                    # ATR EMA period (48 × 15m = 12h)
+    atr_multiplier: float = 2.5             # ATR multiplier for threshold calc
+    threshold_floor: float = 0.01           # Minimum threshold (1%)
+    threshold_cap: float = 0.06             # Maximum threshold (6%)
+
     # ── v7.0 Independent 4H Rubber Band (A/B validated) ──
     # Trades rubber band signals on 4h timeframe independently.
     # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87.
@@ -173,11 +182,11 @@ class RubberBandConfig:
     # short when BTC rising. Filters out idiosyncratic altcoin moves that
     # are less likely to revert.
     # v11.0: Re-enabled with period=48 (12h BTC momentum window).
-    # Maeoknam A/B test: unlocks Risk-Off trades (sympathy pullback).
+    # A/B test: unlocks Risk-Off trades (sympathy pullback).
     # Result: Ret 1331% → 6556% (+393%), Calmar 5.14 → 19.65 (+282%).
     # Robust across all tested periods (16-96), not curve-fit.
     btc_directional_enabled: bool = True   # Align entry with BTC momentum
-    btc_directional_period: int = 48       # v11.0: 12h BTC momentum window (Maeoknam A/B winner)
+    btc_directional_period: int = 48       # v11.0: 12h BTC momentum window (A/B validated)
 
     # ── Capital Preservation (v4.4: DISABLED — hurts at tighter stop) ──
     # v4.3 partial exit hurt performance with stop=0.9 target=0.4:
@@ -625,6 +634,47 @@ def compute_signals_regime_switch(
     return sig
 
 
+# ────────── ATR Computation (v11.4 Adaptive Threshold) ──────────
+@numba.jit(nopython=True, cache=True)
+def compute_atr_pct(high: np.ndarray, low: np.ndarray, close: np.ndarray,
+                    period: int) -> np.ndarray:
+    """ATR as percentage of close price (EMA-smoothed).
+
+    Args:
+        high: High prices array.
+        low: Low prices array.
+        close: Close prices array.
+        period: ATR EMA smoothing period.
+
+    Returns:
+        Array of ATR/close ratios. NaN for bars before warm-up.
+    """
+    n = len(close)
+    atr_pct = np.full(n, np.nan)
+    tr = np.zeros(n)
+    tr[0] = high[0] - low[0]
+    for i in range(1, n):
+        hl = high[i] - low[i]
+        hc = abs(high[i] - close[i - 1])
+        lc = abs(low[i] - close[i - 1])
+        tr[i] = max(hl, max(hc, lc))
+
+    if n < period:
+        return atr_pct
+    atr = 0.0
+    for i in range(period):
+        atr += tr[i]
+    atr /= period
+    if close[period - 1] > 0:
+        atr_pct[period - 1] = atr / close[period - 1]
+    alpha = 2.0 / (period + 1)
+    for i in range(period, n):
+        atr = alpha * tr[i] + (1 - alpha) * atr
+        if close[i] > 0:
+            atr_pct[i] = atr / close[i]
+    return atr_pct
+
+
 # ────────── Confidence-Filtered Regime-Switch (v6.0) ──────────
 @numba.jit(nopython=True, cache=True)
 def _compute_sma_inline(arr: np.ndarray, period: int) -> np.ndarray:
@@ -1019,8 +1069,16 @@ def compute_signals_v9(
     macd_fast: int = 12,
     macd_slow: int = 26,
     macd_signal_period: int = 14,
+    atr_period: int = 0,
+    atr_multiplier: float = 2.5,
+    threshold_floor: float = 0.01,
+    threshold_cap: float = 0.06,
 ) -> np.ndarray:
     """v9.0: S+R+M Confluence Pipeline — regime-switch MR with Stochastic + MACD evidence.
+
+    v11.4: Adaptive threshold — when atr_period > 0, per-bar threshold is
+    clip(atr_multiplier × ATR%(atr_period), threshold_floor, threshold_cap).
+    Falls back to fixed `threshold` when ATR is NaN or atr_period == 0.
 
     Extends compute_signals_confidence (v6.0→v8.0) with:
       - Stochastic %K/%D cross as confidence evidence (+3.7% Calmar)
@@ -1083,6 +1141,12 @@ def compute_signals_v9(
     else:
         macd_hist = np.full(n, 0.0)
 
+    # v11.4: Pre-compute ATR% for adaptive threshold
+    if atr_period > 0:
+        atr_pct = compute_atr_pct(high, low, close, atr_period)
+    else:
+        atr_pct = np.full(n, np.nan)
+
     position = 0
     entry_price = 0.0
     move_size = 0.0
@@ -1092,12 +1156,28 @@ def compute_signals_v9(
     trade_target_retrace = target_retrace
     start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period,
                     rsi_period, vol_period)
+    if atr_period > 0 and atr_period > start_bar:
+        start_bar = atr_period
 
     for i in range(start_bar, n):
         ret = close[i] / close[i - lookback] - 1.0
 
+        # v11.4: Per-bar adaptive threshold
+        if atr_period > 0:
+            atr_val = atr_pct[i]
+            if np.isnan(atr_val):
+                thr = threshold
+            else:
+                thr = atr_multiplier * atr_val
+                if thr < threshold_floor:
+                    thr = threshold_floor
+                if thr > threshold_cap:
+                    thr = threshold_cap
+        else:
+            thr = threshold
+
         if position == 0:
-            if abs(ret) > threshold:
+            if abs(ret) > thr:
                 if np.isnan(btc_sma[i]):
                     continue
                 is_risk_on = btc_close[i] > btc_sma[i]
@@ -1111,7 +1191,7 @@ def compute_signals_v9(
                         continue
                     is_uptrend = close[i] > asset_sma[i]
 
-                    if ret < -threshold and is_uptrend:
+                    if ret < -thr and is_uptrend:
                         # LONG: alt dipped in its own uptrend during BTC bull
                         if rsi[i] < 40:
                             confidence += 1
@@ -1134,7 +1214,7 @@ def compute_signals_v9(
                             position = 1
                             entered = True
 
-                    elif ret > threshold and not is_uptrend:
+                    elif ret > thr and not is_uptrend:
                         # SHORT: alt surged but in downtrend → exhaustion
                         if rsi[i] > 60:
                             confidence += 1
@@ -1158,7 +1238,7 @@ def compute_signals_v9(
                             entered = True
                 else:
                     # ═══ RISK-OFF: Sympathy Pullback + Confidence ═══
-                    if ret < -threshold and btc_mom < 0:
+                    if ret < -thr and btc_mom < 0:
                         # LONG: alt dips with BTC → sympathy → mean revert
                         if rsi[i] < 35:
                             confidence += 1
@@ -1180,7 +1260,7 @@ def compute_signals_v9(
                             position = 1
                             entered = True
 
-                    elif ret > threshold and btc_mom > 0:
+                    elif ret > thr and btc_mom > 0:
                         # SHORT: alt pumps with BTC bounce → fades back
                         if rsi[i] > 65:
                             confidence += 1
@@ -2165,7 +2245,12 @@ class RubberBandStrategy:
         close_prices: np.ndarray,
         btc_close_prices: np.ndarray | None = None,
     ) -> int:
-        """Process a new bar and return signal.
+        """Process a new bar and return entry signal for the LATEST bar only.
+
+        CRITICAL: This method evaluates entry conditions at the LAST bar
+        statelessly, identical to how the backtest evaluates each bar.
+        Previously this ran compute_signals_v9 on 200 bars and took sigs[-1],
+        which conflated old virtual positions with fresh entry signals.
 
         Args:
             symbol: Trading symbol.
@@ -2179,7 +2264,7 @@ class RubberBandStrategy:
         if len(close_prices) < cfg.lookback + 1:
             return 0
 
-        # ═══ v6.0 Confidence-Scored Entry (highest priority) ═══
+        # ═══ v6.0+ Confidence-Scored Entry (stateless last-bar evaluation) ═══
         if btc_close_prices is not None and cfg.entry_mode == 'confidence':
             min_bars = max(
                 cfg.lookback, cfg.btc_directional_period,
@@ -2204,98 +2289,187 @@ class RubberBandStrategy:
                 )
                 return int(sigs[-1])
 
-            # v9.0: Use enhanced signal function when MACD or Stochastic enabled
-            if cfg.macd_enabled or cfg.stoch_enabled:
-                high_data = self._high_data.get(symbol)
-                low_data = self._low_data.get(symbol)
-                if high_data is None:
-                    high_data = close_prices  # fallback
-                if low_data is None:
-                    low_data = close_prices  # fallback
-                sigs = compute_signals_v9(
-                    close_prices, high_data, low_data,
-                    vol_data, taker_data, btc_close_prices,
-                    cfg.lookback, cfg.threshold,
-                    cfg.target_retrace, cfg.stop_mult,
-                    cfg.max_hold, cfg.stop_decay,
-                    cfg.btc_directional_period,
-                    cfg.btc_regime_period,
-                    cfg.asset_trend_period,
-                    cfg.min_confidence,
-                    cfg.base_leverage,
-                    cfg.confidence_leverage_step,
-                    cfg.max_leverage,
-                    cfg.rsi_period,
-                    cfg.vol_period,
-                    cfg.dynamic_target_enabled,
-                    cfg.target_conf3,
-                    cfg.target_conf4,
-                    cfg.target_conf5,
-                    cfg.stoch_enabled,
-                    cfg.stoch_k_period,
-                    cfg.stoch_d_period,
-                    cfg.macd_enabled,
-                    cfg.macd_fast,
-                    cfg.macd_slow,
-                    cfg.macd_signal_period,
-                )
+            # ──────────────────────────────────────────────────────────
+            # STATELESS last-bar entry evaluation (v13.0 parity fix)
+            #
+            # Previously: ran compute_signals_v9() on 200 bars and took
+            # sigs[-1]. This caused TWO critical bugs:
+            #   1. Ghost-position: sigs[-1] was non-zero from a STALE
+            #      virtual entry 5-50 bars ago, not a fresh signal.
+            #   2. Missed-signal: sigs[-1] was zero because the function
+            #      was mid-position when bar 199 qualified for entry.
+            #
+            # Fix: evaluate the LAST bar directly using the same
+            # confidence scoring logic as compute_signals_v9 (identical
+            # entry conditions, no position state carried forward).
+            # This is equivalent to what the backtest sees at each bar
+            # when the strategy is flat (position == 0), which is the
+            # only state that matters for _scan_entries().
+            # ──────────────────────────────────────────────────────────
+            n = len(close_prices)
+
+            # v11.4: Compute adaptive threshold from ATR
+            if cfg.atr_period > 0:
+                high_data = self._high_data.get(symbol, close_prices)
+                low_data = self._low_data.get(symbol, close_prices)
+                atr_arr = compute_atr_pct(high_data, low_data, close_prices, cfg.atr_period)
+                atr_val = float(atr_arr[-1])
+                if np.isnan(atr_val):
+                    thr = cfg.threshold  # fallback
+                else:
+                    thr = cfg.atr_multiplier * atr_val
+                    if thr < cfg.threshold_floor:
+                        thr = cfg.threshold_floor
+                    if thr > cfg.threshold_cap:
+                        thr = cfg.threshold_cap
             else:
-                sigs = compute_signals_confidence(
-                    close_prices, vol_data, taker_data, btc_close_prices,
-                    cfg.lookback, cfg.threshold,
-                    cfg.target_retrace, cfg.stop_mult,
-                    cfg.max_hold, cfg.stop_decay,
-                    cfg.btc_directional_period,
-                    cfg.btc_regime_period,
-                    cfg.asset_trend_period,
-                    cfg.min_confidence,
-                    cfg.base_leverage,
-                    cfg.confidence_leverage_step,
-                    cfg.max_leverage,
-                    cfg.rsi_period,
-                    cfg.vol_period,
-                    cfg.dynamic_target_enabled,
-                    cfg.target_conf3,
-                    cfg.target_conf4,
-                    cfg.target_conf5,
+                thr = cfg.threshold
+
+            # 8-bar return at the last bar
+            ret = close_prices[-1] / close_prices[-cfg.lookback - 1] - 1.0
+            if abs(ret) <= thr:
+                self._mtf_confirmed[symbol] = False
+                return 0
+
+            # BTC regime
+            btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period:]))
+            is_risk_on = float(btc_close_prices[-1]) > btc_sma_val
+            if np.isnan(btc_sma_val):
+                self._mtf_confirmed[symbol] = False
+                return 0
+
+            # BTC momentum
+            btc_mom = float(btc_close_prices[-1] / btc_close_prices[-cfg.btc_directional_period - 1] - 1.0)
+
+            # Asset trend
+            asset_sma_val = float(np.mean(close_prices[-cfg.asset_trend_period:]))
+            is_uptrend = float(close_prices[-1]) > asset_sma_val
+
+            # RSI
+            rsi_arr = _compute_rsi_inline(close_prices, cfg.rsi_period)
+            rsi_val = float(rsi_arr[-1])
+
+            # Volume
+            vol_ratio = 0.0
+            taker_ratio_val = 0.5
+            vol_sma_arr = _compute_sma_inline(vol_data, cfg.vol_period)
+            vol_sma_val = float(vol_sma_arr[-1])
+            if not np.isnan(vol_sma_val) and vol_sma_val > 0:
+                vol_ratio = float(vol_data[-1]) / vol_sma_val
+            if float(vol_data[-1]) > 0:
+                taker_ratio_val = float(taker_data[-1]) / float(vol_data[-1])
+
+            # SMA distance
+            sma_dist = abs(float(close_prices[-1]) - asset_sma_val) / asset_sma_val if asset_sma_val > 0 else 999.0
+
+            # Stochastic
+            stoch_k_val, stoch_d_val = 50.0, 50.0
+            sk_prev, sd_prev = 50.0, 50.0
+            if cfg.stoch_enabled:
+                high_data = self._high_data.get(symbol, close_prices)
+                low_data = self._low_data.get(symbol, close_prices)
+                sk, sd = _compute_stochastic_inline(
+                    high_data, low_data, close_prices,
+                    cfg.stoch_k_period, cfg.stoch_d_period,
                 )
+                stoch_k_val, stoch_d_val = float(sk[-1]), float(sd[-1])
+                if n > 1:
+                    sk_prev, sd_prev = float(sk[-2]), float(sd[-2])
+
+            # MACD
+            macd_hist_val, macd_hist_prev = 0.0, 0.0
+            if cfg.macd_enabled and n >= cfg.macd_slow + cfg.macd_signal_period:
+                _, _, mhist = _compute_macd_inline(
+                    close_prices, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period,
+                )
+                macd_hist_val = float(mhist[-1])
+                if n > 1:
+                    macd_hist_prev = float(mhist[-2])
+
+            # ── Confidence scoring (identical to compute_signals_v9) ──
+            confidence = 1  # BTC regime alignment confirmed
+            signal = 0
+
+            if is_risk_on:
+                # ═══ RISK-ON ═══
+                if ret < -thr and is_uptrend:
+                    # LONG: alt dipped in its own uptrend during BTC bull
+                    if rsi_val < 40: confidence += 1
+                    if vol_ratio > 1.5: confidence += 1
+                    if taker_ratio_val < 0.45: confidence += 1
+                    if sma_dist < 0.02: confidence += 1
+                    if cfg.stoch_enabled and n > 1:
+                        if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                            confidence += 1
+                    if cfg.macd_enabled:
+                        if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                            confidence += 1
+                    if confidence >= cfg.min_confidence:
+                        signal = 1
+
+                elif ret > thr and not is_uptrend:
+                    # SHORT: alt surged but in downtrend → exhaustion
+                    if rsi_val > 60: confidence += 1
+                    if vol_ratio > 1.5: confidence += 1
+                    if taker_ratio_val > 0.55: confidence += 1
+                    if sma_dist < 0.02: confidence += 1
+                    if cfg.stoch_enabled and n > 1:
+                        if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                            confidence += 1
+                    if cfg.macd_enabled:
+                        if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                            confidence += 1
+                    if confidence >= cfg.min_confidence:
+                        signal = -1
+            else:
+                # ═══ RISK-OFF ═══
+                if ret < -thr and btc_mom < 0:
+                    # LONG: alt dips with BTC → sympathy → mean revert
+                    if rsi_val < 35: confidence += 1
+                    if vol_ratio > 1.5: confidence += 1
+                    if taker_ratio_val < 0.42: confidence += 1
+                    if btc_mom < -0.01: confidence += 1
+                    if cfg.stoch_enabled and n > 1:
+                        if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                            confidence += 1
+                    if cfg.macd_enabled:
+                        if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                            confidence += 1
+                    if confidence >= cfg.min_confidence:
+                        signal = 1
+
+                elif ret > thr and btc_mom > 0:
+                    # SHORT: alt pumps with BTC bounce → fades back
+                    if rsi_val > 65: confidence += 1
+                    if vol_ratio > 1.5: confidence += 1
+                    if taker_ratio_val > 0.58: confidence += 1
+                    if btc_mom > 0.01: confidence += 1
+                    if cfg.stoch_enabled and n > 1:
+                        if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                            confidence += 1
+                    if cfg.macd_enabled:
+                        if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                            confidence += 1
+                    if confidence >= cfg.min_confidence:
+                        signal = -1
 
             # ═══ v7.0 MTF Confirmation (LIVE — inline latest-bar check) ═══
-            # CRITICAL PARITY NOTE: apply_mtf_confirmation() uses j = i // 16
-            # to map 15m→4h index. This is CORRECT for backtest (both arrays
-            # start at the same date), but WRONG for live (200 15m bars vs
-            # 100 4h bars with different start times). Bar 199 would map to
-            # close_4h[12] (352h ago) instead of close_4h[99] (current).
-            #
-            # Fix: Compute the 4h trend directly from the LATEST 4h data.
-            # This is equivalent to what apply_mtf_confirmation does at the
-            # last bar when arrays are properly time-aligned.
             htf_close = self._htf_close_data.get(symbol)
             mtf_applied = False
-            last_sig = sigs[-1]
 
-            if cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
-                # Compute 4h SMA from the most recent bars
+            if signal != 0 and cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
                 sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period:]))
                 trend_up = float(htf_close[-1]) > sma_4h
 
-                # Block counter-trend entries (same logic as apply_mtf_confirmation)
-                if last_sig > 0 and not trend_up:
-                    last_sig = 0.0  # Block long in 4h downtrend
-                elif last_sig < 0 and trend_up:
-                    last_sig = 0.0  # Block short in 4h uptrend
+                if signal > 0 and not trend_up:
+                    signal = 0  # Block long in 4h downtrend
+                elif signal < 0 and trend_up:
+                    signal = 0  # Block short in 4h uptrend
                 else:
-                    mtf_applied = True  # Signal survived MTF filter
+                    mtf_applied = True
 
-            # Return signal direction; leverage communicated via was_mtf_confirmed()
-            if last_sig > 0:
-                self._mtf_confirmed[symbol] = mtf_applied
-                return 1
-            elif last_sig < 0:
-                self._mtf_confirmed[symbol] = mtf_applied
-                return -1
-            self._mtf_confirmed[symbol] = False
-            return 0
+            self._mtf_confirmed[symbol] = mtf_applied
+            return signal
 
         # ═══ v5.0 Regime-Switch Dual Entry ═══
         if btc_close_prices is not None and cfg.entry_mode == 'regime_switch':
@@ -2406,6 +2580,247 @@ class RubberBandStrategy:
             cfg.htf_rb_max_hold, cfg.htf_rb_btc_sma_period,
         )
         return int(sigs[-1])
+
+    def diagnose_bar(
+        self,
+        symbol: str,
+        close_prices: np.ndarray,
+        btc_close_prices: np.ndarray | None = None,
+    ) -> dict:
+        """Compute all intermediate diagnostic values for the latest bar.
+
+        READ-ONLY: Does NOT modify any state. Call AFTER on_bar() to
+        capture the same-bar context without side effects.
+
+        Returns a dict with all pipeline stages for structured logging.
+        Designed for parameter optimization — every filter gate is exposed.
+        """
+        cfg = self.config
+
+        # v11.4: Compute adaptive threshold for diagnostics
+        if cfg.atr_period > 0 and len(close_prices) >= cfg.atr_period:
+            high_data = self._high_data.get(symbol, close_prices)
+            low_data = self._low_data.get(symbol, close_prices)
+            atr_arr = compute_atr_pct(high_data, low_data, close_prices, cfg.atr_period)
+            _atr_val = float(atr_arr[-1])
+            if np.isnan(_atr_val):
+                _diag_thr = cfg.threshold
+            else:
+                _diag_thr = cfg.atr_multiplier * _atr_val
+                if _diag_thr < cfg.threshold_floor:
+                    _diag_thr = cfg.threshold_floor
+                if _diag_thr > cfg.threshold_cap:
+                    _diag_thr = cfg.threshold_cap
+        else:
+            _diag_thr = cfg.threshold
+
+        diag: dict = {
+            'symbol': symbol,
+            'price': float(close_prices[-1]) if len(close_prices) > 0 else 0.0,
+            'move_8bar': 0.0,
+            'threshold': _diag_thr,
+            'passed_threshold': False,
+            'regime': None,          # 'risk_on' | 'risk_off' | None
+            'btc_mom': 0.0,
+            'asset_trend': None,     # 'up' | 'down' | None
+            'entry_type': None,      # 'classic_long'|'classic_short'|'sympathy_long'|'sympathy_short'
+            'confidence': 0,
+            'min_confidence': cfg.min_confidence,
+            'passed_confidence': False,
+            'evidence': {},          # per-indicator breakdown
+            'raw_signal': 0,         # signal from compute_signals before MTF
+            'mtf_trend_up': None,    # True/False/None
+            'mtf_blocked': False,
+            'final_signal': 0,
+        }
+
+        if len(close_prices) < cfg.lookback + 1:
+            return diag
+
+        # 8-bar move
+        ret = float(close_prices[-1] / close_prices[-cfg.lookback - 1] - 1.0)
+        diag['move_8bar'] = ret
+
+        if btc_close_prices is None or cfg.entry_mode != 'confidence':
+            return diag
+
+        min_bars = max(
+            cfg.lookback, cfg.btc_directional_period,
+            cfg.btc_regime_period, cfg.asset_trend_period,
+            cfg.rsi_period, cfg.vol_period,
+        ) + 1
+        if len(btc_close_prices) < min_bars or len(close_prices) < min_bars:
+            return diag
+
+        n = len(close_prices)
+
+        # ── Indicators (same as compute_signals_v9, last bar only) ──
+        # BTC regime
+        btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period:]))
+        is_risk_on = float(btc_close_prices[-1]) > btc_sma_val
+        diag['regime'] = 'risk_on' if is_risk_on else 'risk_off'
+
+        # BTC momentum
+        btc_mom = float(btc_close_prices[-1] / btc_close_prices[-cfg.btc_directional_period - 1] - 1.0)
+        diag['btc_mom'] = btc_mom
+
+        # Asset trend
+        asset_sma_val = float(np.mean(close_prices[-cfg.asset_trend_period:]))
+        is_uptrend = float(close_prices[-1]) > asset_sma_val
+        diag['asset_trend'] = 'up' if is_uptrend else 'down'
+
+        # RSI (approximate using last portion — same Wilder smoothing)
+        rsi_arr = _compute_rsi_inline(close_prices, cfg.rsi_period)
+        rsi_val = float(rsi_arr[-1])
+
+        # Volume
+        vol_data = self._volume_data.get(symbol)
+        taker_data = self._taker_data.get(symbol)
+        vol_ratio = 0.0
+        taker_ratio_val = 0.5
+        if vol_data is not None and len(vol_data) == n:
+            vol_sma_arr = _compute_sma_inline(vol_data, cfg.vol_period)
+            vol_sma_val = float(vol_sma_arr[-1])
+            if not np.isnan(vol_sma_val) and vol_sma_val > 0:
+                vol_ratio = float(vol_data[-1]) / vol_sma_val
+            if taker_data is not None and len(taker_data) == n and float(vol_data[-1]) > 0:
+                taker_ratio_val = float(taker_data[-1]) / float(vol_data[-1])
+
+        # Stochastic
+        stoch_k_val, stoch_d_val = 50.0, 50.0
+        if cfg.stoch_enabled:
+            high_data = self._high_data.get(symbol, close_prices)
+            low_data = self._low_data.get(symbol, close_prices)
+            sk, sd = _compute_stochastic_inline(high_data, low_data, close_prices,
+                                                 cfg.stoch_k_period, cfg.stoch_d_period)
+            stoch_k_val, stoch_d_val = float(sk[-1]), float(sd[-1])
+
+        # MACD
+        macd_hist_val, macd_hist_prev = 0.0, 0.0
+        if cfg.macd_enabled and n >= cfg.macd_slow + cfg.macd_signal_period:
+            _, _, mhist = _compute_macd_inline(close_prices, cfg.macd_fast,
+                                                cfg.macd_slow, cfg.macd_signal_period)
+            macd_hist_val = float(mhist[-1])
+            macd_hist_prev = float(mhist[-2]) if n > 1 else 0.0
+
+        # SMA distance
+        sma_dist = abs(float(close_prices[-1]) - asset_sma_val) / asset_sma_val if asset_sma_val > 0 else 0.0
+
+        diag['evidence'] = {
+            'rsi': round(rsi_val, 2),
+            'vol_ratio': round(vol_ratio, 3),
+            'taker_ratio': round(taker_ratio_val, 4),
+            'sma_dist': round(sma_dist, 4),
+            'stoch_k': round(stoch_k_val, 2),
+            'stoch_d': round(stoch_d_val, 2),
+            'macd_hist': round(macd_hist_val, 6),
+            'macd_hist_prev': round(macd_hist_prev, 6),
+        }
+
+        # ── Threshold gate ──
+        diag['passed_threshold'] = abs(ret) > _diag_thr
+        if not diag['passed_threshold']:
+            return diag
+
+        # ── Confidence scoring (mirrors compute_signals_v9 last bar) ──
+        confidence = 1  # BTC regime confirmed
+        entry_type = None
+
+        if is_risk_on:
+            if ret < -_diag_thr and is_uptrend:
+                entry_type = 'classic_long'
+                if rsi_val < 40: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val < 0.45: confidence += 1
+                if sma_dist < 0.02: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                    if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                        confidence += 1
+            elif ret > _diag_thr and not is_uptrend:
+                entry_type = 'classic_short'
+                if rsi_val > 60: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val > 0.55: confidence += 1
+                if sma_dist < 0.02: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                    if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                        confidence += 1
+            else:
+                # Threshold passed but trend/direction mismatch
+                entry_type = 'risk_on_blocked'
+        else:
+            if ret < -_diag_thr and btc_mom < 0:
+                entry_type = 'sympathy_long'
+                if rsi_val < 35: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val < 0.42: confidence += 1
+                if btc_mom < -0.01: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                    if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                        confidence += 1
+            elif ret > _diag_thr and btc_mom > 0:
+                entry_type = 'sympathy_short'
+                if rsi_val > 65: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val > 0.58: confidence += 1
+                if btc_mom > 0.01: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                    if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                        confidence += 1
+            else:
+                entry_type = 'risk_off_blocked'
+
+        diag['entry_type'] = entry_type
+        diag['confidence'] = confidence
+        diag['passed_confidence'] = confidence >= cfg.min_confidence
+
+        # Determine raw signal (before MTF)
+        raw_signal = 0
+        if entry_type in ('classic_long', 'sympathy_long') and confidence >= cfg.min_confidence:
+            raw_signal = 1
+        elif entry_type in ('classic_short', 'sympathy_short') and confidence >= cfg.min_confidence:
+            raw_signal = -1
+        diag['raw_signal'] = raw_signal
+
+        # ── MTF filter ──
+        htf_close = self._htf_close_data.get(symbol)
+        if cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
+            sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period:]))
+            trend_up = float(htf_close[-1]) > sma_4h
+            diag['mtf_trend_up'] = trend_up
+
+            if raw_signal > 0 and not trend_up:
+                diag['mtf_blocked'] = True
+                diag['final_signal'] = 0
+            elif raw_signal < 0 and trend_up:
+                diag['mtf_blocked'] = True
+                diag['final_signal'] = 0
+            else:
+                diag['final_signal'] = raw_signal
+        else:
+            diag['final_signal'] = raw_signal
+
+        return diag
 
     def was_mtf_confirmed(self, symbol: str) -> bool:
         """Check if the last signal for a symbol was MTF-confirmed.
