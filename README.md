@@ -73,8 +73,9 @@
 
 ### 전략 프레임워크
 - **Rubber Band Mean-Reversion (v11.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-20 심볼 화이트리스트
-- **Elliott Wave Strategy (v11.5)**: ZigZag ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
+- **Elliott Wave Strategy (v11.6)**: ZigZag ABC 패턴 + 5차원 품질 스코어링 + Timing Alpha Filter + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
   - 4h 타임프레임, EMA(20/50/100/200/500), RSI(14/9), MACD(12/26/9), Stochastic(14/3)
+  - **Timing Alpha (v11.6)**: W3/W1 가속도 + 정정/충격 시간비율 + W3/W1 바 비율 필터 (Calmar 5.10, Sharpe 1.69)
   - **Quality Scoring (v11.5)**: W2 retrace/W3 extension/B retrace/C:A ratio/구조적 규칙 5차원 0-100점 (임계: 40점)
   - **Risk-Sized Leverage (v11.5)**: `lev = min(2.0, 2%/stop_dist)` — 트레이드당 최대 2% 자기자본 위험으로 일관된 리스크 관리
   - **Tight Stops at C (v11.5)**: 정정파 C 완료 지점 ±0.5% — 틀리면 즉시 소규모 손절, 맞으면 높은 RR
@@ -185,8 +186,11 @@ scripts/                    # 유틸리티 스크립트
 ├── download_extended_data.py # 장기 과거 데이터 다운로드
 ├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
 ├── elliott_backtest.py     # Elliott Wave 365일 백테스트
-└── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
-tests/                      # 유닛 테스트 (540개)
+├── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
+├── elliott_wave_timing_research.py  # Elliott 타이밍 알파 피처 리서치
+├── elliott_timing_backtest.py       # Elliott 타이밍 알파 Round 1 백테스트
+└── elliott_timing_backtest_r2.py    # Elliott 타이밍 알파 Round 2 정제
+tests/                      # 유닛 테스트 (562개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)

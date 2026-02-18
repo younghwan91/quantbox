@@ -12,7 +12,7 @@
 1. [개요](#1-개요)
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
 3. [🔥 Rubber Band Scalper (v2.0)](#3-rubber-band-scalper)
-3.5. [🌊 Elliott Wave Strategy (v11.5)](#35-elliott-wave-strategy)
+3.5. [🌊 Elliott Wave Strategy (v11.6)](#35-elliott-wave-strategy)
 4. [아키텍처 이해](#4-아키텍처-이해)
 5. [핵심 모듈 상세](#5-핵심-모듈-상세)
 6. [데이터 관리](#6-데이터-관리)
@@ -129,9 +129,16 @@ result = bt.run_single(close, signals, "BTCUSDT")
 print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
 ```
 
-### 3.5 Elliott Wave Strategy (v11.5)
+### 3.5 Elliott Wave Strategy (v11.6)
 
-Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage 기반 전략.
+Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Timing Alpha Filter + Risk-Sized Leverage 기반 전략.
+
+#### v11.6 핵심 개선:
+- **Timing Alpha Filter**: 97패턴 리서치 기반 3중 타이밍 게이트 (accel≥0, corr≥0.20, W3/W1≤2.5)
+  - `impulse_accel`: W3/W1 속도 가속도 (감속 임펄스 제거 → 패자 40% 필터)
+  - `corr_impulse_ratio`: ABC 정정 시간 / 임펄스 시간 (너무 짧은 정정 제거)
+  - `max_w3_w1_time_ratio`: W3/W1 바 비율 (지연된 W3 제거)
+  - 파라미터 비감응: accel -0.3~+0.3 동일 결과 → 과적합 아님
 
 #### v11.5 핵심 개선:
 - **Quality Scoring**: W2/W3/B retrace, C:A ratio, 구조적 규칙 5차원 0-100점 스코어. 임계값 40점 이하 패턴 제거
@@ -141,16 +148,15 @@ Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage 기�
 - **Tighter Fibonacci Ranges**: W3 extension min 1.272, C/A 0.786-2.000, C Fib tolerance 0.10
 - **Risk Filter**: entry-to-stop 거리 최대 3% 제한
 
-#### 백테스트 결과 (365일, 8심볼, sweep-optimized, relaxed mode):
-| 지표 | 값 |
-|------|-----|
-| Active Symbols | 8 |
-| Total Trades | 8 |
-| Win Rate | 75.0% |
-| Portfolio Return | +4.84% |
-| Portfolio MaxDD | 1.96% |
-| Sharpe Ratio | 1.11 |
-| Calmar Ratio | 2.47 |
+#### 백테스트 결과 (365일, 18심볼, timing alpha, best_refined):
+| 지표 | v11.5 | v11.6 (timing) |
+|------|-------|----------------|
+| Active Symbols | 8 | 12 |
+| Total Trades | 8 | 21 |
+| Portfolio Return | +4.84% | **+5.61%** |
+| Portfolio MaxDD | 1.96% | 1.10% |
+| Sharpe Ratio | 1.11 | **1.69** |
+| Calmar Ratio | 2.47 | **5.10** |
 
 #### 실행 방법
 
