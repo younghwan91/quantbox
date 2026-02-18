@@ -1,6 +1,6 @@
-# Advanced Algorithmic Guide for Quant Trading Agents: Maeoknam Strategy
+# Advanced Algorithmic Guide for Quant Trading Agents: Elliott Wave Championship Strategy
 
-This document codifies the practical trading techniques of trader Maeoknam, translating them into executable logic for a quantitative trading agent. It specifically details the geometric evaluation of impulse and corrective waves, alongside the mathematical leverage management techniques that served as the foundation for their world championship victory.
+This document codifies practical championship-level trading techniques, translating them into executable logic for a quantitative trading agent. It specifically details the geometric evaluation of impulse and corrective waves, alongside the mathematical leverage management techniques that served as the foundation for a world championship victory.
 
 ## 1. Asset Selection and Filtering Logic
 

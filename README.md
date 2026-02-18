@@ -69,7 +69,7 @@
 
 ### 전략 프레임워크
 - **Rubber Band Mean-Reversion (v11.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-20 심볼 화이트리스트
-- **Elliott Wave Strategy (v11.5)**: 매옥남 챔피언십 메소드 — ZigZag ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
+- **Elliott Wave Strategy (v11.5)**: ZigZag ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
   - 4h 타임프레임, EMA(20/50/100/200/500), RSI(14/9), MACD(12/26/9), Stochastic(14/3)
   - **Quality Scoring (v11.5)**: W2 retrace/W3 extension/B retrace/C:A ratio/구조적 규칙 5차원 0-100점 (임계: 40점)
   - **Risk-Sized Leverage (v11.5)**: `lev = min(2.0, 2%/stop_dist)` — 트레이드당 최대 2% 자기자본 위험으로 일관된 리스크 관리
@@ -166,7 +166,7 @@ quantbox/
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 컴포넌트
 │   ├── rubberband.py       # Rubber Band Scalper (기본, Numba 가속)
-│   ├── elliott.py          # Elliott Wave 전략 (매옥남 메소드, Numba 가속)
+│   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
 ├── backtest/               # 백테스팅 프레임워크
@@ -178,9 +178,10 @@ quantbox/
 
 scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
+├── download_extended_data.py # 장기 과거 데이터 다운로드
+├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
 ├── elliott_backtest.py     # Elliott Wave 365일 백테스트
-├── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
-└── download_15m_data.py    # 멀티 타임프레임 데이터 다운로드
+└── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
 tests/                      # 유닛 테스트 (514개)
 \`\`\`
 
