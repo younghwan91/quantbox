@@ -19,7 +19,7 @@ from quantbox.strategy.elliott import (
     check_macd_reversal,
     check_stoch_cross,
     compute_elliott_signals,
-    detect_abc_patterns,
+    detect_impulse_abc_patterns,
     detect_bearish_divergence,
     detect_bullish_divergence,
     detect_ending_diagonal,
@@ -178,7 +178,8 @@ class TestZigZagPivots:
 
     def test_flat_market_few_pivots(self):
         """Flat market with 3% threshold → very few pivots."""
-        prices = np.full(100, 100.0) + np.random.randn(100) * 0.5
+        rng = np.random.RandomState(42)
+        prices = np.full(100, 100.0) + rng.randn(100) * 0.5
         high = prices + 0.2
         low = prices - 0.2
 
@@ -299,12 +300,15 @@ class TestStochCross:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  ABC pattern detection tests
+#  5-Wave Impulse + ABC pattern detection tests
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestABCPatternDetection:
-    """ABC corrective wave pattern detection tests."""
+    """5-wave impulse + ABC corrective wave pattern detection tests.
+
+    Uses 9-pivot sequences per winning_strategy §3.1.
+    """
 
     def _make_pivots(self, sequence):
         """Build pivot arrays from (price, type) sequence."""
@@ -315,106 +319,106 @@ class TestABCPatternDetection:
         return idx, prices, types, n
 
     def test_valid_bearish_abc_long(self):
-        """Valid bearish ABC → long signal."""
-        # Low(100) → High(200) → Low_A(130) → High_B(175) → Low_C(120)
-        #  impulse = 100
-        #  wave_a = 200-130=70, wave_b = 175-130=45, wave_c = 175-120=55
-        #  b_retrace = 45/70 = 0.643 ✓ (0.40-0.72)
-        #  c_vs_a = 55/70 = 0.786 → slightly below 0.80 min
-        # Adjust: Low_C = 115 → wave_c = 175-115 = 60, c_vs_a = 60/70 = 0.857 ✓
-        # C near 0.618 Fib: H - 0.618*(H-L) = 200 - 61.8 = 138.2
-        # c_fib_dist = |115 - 138.2| / 100 = 0.232 → too far
-        # Adjust for better Fib: target C at ~138
-        # Let's use: Low(100) → High(200) → A(140) → B(180) → C(138)
-        #  wave_a = 60, wave_b = 40, wave_c = 42
-        #  b_retrace = 40/60 = 0.667 ✓
-        #  c_vs_a = 42/60 = 0.70 → below min. Adjust again.
-        # Better: Low(100)→High(200)→A(130)→B(172)→C(138)
-        #  wave_a=70, wave_b=42, wave_c=34 → c_vs_a=0.486 too low
-        # Let me just build a valid setup directly:
-        # Impulse L→H: 100→200 (impulse=100, fib618=138.2)
-        # A: 200→120 (wave_a=80)
-        # B: 120→160 (wave_b=40, b_ret=40/80=0.50 ✓)
-        # C: 160→130 (wave_c=30) → c_vs_a = 30/80 = 0.375 low
-        # Need c_vs_a >= 0.80: wave_c >= 64
-        # C: 160→96 (wave_c=64) → c_vs_a = 0.80 ✓
-        # C=96, fib618=138.2, dist=|96-138.2|/100=0.422 too far
-        # Make impulse smaller or C closer to fib:
-        # Impulse L→H: 100→150 (impulse=50, fib618=119.1)
-        # A: 150→120 (wave_a=30)
-        # B: 120→138 (wave_b=18, b_ret=0.60 ✓)
-        # C: 138→112 (wave_c=26, c_vs_a=0.867 ✓)
-        # C=112, fib618=119.1, dist=|112-119.1|/50=0.142 → close to tolerance
-        # Reduce tolerance slightly: Use C=118
-        # C: 138→118 (wave_c=20, c_vs_a=0.667) → too low again
-        # Let me use C=114
-        # C: 138→114 (wave_c=24, c_vs_a=0.80 ✓)
-        # dist=|114-119.1|/50=0.102 ✓
+        """Valid 5-wave bullish impulse + bearish ABC → long signal.
+
+        Impulse UP: W0(100)→W1(150)→W2(125)→W3(225)→W4(190)→W5(250)
+          wave1=50, w2_retrace=0.50, w3_ext=2.0, w4_retrace=0.35
+          W2>W0 ✓, W3>W1 ✓, W4>W1 ✓ (no wave4/wave1 overlap)
+        ABC DOWN: W5(250)→A(195)→B(230)→C(165)
+          wave_a=55, b_retrace=0.636, c_vs_a=1.182
+          total_impulse=150, fib618=157.3, c_fib_dist=0.051
+        """
         sequence = [
-            (100.0, -1),   # L (swing low)
-            (150.0, 1),    # H (swing high — impulse end)
-            (120.0, -1),   # A (swing low — first correction leg)
-            (138.0, 1),    # B (swing high — partial retrace)
-            (114.0, -1),   # C (swing low — entry zone)
+            (100.0, -1),   # W0 (low)
+            (150.0, 1),    # W1 (high)
+            (125.0, -1),   # W2 (low — 0.50 retrace of W1)
+            (225.0, 1),    # W3 (high — 2.0x extension of W1)
+            (190.0, -1),   # W4 (low — 0.35 retrace of W3, above W1)
+            (250.0, 1),    # W5 (high)
+            (195.0, -1),   # A (low)
+            (230.0, 1),    # B (high — 0.636 retrace of A)
+            (165.0, -1),   # C (low — near 0.618 fib of impulse)
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         cfg = ElliottConfig()
-        patterns = detect_abc_patterns(idx, prices, types, n, cfg)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, cfg)
 
         assert len(patterns) >= 1
         p = patterns[0]
         assert p['signal'] == 1  # Long
-        assert p['type'] == 'bearish_abc_long'
-        assert p['target_1'] == 138.0  # B level
-        assert p['target_2'] == 150.0  # H level
-        assert p['stop'] < 114.0  # Below C
+        assert p['type'] == 'bullish_impulse_abc_long'
+        # TP1 = B level (near-term target), TP2 = C + 1.618 × wave1
+        assert p['target_1'] == pytest.approx(230.0, rel=1e-3)  # B price
+        assert p['target_2'] == pytest.approx(165.0 + 1.618 * 50.0, rel=1e-3)
+        assert p['stop'] == pytest.approx(165.0 * 0.995, rel=1e-3)  # C × (1 - 0.5%)
+        assert 'quality' in p
+        assert p['quality'] > 0  # should have positive quality score
 
     def test_valid_bullish_abc_short(self):
-        """Valid bullish ABC → short signal."""
-        # High(150) → Low(100) → High_A(130) → Low_B(112) → High_C(136)
-        # impulse = 50 (down), fib618 = 100 + 0.618*50 = 130.9
-        # wave_a = 130-100 = 30, wave_b = 130-112 = 18, wave_c = 136-112 = 24
-        # b_retrace = 18/30 = 0.60 ✓
-        # c_vs_a = 24/30 = 0.80 ✓
-        # c_fib_dist = |136-130.9|/50 = 0.102 ✓
+        """Valid 5-wave bearish impulse + bullish ABC → short signal.
+
+        Impulse DOWN: W0(250)→W1(200)→W2(225)→W3(125)→W4(155)→W5(100)
+          wave1=50, w2_retrace=0.50, w3_ext=2.0, w4_retrace=0.40
+          W2<W0 ✓, W3<W1 ✓, W4<W1 ✓
+        ABC UP: W5(100)→A(157)→B(130)→C(185)
+          wave_a=57, b_ret=0.474, c_vs_a=0.965
+          total_impulse=150, fib618=100+92.7=192.7, dist=|185-192.7|/150=0.051
+        """
         sequence = [
-            (150.0, 1),    # H (swing high)
-            (100.0, -1),   # L (swing low — impulse end)
-            (130.0, 1),    # A (swing high — correction up)
-            (112.0, -1),   # B (swing low — partial retrace)
-            (136.0, 1),    # C (swing high — entry zone)
+            (250.0, 1),    # W0 (high)
+            (200.0, -1),   # W1 (low)
+            (225.0, 1),    # W2 (high — 0.50 retrace)
+            (125.0, -1),   # W3 (low — 2.0x extension)
+            (155.0, 1),    # W4 (high — 0.40 retrace, below W1)
+            (100.0, -1),   # W5 (low)
+            (157.0, 1),    # A (high)
+            (130.0, -1),   # B (low — 0.474 retrace of A)
+            (185.0, 1),    # C (high — near 0.618 fib)
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         cfg = ElliottConfig()
-        patterns = detect_abc_patterns(idx, prices, types, n, cfg)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, cfg)
 
         assert len(patterns) >= 1
         p = patterns[0]
         assert p['signal'] == -1  # Short
-        assert p['type'] == 'bullish_abc_short'
+        assert p['type'] == 'bearish_impulse_abc_short'
+        assert 'quality' in p
+        assert p['quality'] > 0  # should have positive quality score
 
     def test_invalid_b_exceeds_origin(self):
-        """B exceeding the origin invalidates the pattern."""
-        # B goes above H → invalid per winning_strategy §3.1
+        """B exceeding W5 (A origin) invalidates the pattern."""
         sequence = [
-            (100.0, -1),
-            (150.0, 1),    # H
-            (120.0, -1),
-            (155.0, 1),    # B > H → INVALID
-            (110.0, -1),
+            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
+            (190.0, -1), (250.0, 1),
+            (195.0, -1),
+            (255.0, 1),   # B > W5(250) → INVALID
+            (165.0, -1),
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         cfg = ElliottConfig()
-        patterns = detect_abc_patterns(idx, prices, types, n, cfg)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, cfg)
+        assert len(patterns) == 0
+
+    def test_wave4_intruding_wave1_rejected(self):
+        """Wave 4 entering Wave 1 territory → INVALID (cardinal rule)."""
+        sequence = [
+            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
+            (145.0, -1),  # W4=145 < W1=150 → INVALID overlap
+            (250.0, 1), (195.0, -1), (230.0, 1), (165.0, -1),
+        ]
+        idx, prices, types, n = self._make_pivots(sequence)
+        cfg = ElliottConfig()
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, cfg)
         assert len(patterns) == 0
 
     def test_insufficient_pivots(self):
-        """Less than 5 pivots → no patterns."""
-        idx = np.array([0, 10, 20], dtype=np.int64)
-        prices = np.array([100.0, 120.0, 105.0])
-        types = np.array([-1, 1, -1], dtype=np.int64)
+        """Less than 9 pivots → no patterns."""
+        idx = np.arange(5, dtype=np.int64) * 10
+        prices = np.array([100.0, 150.0, 125.0, 200.0, 180.0])
+        types = np.array([-1, 1, -1, 1, -1], dtype=np.int64)
         cfg = ElliottConfig()
-        patterns = detect_abc_patterns(idx, prices, types, 3, cfg)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, 5, cfg)
         assert len(patterns) == 0
 
 
@@ -634,16 +638,17 @@ class TestBacktestSignals:
         high = df['high'].values[-600:].astype(np.float64)
         low = df['low'].values[-600:].astype(np.float64)
 
-        signals = compute_elliott_signals(close, high, low, close)
+        signals, _ = compute_elliott_signals(close, high, low, close)
         assert len(signals) == len(close)
 
     def test_signals_are_valid_values(self, btc_4h_data):
-        """Signals must be -1, 0, or +1."""
+        """Signals must be valid leverage values: 0, ±0.4, ±1.0, ±2.0."""
         df = btc_4h_data
         close = df['close'].values[-600:].astype(np.float64)
         high = df['high'].values[-600:].astype(np.float64)
         low = df['low'].values[-600:].astype(np.float64)
 
-        signals = compute_elliott_signals(close, high, low, close)
+        signals, _ = compute_elliott_signals(close, high, low, close)
+        valid_values = {-2.0, -1.0, -0.4, 0.0, 0.4, 1.0, 2.0}
         unique = set(signals)
-        assert unique.issubset({-1.0, 0.0, 1.0})
+        assert unique.issubset(valid_values), f"Unexpected signal values: {unique - valid_values}"
