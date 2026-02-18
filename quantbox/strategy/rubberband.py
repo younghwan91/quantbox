@@ -2407,6 +2407,229 @@ class RubberBandStrategy:
         )
         return int(sigs[-1])
 
+    def diagnose_bar(
+        self,
+        symbol: str,
+        close_prices: np.ndarray,
+        btc_close_prices: np.ndarray | None = None,
+    ) -> dict:
+        """Compute all intermediate diagnostic values for the latest bar.
+
+        READ-ONLY: Does NOT modify any state. Call AFTER on_bar() to
+        capture the same-bar context without side effects.
+
+        Returns a dict with all pipeline stages for structured logging.
+        Designed for parameter optimization — every filter gate is exposed.
+        """
+        cfg = self.config
+        diag: dict = {
+            'symbol': symbol,
+            'price': float(close_prices[-1]) if len(close_prices) > 0 else 0.0,
+            'move_8bar': 0.0,
+            'threshold': cfg.threshold,
+            'passed_threshold': False,
+            'regime': None,          # 'risk_on' | 'risk_off' | None
+            'btc_mom': 0.0,
+            'asset_trend': None,     # 'up' | 'down' | None
+            'entry_type': None,      # 'classic_long'|'classic_short'|'sympathy_long'|'sympathy_short'
+            'confidence': 0,
+            'min_confidence': cfg.min_confidence,
+            'passed_confidence': False,
+            'evidence': {},          # per-indicator breakdown
+            'raw_signal': 0,         # signal from compute_signals before MTF
+            'mtf_trend_up': None,    # True/False/None
+            'mtf_blocked': False,
+            'final_signal': 0,
+        }
+
+        if len(close_prices) < cfg.lookback + 1:
+            return diag
+
+        # 8-bar move
+        ret = float(close_prices[-1] / close_prices[-cfg.lookback - 1] - 1.0)
+        diag['move_8bar'] = ret
+
+        if btc_close_prices is None or cfg.entry_mode != 'confidence':
+            return diag
+
+        min_bars = max(
+            cfg.lookback, cfg.btc_directional_period,
+            cfg.btc_regime_period, cfg.asset_trend_period,
+            cfg.rsi_period, cfg.vol_period,
+        ) + 1
+        if len(btc_close_prices) < min_bars or len(close_prices) < min_bars:
+            return diag
+
+        n = len(close_prices)
+
+        # ── Indicators (same as compute_signals_v9, last bar only) ──
+        # BTC regime
+        btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period:]))
+        is_risk_on = float(btc_close_prices[-1]) > btc_sma_val
+        diag['regime'] = 'risk_on' if is_risk_on else 'risk_off'
+
+        # BTC momentum
+        btc_mom = float(btc_close_prices[-1] / btc_close_prices[-cfg.btc_directional_period - 1] - 1.0)
+        diag['btc_mom'] = btc_mom
+
+        # Asset trend
+        asset_sma_val = float(np.mean(close_prices[-cfg.asset_trend_period:]))
+        is_uptrend = float(close_prices[-1]) > asset_sma_val
+        diag['asset_trend'] = 'up' if is_uptrend else 'down'
+
+        # RSI (approximate using last portion — same Wilder smoothing)
+        rsi_arr = _compute_rsi_inline(close_prices, cfg.rsi_period)
+        rsi_val = float(rsi_arr[-1])
+
+        # Volume
+        vol_data = self._volume_data.get(symbol)
+        taker_data = self._taker_data.get(symbol)
+        vol_ratio = 0.0
+        taker_ratio_val = 0.5
+        if vol_data is not None and len(vol_data) == n:
+            vol_sma_arr = _compute_sma_inline(vol_data, cfg.vol_period)
+            vol_sma_val = float(vol_sma_arr[-1])
+            if not np.isnan(vol_sma_val) and vol_sma_val > 0:
+                vol_ratio = float(vol_data[-1]) / vol_sma_val
+            if taker_data is not None and len(taker_data) == n and float(vol_data[-1]) > 0:
+                taker_ratio_val = float(taker_data[-1]) / float(vol_data[-1])
+
+        # Stochastic
+        stoch_k_val, stoch_d_val = 50.0, 50.0
+        if cfg.stoch_enabled:
+            high_data = self._high_data.get(symbol, close_prices)
+            low_data = self._low_data.get(symbol, close_prices)
+            sk, sd = _compute_stochastic_inline(high_data, low_data, close_prices,
+                                                 cfg.stoch_k_period, cfg.stoch_d_period)
+            stoch_k_val, stoch_d_val = float(sk[-1]), float(sd[-1])
+
+        # MACD
+        macd_hist_val, macd_hist_prev = 0.0, 0.0
+        if cfg.macd_enabled and n >= cfg.macd_slow + cfg.macd_signal_period:
+            _, _, mhist = _compute_macd_inline(close_prices, cfg.macd_fast,
+                                                cfg.macd_slow, cfg.macd_signal_period)
+            macd_hist_val = float(mhist[-1])
+            macd_hist_prev = float(mhist[-2]) if n > 1 else 0.0
+
+        # SMA distance
+        sma_dist = abs(float(close_prices[-1]) - asset_sma_val) / asset_sma_val if asset_sma_val > 0 else 0.0
+
+        diag['evidence'] = {
+            'rsi': round(rsi_val, 2),
+            'vol_ratio': round(vol_ratio, 3),
+            'taker_ratio': round(taker_ratio_val, 4),
+            'sma_dist': round(sma_dist, 4),
+            'stoch_k': round(stoch_k_val, 2),
+            'stoch_d': round(stoch_d_val, 2),
+            'macd_hist': round(macd_hist_val, 6),
+            'macd_hist_prev': round(macd_hist_prev, 6),
+        }
+
+        # ── Threshold gate ──
+        diag['passed_threshold'] = abs(ret) > cfg.threshold
+        if not diag['passed_threshold']:
+            return diag
+
+        # ── Confidence scoring (mirrors compute_signals_v9 last bar) ──
+        confidence = 1  # BTC regime confirmed
+        entry_type = None
+
+        if is_risk_on:
+            if ret < -cfg.threshold and is_uptrend:
+                entry_type = 'classic_long'
+                if rsi_val < 40: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val < 0.45: confidence += 1
+                if sma_dist < 0.02: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                    if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                        confidence += 1
+            elif ret > cfg.threshold and not is_uptrend:
+                entry_type = 'classic_short'
+                if rsi_val > 60: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val > 0.55: confidence += 1
+                if sma_dist < 0.02: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                    if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                        confidence += 1
+            else:
+                # Threshold passed but trend/direction mismatch
+                entry_type = 'risk_on_blocked'
+        else:
+            if ret < -cfg.threshold and btc_mom < 0:
+                entry_type = 'sympathy_long'
+                if rsi_val < 35: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val < 0.42: confidence += 1
+                if btc_mom < -0.01: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                    if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                        confidence += 1
+            elif ret > cfg.threshold and btc_mom > 0:
+                entry_type = 'sympathy_short'
+                if rsi_val > 65: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val > 0.58: confidence += 1
+                if btc_mom > 0.01: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                    if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                        confidence += 1
+            else:
+                entry_type = 'risk_off_blocked'
+
+        diag['entry_type'] = entry_type
+        diag['confidence'] = confidence
+        diag['passed_confidence'] = confidence >= cfg.min_confidence
+
+        # Determine raw signal (before MTF)
+        raw_signal = 0
+        if entry_type in ('classic_long', 'sympathy_long') and confidence >= cfg.min_confidence:
+            raw_signal = 1
+        elif entry_type in ('classic_short', 'sympathy_short') and confidence >= cfg.min_confidence:
+            raw_signal = -1
+        diag['raw_signal'] = raw_signal
+
+        # ── MTF filter ──
+        htf_close = self._htf_close_data.get(symbol)
+        if cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
+            sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period:]))
+            trend_up = float(htf_close[-1]) > sma_4h
+            diag['mtf_trend_up'] = trend_up
+
+            if raw_signal > 0 and not trend_up:
+                diag['mtf_blocked'] = True
+                diag['final_signal'] = 0
+            elif raw_signal < 0 and trend_up:
+                diag['mtf_blocked'] = True
+                diag['final_signal'] = 0
+            else:
+                diag['final_signal'] = raw_signal
+        else:
+            diag['final_signal'] = raw_signal
+
+        return diag
+
     def was_mtf_confirmed(self, symbol: str) -> bool:
         """Check if the last signal for a symbol was MTF-confirmed.
 
