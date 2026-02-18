@@ -49,6 +49,18 @@ from quantbox.core.limit_chaser import (
     ChaseConfig, ChaseFillStatus, ChaseResult, LimitOrderChaser,
 )
 from quantbox.core.settings import get_settings
+from quantbox.core.terminal_ui import (
+    Color,
+    confirm_live_trading,
+    format_cycle_header,
+    format_entry,
+    format_exit,
+    format_scan_summary,
+    format_session_summary,
+    print_banner,
+    print_startup_complete,
+    print_system_info,
+)
 from quantbox.notifications.bot import (
     BotCommand, CommandType, DiscordBotRunner,
 )
@@ -1047,8 +1059,16 @@ class RubberBandScalper:
             cost = fill_qty * fill_price * cfg.cost_per_side
             self._paper_balance -= cost
 
+        _side_str = 'LONG' if signal == 1 else 'SHORT'
+        print(format_entry(
+            symbol=symbol,
+            side=_side_str,
+            price=fill_price,
+            leverage=lev_int,
+            size_usd=fill_qty * fill_price,
+        ))
         logger.info(
-            f"[{symbol}] OPENED {'LONG' if signal == 1 else 'SHORT'} "
+            f"[{symbol}] OPENED {_side_str} "
             f"qty={fill_qty:.6f} @ ${fill_price:.4f} "
             f"(notional=${fill_qty * fill_price:.2f}, "
             f"lev={lev_int}x, move={move_size*100:.2f}%)"
@@ -1465,10 +1485,19 @@ class RubberBandScalper:
         _diag_logger.log_exit(self._cycle_count,
                               datetime.now(timezone.utc).isoformat(), trade)
 
-        emoji = '💰' if net_pnl > 0 else '💸'
+        _exit_side = 'LONG' if pos['signal'] == 1 else 'SHORT'
+        print(format_exit(
+            symbol=symbol,
+            side=_exit_side,
+            entry_price=pos['entry_price'],
+            exit_price=fill_price,
+            pnl_usd=net_pnl,
+            pnl_pct=pnl_pct * 100,
+            reason=reason,
+            bars_held=pos['bars_held'],
+        ))
         logger.info(
-            f"[{symbol}] CLOSED ({reason}): "
-            f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
+            f"[{symbol}] CLOSED ({reason}): {_exit_side} "
             f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
             f"held={pos['bars_held']} bars"
         )
@@ -1517,10 +1546,17 @@ class RubberBandScalper:
         if self._stop_requested:
             return
 
+        header = format_cycle_header(
+            cycle=self._cycle_count,
+            balance=balance,
+            n_active=self.strategy.n_active,
+            max_slots=self.config.max_concurrent,
+        )
+        print(header)
         logger.info(
-            f"── Cycle #{self._cycle_count} | "
+            f"Cycle #{self._cycle_count} | "
             f"Balance=${balance:.2f} | "
-            f"Positions={self.strategy.n_active}/{self.config.max_concurrent} ──"
+            f"Positions={self.strategy.n_active}/{self.config.max_concurrent}"
         )
 
         # 1. Risk check
@@ -1661,14 +1697,14 @@ class RubberBandScalper:
         candidates.sort(key=lambda x: x[2], reverse=True)
 
         # ── Diagnostic: log scan summary every cycle ──
+        top_movers = sorted(moves_seen, key=lambda x: x[1], reverse=True)[:3]
+        print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
         if candidates:
             cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
             logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
         else:
-            # Show top 3 movers so user knows scans ARE running
             if moves_seen:
-                moves_seen.sort(key=lambda x: x[1], reverse=True)
-                top3 = [f"{s}({m*100:.2f}%)" for s, m in moves_seen[:3]]
+                top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
                 logger.info(
                     f"No candidates — top moves: {', '.join(top3)} "
                     f"(need >{self.config.threshold*100:.1f}%)"
@@ -2019,6 +2055,7 @@ class RubberBandScalper:
             logger.error("No symbols available")
             return
 
+        self._print_startup_banner(balance, len(symbols))
         self._cycle(symbols)
 
     def run_continuous(self) -> None:
@@ -2035,6 +2072,8 @@ class RubberBandScalper:
         self._load_state()
 
         mode_str = "PAPER" if self.paper_mode else "LIVE"
+        n_symbols = len(self.config.symbol_whitelist) if self.config.symbol_whitelist else 0
+        self._print_startup_banner(balance, n_symbols)
         logger.info(f"Starting continuous trading ({mode_str})")
         logger.info(f"Initial balance: ${balance:.2f}")
 
@@ -2127,6 +2166,21 @@ class RubberBandScalper:
             if self._initial_balance > 0 else 0
         )
 
+        best = max(self._trade_history, key=lambda t: t['pnl_usd']) if self._trade_history else None
+        worst = min(self._trade_history, key=lambda t: t['pnl_usd']) if self._trade_history else None
+
+        # Terminal summary
+        print(format_session_summary(
+            cycles=self._cycle_count,
+            n_trades=n_trades,
+            win_rate=wr,
+            total_pnl=total_pnl,
+            balance=balance_now,
+            session_roi=session_return,
+            best_trade=best,
+            worst_trade=worst,
+        ))
+
         fields = [
             {'name': 'Cycles', 'value': str(self._cycle_count), 'inline': True},
             {'name': 'Trades', 'value': f'{n_trades} (WR {wr:.0f}%)', 'inline': True},
@@ -2134,10 +2188,9 @@ class RubberBandScalper:
             {'name': 'Balance', 'value': f'${balance_now:,.2f}', 'inline': True},
             {'name': 'Session ROI', 'value': f'{session_return:+.2f}%', 'inline': True},
         ]
-        if self._trade_history:
-            best = max(self._trade_history, key=lambda t: t['pnl_usd'])
-            worst = min(self._trade_history, key=lambda t: t['pnl_usd'])
+        if best:
             fields.append({'name': 'Best', 'value': f"{best['symbol']} ${best['pnl_usd']:+,.2f}", 'inline': True})
+        if worst:
             fields.append({'name': 'Worst', 'value': f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", 'inline': True})
 
         self.discord.send(embed={
@@ -2146,6 +2199,30 @@ class RubberBandScalper:
             'fields': fields,
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
+
+    def _print_startup_banner(self, balance: float, n_symbols: int) -> None:
+        """Print the startup banner with system info."""
+        settings = get_settings()
+        mode_str = 'PAPER' if self.paper_mode else 'LIVE'
+        print_banner()
+        print_system_info(
+            mode=mode_str,
+            strategy=self.strategy_name,
+            balance=balance,
+            n_symbols=n_symbols,
+            max_slots=self.config.max_concurrent,
+            leverage_base=self.config.base_leverage,
+            leverage_max=self.config.max_leverage,
+            lookback=self.config.lookback,
+            threshold=self.config.threshold,
+            target=self.config.target_retrace,
+            stop_mult=self.config.stop_mult,
+            max_hold=self.config.max_hold,
+            entry_mode=self.config.entry_mode,
+            min_confidence=self.config.min_confidence,
+            testnet=settings.binance_testnet,
+        )
+        print_startup_complete(mode_str)
 
     def _next_bar_time(self) -> datetime:
         """Calculate the next 15-minute bar close time (+5s buffer)."""
@@ -2298,6 +2375,11 @@ def main():
         config=config,
         strategy_name=args.strategy,
     )
+
+    # ── Live trading confirmation gate ──
+    if not args.paper:
+        if not confirm_live_trading():
+            sys.exit(0)
 
     if args.once:
         scalper.run_once()
