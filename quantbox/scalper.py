@@ -541,6 +541,13 @@ class RubberBandScalper:
                 reduce_only=reduce_only,
             )
 
+            if result.status == ChaseFillStatus.NO_POSITION:
+                logger.warning(
+                    f"[{symbol}] NO POSITION on exchange — "
+                    f"reduceOnly rejected. Position already closed."
+                )
+                return {'status': 'NO_POSITION'}
+
             if result.status in (
                 ChaseFillStatus.FILLED, ChaseFillStatus.FALLBACK_MARKET
             ):
@@ -1645,9 +1652,11 @@ class RubberBandScalper:
     ) -> bool:
         """Close an existing position.
 
-        Returns True if closed successfully.
+        Returns True if closed successfully.  Also returns True when the
+        exchange reports NO_POSITION (-4118/-2022) because the position is
+        already gone — we just clean up our internal state.
         """
-        pos = self.strategy.close_position(symbol)
+        pos = self.strategy._positions.get(symbol)
         if pos is None:
             return False
 
@@ -1670,9 +1679,25 @@ class RubberBandScalper:
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
         result = self._place_order(symbol, side, quantity, reduce_only=True)
+
+        # ── NO_POSITION: exchange says position already gone ──
+        if isinstance(result, dict) and result.get('status') == 'NO_POSITION':
+            logger.warning(
+                f"[{symbol}] Position already closed on exchange — "
+                f"cleaning up internal state (reason={reason})"
+            )
+            self.discord.send(content=(
+                f"\u26a0\ufe0f **NO POSITION** [{symbol}] — "
+                f"Position gone on exchange. State cleanup."
+            ))
+            # Remove from internal tracking
+            self.strategy.close_position(symbol)
+            self._save_state()
+            return True
+
         if result is None:
-            # Failed to close — re-add position for retry (SL/TP already
-            # cancelled, so we need to re-place them)
+            # Failed to close — position stays in state for retry
+            # SL/TP already cancelled, so re-place them
             new_sl_oid = self._place_server_stop_loss(
                 symbol=symbol,
                 signal=pos['signal'],
@@ -1689,17 +1714,19 @@ class RubberBandScalper:
                 move_size=pos['move_size'],
                 target_retrace=self.config.target_retrace,
             )
-            self.strategy.open_position(
-                symbol=symbol,
-                signal=pos['signal'],
-                entry_price=pos['entry_price'],
-                notional=pos['notional'],
-                leverage=pos['leverage'],
-                move_size=pos['move_size'],
-                entry_stop_mult=pos.get('entry_stop_mult'),
-                server_sl_order_id=new_sl_oid,
-                server_tp_order_id=new_tp_oid,
-            )
+            # Update existing position's server order IDs
+            # Guard against sentinel values being stored as order IDs
+            if new_sl_oid and new_sl_oid != 'WOULD_TRIGGER':
+                pos['server_sl_order_id'] = new_sl_oid
+            else:
+                pos['server_sl_order_id'] = None
+            pos['server_tp_order_id'] = new_tp_oid
+            self._save_state()
+            return False
+
+        # ── Successful close — NOW remove from state ──
+        pos = self.strategy.close_position(symbol)
+        if pos is None:
             return False
 
         fill_price = float(result['avgPrice'])

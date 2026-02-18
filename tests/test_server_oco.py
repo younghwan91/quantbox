@@ -745,3 +745,74 @@ class TestForceCloseOnWouldTrigger:
             # positional arg check
             args = scalper._place_order.call_args[0]
             assert args[3] is True  # 4th positional = reduce_only
+
+    def test_close_position_no_position_cleans_state(self):
+        """When exchange returns NO_POSITION, internal state is cleaned."""
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper._place_order = MagicMock(
+            return_value={'status': 'NO_POSITION'},
+        )
+
+        scalper.strategy.open_position(
+            symbol='FETUSDT', signal=1, entry_price=0.1686,
+            notional=100.0, leverage=3, move_size=0.02,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
+        )
+
+        result = scalper._close_position('FETUSDT', 'force_sl_breach', 0.0)
+
+        assert result is True
+        # Position must be gone from state
+        assert 'FETUSDT' not in scalper.strategy._positions
+        scalper._save_state.assert_called()
+
+    def test_close_position_failure_keeps_state(self):
+        """When close order fails, position stays in state for retry."""
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper._place_order = MagicMock(return_value=None)
+        # Mock SL/TP re-placement
+        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
+        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+
+        scalper.strategy.open_position(
+            symbol='FETUSDT', signal=1, entry_price=0.1686,
+            notional=100.0, leverage=3, move_size=0.02,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
+        )
+
+        result = scalper._close_position('FETUSDT', 'stop_loss', 0.16)
+
+        assert result is False
+        # Position must still be in state
+        assert 'FETUSDT' in scalper.strategy._positions
+        # New SL/TP must be stored
+        pos = scalper.strategy._positions['FETUSDT']
+        assert pos['server_sl_order_id'] == 'sl_new'
+        assert pos['server_tp_order_id'] == 'tp_new'
+
+    def test_would_trigger_not_stored_as_order_id(self):
+        """WOULD_TRIGGER sentinel must not be saved as server_sl_order_id."""
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper._place_order = MagicMock(return_value=None)
+        scalper._place_server_stop_loss = MagicMock(
+            return_value='WOULD_TRIGGER',
+        )
+        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+
+        scalper.strategy.open_position(
+            symbol='FETUSDT', signal=1, entry_price=0.1686,
+            notional=100.0, leverage=3, move_size=0.02,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
+        )
+
+        scalper._close_position('FETUSDT', 'stop_loss', 0.16)
+
+        pos = scalper.strategy._positions['FETUSDT']
+        assert pos['server_sl_order_id'] is None
+        assert pos['server_sl_order_id'] != 'WOULD_TRIGGER'
