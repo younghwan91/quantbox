@@ -18,8 +18,9 @@
 7. [Sweet Spot Analysis](#7-sweet-spot-analysis)
 8. [Overfitting Assessment](#8-overfitting-assessment)
 9. [Live Regime Viability](#9-live-regime-viability)
-10. [Conclusions & Recommendations](#10-conclusions--recommendations)
-11. [Appendix: Raw Data & Reproduction Steps](#11-appendix-raw-data--reproduction-steps)
+10. [Experiment 3: Leverage Optimization (14 variants)](#10-experiment-3-leverage-optimization-14-variants)
+11. [Conclusions & Recommendations](#11-conclusions--recommendations)
+12. [Appendix: Raw Data & Reproduction Steps](#12-appendix-raw-data--reproduction-steps)
 
 ---
 
@@ -474,7 +475,71 @@ For `2.5x_f1.5` (recommended sweet spot):
 
 ---
 
-## 10. Conclusions & Recommendations
+## 10. Experiment 3: Leverage Optimization (14 variants)
+
+### Motivation
+
+The adaptive `2.5x_f1` variant was chosen as the production candidate (highest OOS Sharpe 8.23, OOS/IS 1.09, 5,670 trades). With 5.5× more trades than the fixed baseline, the current leverage setting (base=1.5×, MTF mult=2.5×, effective=3.75×) may not be optimal — more frequent trading can compound leverage risk differently.
+
+### Method
+
+Systematic grid of 14 leverage combinations:
+- **Base leverage:** 1.0×, 1.5×, 2.0×
+- **MTF multiplier:** 1.0×, 1.5×, 2.0×, 2.5×, 3.0×
+- Effective leverage = base × MTF multiplier
+- All other parameters fixed to `2.5x_f1` adaptive config
+- Same walk-forward validation (IS=182d, OOS=183d)
+- Same cost model (0.04%/side + funding fee)
+
+### Results
+
+| Config | Eff. Lev | ΣRet% | GeoRet% | Sharpe | MDD% | Calmar | OOS/IS | Sharpe/MDD |
+|---|---|---|---|---|---|---|---|---|
+| 1.0x_mtf1.0 (no lev) | 1.0× | +3,348 | +155.4 | **8.13** | **5.2** | 30.1 | 1.09 | **1.572** |
+| 1.0x_mtf1.5 | 1.5× | +6,830 | +301.2 | 8.06 | 7.7 | 39.0 | 1.09 | 1.045 |
+| 1.0x_mtf2.0 | 2.0× | +12,585 | +523.2 | 8.00 | 10.2 | 51.1 | 1.09 | 0.781 |
+| 1.0x_mtf2.5 | 2.5× | +22,028 | +857.4 | 7.94 | 12.7 | 67.3 | 1.09 | 0.623 |
+| 1.0x_mtf3.0 | 3.0× | +37,383 | +1,354.5 | 7.88 | 15.2 | 89.0 | 1.09 | 0.517 |
+| 1.5x_mtf1.0 | 1.5× | +6,830 | +301.2 | 8.06 | 7.7 | 39.0 | 1.09 | 1.045 |
+| 1.5x_mtf1.5 | 2.25× | +16,730 | +673.5 | 7.97 | 11.5 | 58.6 | 1.09 | 0.693 |
+| 1.5x_mtf2.0 | 3.0× | +37,383 | +1,354.5 | 7.88 | 15.2 | 89.0 | 1.09 | 0.517 |
+| **1.5x_mtf2.5 (current)** | **3.75×** | **+79,523** | **+2,567.5** | **7.78** | **18.9** | **135.9** | **1.09** | **0.412** |
+| 1.5x_mtf3.0 | 4.5× | +163,384 | +4,671.8 | 7.69 | 22.5 | 207.7 | 1.08 | 0.342 |
+| 2.0x_mtf1.0 | 2.0× | +12,585 | +523.2 | 8.00 | 10.2 | 51.1 | 1.09 | 0.781 |
+| 2.0x_mtf1.5 | 3.0× | +37,383 | +1,354.5 | 7.88 | 15.2 | 89.0 | 1.09 | 0.517 |
+| 2.0x_mtf2.0 | 4.0× | +101,451 | +3,147.1 | 7.75 | 20.1 | 156.6 | 1.09 | 0.386 |
+| 2.0x_mtf2.5 | 5.0× | +259,693 | +6,835.5 | 7.62 | 24.9 | 275.0 | 1.08 | 0.307 |
+
+### Key Findings
+
+1. **OOS/IS is rock-solid at 1.08–1.09 across ALL leverage levels.** Leverage choice has zero impact on walk-forward robustness. No overfitting risk from leverage selection.
+
+2. **Sharpe monotonically decreases with leverage** (8.13 → 7.62) because drawdowns compound asymmetrically. The no-leverage variant has the purest risk-adjusted quality.
+
+3. **Sharpe/MDD efficiency degrades rapidly with leverage:**
+   - 1.0× effective: 1.572 (best)
+   - 2.0× effective: 0.781
+   - **3.75× current: 0.412**
+   - 5.0× effective: 0.307
+
+4. **Trade count is identical (5,670) across all variants** — leverage only affects position sizing, not signal generation.
+
+5. **The tradeoff is purely risk appetite:**
+   - Lower leverage → higher Sharpe, lower MDD, better efficiency
+   - Higher leverage → higher absolute returns, rapidly diminishing risk-adjusted quality
+
+### Decision
+
+**Keep current leverage (base=1.5×, MTF=2.5×, effective=3.75×).** Rationale:
+- Sharpe 7.78 is still excellent (OOS 8.49)
+- MDD 18.9% is within acceptable bounds for a scalping system
+- Calmar ratio 135.9 is exceptional
+- The 5.5× more trades from adaptive threshold don't degrade leverage quality (OOS/IS unchanged)
+- Current production infrastructure is already configured for this leverage level
+
+---
+
+## 11. Conclusions & Recommendations
 
 ### Key Findings
 
@@ -486,13 +551,20 @@ For `2.5x_f1.5` (recommended sweet spot):
 
 4. **Live viability confirmed.** Even the most conservative variant generates more signals than the fixed strategy in the current low-vol regime.
 
-### Recommended Variants for Further Evaluation
+5. **Leverage is independent of threshold choice.** The current 3.75× effective leverage performs identically on robustness metrics (OOS/IS) across all leverage levels tested. No re-optimization needed.
 
-| Priority | Variant | Why |
+### Chosen Configuration
+
+| Parameter | Value | Rationale |
 |---|---|---|
-| **Primary** | `2.5x_f1.5` | Best balance: OOS Sharpe 7.94, OOS/IS 1.13, 4,324 trades, WR 68.3%, L30d=367. Floor=1.5% is the current production default. |
-| **Conservative** | `3.0x_f1.5` | Fewer trades (2,792), higher WR (70.3%), tighter MDD (14.3%), but still 2× fixed activity. |
-| **Aggressive** | `2.5x_f1` | Highest OOS Sharpe (8.23), but 5,670 trades may have execution friction. |
+| **Variant** | `2.5x_f1` | Highest OOS Sharpe (8.23), OOS/IS 1.09 |
+| **ATR multiplier** | 2.5 | Balances sensitivity and noise |
+| **Threshold floor** | 1.0% | Catches low-vol regime entries |
+| **ATR period** | 48 bars (12h) | Smooth enough to avoid whipsaws |
+| **Threshold cap** | 6.0% | Prevents extreme-vol false signals |
+| **Base leverage** | 1.5× | Current production default (kept) |
+| **MTF multiplier** | 2.5× | Current production default (kept) |
+| **Effective leverage** | 3.75× | Current production default (kept) |
 
 ### Outstanding Risks
 
@@ -503,7 +575,8 @@ For `2.5x_f1.5` (recommended sweet spot):
 
 ### Next Steps
 
-- [ ] Decide on variant to implement in production
+- [x] Decide on variant to implement in production → **`2.5x_f1`**
+- [x] Leverage optimization → **Keep current 3.75× (no change needed)**
 - [ ] Implement adaptive threshold in `quantbox/strategy/rubberband.py`
 - [ ] Add settings: `rb_atr_period`, `rb_atr_multiplier`, `rb_threshold_floor`, `rb_threshold_cap`
 - [ ] Create feature branch and run full test suite
@@ -511,7 +584,7 @@ For `2.5x_f1.5` (recommended sweet spot):
 
 ---
 
-## 11. Appendix: Raw Data & Reproduction Steps
+## 12. Appendix: Raw Data & Reproduction Steps
 
 ### File Inventory
 
@@ -519,7 +592,9 @@ For `2.5x_f1.5` (recommended sweet spot):
 |---|---|
 | `scripts/rb_adaptive_ab_test.py` | Experiment 1: Initial A/B test (5 variants) |
 | `scripts/rb_adaptive_sweep.py` | Experiment 2: Walk-forward sweep (18 variants) |
+| `scripts/leverage_ab_test.py` | Experiment 3: Leverage optimization (14 variants) |
 | `logs/sweep_v2_results.txt` | Full output of Experiment 2 |
+| `logs/leverage_ab_results.txt` | Full output of Experiment 3 |
 | `data/cache_extended/*.npz` | Cached Binance data (365d, 20 symbols, 15m + 4h) |
 
 ### Exact Reproduction Steps
