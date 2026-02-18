@@ -49,7 +49,8 @@ Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. ATR 기�
   - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
   - 변동성 높은 시장에서는 임계값 자동 확대, 낮은 시장에서는 타이트하게 조정
   - 레버리지 최적화: 1×~5× 그리드 → 현행 3.75× 유지 결정
-- **Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어
+- **Server-Side Stop-Loss**: 바이낸스 Algo Order API로 클라이언트 크래시 방어
+  - **v11.4.2 Bracket Repair**: 복원된 포지션의 누락된 SL/TP를 자동 복구
 - **v9.0 Fibonacci Exit**: target 0.382, stop 0.786 (R:R 0.486, Calmar +29%)
 - **v9.0 S+R+M Confluence**: MACD(12,26,14) + Stochastic(3,3) 컨피던스 증거
 - **v7.0 MTF Confirmation**: 4h SMA(12) 트렌드 필터 — MDD -74%, Calmar +275%
