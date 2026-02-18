@@ -31,6 +31,7 @@ class ChaseFillStatus(Enum):
     FALLBACK_MARKET = "fallback_market"
     FAILED = "failed"
     TIMEOUT = "timeout"
+    NO_POSITION = "no_position"  # -4118/-2022: position already closed
 
 
 @dataclass
@@ -265,7 +266,20 @@ class LimitOrderChaser:
                     f"(chase #{chase_count}, reduceOnly={reduce_only})"
                 )
             except Exception as e:
+                err_str = str(e)
                 logger.error(f"[{symbol}] Limit order failed: {e}")
+                # -4118: ReduceOnly order failed (no position exists)
+                # -2022: ReduceOnly order rejected
+                if '-4118' in err_str or '-2022' in err_str:
+                    return ChaseResult(
+                        status=ChaseFillStatus.NO_POSITION,
+                        filled_quantity=0.0,
+                        avg_price=0.0,
+                        order_id='',
+                        chase_count=chase_count,
+                        elapsed_seconds=time.monotonic() - start_time,
+                        maker_fill=False,
+                    )
                 break
 
             # 4. Wait and check fill
@@ -402,6 +416,16 @@ class LimitOrderChaser:
                 symbol, side, remaining_qty, step_size, quantity_precision,
                 reduce_only=reduce_only,
             )
+            if market_result == 'NO_POSITION':
+                return ChaseResult(
+                    status=ChaseFillStatus.NO_POSITION,
+                    filled_quantity=0.0,
+                    avg_price=0.0,
+                    order_id='',
+                    chase_count=chase_count,
+                    elapsed_seconds=time.monotonic() - start_time,
+                    maker_fill=False,
+                )
             if market_result is not None:
                 mkt_qty, mkt_price, mkt_oid = market_result
                 weighted_price_sum += mkt_qty * mkt_price
@@ -530,7 +554,11 @@ class LimitOrderChaser:
                 symbol, side, quantity, order_id
             )
         except Exception as e:
+            err_str = str(e)
             logger.error(f"[{symbol}] Market fallback FAILED: {e}")
+            # -4118/-2022: position already gone — not a real error
+            if '-4118' in err_str or '-2022' in err_str:
+                return 'NO_POSITION'
             return None
 
     def _verify_market_order(
