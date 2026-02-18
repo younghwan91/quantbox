@@ -950,6 +950,71 @@ class RubberBandScalper:
                     self._record_server_fill(
                         sym, fill_price, fill_qty, 'server_sl',
                     )
+                    continue
+
+            # ═══ v11.4.2 BRACKET REPAIR: Place missing SL/TP for restored positions ═══
+            # Positions restored from state may have None algoIds (e.g. old session
+            # failed to place them). Detect and repair to ensure server-side protection.
+            missing_sl = sl_oid is None
+            missing_tp = tp_oid is None
+
+            if missing_sl or missing_tp:
+                quantity = pos['notional'] / pos['entry_price']
+                quantity = self._round_qty(quantity, sym)
+                signal = pos['signal']
+                entry_price = pos['entry_price']
+                move_size = pos.get('move_size', 0.03)
+                stop_mult = pos.get(
+                    'entry_stop_mult', self.config.stop_mult,
+                )
+
+                if missing_sl:
+                    new_sl = self._place_server_stop_loss(
+                        symbol=sym, signal=signal, quantity=quantity,
+                        entry_price=entry_price, move_size=move_size,
+                        stop_mult=stop_mult,
+                    )
+                    if new_sl:
+                        pos['server_sl_order_id'] = new_sl
+                        logger.info(
+                            f"[{sym}] BRACKET REPAIR: SL placed "
+                            f"algoId={new_sl}"
+                        )
+                    else:
+                        logger.error(
+                            f"[{sym}] BRACKET REPAIR FAILED: "
+                            f"Could not place SL — position UNPROTECTED"
+                        )
+
+                if missing_tp:
+                    new_tp = self._place_server_take_profit(
+                        symbol=sym, signal=signal, quantity=quantity,
+                        entry_price=entry_price, move_size=move_size,
+                        target_retrace=self.config.target_retrace,
+                    )
+                    if new_tp:
+                        pos['server_tp_order_id'] = new_tp
+                        logger.info(
+                            f"[{sym}] BRACKET REPAIR: TP placed "
+                            f"algoId={new_tp}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[{sym}] BRACKET REPAIR: TP failed — "
+                            f"client-side TP still active"
+                        )
+
+                if missing_sl or missing_tp:
+                    self._save_state()
+                    sl_id = pos.get('server_sl_order_id')
+                    tp_id = pos.get('server_tp_order_id')
+                    logger.info(
+                        f"[{sym}] Bracket repair complete: "
+                        f"SL={'OK' if sl_id else 'MISSING'} "
+                        f"(algoId={sl_id}) "
+                        f"TP={'OK' if tp_id else 'MISSING'} "
+                        f"(algoId={tp_id})"
+                    )
 
     def _record_server_fill(
         self, symbol: str, fill_price: float, fill_qty: float, reason: str,
