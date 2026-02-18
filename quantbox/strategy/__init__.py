@@ -38,6 +38,7 @@ from quantbox.strategy.elliott import (
     ElliottConfig,
     ElliottStrategy,
     compute_elliott_signals,
+    scan_multi_scale_patterns,
 )
 
 __all__ = [
@@ -55,6 +56,7 @@ __all__ = [
     "ElliottConfig",
     "ElliottStrategy",
     "compute_elliott_signals",
+    "scan_multi_scale_patterns",
     # Alpha engine (enhanced + hybrid)
     "AlphaConfig",
     "AlphaStrategy",
