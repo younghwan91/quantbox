@@ -1,12 +1,13 @@
 """
-Tests for server-side OCO (TP + SL) bracket orders — v11.2.
+Tests for server-side OCO (TP + SL) bracket orders via Binance Algo Order API.
 
 Verifies:
-1. TP order placement with correct prices
+1. TP order placement with correct prices via Algo API
 2. SL + TP pair on position open
 3. Cancel TP on SL fill and vice versa (_sync_server_orders)
 4. Partial close updates both TP and SL
 5. State persistence of server_tp_order_id
+6. Algo API params (algoType=CONDITIONAL, triggerPrice, etc.)
 """
 
 from unittest.mock import MagicMock, patch, call
@@ -32,6 +33,8 @@ def _make_scalper(paper: bool = True, **config_overrides):
         'executedQty': '1.0',
         'status': 'FILLED',
     }
+    # Default Algo Order API mock: returns algoId
+    mock_client._request_futures_api.return_value = {'algoId': 99999}
 
     with patch('quantbox.scalper.load_dotenv'), \
          patch('quantbox.scalper.Client', return_value=mock_client), \
@@ -55,7 +58,6 @@ class TestTPPriceCalculation:
     def test_long_tp_price_above_entry(self):
         """LONG TP must be above entry."""
         scalper = _make_scalper()
-        # signal=1 (long), entry=100, move=5%, target_retrace=0.382
         tp_oid = scalper._place_server_take_profit(
             symbol='BTCUSDT', signal=1, quantity=0.1,
             entry_price=100.0, move_size=0.05, target_retrace=0.382,
@@ -73,52 +75,229 @@ class TestTPPriceCalculation:
         assert tp_oid is not None
         assert tp_oid.startswith('paper_tp_')
 
-    def test_live_long_tp_order_params(self):
-        """Live mode: verify correct TAKE_PROFIT order params for LONG."""
+    def test_live_long_tp_algo_params(self):
+        """Live: verify TAKE_PROFIT algo order params for LONG."""
         scalper = _make_scalper(paper=False)
         scalper.get_symbol_info = MagicMock(return_value={
             'tick_size': 0.01, 'price_precision': 2,
         })
-        scalper.client.futures_create_order.return_value = {'orderId': 99}
+        scalper.client._request_futures_api.return_value = {'algoId': 501}
 
         scalper._place_server_take_profit(
             symbol='BTCUSDT', signal=1, quantity=0.1,
             entry_price=100.0, move_size=0.05, target_retrace=0.382,
         )
 
-        call_kwargs = scalper.client.futures_create_order.call_args
-        assert call_kwargs[1]['side'] == 'SELL'  # Close long = sell
-        assert call_kwargs[1]['type'] == 'TAKE_PROFIT'
-        assert call_kwargs[1]['reduceOnly'] is True
-        # stopPrice should be ~101.91 (100 * 1.0191)
-        stop_price = float(call_kwargs[1]['stopPrice'])
-        assert stop_price > 100.0, "Long TP trigger must be above entry"
+        # The _place_algo_order calls _request_futures_api('post', 'algoOrder', ...)
+        call_args = scalper.client._request_futures_api.call_args
+        assert call_args[0][0] == 'post'
+        assert call_args[0][1] == 'algoOrder'
+        data = call_args[1]['data']
+        assert data['algoType'] == 'CONDITIONAL'
+        assert data['side'] == 'SELL'  # Close long = sell
+        assert data['type'] == 'TAKE_PROFIT'
+        assert data['reduceOnly'] == 'true'
+        trigger = float(data['triggerPrice'])
+        assert trigger > 100.0, "Long TP trigger must be above entry"
+        limit = float(data['price'])
+        assert limit < trigger, "Limit slightly below trigger for SELL"
 
-    def test_live_short_tp_order_params(self):
-        """Live mode: verify correct TAKE_PROFIT order params for SHORT."""
+    def test_live_short_tp_algo_params(self):
+        """Live: verify TAKE_PROFIT algo order params for SHORT."""
         scalper = _make_scalper(paper=False)
         scalper.get_symbol_info = MagicMock(return_value={
             'tick_size': 0.01, 'price_precision': 2,
         })
-        scalper.client.futures_create_order.return_value = {'orderId': 88}
+        scalper.client._request_futures_api.return_value = {'algoId': 502}
 
         scalper._place_server_take_profit(
             symbol='ETHUSDT', signal=-1, quantity=1.0,
             entry_price=3000.0, move_size=0.04, target_retrace=0.382,
         )
 
-        call_kwargs = scalper.client.futures_create_order.call_args
-        assert call_kwargs[1]['side'] == 'BUY'  # Close short = buy
-        assert call_kwargs[1]['type'] == 'TAKE_PROFIT'
-        stop_price = float(call_kwargs[1]['stopPrice'])
-        assert stop_price < 3000.0, "Short TP trigger must be below entry"
+        data = scalper.client._request_futures_api.call_args[1]['data']
+        assert data['side'] == 'BUY'  # Close short = buy
+        assert data['type'] == 'TAKE_PROFIT'
+        trigger = float(data['triggerPrice'])
+        assert trigger < 3000.0, "Short TP trigger must be below entry"
+
+
+class TestSLPriceCalculation:
+    """Verify stop-loss price is correct for long and short."""
+
+    def test_live_long_sl_algo_params(self):
+        """Live: verify STOP algo order params for LONG."""
+        scalper = _make_scalper(paper=False)
+        scalper.get_symbol_info = MagicMock(return_value={
+            'tick_size': 0.01, 'price_precision': 2,
+        })
+        scalper.client._request_futures_api.return_value = {'algoId': 601}
+
+        scalper._place_server_stop_loss(
+            symbol='BTCUSDT', signal=1, quantity=0.1,
+            entry_price=100.0, move_size=0.05, stop_mult=0.786,
+        )
+
+        data = scalper.client._request_futures_api.call_args[1]['data']
+        assert data['algoType'] == 'CONDITIONAL'
+        assert data['side'] == 'SELL'  # Close long = sell
+        assert data['type'] == 'STOP'
+        assert data['reduceOnly'] == 'true'
+        trigger = float(data['triggerPrice'])
+        assert trigger < 100.0, "Long SL trigger must be below entry"
+        limit = float(data['price'])
+        assert limit < trigger, "SL limit below trigger for SELL"
+
+    def test_live_short_sl_algo_params(self):
+        """Live: verify STOP algo order params for SHORT."""
+        scalper = _make_scalper(paper=False)
+        scalper.get_symbol_info = MagicMock(return_value={
+            'tick_size': 0.01, 'price_precision': 2,
+        })
+        scalper.client._request_futures_api.return_value = {'algoId': 602}
+
+        scalper._place_server_stop_loss(
+            symbol='ETHUSDT', signal=-1, quantity=1.0,
+            entry_price=3000.0, move_size=0.04, stop_mult=0.786,
+        )
+
+        data = scalper.client._request_futures_api.call_args[1]['data']
+        assert data['side'] == 'BUY'  # Close short = buy
+        assert data['type'] == 'STOP'
+        trigger = float(data['triggerPrice'])
+        assert trigger > 3000.0, "Short SL trigger must be above entry"
+        limit = float(data['price'])
+        assert limit > trigger, "SL limit above trigger for BUY"
+
+    def test_sl_failure_returns_none(self):
+        """API failure returns None and does not raise."""
+        scalper = _make_scalper(paper=False)
+        scalper.get_symbol_info = MagicMock(return_value={
+            'tick_size': 0.01, 'price_precision': 2,
+        })
+        scalper.client._request_futures_api.side_effect = Exception("timeout")
+
+        result = scalper._place_server_stop_loss(
+            symbol='BTCUSDT', signal=1, quantity=0.1,
+            entry_price=100.0, move_size=0.05, stop_mult=0.786,
+        )
+        assert result is None
+
+
+# ─────────────────────────── Cancel Algo Orders ──────────────────
+
+
+class TestCancelAlgoOrders:
+    """Verify cancel uses DELETE /fapi/v1/algoOrder."""
+
+    def test_cancel_sl_calls_algo_api(self):
+        """Cancel SL uses _request_futures_api DELETE algoOrder."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            'algoId': 1001, 'code': '200', 'msg': 'success',
+        }
+
+        scalper._cancel_server_stop_loss('BTCUSDT', '1001')
+
+        call_args = scalper.client._request_futures_api.call_args
+        assert call_args[0][0] == 'delete'
+        assert call_args[0][1] == 'algoOrder'
+        assert call_args[1]['data'] == {'algoId': 1001}
+
+    def test_cancel_tp_calls_algo_api(self):
+        """Cancel TP uses _request_futures_api DELETE algoOrder."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            'algoId': 2001, 'code': '200', 'msg': 'success',
+        }
+
+        scalper._cancel_server_take_profit('BTCUSDT', '2001')
+
+        call_args = scalper.client._request_futures_api.call_args
+        assert call_args[0][0] == 'delete'
+        assert call_args[0][1] == 'algoOrder'
+        assert call_args[1]['data'] == {'algoId': 2001}
+
+    def test_cancel_paper_mode_skips(self):
+        """Paper mode does not call API."""
+        scalper = _make_scalper(paper=True)
+        scalper._cancel_server_stop_loss('BTCUSDT', 'paper_sl_123')
+        scalper.client._request_futures_api.assert_not_called()
+
+    def test_cancel_none_order_skips(self):
+        """None or empty order_id does not call API."""
+        scalper = _make_scalper(paper=False)
+        scalper._cancel_server_stop_loss('BTCUSDT', None)
+        scalper._cancel_server_stop_loss('BTCUSDT', '')
+        scalper.client._request_futures_api.assert_not_called()
+
+
+# ─────────────────────────── Check Order Filled ──────────────────
+
+
+class TestCheckOrderFilled:
+    """Verify _check_order_filled uses GET /fapi/v1/algoOrder."""
+
+    def test_triggered_returns_fill(self):
+        """TRIGGERED status returns fill info."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            'algoStatus': 'TRIGGERED',
+            'orderType': 'TAKE_PROFIT',
+            'triggerPrice': '101.91',
+            'actualPrice': '101.90',
+            'quantity': '1.0',
+        }
+
+        result = scalper._check_order_filled('BTCUSDT', '8001')
+
+        assert result is not None
+        assert result['status'] == 'FILLED'
+        assert float(result['avgPrice']) == 101.90
+        assert result['executedQty'] == '1.0'
+
+        # Verify GET request
+        call_args = scalper.client._request_futures_api.call_args
+        assert call_args[0][0] == 'get'
+        assert call_args[0][1] == 'algoOrder'
+        assert call_args[1]['data'] == {'algoId': 8001}
+
+    def test_triggered_zero_actual_uses_trigger(self):
+        """If actualPrice is 0, use triggerPrice as fill proxy."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            'algoStatus': 'TRIGGERED',
+            'orderType': 'STOP',
+            'triggerPrice': '95.50',
+            'actualPrice': '0',
+            'quantity': '2.0',
+        }
+
+        result = scalper._check_order_filled('BTCUSDT', '9001')
+        assert float(result['avgPrice']) == 95.50
+
+    def test_new_status_returns_none(self):
+        """NEW status means not filled."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            'algoStatus': 'NEW',
+        }
+
+        result = scalper._check_order_filled('BTCUSDT', '5001')
+        assert result is None
+
+    def test_paper_mode_returns_none(self):
+        """Paper mode always returns None."""
+        scalper = _make_scalper(paper=True)
+        result = scalper._check_order_filled('BTCUSDT', 'paper_tp_123')
+        assert result is None
 
 
 # ─────────────────────────── Sync Server Orders ──────────────────
 
 
 class TestSyncServerOrders:
-    """Verify _sync_server_orders reconciles filled orders."""
+    """Verify _sync_server_orders reconciles filled algo orders."""
 
     def test_tp_filled_cancels_sl(self):
         """When server TP fills, SL must be cancelled."""
@@ -127,45 +306,40 @@ class TestSyncServerOrders:
             'tick_size': 0.01, 'price_precision': 2,
         })
 
-        # Manually insert a position with both order IDs
         scalper.strategy.open_position(
             symbol='BTCUSDT', signal=1, entry_price=100.0,
             notional=100.0, leverage=2, move_size=0.05,
-            server_sl_order_id='sl_001',
-            server_tp_order_id='tp_001',
+            server_sl_order_id='1001',
+            server_tp_order_id='2001',
         )
 
-        # Mock: TP is FILLED, SL is still open
-        def mock_get_order(symbol, orderId):
-            if orderId == int('tp_001'.replace('tp_', '')):
-                # This won't work with 'tp_001', so let's use numeric IDs
-                pass
-            raise Exception("not found")
-
-        # Use numeric IDs for realistic mock
-        scalper.strategy._positions['BTCUSDT']['server_sl_order_id'] = '1001'
-        scalper.strategy._positions['BTCUSDT']['server_tp_order_id'] = '2001'
-
-        def futures_get_order(symbol, orderId):
-            if orderId == 2001:  # TP order
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'get' and data.get('algoId') == 2001:
                 return {
-                    'status': 'FILLED',
-                    'avgPrice': '101.91',
-                    'executedQty': '1.0',
+                    'algoStatus': 'TRIGGERED',
+                    'orderType': 'TAKE_PROFIT',
+                    'triggerPrice': '101.91',
+                    'actualPrice': '101.91',
+                    'quantity': '1.0',
                 }
-            return {'status': 'NEW'}
+            if method == 'get':
+                return {'algoStatus': 'NEW'}
+            # Cancel response
+            return {'algoId': data.get('algoId'), 'code': '200', 'msg': 'success'}
 
-        scalper.client.futures_get_order = MagicMock(side_effect=futures_get_order)
-        scalper.client.futures_cancel_order = MagicMock()
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
 
         scalper._sync_server_orders()
 
         # Position should be removed (TP filled)
         assert not scalper.strategy.has_position('BTCUSDT')
-        # SL should have been cancelled
-        scalper.client.futures_cancel_order.assert_called_once_with(
-            symbol='BTCUSDT', orderId=1001,
-        )
+        # SL cancel should have been called
+        cancel_calls = [
+            c for c in scalper.client._request_futures_api.call_args_list
+            if c[0][0] == 'delete'
+        ]
+        assert len(cancel_calls) == 1
+        assert cancel_calls[0][1]['data'] == {'algoId': 1001}
 
     def test_sl_filled_cancels_tp(self):
         """When server SL fills, TP must be cancelled."""
@@ -181,26 +355,32 @@ class TestSyncServerOrders:
             server_tp_order_id='4001',
         )
 
-        def futures_get_order(symbol, orderId):
-            if orderId == 4001:  # TP: not filled
-                return {'status': 'NEW'}
-            if orderId == 3001:  # SL: filled
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'get' and data.get('algoId') == 4001:
+                return {'algoStatus': 'NEW'}
+            if method == 'get' and data.get('algoId') == 3001:
                 return {
-                    'status': 'FILLED',
-                    'avgPrice': '3120.0',
-                    'executedQty': '1.0',
+                    'algoStatus': 'TRIGGERED',
+                    'orderType': 'STOP',
+                    'triggerPrice': '3120.0',
+                    'actualPrice': '3120.0',
+                    'quantity': '1.0',
                 }
-            return {'status': 'NEW'}
+            if method == 'get':
+                return {'algoStatus': 'NEW'}
+            return {'algoId': data.get('algoId'), 'code': '200', 'msg': 'success'}
 
-        scalper.client.futures_get_order = MagicMock(side_effect=futures_get_order)
-        scalper.client.futures_cancel_order = MagicMock()
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
 
         scalper._sync_server_orders()
 
         assert not scalper.strategy.has_position('ETHUSDT')
-        scalper.client.futures_cancel_order.assert_called_once_with(
-            symbol='ETHUSDT', orderId=4001,
-        )
+        cancel_calls = [
+            c for c in scalper.client._request_futures_api.call_args_list
+            if c[0][0] == 'delete'
+        ]
+        assert len(cancel_calls) == 1
+        assert cancel_calls[0][1]['data'] == {'algoId': 4001}
 
     def test_neither_filled_no_change(self):
         """If neither order filled, position stays."""
@@ -213,9 +393,7 @@ class TestSyncServerOrders:
             server_tp_order_id='6001',
         )
 
-        scalper.client.futures_get_order = MagicMock(
-            return_value={'status': 'NEW'}
-        )
+        scalper.client._request_futures_api.return_value = {'algoStatus': 'NEW'}
 
         scalper._sync_server_orders()
 
@@ -264,12 +442,20 @@ class TestTPStatePersistence:
             server_tp_order_id='8001',
         )
 
-        scalper.client.futures_get_order = MagicMock(side_effect=lambda **kw: {
-            'status': 'FILLED',
-            'avgPrice': '101.91',
-            'executedQty': '1.0',
-        } if kw.get('orderId') == 8001 else {'status': 'NEW'})
-        scalper.client.futures_cancel_order = MagicMock()
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'get' and data.get('algoId') == 8001:
+                return {
+                    'algoStatus': 'TRIGGERED',
+                    'orderType': 'TAKE_PROFIT',
+                    'triggerPrice': '101.91',
+                    'actualPrice': '101.91',
+                    'quantity': '1.0',
+                }
+            if method == 'get':
+                return {'algoStatus': 'NEW'}
+            return {'algoId': data.get('algoId'), 'code': '200', 'msg': 'success'}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
 
         scalper._sync_server_orders()
 
