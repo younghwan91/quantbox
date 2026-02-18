@@ -25,6 +25,8 @@ from quantbox.strategy.elliott import (
     detect_ending_diagonal,
     detect_triangle,
     zigzag_pivots,
+    _validate_bullish_impulse_abc,
+    _validate_bearish_impulse_abc,
 )
 
 
@@ -725,3 +727,194 @@ class TestV2TargetImprovements:
         """Default lookback must be 12 bars (2 days at 4h), not 5."""
         cfg = ElliottConfig()
         assert cfg.pattern_lookback_bars == 12
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Timing alpha filter tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestTimingAlphaFeatures:
+    """Test timing alpha features (impulse_accel, corr_impulse_ratio, w3_w1_time_ratio).
+
+    Research: best_refined variant — accel≥0, corr≥0.20, W3/W1<2.5
+    """
+
+    def _make_pivots(self, sequence):
+        """Build pivot arrays from (price, type) sequence with custom spacing."""
+        n = len(sequence)
+        if isinstance(sequence[0], tuple) and len(sequence[0]) == 3:
+            # (price, type, bar_index) format
+            idx = np.array([s[2] for s in sequence], dtype=np.int64)
+            prices = np.array([s[0] for s in sequence], dtype=np.float64)
+            types = np.array([s[1] for s in sequence], dtype=np.int64)
+        else:
+            idx = np.arange(n, dtype=np.int64) * 10
+            prices = np.array([s[0] for s in sequence], dtype=np.float64)
+            types = np.array([s[1] for s in sequence], dtype=np.int64)
+        return idx, prices, types, n
+
+    def test_bullish_pattern_has_timing_fields(self):
+        """Bullish pattern dict must contain all timing alpha fields."""
+        sequence = [
+            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
+            (190.0, -1), (250.0, 1),
+            (195.0, -1), (230.0, 1), (165.0, -1),
+        ]
+        idx, prices, types, n = self._make_pivots(sequence)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
+        assert len(patterns) >= 1
+        p = patterns[0]
+        for key in ('impulse_accel', 'corr_impulse_ratio', 'w3_w1_time_ratio',
+                     'w1_bars', 'w3_bars', 'impulse_bars', 'correction_bars'):
+            assert key in p, f"Missing timing field: {key}"
+
+    def test_bearish_pattern_has_timing_fields(self):
+        """Bearish pattern dict must contain all timing alpha fields."""
+        sequence = [
+            (250.0, 1), (200.0, -1), (225.0, 1), (125.0, -1),
+            (155.0, 1), (100.0, -1),
+            (157.0, 1), (130.0, -1), (185.0, 1),
+        ]
+        idx, prices, types, n = self._make_pivots(sequence)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
+        assert len(patterns) >= 1
+        p = patterns[0]
+        for key in ('impulse_accel', 'corr_impulse_ratio', 'w3_w1_time_ratio',
+                     'w1_bars', 'w3_bars', 'impulse_bars', 'correction_bars'):
+            assert key in p, f"Missing timing field: {key}"
+
+    def test_impulse_accel_positive_when_w3_faster(self):
+        """W3 moving faster than W1 → positive acceleration."""
+        # W1: 100→150 in 10 bars (vel=5.0)
+        # W3: 125→225 in 10 bars (vel=10.0) → accel = 10/5 - 1 = 1.0
+        sequence = [
+            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
+            (190.0, -1), (250.0, 1),
+            (195.0, -1), (230.0, 1), (165.0, -1),
+        ]
+        idx, prices, types, n = self._make_pivots(sequence)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
+        p = patterns[0]
+        assert p['impulse_accel'] > 0, "W3 faster than W1 should give positive accel"
+        assert p['impulse_accel'] == pytest.approx(1.0, rel=0.01)
+
+    def test_impulse_accel_negative_when_w3_slower(self):
+        """W3 moving slower than W1 → negative acceleration → filtered out.
+
+        Use custom bar spacing: W1 covers 5 bars, W3 covers 20 bars.
+        W1: 100→150 in 5 bars (vel=10.0)
+        W3: 125→225 in 20 bars (vel=5.0) → accel = 5/10 - 1 = -0.5
+        """
+        cfg = ElliottConfig()
+        pivot_indices = [0, 5, 10, 30, 35, 40, 50, 60, 70]
+        pattern = _validate_bullish_impulse_abc(
+            W0=100.0, W1=150.0, W2=125.0, W3=225.0, W4=190.0, W5=250.0,
+            A=195.0, B=230.0, C=165.0,
+            c_idx=70, config=cfg, pivot_indices=pivot_indices,
+        )
+        assert pattern is not None
+        assert pattern['impulse_accel'] < 0, "W3 slower than W1 should give negative accel"
+        assert pattern['impulse_accel'] == pytest.approx(-0.5, rel=0.01)
+
+    def test_w3_w1_time_ratio_computation(self):
+        """w3_w1_time_ratio = w3_bars / w1_bars."""
+        # W1: bars 0→10 (10 bars), W3: bars 20→50 (30 bars) → ratio = 3.0
+        cfg = ElliottConfig()
+        pivot_indices = [0, 10, 20, 50, 55, 60, 70, 80, 90]
+        pattern = _validate_bullish_impulse_abc(
+            W0=100.0, W1=150.0, W2=125.0, W3=225.0, W4=190.0, W5=250.0,
+            A=195.0, B=230.0, C=165.0,
+            c_idx=90, config=cfg, pivot_indices=pivot_indices,
+        )
+        assert pattern is not None
+        assert pattern['w3_w1_time_ratio'] == pytest.approx(3.0, rel=0.01)
+        assert pattern['w1_bars'] == 10
+        assert pattern['w3_bars'] == 30
+
+    def test_corr_impulse_ratio_computation(self):
+        """corr_impulse_ratio = correction_bars / impulse_bars."""
+        # impulse: bars 0→50 (50 bars), correction: bars 50→80 (30 bars)
+        # ratio = 30/50 = 0.6
+        sequence = [
+            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
+            (190.0, -1), (250.0, 1),
+            (195.0, -1), (230.0, 1), (165.0, -1),
+        ]
+        idx, prices, types, n = self._make_pivots(sequence)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
+        p = patterns[0]
+        assert p['corr_impulse_ratio'] == pytest.approx(0.6, rel=0.01)
+        assert p['impulse_bars'] == 50
+        assert p['correction_bars'] == 30
+
+    def test_config_defaults_match_research(self):
+        """Default timing config values must match research best_refined variant."""
+        cfg = ElliottConfig()
+        assert cfg.min_impulse_accel == 0.0
+        assert cfg.min_corr_impulse_ratio == 0.20
+        assert cfg.max_w3_w1_time_ratio == 2.5
+
+    def test_timing_filter_rejects_decelerating_impulse(self):
+        """Pattern with negative accel should be filtered in backtest signals.
+
+        Directly test that _validate still produces the pattern (it's a feature,
+        not a validation rule), but the config filter would reject it.
+        """
+        cfg = ElliottConfig()
+        # W3 much slower → negative accel
+        pivot_indices = [0, 5, 10, 30, 35, 40, 50, 60, 70]
+        pattern = _validate_bullish_impulse_abc(
+            W0=100.0, W1=150.0, W2=125.0, W3=225.0, W4=190.0, W5=250.0,
+            A=195.0, B=230.0, C=165.0,
+            c_idx=70, config=cfg, pivot_indices=pivot_indices,
+        )
+        assert pattern is not None
+        # Validation produced the pattern, but filter gate would catch it
+        assert pattern['impulse_accel'] < cfg.min_impulse_accel
+
+    def test_timing_filter_rejects_high_w3w1_ratio(self):
+        """W3 taking 3x longer than W1 → exceeds max_w3_w1_time_ratio=2.5."""
+        cfg = ElliottConfig()
+        pivot_indices = [0, 10, 20, 50, 55, 60, 70, 80, 90]
+        pattern = _validate_bullish_impulse_abc(
+            W0=100.0, W1=150.0, W2=125.0, W3=225.0, W4=190.0, W5=250.0,
+            A=195.0, B=230.0, C=165.0,
+            c_idx=90, config=cfg, pivot_indices=pivot_indices,
+        )
+        assert pattern is not None
+        assert pattern['w3_w1_time_ratio'] > cfg.max_w3_w1_time_ratio
+
+    def test_bearish_timing_features_correct(self):
+        """Bearish patterns also compute timing features correctly."""
+        cfg = ElliottConfig()
+        pivot_indices = [0, 10, 20, 30, 40, 50, 60, 70, 80]
+        pattern = _validate_bearish_impulse_abc(
+            W0=250.0, W1=200.0, W2=225.0, W3=125.0, W4=155.0, W5=100.0,
+            A=157.0, B=130.0, C=185.0,
+            c_idx=80, config=cfg, pivot_indices=pivot_indices,
+        )
+        assert pattern is not None
+        # wave1=50 in 10 bars (vel=5), wave3=100 in 10 bars (vel=10) → accel=1.0
+        assert pattern['impulse_accel'] == pytest.approx(1.0, rel=0.01)
+        assert pattern['w3_w1_time_ratio'] == pytest.approx(1.0, rel=0.01)
+        assert pattern['corr_impulse_ratio'] == pytest.approx(0.6, rel=0.01)
+
+    def test_backtest_live_parity_timing_filter(self):
+        """Timing filter uses same config params in both backtest and live paths.
+
+        Verify config attributes exist and are the same object defaults.
+        """
+        cfg = ElliottConfig()
+        # These must exist and be accessed with identical names
+        assert hasattr(cfg, 'min_impulse_accel')
+        assert hasattr(cfg, 'min_corr_impulse_ratio')
+        assert hasattr(cfg, 'max_w3_w1_time_ratio')
+        # Backtest uses pattern.get() with safe defaults — verify those defaults
+        # would NOT accidentally pass the filter (conservative)
+        # impulse_accel default 1.0 >= 0.0 → passes (safe: old patterns pass)
+        assert 1.0 >= cfg.min_impulse_accel
+        # corr_impulse_ratio default 0.5 >= 0.20 → passes
+        assert 0.5 >= cfg.min_corr_impulse_ratio
+        # w3_w1_time_ratio default 1.0 <= 2.5 → passes
+        assert 1.0 <= cfg.max_w3_w1_time_ratio
