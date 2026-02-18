@@ -76,7 +76,8 @@
   - **Tight Stops at C (v11.5)**: 정정파 C 완료 지점 ±0.5% — 틀리면 즉시 소규모 손절, 맞으면 높은 RR
   - **adj_close (v11.5)**: 정밀한 백테스트를 위한 인트라바 체결가 보정
   - BTC 매크로 바이어스: 200/500 EMA 기반 롱/숏 필터링
-  - 백테스트 (365일, 20심볼): 12 trades, WR 66.7%, +1.24%, MaxDD 1.55%, Sharpe 0.59, Calmar 0.80
+  - **Sweep-Optimized (2026-02-18)**: zigzag 0.03→0.02, trail 2.0→1.5 (48+36 combos, 8 symbols)
+  - 백테스트 (365일, 8심볼): 8 trades, WR 75%, +4.84%, MaxDD 1.96%, Sharpe 1.11, Calmar 2.47
   - Numba 가속 지표: EMA, RSI, MACD, Stochastic, ATR, ZigZag
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
@@ -177,9 +178,10 @@ quantbox/
 
 scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
-├── download_extended_data.py # 365일 확장 데이터 다운로드
-└── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
-tests/                      # 유닛 테스트 (503개)
+├── elliott_backtest.py     # Elliott Wave 365일 백테스트
+├── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
+└── download_15m_data.py    # 멀티 타임프레임 데이터 다운로드
+tests/                      # 유닛 테스트 (514개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
