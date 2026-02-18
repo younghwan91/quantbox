@@ -402,24 +402,35 @@ class RubberBandScalper:
         self, symbol: str, n_bars: int = 200, interval: str = '15m',
         full: bool = False,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-        """Download recent klines.
+        """Download recent COMPLETED klines (incomplete bar dropped).
+
+        Binance futures_klines always includes the currently-open (incomplete)
+        candle as the last element. We request n_bars+1 and drop the last one
+        to ensure backtest-live parity: signals are computed only on CLOSED bars.
 
         Args:
             symbol: Trading symbol.
-            n_bars: Number of bars to fetch.
+            n_bars: Number of completed bars to return.
             interval: Candle interval ('15m', '4h', etc.).
-            full: If True, returns (close, volume, taker_buy) tuple.
+            full: If True, returns (close, high, low, volume, taker_buy) tuple.
 
         Returns:
-            Array of close prices (default), or (close, volume, taker_buy) tuple
-            if full=True, or None on failure.
+            Array of close prices (default), or (close, high, low, volume,
+            taker_buy) tuple if full=True, or None on failure.
         """
         try:
             klines = self.client.futures_klines(
                 symbol=symbol,
                 interval=interval,
-                limit=n_bars,
+                limit=n_bars + 1,  # +1 to compensate for dropping incomplete bar
             )
+            if not klines:
+                return None
+            # Drop the last (currently-open/incomplete) candle for backtest parity.
+            # The last kline from Binance is ALWAYS the live candle that hasn't
+            # closed yet — using it would compute signals on partial data that
+            # never existed in the backtest.
+            klines = klines[:-1]
             if not klines:
                 return None
             close = np.array([float(k[4]) for k in klines], dtype=np.float64)
@@ -2151,11 +2162,11 @@ class RubberBandScalper:
         return target
 
     def _wait_for_bar(self) -> None:
-        """Wait for the next 15m bar close, polling every 60s.
+        """Wait for the next 15m bar close, polling every 5s for commands.
 
         While waiting:
-        - Process bot commands (<1 min latency vs 15 min)
-        - Sync server-side TP/SL order fills
+        - Process bot commands (~5s latency for responsive interaction)
+        - Sync server-side TP/SL order fills (every 60s to avoid API spam)
         - Check for stop requests
         """
         target = self._next_bar_time()
@@ -2163,22 +2174,28 @@ class RubberBandScalper:
         if remaining > 0:
             logger.debug(f"Waiting {remaining:.0f}s for next bar close")
 
+        BOT_POLL_INTERVAL = 5.0    # Check bot commands every 5s
+        SYNC_INTERVAL = 60.0       # Sync server orders every 60s
+        last_sync = time.monotonic()
+
         while True:
             now = datetime.now(timezone.utc)
             remaining = (target - now).total_seconds()
             if remaining <= 0:
                 break
 
-            # Process bot commands while waiting
+            # Process bot commands while waiting (~5s response time)
             self._process_bot_commands()
             if self._stop_requested:
                 break
 
-            # Sync server-side TP/SL fills between bars
-            self._sync_server_orders()
+            # Sync server-side TP/SL fills periodically (not every 5s)
+            if time.monotonic() - last_sync >= SYNC_INTERVAL:
+                self._sync_server_orders()
+                last_sync = time.monotonic()
 
-            # Sleep at most 60s, or until bar close (whichever is sooner)
-            sleep_secs = min(60.0, remaining)
+            # Sleep 5s max for responsive bot commands
+            sleep_secs = min(BOT_POLL_INTERVAL, remaining)
             time.sleep(sleep_secs)
 
 
@@ -2210,7 +2227,7 @@ def main():
     )
     parser.add_argument(
         '--strategy', choices=['rubberband', 'elliott'], default='rubberband',
-        help='Trading strategy: rubberband (default) or elliott (Maeoknam)'
+        help='Trading strategy: rubberband (default) or elliott (wave ABC)'
     )
     args = parser.parse_args()
 
