@@ -461,9 +461,17 @@ class RubberBandScalper:
 
     def _place_order(
         self, symbol: str, side: str, quantity: float,
-        leverage: int = 1,
+        leverage: int = 1, reduce_only: bool = False,
     ) -> dict | None:
         """Place order via LimitOrderChaser.
+
+        Args:
+            symbol: Trading symbol.
+            side: 'BUY' or 'SELL'.
+            quantity: Order quantity.
+            leverage: Leverage to set before order.
+            reduce_only: If True, pass reduceOnly=True to exchange.
+                Must be True when closing positions to avoid margin errors.
 
         Returns dict with avgPrice, executedQty on success, None on failure.
         """
@@ -530,6 +538,7 @@ class RubberBandScalper:
                 price_precision=price_precision,
                 step_size=step_size,
                 quantity_precision=qty_precision,
+                reduce_only=reduce_only,
             )
 
             if result.status in (
@@ -631,10 +640,15 @@ class RubberBandScalper:
             )
             return algo_id
         except Exception as e:
+            err_str = str(e)
             logger.error(
                 f"[{symbol}] SERVER {label.upper()} FAILED: {e}. "
                 f"params={params}"
             )
+            # -2021: "Order would immediately trigger" — price already past
+            # the stop level. Return sentinel so caller can force-close.
+            if '-2021' in err_str:
+                return 'WOULD_TRIGGER'
             return None
 
     def _place_server_stop_loss(
@@ -701,6 +715,18 @@ class RubberBandScalper:
             quantity=quantity, trigger_price=stop_price,
             limit_price=limit_price, label='stop-loss',
         )
+        if algo_id == 'WOULD_TRIGGER':
+            logger.error(
+                f"[{symbol}] SL WOULD IMMEDIATELY TRIGGER — "
+                f"price already past stop level ${stop_price:.4f}. "
+                f"Returning sentinel for force-close."
+            )
+            self.discord.send(content=(
+                f"\U0001f6a8 **SL WOULD TRIGGER** [{symbol}] — "
+                f"Price blew past SL ${stop_price:.4f}. "
+                f"Force-close required."
+            ))
+            return 'WOULD_TRIGGER'
         if algo_id is None:
             logger.error(
                 f"[{symbol}] Position is UNPROTECTED — "
@@ -974,7 +1000,39 @@ class RubberBandScalper:
                         entry_price=entry_price, move_size=move_size,
                         stop_mult=stop_mult,
                     )
-                    if new_sl:
+                    if new_sl == 'WOULD_TRIGGER':
+                        # ═══ FORCE-CLOSE: Price blew past SL level ═══
+                        # The stop price is already behind the market.
+                        # Close the position immediately at market with
+                        # reduceOnly to prevent the "margin insufficient"
+                        # error that killed us before.
+                        logger.critical(
+                            f"[{sym}] BRACKET REPAIR → FORCE CLOSE: "
+                            f"Price past SL. Closing at market."
+                        )
+                        self.discord.send(content=(
+                            f"\U0001f6a8 **FORCE CLOSE** [{sym}] — "
+                            f"Price blew past SL. Emergency market close."
+                        ))
+                        closed = self._close_position(
+                            sym, 'force_sl_breach', 0.0,
+                        )
+                        if closed:
+                            logger.info(
+                                f"[{sym}] FORCE CLOSE SUCCESS — "
+                                f"position liquidated at market."
+                            )
+                        else:
+                            logger.critical(
+                                f"[{sym}] FORCE CLOSE FAILED — "
+                                f"MANUAL INTERVENTION REQUIRED!"
+                            )
+                            self.discord.send(content=(
+                                f"\U0001f6a8\U0001f6a8 **FORCE CLOSE FAILED** "
+                                f"[{sym}] — MANUAL CLOSE REQUIRED NOW!"
+                            ))
+                        continue  # Skip TP repair — position gone
+                    elif new_sl:
                         pos['server_sl_order_id'] = new_sl
                         logger.info(
                             f"[{sym}] BRACKET REPAIR: SL placed "
@@ -1348,7 +1406,7 @@ class RubberBandScalper:
         # Reverse the entry side to close
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
-        result = self._place_order(symbol, side, close_qty)
+        result = self._place_order(symbol, side, close_qty, reduce_only=True)
         if result is None:
             # Failed: revert partial_closed flag
             pos['partial_closed'] = False
@@ -1611,7 +1669,7 @@ class RubberBandScalper:
         # Reverse the entry side
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
-        result = self._place_order(symbol, side, quantity)
+        result = self._place_order(symbol, side, quantity, reduce_only=True)
         if result is None:
             # Failed to close — re-add position for retry (SL/TP already
             # cancelled, so we need to re-place them)
@@ -1706,7 +1764,7 @@ class RubberBandScalper:
         hold_time = pos['bars_held'] * 15  # minutes
 
         self.discord.send(embed={
-            'title': f"{emoji} {symbol} CLOSED — {reason.upper().replace('_', ' ')}",
+            'title': f"{'✅' if net_pnl > 0 else '❌'} {symbol} CLOSED — {reason.upper().replace('_', ' ')}",
             'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
             'fields': [
                 {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
