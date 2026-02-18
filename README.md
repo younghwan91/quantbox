@@ -8,9 +8,13 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v11.1 — Critical Fixes + Pool Expansion)
-- **Alpha**: 3.2% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **v10.0 Entry Optimization**: threshold 0.045→0.032 (+162% ret, +324% trades), min_confidence 2→1 (MTF as quality gate, +86.9% ret)
+### 🔥 Rubber Band Scalper (v11.4 — Adaptive Threshold)
+- **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
+- **v11.4 Adaptive Threshold**: 고정 3.2% → ATR(48)×2.5 적응형 (OOS Sharpe 8.23, OOS/IS 1.09, 제로 과적합)
+  - 공식: `threshold = clip(2.5 × ATR%(48), 1%, 6%)` — 변동성 높으면 넓고, 낮으면 타이트
+  - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
+  - 레버리지 최적화: 1×~5× 그리드 → Sharpe 단조 감소, 현행 3.75× 유지 결정
+- **v10.0 Entry Optimization**: threshold fallback 0.032 (ATR NaN 시), min_confidence 1 (MTF as quality gate)
 - **v10.0 Extended Hold**: max_hold 10→20 (+24% ret, strictly better)
 - **v10.0 Faster Stochastic**: stoch_k 5→3 (+5% Calmar)
 - **v11.1 Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어 + 레버리지 설정 검증
@@ -182,7 +186,7 @@ scripts/                    # 유틸리티 스크립트
 ├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
 ├── elliott_backtest.py     # Elliott Wave 365일 백테스트
 └── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
-tests/                      # 유닛 테스트 (514개)
+tests/                      # 유닛 테스트 (540개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)

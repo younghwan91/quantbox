@@ -199,6 +199,10 @@ def test_signal_direction_preserved(default_cfg):
         cfg.macd_fast,
         cfg.macd_slow,
         cfg.macd_signal_period,
+        cfg.atr_period,
+        cfg.atr_multiplier,
+        cfg.threshold_floor,
+        cfg.threshold_cap,
     )
 
     bt_last = bt_sigs[-1]

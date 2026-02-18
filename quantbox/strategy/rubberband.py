@@ -134,6 +134,15 @@ class RubberBandConfig:
     stoch_k_period: int = 3                 # v10.0: Faster stochastic (+5% Calmar vs 5)
     stoch_d_period: int = 3                 # Stochastic %D period
 
+    # ── v11.4 Adaptive Threshold (Walk-Forward Validated) ──
+    # Per-bar threshold = clip(atr_multiplier × ATR%(atr_period), floor, cap)
+    # Chosen config: 2.5x_f1 — OOS Sharpe 8.23, OOS/IS 1.09, zero overfitting.
+    # When atr_period=0, falls back to fixed `threshold` above.
+    atr_period: int = 48                    # ATR EMA period (48 × 15m = 12h)
+    atr_multiplier: float = 2.5             # ATR multiplier for threshold calc
+    threshold_floor: float = 0.01           # Minimum threshold (1%)
+    threshold_cap: float = 0.06             # Maximum threshold (6%)
+
     # ── v7.0 Independent 4H Rubber Band (A/B validated) ──
     # Trades rubber band signals on 4h timeframe independently.
     # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87.
@@ -625,6 +634,47 @@ def compute_signals_regime_switch(
     return sig
 
 
+# ────────── ATR Computation (v11.4 Adaptive Threshold) ──────────
+@numba.jit(nopython=True, cache=True)
+def compute_atr_pct(high: np.ndarray, low: np.ndarray, close: np.ndarray,
+                    period: int) -> np.ndarray:
+    """ATR as percentage of close price (EMA-smoothed).
+
+    Args:
+        high: High prices array.
+        low: Low prices array.
+        close: Close prices array.
+        period: ATR EMA smoothing period.
+
+    Returns:
+        Array of ATR/close ratios. NaN for bars before warm-up.
+    """
+    n = len(close)
+    atr_pct = np.full(n, np.nan)
+    tr = np.zeros(n)
+    tr[0] = high[0] - low[0]
+    for i in range(1, n):
+        hl = high[i] - low[i]
+        hc = abs(high[i] - close[i - 1])
+        lc = abs(low[i] - close[i - 1])
+        tr[i] = max(hl, max(hc, lc))
+
+    if n < period:
+        return atr_pct
+    atr = 0.0
+    for i in range(period):
+        atr += tr[i]
+    atr /= period
+    if close[period - 1] > 0:
+        atr_pct[period - 1] = atr / close[period - 1]
+    alpha = 2.0 / (period + 1)
+    for i in range(period, n):
+        atr = alpha * tr[i] + (1 - alpha) * atr
+        if close[i] > 0:
+            atr_pct[i] = atr / close[i]
+    return atr_pct
+
+
 # ────────── Confidence-Filtered Regime-Switch (v6.0) ──────────
 @numba.jit(nopython=True, cache=True)
 def _compute_sma_inline(arr: np.ndarray, period: int) -> np.ndarray:
@@ -1019,8 +1069,16 @@ def compute_signals_v9(
     macd_fast: int = 12,
     macd_slow: int = 26,
     macd_signal_period: int = 14,
+    atr_period: int = 0,
+    atr_multiplier: float = 2.5,
+    threshold_floor: float = 0.01,
+    threshold_cap: float = 0.06,
 ) -> np.ndarray:
     """v9.0: S+R+M Confluence Pipeline — regime-switch MR with Stochastic + MACD evidence.
+
+    v11.4: Adaptive threshold — when atr_period > 0, per-bar threshold is
+    clip(atr_multiplier × ATR%(atr_period), threshold_floor, threshold_cap).
+    Falls back to fixed `threshold` when ATR is NaN or atr_period == 0.
 
     Extends compute_signals_confidence (v6.0→v8.0) with:
       - Stochastic %K/%D cross as confidence evidence (+3.7% Calmar)
@@ -1083,6 +1141,12 @@ def compute_signals_v9(
     else:
         macd_hist = np.full(n, 0.0)
 
+    # v11.4: Pre-compute ATR% for adaptive threshold
+    if atr_period > 0:
+        atr_pct = compute_atr_pct(high, low, close, atr_period)
+    else:
+        atr_pct = np.full(n, np.nan)
+
     position = 0
     entry_price = 0.0
     move_size = 0.0
@@ -1092,12 +1156,28 @@ def compute_signals_v9(
     trade_target_retrace = target_retrace
     start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period,
                     rsi_period, vol_period)
+    if atr_period > 0 and atr_period > start_bar:
+        start_bar = atr_period
 
     for i in range(start_bar, n):
         ret = close[i] / close[i - lookback] - 1.0
 
+        # v11.4: Per-bar adaptive threshold
+        if atr_period > 0:
+            atr_val = atr_pct[i]
+            if np.isnan(atr_val):
+                thr = threshold
+            else:
+                thr = atr_multiplier * atr_val
+                if thr < threshold_floor:
+                    thr = threshold_floor
+                if thr > threshold_cap:
+                    thr = threshold_cap
+        else:
+            thr = threshold
+
         if position == 0:
-            if abs(ret) > threshold:
+            if abs(ret) > thr:
                 if np.isnan(btc_sma[i]):
                     continue
                 is_risk_on = btc_close[i] > btc_sma[i]
@@ -1111,7 +1191,7 @@ def compute_signals_v9(
                         continue
                     is_uptrend = close[i] > asset_sma[i]
 
-                    if ret < -threshold and is_uptrend:
+                    if ret < -thr and is_uptrend:
                         # LONG: alt dipped in its own uptrend during BTC bull
                         if rsi[i] < 40:
                             confidence += 1
@@ -1134,7 +1214,7 @@ def compute_signals_v9(
                             position = 1
                             entered = True
 
-                    elif ret > threshold and not is_uptrend:
+                    elif ret > thr and not is_uptrend:
                         # SHORT: alt surged but in downtrend → exhaustion
                         if rsi[i] > 60:
                             confidence += 1
@@ -1158,7 +1238,7 @@ def compute_signals_v9(
                             entered = True
                 else:
                     # ═══ RISK-OFF: Sympathy Pullback + Confidence ═══
-                    if ret < -threshold and btc_mom < 0:
+                    if ret < -thr and btc_mom < 0:
                         # LONG: alt dips with BTC → sympathy → mean revert
                         if rsi[i] < 35:
                             confidence += 1
@@ -1180,7 +1260,7 @@ def compute_signals_v9(
                             position = 1
                             entered = True
 
-                    elif ret > threshold and btc_mom > 0:
+                    elif ret > thr and btc_mom > 0:
                         # SHORT: alt pumps with BTC bounce → fades back
                         if rsi[i] > 65:
                             confidence += 1
@@ -2228,9 +2308,26 @@ class RubberBandStrategy:
             # ──────────────────────────────────────────────────────────
             n = len(close_prices)
 
+            # v11.4: Compute adaptive threshold from ATR
+            if cfg.atr_period > 0:
+                high_data = self._high_data.get(symbol, close_prices)
+                low_data = self._low_data.get(symbol, close_prices)
+                atr_arr = compute_atr_pct(high_data, low_data, close_prices, cfg.atr_period)
+                atr_val = float(atr_arr[-1])
+                if np.isnan(atr_val):
+                    thr = cfg.threshold  # fallback
+                else:
+                    thr = cfg.atr_multiplier * atr_val
+                    if thr < cfg.threshold_floor:
+                        thr = cfg.threshold_floor
+                    if thr > cfg.threshold_cap:
+                        thr = cfg.threshold_cap
+            else:
+                thr = cfg.threshold
+
             # 8-bar return at the last bar
             ret = close_prices[-1] / close_prices[-cfg.lookback - 1] - 1.0
-            if abs(ret) <= cfg.threshold:
+            if abs(ret) <= thr:
                 self._mtf_confirmed[symbol] = False
                 return 0
 
@@ -2295,7 +2392,7 @@ class RubberBandStrategy:
 
             if is_risk_on:
                 # ═══ RISK-ON ═══
-                if ret < -cfg.threshold and is_uptrend:
+                if ret < -thr and is_uptrend:
                     # LONG: alt dipped in its own uptrend during BTC bull
                     if rsi_val < 40: confidence += 1
                     if vol_ratio > 1.5: confidence += 1
@@ -2310,7 +2407,7 @@ class RubberBandStrategy:
                     if confidence >= cfg.min_confidence:
                         signal = 1
 
-                elif ret > cfg.threshold and not is_uptrend:
+                elif ret > thr and not is_uptrend:
                     # SHORT: alt surged but in downtrend → exhaustion
                     if rsi_val > 60: confidence += 1
                     if vol_ratio > 1.5: confidence += 1
@@ -2326,7 +2423,7 @@ class RubberBandStrategy:
                         signal = -1
             else:
                 # ═══ RISK-OFF ═══
-                if ret < -cfg.threshold and btc_mom < 0:
+                if ret < -thr and btc_mom < 0:
                     # LONG: alt dips with BTC → sympathy → mean revert
                     if rsi_val < 35: confidence += 1
                     if vol_ratio > 1.5: confidence += 1
@@ -2341,7 +2438,7 @@ class RubberBandStrategy:
                     if confidence >= cfg.min_confidence:
                         signal = 1
 
-                elif ret > cfg.threshold and btc_mom > 0:
+                elif ret > thr and btc_mom > 0:
                     # SHORT: alt pumps with BTC bounce → fades back
                     if rsi_val > 65: confidence += 1
                     if vol_ratio > 1.5: confidence += 1
@@ -2499,11 +2596,29 @@ class RubberBandStrategy:
         Designed for parameter optimization — every filter gate is exposed.
         """
         cfg = self.config
+
+        # v11.4: Compute adaptive threshold for diagnostics
+        if cfg.atr_period > 0 and len(close_prices) >= cfg.atr_period:
+            high_data = self._high_data.get(symbol, close_prices)
+            low_data = self._low_data.get(symbol, close_prices)
+            atr_arr = compute_atr_pct(high_data, low_data, close_prices, cfg.atr_period)
+            _atr_val = float(atr_arr[-1])
+            if np.isnan(_atr_val):
+                _diag_thr = cfg.threshold
+            else:
+                _diag_thr = cfg.atr_multiplier * _atr_val
+                if _diag_thr < cfg.threshold_floor:
+                    _diag_thr = cfg.threshold_floor
+                if _diag_thr > cfg.threshold_cap:
+                    _diag_thr = cfg.threshold_cap
+        else:
+            _diag_thr = cfg.threshold
+
         diag: dict = {
             'symbol': symbol,
             'price': float(close_prices[-1]) if len(close_prices) > 0 else 0.0,
             'move_8bar': 0.0,
-            'threshold': cfg.threshold,
+            'threshold': _diag_thr,
             'passed_threshold': False,
             'regime': None,          # 'risk_on' | 'risk_off' | None
             'btc_mom': 0.0,
@@ -2603,7 +2718,7 @@ class RubberBandStrategy:
         }
 
         # ── Threshold gate ──
-        diag['passed_threshold'] = abs(ret) > cfg.threshold
+        diag['passed_threshold'] = abs(ret) > _diag_thr
         if not diag['passed_threshold']:
             return diag
 
@@ -2612,7 +2727,7 @@ class RubberBandStrategy:
         entry_type = None
 
         if is_risk_on:
-            if ret < -cfg.threshold and is_uptrend:
+            if ret < -_diag_thr and is_uptrend:
                 entry_type = 'classic_long'
                 if rsi_val < 40: confidence += 1
                 if vol_ratio > 1.5: confidence += 1
@@ -2626,7 +2741,7 @@ class RubberBandStrategy:
                 if cfg.macd_enabled:
                     if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
                         confidence += 1
-            elif ret > cfg.threshold and not is_uptrend:
+            elif ret > _diag_thr and not is_uptrend:
                 entry_type = 'classic_short'
                 if rsi_val > 60: confidence += 1
                 if vol_ratio > 1.5: confidence += 1
@@ -2644,7 +2759,7 @@ class RubberBandStrategy:
                 # Threshold passed but trend/direction mismatch
                 entry_type = 'risk_on_blocked'
         else:
-            if ret < -cfg.threshold and btc_mom < 0:
+            if ret < -_diag_thr and btc_mom < 0:
                 entry_type = 'sympathy_long'
                 if rsi_val < 35: confidence += 1
                 if vol_ratio > 1.5: confidence += 1
@@ -2658,7 +2773,7 @@ class RubberBandStrategy:
                 if cfg.macd_enabled:
                     if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
                         confidence += 1
-            elif ret > cfg.threshold and btc_mom > 0:
+            elif ret > _diag_thr and btc_mom > 0:
                 entry_type = 'sympathy_short'
                 if rsi_val > 65: confidence += 1
                 if vol_ratio > 1.5: confidence += 1

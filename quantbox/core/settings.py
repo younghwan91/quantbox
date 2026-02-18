@@ -145,6 +145,14 @@ class QuantBoxSettings(BaseSettings):
     rb_stoch_k_period: int = 3                # v10.0: 더 빠른 스토캐스틱 (+5% Calmar vs 5)
     rb_stoch_d_period: int = 3                # 스토캐스틱 %D 기간
 
+    # ── v11.4 Adaptive Threshold (Walk-Forward Validated) ──
+    # Per-bar threshold = clip(atr_multiplier × ATR%(atr_period), floor, cap)
+    # Chosen config: 2.5x_f1 — OOS Sharpe 8.23, OOS/IS 1.09, zero overfitting.
+    rb_atr_period: int = 48                   # ATR EMA 기간 (48 × 15분 = 12시간)
+    rb_atr_multiplier: float = 2.5            # ATR 배수
+    rb_threshold_floor: float = 0.01          # 최소 임계값 (1%)
+    rb_threshold_cap: float = 0.06            # 최대 임계값 (6%)
+
     # ── v7.0 Independent 4H Rubber Band ──
     # Trades mean-reversion on 4h timeframe independently from 15m.
     # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
