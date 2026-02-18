@@ -1,5 +1,5 @@
 """
-Tests for Elliott Wave Strategy — Maeoknam Championship Method.
+Tests for Elliott Wave Strategy — ABC pattern + Fibonacci validation.
 
 Uses REAL Binance data (cached) for strategy integration tests,
 and small deterministic arrays for indicator unit tests.
@@ -347,9 +347,9 @@ class TestABCPatternDetection:
         p = patterns[0]
         assert p['signal'] == 1  # Long
         assert p['type'] == 'bullish_impulse_abc_long'
-        # TP1 = B level (near-term target), TP2 = C + 1.618 × wave1
-        assert p['target_1'] == pytest.approx(230.0, rel=1e-3)  # B price
-        assert p['target_2'] == pytest.approx(165.0 + 1.618 * 50.0, rel=1e-3)
+        # TP1 = W5 (prior impulse peak), TP2 = C + 1.0 × total_impulse
+        assert p['target_1'] == pytest.approx(250.0, rel=1e-3)  # W5 price
+        assert p['target_2'] == pytest.approx(165.0 + 1.0 * 150.0, rel=1e-3)  # C + impulse
         assert p['stop'] == pytest.approx(165.0 * 0.995, rel=1e-3)  # C × (1 - 0.5%)
         assert 'quality' in p
         assert p['quality'] > 0  # should have positive quality score
@@ -383,6 +383,9 @@ class TestABCPatternDetection:
         p = patterns[0]
         assert p['signal'] == -1  # Short
         assert p['type'] == 'bearish_impulse_abc_short'
+        # TP1 = W5 (prior impulse low), TP2 = C - 1.0 × total_impulse
+        assert p['target_1'] == pytest.approx(100.0, rel=1e-3)  # W5 price
+        assert p['target_2'] == pytest.approx(185.0 - 1.0 * 150.0, rel=1e-3)  # C - impulse
         assert 'quality' in p
         assert p['quality'] > 0  # should have positive quality score
 
@@ -652,3 +655,73 @@ class TestBacktestSignals:
         valid_values = {-2.0, -1.0, -0.4, 0.0, 0.4, 1.0, 2.0}
         unique = set(signals)
         assert unique.issubset(valid_values), f"Unexpected signal values: {unique - valid_values}"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v2 target & confluence tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestV2TargetImprovements:
+    """Verify v2 changes: TP1=W5, TP2=impulse projection, lookback=12."""
+
+    def _make_pivots(self, sequence):
+        n = len(sequence)
+        idx = np.arange(n, dtype=np.int64) * 10
+        prices = np.array([s[0] for s in sequence], dtype=np.float64)
+        types = np.array([s[1] for s in sequence], dtype=np.int64)
+        return idx, prices, types, n
+
+    def test_bullish_tp1_is_w5_not_b(self):
+        """TP1 must target W5 (structural resistance), NOT B (correction bounce)."""
+        sequence = [
+            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
+            (190.0, -1), (250.0, 1),  # W5 = 250
+            (195.0, -1), (230.0, 1),  # B = 230
+            (165.0, -1),              # C = 165
+        ]
+        idx, prices, types, n = self._make_pivots(sequence)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
+        assert len(patterns) >= 1
+        p = patterns[0]
+        # TP1 = W5 = 250 (NOT B = 230)
+        assert p['target_1'] == pytest.approx(250.0, rel=1e-3)
+        assert p['target_1'] != pytest.approx(230.0, rel=1e-3)
+
+    def test_bearish_tp1_is_w5_not_b(self):
+        """Bearish TP1 must target W5 (structural support), NOT B."""
+        sequence = [
+            (250.0, 1), (200.0, -1), (225.0, 1), (125.0, -1),
+            (155.0, 1), (100.0, -1),  # W5 = 100
+            (157.0, 1), (130.0, -1),  # B = 130
+            (185.0, 1),               # C = 185
+        ]
+        idx, prices, types, n = self._make_pivots(sequence)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
+        assert len(patterns) >= 1
+        p = patterns[0]
+        # TP1 = W5 = 100 (NOT B = 130)
+        assert p['target_1'] == pytest.approx(100.0, rel=1e-3)
+        assert p['target_1'] != pytest.approx(130.0, rel=1e-3)
+
+    def test_tp2_uses_full_impulse_not_wave1(self):
+        """TP2 must use total impulse (W5-W0), not internal wave1 (W1-W0)."""
+        sequence = [
+            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
+            (190.0, -1), (250.0, 1),
+            (195.0, -1), (230.0, 1), (165.0, -1),
+        ]
+        idx, prices, types, n = self._make_pivots(sequence)
+        patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
+        p = patterns[0]
+        total_impulse = 250.0 - 100.0  # W5 - W0 = 150
+        wave1_only = 150.0 - 100.0      # W1 - W0 = 50
+        # TP2 = C + 1.0 × total_impulse = 165 + 150 = 315
+        assert p['target_2'] == pytest.approx(165.0 + 1.0 * total_impulse, rel=1e-3)
+        # Must NOT be the old formula using wave1
+        assert p['target_2'] != pytest.approx(165.0 + 1.618 * wave1_only, rel=1e-3)
+
+    def test_pattern_lookback_bars_is_12(self):
+        """Default lookback must be 12 bars (2 days at 4h), not 5."""
+        cfg = ElliottConfig()
+        assert cfg.pattern_lookback_bars == 12
