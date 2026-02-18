@@ -1,8 +1,10 @@
 """
-Strategy module — Rubber Band mean-reversion scalper + Alpha Engine.
+Strategy module — Rubber Band + Elliott Wave + Alpha Engine.
 
-Production strategy: RB_original + Volatility-ranked Top-5 symbols.
-Walk-forward validated: +35% (90d), Sharpe 4.67, OOS +34% compounded.
+Strategies:
+  - RubberBand: Mean-reversion scalper (15m/4h)
+  - Elliott: ABC wave pattern + Fibonacci validation (4h/15m)
+  - Alpha: Multi-factor alpha engine (hybrid)
 """
 
 from quantbox.strategy.rubberband import (
@@ -32,6 +34,12 @@ from quantbox.strategy.vol_selector import (
     compute_realized_vol,
     rank_symbols_by_vol,
 )
+from quantbox.strategy.elliott import (
+    ElliottConfig,
+    ElliottStrategy,
+    compute_elliott_signals,
+    scan_multi_scale_patterns,
+)
 
 __all__ = [
     # Original rubber band
@@ -44,6 +52,11 @@ __all__ = [
     "calculate_position_size",
     "compute_confidence_leverage",
     "apply_confidence_leverage",
+    # Elliott Wave (ABC pattern + Fibonacci)
+    "ElliottConfig",
+    "ElliottStrategy",
+    "compute_elliott_signals",
+    "scan_multi_scale_patterns",
     # Alpha engine (enhanced + hybrid)
     "AlphaConfig",
     "AlphaStrategy",
