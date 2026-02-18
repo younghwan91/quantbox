@@ -595,3 +595,153 @@ class TestBracketRepair:
         scalper._sync_server_orders()
 
         scalper._save_state.assert_called_once()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Force-close on -2021 "Order would immediately trigger"
+# ═══════════════════════════════════════════════════════════════════
+
+class TestForceCloseOnWouldTrigger:
+    """Verify that bracket repair force-closes positions when the SL
+    placement returns -2021 (price already past stop level)."""
+
+    def test_algo_order_returns_sentinel_on_2021(self):
+        """_place_algo_order returns 'WOULD_TRIGGER' for -2021 errors."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.side_effect = Exception(
+            'APIError(code=-2021): Order would immediately trigger.'
+        )
+
+        result = scalper._place_algo_order(
+            symbol='FETUSDT', side='SELL', order_type='STOP',
+            quantity=25000.0, trigger_price=0.1652,
+            limit_price=0.1643, label='stop-loss',
+        )
+        assert result == 'WOULD_TRIGGER'
+
+    def test_algo_order_returns_none_on_other_error(self):
+        """_place_algo_order returns None for non-2021 errors."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.side_effect = Exception(
+            'APIError(code=-1111): Some other error.'
+        )
+
+        result = scalper._place_algo_order(
+            symbol='FETUSDT', side='SELL', order_type='STOP',
+            quantity=25000.0, trigger_price=0.1652,
+            limit_price=0.1643, label='stop-loss',
+        )
+        assert result is None
+
+    def test_place_server_sl_propagates_sentinel(self):
+        """_place_server_stop_loss returns 'WOULD_TRIGGER' when algo API
+        returns -2021."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.side_effect = Exception(
+            'APIError(code=-2021): Order would immediately trigger.'
+        )
+
+        result = scalper._place_server_stop_loss(
+            symbol='FETUSDT', signal=1, quantity=25000.0,
+            entry_price=0.1686, move_size=0.02, stop_mult=1.0,
+        )
+        assert result == 'WOULD_TRIGGER'
+
+    def test_bracket_repair_force_closes_on_would_trigger(self):
+        """When bracket repair gets WOULD_TRIGGER, it force-closes the
+        position instead of leaving it unprotected."""
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper._close_position = MagicMock(return_value=True)
+
+        # Position with missing SL (e.g. restored from state after crash)
+        scalper.strategy.open_position(
+            symbol='FETUSDT', signal=1, entry_price=0.1686,
+            notional=100.0, leverage=3, move_size=0.02,
+            server_sl_order_id=None,
+            server_tp_order_id='tp_exists',
+        )
+
+        call_count = 0
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            nonlocal call_count
+            if method == 'post':
+                # SL placement → -2021
+                raise Exception(
+                    'APIError(code=-2021): Order would immediately trigger.'
+                )
+            # GET for checking TP status
+            call_count += 1
+            return {'algoStatus': 'NEW'}
+
+        scalper.client._request_futures_api = MagicMock(
+            side_effect=mock_algo_api,
+        )
+
+        scalper._sync_server_orders()
+
+        # Must call _close_position with force_sl_breach reason
+        scalper._close_position.assert_called_once_with(
+            'FETUSDT', 'force_sl_breach', 0.0,
+        )
+
+    def test_bracket_repair_force_close_failure_alerts(self):
+        """When force-close itself fails, a CRITICAL discord alert fires."""
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper._close_position = MagicMock(return_value=False)
+        scalper.discord = MagicMock()
+
+        scalper.strategy.open_position(
+            symbol='FETUSDT', signal=1, entry_price=0.1686,
+            notional=100.0, leverage=3, move_size=0.02,
+            server_sl_order_id=None,
+            server_tp_order_id='tp_exists',
+        )
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'post':
+                raise Exception(
+                    'APIError(code=-2021): Order would immediately trigger.'
+                )
+            return {'algoStatus': 'NEW'}
+
+        scalper.client._request_futures_api = MagicMock(
+            side_effect=mock_algo_api,
+        )
+
+        scalper._sync_server_orders()
+
+        # Discord must fire FORCE CLOSE FAILED alert
+        discord_calls = [
+            c for c in scalper.discord.send.call_args_list
+            if 'FORCE CLOSE FAILED' in str(c)
+        ]
+        assert len(discord_calls) >= 1
+
+    def test_reduce_only_on_close_position(self):
+        """_close_position passes reduce_only=True to _place_order."""
+        scalper = _make_scalper(paper=False)
+        scalper._place_order = MagicMock(return_value={
+            'orderId': 999, 'avgPrice': '0.1640',
+            'executedQty': '25000', 'status': 'FILLED',
+        })
+
+        scalper.strategy.open_position(
+            symbol='FETUSDT', signal=1, entry_price=0.1686,
+            notional=100.0, leverage=3, move_size=0.02,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
+        )
+
+        scalper._close_position('FETUSDT', 'test_close', 0.1640)
+
+        # Verify reduce_only=True was passed
+        _, kwargs = scalper._place_order.call_args
+        if 'reduce_only' in kwargs:
+            assert kwargs['reduce_only'] is True
+        else:
+            # positional arg check
+            args = scalper._place_order.call_args[0]
+            assert args[3] is True  # 4th positional = reduce_only
