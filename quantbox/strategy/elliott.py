@@ -52,11 +52,11 @@ class ElliottConfig:
     All values calibrated to winning_strategy.md specification.
     """
 
-    # ── ZigZag swing detection ──
-    zigzag_threshold: float = 0.03       # 3% min swing on 4h
+    # ── ZigZag swing detection (sweep-optimized 2026-02-18) ──
+    zigzag_threshold: float = 0.02       # 2% min swing on 4h (sweep: 0.02 > 0.03, +5 trades)
     zigzag_threshold_15m: float = 0.015  # 1.5% on 15m (divergence check)
     # Multi-scale zigzag for fractal structure (winning_strategy §1)
-    zigzag_thresholds: tuple[float, ...] = (0.03, 0.05, 0.07)
+    zigzag_thresholds: tuple[float, ...] = (0.02, 0.04, 0.06)
     # How many bars back a pattern's C can be and still be actionable
     pattern_lookback_bars: int = 5
 
@@ -131,7 +131,7 @@ class ElliottConfig:
     # ── Confirmation & position management ──
     confirmation_bars: int = 4   # Max bars to wait for primary confirmation
     max_hold_bars: int = 96      # Max hold ~16 days at 4h
-    trail_atr_mult: float = 2.0  # Trailing stop distance in ATR units
+    trail_atr_mult: float = 1.5  # Trailing stop in ATR units (sweep: 1.5 > 2.0, +0.3% ret)
 
     # ── Stop loss (§3.1: tight invalidation) ──
     # If C truly ends the correction, price should NOT revisit C.
