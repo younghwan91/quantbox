@@ -88,6 +88,77 @@ def _setup_logging() -> Path:
 _log_path = _setup_logging()
 logger = logging.getLogger('Scalper')
 
+
+# ──────────────── Diagnostic JSONL Logger (v12.0) ─────────────────────
+# Structured per-symbol-per-cycle data for parameter optimization.
+# Writes to logs/diagnostics.jsonl — load with pd.read_json(lines=True).
+
+class DiagnosticLogger:
+    """Append-only JSONL writer for structured diagnostic data.
+
+    Zero impact on strategy logic — pure observation layer.
+    Rotates at 50MB to prevent disk fill.
+    """
+
+    def __init__(self, log_dir: Path = Path('logs')):
+        self._path = log_dir / 'diagnostics.jsonl'
+        self._fh: logging.handlers.RotatingFileHandler | None = None
+        self._logger = logging.getLogger('Diagnostics')
+        self._logger.setLevel(logging.DEBUG)
+        self._logger.propagate = False  # Don't spam main log
+        try:
+            fh = logging.handlers.RotatingFileHandler(
+                str(self._path), maxBytes=50 * 1024 * 1024, backupCount=3,
+            )
+            fh.setFormatter(logging.Formatter('%(message)s'))
+            self._logger.addHandler(fh)
+            self._fh = fh
+        except Exception:
+            pass  # Degrade gracefully — diagnostics are optional
+
+    def log_scan(self, cycle: int, timestamp: str, diags: list[dict]) -> None:
+        """Write one JSONL record per cycle with all symbol diagnostics."""
+        if self._fh is None:
+            return
+        record = {
+            'type': 'scan',
+            'cycle': cycle,
+            'ts': timestamp,
+            'symbols': diags,
+        }
+        self._logger.debug(json.dumps(record, separators=(',', ':')))
+
+    def log_entry(self, cycle: int, timestamp: str, symbol: str,
+                  signal: int, diag: dict, sizing: dict) -> None:
+        """Write entry diagnostic when a position is opened."""
+        if self._fh is None:
+            return
+        record = {
+            'type': 'entry',
+            'cycle': cycle,
+            'ts': timestamp,
+            'symbol': symbol,
+            'signal': signal,
+            'diag': diag,
+            'sizing': sizing,
+        }
+        self._logger.debug(json.dumps(record, separators=(',', ':')))
+
+    def log_exit(self, cycle: int, timestamp: str, trade: dict) -> None:
+        """Write exit diagnostic when a position is closed."""
+        if self._fh is None:
+            return
+        record = {
+            'type': 'exit',
+            'cycle': cycle,
+            'ts': timestamp,
+            'trade': trade,
+        }
+        self._logger.debug(json.dumps(record, separators=(',', ':')))
+
+
+_diag_logger = DiagnosticLogger()
+
 # ──────────────────────── State File ──────────────────────────────────
 
 STATE_DIR = Path('data/state')
@@ -972,6 +1043,19 @@ class RubberBandScalper:
             f"lev={lev_int}x, move={move_size*100:.2f}%)"
         )
 
+        # v12.0: Entry diagnostic to JSONL
+        if hasattr(self.strategy, 'diagnose_bar'):
+            entry_diag = self.strategy.diagnose_bar(symbol, close_prices)
+            _diag_logger.log_entry(
+                self._cycle_count,
+                datetime.now(timezone.utc).isoformat(),
+                symbol, signal, entry_diag,
+                {'notional': round(fill_qty * fill_price, 2),
+                 'leverage': lev_int, 'move_size': round(move_size, 6),
+                 'fill_price': fill_price, 'tp_pct': round(cfg.target_retrace * 100, 2),
+                 'sl_mult': round(eff_stop, 4)},
+            )
+
         # Compute TP/SL prices for notification
         tp_distance = move_size * cfg.target_retrace
         sl_distance = move_size * eff_stop
@@ -1366,6 +1450,10 @@ class RubberBandScalper:
         }
         self._trade_history.append(trade)
 
+        # v12.0: Exit diagnostic to JSONL
+        _diag_logger.log_exit(self._cycle_count,
+                              datetime.now(timezone.utc).isoformat(), trade)
+
         emoji = '💰' if net_pnl > 0 else '💸'
         logger.info(
             f"[{symbol}] CLOSED ({reason}): "
@@ -1508,6 +1596,8 @@ class RubberBandScalper:
         Prioritizes symbols with the largest moves (strongest alpha signal).
         """
         candidates: list[tuple[str, int, float, np.ndarray]] = []
+        moves_seen: list[tuple[str, float]] = []  # diagnostic: (symbol, abs_move)
+        scan_diags: list[dict] = []  # v12.0: per-symbol diagnostics
 
         for sym in symbols:
             # Skip symbols we already have positions in
@@ -1538,6 +1628,17 @@ class RubberBandScalper:
                     self.strategy.update_htf_data(sym, close_4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
+
+            # v12.0: Collect full diagnostic context (read-only, after on_bar)
+            if self.strategy_name != 'elliott' and hasattr(self.strategy, 'diagnose_bar'):
+                diag = self.strategy.diagnose_bar(sym, close, btc_close)
+                diag['signal_actual'] = signal  # cross-verify with on_bar
+                scan_diags.append(diag)
+
+            # Track 8-bar move for diagnostics
+            abs_move = abs(close[-1] / close[-self.config.lookback - 1] - 1.0)
+            moves_seen.append((sym, abs_move))
+
             if signal != 0:
                 # Measure move strength for prioritization
                 move = abs(
@@ -1547,6 +1648,25 @@ class RubberBandScalper:
 
         # Prioritize strongest moves
         candidates.sort(key=lambda x: x[2], reverse=True)
+
+        # ── Diagnostic: log scan summary every cycle ──
+        if candidates:
+            cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
+            logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
+        else:
+            # Show top 3 movers so user knows scans ARE running
+            if moves_seen:
+                moves_seen.sort(key=lambda x: x[1], reverse=True)
+                top3 = [f"{s}({m*100:.2f}%)" for s, m in moves_seen[:3]]
+                logger.info(
+                    f"No candidates — top moves: {', '.join(top3)} "
+                    f"(need >{self.config.threshold*100:.1f}%)"
+                )
+
+        # v12.0: Write structured diagnostics to JSONL
+        if scan_diags:
+            ts = datetime.now(timezone.utc).isoformat()
+            _diag_logger.log_scan(self._cycle_count, ts, scan_diags)
 
         entries_made = 0
         for sym, signal, move, close in candidates:
