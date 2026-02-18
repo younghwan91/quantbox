@@ -2357,6 +2357,11 @@ def main():
         stoch_enabled=settings.rb_stoch_enabled,
         stoch_k_period=settings.rb_stoch_k_period,
         stoch_d_period=settings.rb_stoch_d_period,
+        # v11.4: Adaptive Threshold (Walk-Forward Validated)
+        atr_period=settings.rb_atr_period,
+        atr_multiplier=settings.rb_atr_multiplier,
+        threshold_floor=settings.rb_threshold_floor,
+        threshold_cap=settings.rb_threshold_cap,
         # v10.0: Symbol whitelist & dynamic capital
         symbol_whitelist=[s.strip() for s in settings.rb_symbol_whitelist.split(',') if s.strip()],
         dynamic_capital_enabled=settings.rb_dynamic_capital_enabled,
