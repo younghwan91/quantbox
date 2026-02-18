@@ -489,12 +489,21 @@ class TestPollingLoop:
             call_idx[0] += 1
             return fake_times[idx]
 
+        # Simulate monotonic clock jumping past SYNC_INTERVAL (60s)
+        mono_values = [0.0, 61.0, 61.0]
+        mono_idx = [0]
+
+        def fake_monotonic():
+            idx = min(mono_idx[0], len(mono_values) - 1)
+            mono_idx[0] += 1
+            return mono_values[idx]
+
         with patch("quantbox.scalper.datetime") as mock_dt, \
              patch("quantbox.scalper.time") as mock_time:
             mock_dt.now = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             mock_time.sleep = MagicMock()
-            mock_time.monotonic = time.monotonic
+            mock_time.monotonic = fake_monotonic
 
             scalper._wait_for_bar()
 
