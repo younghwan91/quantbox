@@ -173,11 +173,11 @@ class RubberBandConfig:
     # short when BTC rising. Filters out idiosyncratic altcoin moves that
     # are less likely to revert.
     # v11.0: Re-enabled with period=48 (12h BTC momentum window).
-    # Maeoknam A/B test: unlocks Risk-Off trades (sympathy pullback).
+    # A/B test: unlocks Risk-Off trades (sympathy pullback).
     # Result: Ret 1331% → 6556% (+393%), Calmar 5.14 → 19.65 (+282%).
     # Robust across all tested periods (16-96), not curve-fit.
     btc_directional_enabled: bool = True   # Align entry with BTC momentum
-    btc_directional_period: int = 48       # v11.0: 12h BTC momentum window (Maeoknam A/B winner)
+    btc_directional_period: int = 48       # v11.0: 12h BTC momentum window (A/B validated)
 
     # ── Capital Preservation (v4.4: DISABLED — hurts at tighter stop) ──
     # v4.3 partial exit hurt performance with stop=0.9 target=0.4:
@@ -2165,7 +2165,12 @@ class RubberBandStrategy:
         close_prices: np.ndarray,
         btc_close_prices: np.ndarray | None = None,
     ) -> int:
-        """Process a new bar and return signal.
+        """Process a new bar and return entry signal for the LATEST bar only.
+
+        CRITICAL: This method evaluates entry conditions at the LAST bar
+        statelessly, identical to how the backtest evaluates each bar.
+        Previously this ran compute_signals_v9 on 200 bars and took sigs[-1],
+        which conflated old virtual positions with fresh entry signals.
 
         Args:
             symbol: Trading symbol.
@@ -2179,7 +2184,7 @@ class RubberBandStrategy:
         if len(close_prices) < cfg.lookback + 1:
             return 0
 
-        # ═══ v6.0 Confidence-Scored Entry (highest priority) ═══
+        # ═══ v6.0+ Confidence-Scored Entry (stateless last-bar evaluation) ═══
         if btc_close_prices is not None and cfg.entry_mode == 'confidence':
             min_bars = max(
                 cfg.lookback, cfg.btc_directional_period,
@@ -2204,98 +2209,170 @@ class RubberBandStrategy:
                 )
                 return int(sigs[-1])
 
-            # v9.0: Use enhanced signal function when MACD or Stochastic enabled
-            if cfg.macd_enabled or cfg.stoch_enabled:
-                high_data = self._high_data.get(symbol)
-                low_data = self._low_data.get(symbol)
-                if high_data is None:
-                    high_data = close_prices  # fallback
-                if low_data is None:
-                    low_data = close_prices  # fallback
-                sigs = compute_signals_v9(
-                    close_prices, high_data, low_data,
-                    vol_data, taker_data, btc_close_prices,
-                    cfg.lookback, cfg.threshold,
-                    cfg.target_retrace, cfg.stop_mult,
-                    cfg.max_hold, cfg.stop_decay,
-                    cfg.btc_directional_period,
-                    cfg.btc_regime_period,
-                    cfg.asset_trend_period,
-                    cfg.min_confidence,
-                    cfg.base_leverage,
-                    cfg.confidence_leverage_step,
-                    cfg.max_leverage,
-                    cfg.rsi_period,
-                    cfg.vol_period,
-                    cfg.dynamic_target_enabled,
-                    cfg.target_conf3,
-                    cfg.target_conf4,
-                    cfg.target_conf5,
-                    cfg.stoch_enabled,
-                    cfg.stoch_k_period,
-                    cfg.stoch_d_period,
-                    cfg.macd_enabled,
-                    cfg.macd_fast,
-                    cfg.macd_slow,
-                    cfg.macd_signal_period,
+            # ──────────────────────────────────────────────────────────
+            # STATELESS last-bar entry evaluation (v13.0 parity fix)
+            #
+            # Previously: ran compute_signals_v9() on 200 bars and took
+            # sigs[-1]. This caused TWO critical bugs:
+            #   1. Ghost-position: sigs[-1] was non-zero from a STALE
+            #      virtual entry 5-50 bars ago, not a fresh signal.
+            #   2. Missed-signal: sigs[-1] was zero because the function
+            #      was mid-position when bar 199 qualified for entry.
+            #
+            # Fix: evaluate the LAST bar directly using the same
+            # confidence scoring logic as compute_signals_v9 (identical
+            # entry conditions, no position state carried forward).
+            # This is equivalent to what the backtest sees at each bar
+            # when the strategy is flat (position == 0), which is the
+            # only state that matters for _scan_entries().
+            # ──────────────────────────────────────────────────────────
+            n = len(close_prices)
+
+            # 8-bar return at the last bar
+            ret = close_prices[-1] / close_prices[-cfg.lookback - 1] - 1.0
+            if abs(ret) <= cfg.threshold:
+                self._mtf_confirmed[symbol] = False
+                return 0
+
+            # BTC regime
+            btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period:]))
+            is_risk_on = float(btc_close_prices[-1]) > btc_sma_val
+            if np.isnan(btc_sma_val):
+                self._mtf_confirmed[symbol] = False
+                return 0
+
+            # BTC momentum
+            btc_mom = float(btc_close_prices[-1] / btc_close_prices[-cfg.btc_directional_period - 1] - 1.0)
+
+            # Asset trend
+            asset_sma_val = float(np.mean(close_prices[-cfg.asset_trend_period:]))
+            is_uptrend = float(close_prices[-1]) > asset_sma_val
+
+            # RSI
+            rsi_arr = _compute_rsi_inline(close_prices, cfg.rsi_period)
+            rsi_val = float(rsi_arr[-1])
+
+            # Volume
+            vol_ratio = 0.0
+            taker_ratio_val = 0.5
+            vol_sma_arr = _compute_sma_inline(vol_data, cfg.vol_period)
+            vol_sma_val = float(vol_sma_arr[-1])
+            if not np.isnan(vol_sma_val) and vol_sma_val > 0:
+                vol_ratio = float(vol_data[-1]) / vol_sma_val
+            if float(vol_data[-1]) > 0:
+                taker_ratio_val = float(taker_data[-1]) / float(vol_data[-1])
+
+            # SMA distance
+            sma_dist = abs(float(close_prices[-1]) - asset_sma_val) / asset_sma_val if asset_sma_val > 0 else 999.0
+
+            # Stochastic
+            stoch_k_val, stoch_d_val = 50.0, 50.0
+            sk_prev, sd_prev = 50.0, 50.0
+            if cfg.stoch_enabled:
+                high_data = self._high_data.get(symbol, close_prices)
+                low_data = self._low_data.get(symbol, close_prices)
+                sk, sd = _compute_stochastic_inline(
+                    high_data, low_data, close_prices,
+                    cfg.stoch_k_period, cfg.stoch_d_period,
                 )
+                stoch_k_val, stoch_d_val = float(sk[-1]), float(sd[-1])
+                if n > 1:
+                    sk_prev, sd_prev = float(sk[-2]), float(sd[-2])
+
+            # MACD
+            macd_hist_val, macd_hist_prev = 0.0, 0.0
+            if cfg.macd_enabled and n >= cfg.macd_slow + cfg.macd_signal_period:
+                _, _, mhist = _compute_macd_inline(
+                    close_prices, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period,
+                )
+                macd_hist_val = float(mhist[-1])
+                if n > 1:
+                    macd_hist_prev = float(mhist[-2])
+
+            # ── Confidence scoring (identical to compute_signals_v9) ──
+            confidence = 1  # BTC regime alignment confirmed
+            signal = 0
+
+            if is_risk_on:
+                # ═══ RISK-ON ═══
+                if ret < -cfg.threshold and is_uptrend:
+                    # LONG: alt dipped in its own uptrend during BTC bull
+                    if rsi_val < 40: confidence += 1
+                    if vol_ratio > 1.5: confidence += 1
+                    if taker_ratio_val < 0.45: confidence += 1
+                    if sma_dist < 0.02: confidence += 1
+                    if cfg.stoch_enabled and n > 1:
+                        if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                            confidence += 1
+                    if cfg.macd_enabled:
+                        if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                            confidence += 1
+                    if confidence >= cfg.min_confidence:
+                        signal = 1
+
+                elif ret > cfg.threshold and not is_uptrend:
+                    # SHORT: alt surged but in downtrend → exhaustion
+                    if rsi_val > 60: confidence += 1
+                    if vol_ratio > 1.5: confidence += 1
+                    if taker_ratio_val > 0.55: confidence += 1
+                    if sma_dist < 0.02: confidence += 1
+                    if cfg.stoch_enabled and n > 1:
+                        if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                            confidence += 1
+                    if cfg.macd_enabled:
+                        if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                            confidence += 1
+                    if confidence >= cfg.min_confidence:
+                        signal = -1
             else:
-                sigs = compute_signals_confidence(
-                    close_prices, vol_data, taker_data, btc_close_prices,
-                    cfg.lookback, cfg.threshold,
-                    cfg.target_retrace, cfg.stop_mult,
-                    cfg.max_hold, cfg.stop_decay,
-                    cfg.btc_directional_period,
-                    cfg.btc_regime_period,
-                    cfg.asset_trend_period,
-                    cfg.min_confidence,
-                    cfg.base_leverage,
-                    cfg.confidence_leverage_step,
-                    cfg.max_leverage,
-                    cfg.rsi_period,
-                    cfg.vol_period,
-                    cfg.dynamic_target_enabled,
-                    cfg.target_conf3,
-                    cfg.target_conf4,
-                    cfg.target_conf5,
-                )
+                # ═══ RISK-OFF ═══
+                if ret < -cfg.threshold and btc_mom < 0:
+                    # LONG: alt dips with BTC → sympathy → mean revert
+                    if rsi_val < 35: confidence += 1
+                    if vol_ratio > 1.5: confidence += 1
+                    if taker_ratio_val < 0.42: confidence += 1
+                    if btc_mom < -0.01: confidence += 1
+                    if cfg.stoch_enabled and n > 1:
+                        if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                            confidence += 1
+                    if cfg.macd_enabled:
+                        if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                            confidence += 1
+                    if confidence >= cfg.min_confidence:
+                        signal = 1
+
+                elif ret > cfg.threshold and btc_mom > 0:
+                    # SHORT: alt pumps with BTC bounce → fades back
+                    if rsi_val > 65: confidence += 1
+                    if vol_ratio > 1.5: confidence += 1
+                    if taker_ratio_val > 0.58: confidence += 1
+                    if btc_mom > 0.01: confidence += 1
+                    if cfg.stoch_enabled and n > 1:
+                        if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                            confidence += 1
+                    if cfg.macd_enabled:
+                        if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                            confidence += 1
+                    if confidence >= cfg.min_confidence:
+                        signal = -1
 
             # ═══ v7.0 MTF Confirmation (LIVE — inline latest-bar check) ═══
-            # CRITICAL PARITY NOTE: apply_mtf_confirmation() uses j = i // 16
-            # to map 15m→4h index. This is CORRECT for backtest (both arrays
-            # start at the same date), but WRONG for live (200 15m bars vs
-            # 100 4h bars with different start times). Bar 199 would map to
-            # close_4h[12] (352h ago) instead of close_4h[99] (current).
-            #
-            # Fix: Compute the 4h trend directly from the LATEST 4h data.
-            # This is equivalent to what apply_mtf_confirmation does at the
-            # last bar when arrays are properly time-aligned.
             htf_close = self._htf_close_data.get(symbol)
             mtf_applied = False
-            last_sig = sigs[-1]
 
-            if cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
-                # Compute 4h SMA from the most recent bars
+            if signal != 0 and cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
                 sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period:]))
                 trend_up = float(htf_close[-1]) > sma_4h
 
-                # Block counter-trend entries (same logic as apply_mtf_confirmation)
-                if last_sig > 0 and not trend_up:
-                    last_sig = 0.0  # Block long in 4h downtrend
-                elif last_sig < 0 and trend_up:
-                    last_sig = 0.0  # Block short in 4h uptrend
+                if signal > 0 and not trend_up:
+                    signal = 0  # Block long in 4h downtrend
+                elif signal < 0 and trend_up:
+                    signal = 0  # Block short in 4h uptrend
                 else:
-                    mtf_applied = True  # Signal survived MTF filter
+                    mtf_applied = True
 
-            # Return signal direction; leverage communicated via was_mtf_confirmed()
-            if last_sig > 0:
-                self._mtf_confirmed[symbol] = mtf_applied
-                return 1
-            elif last_sig < 0:
-                self._mtf_confirmed[symbol] = mtf_applied
-                return -1
-            self._mtf_confirmed[symbol] = False
-            return 0
+            self._mtf_confirmed[symbol] = mtf_applied
+            return signal
 
         # ═══ v5.0 Regime-Switch Dual Entry ═══
         if btc_close_prices is not None and cfg.entry_mode == 'regime_switch':

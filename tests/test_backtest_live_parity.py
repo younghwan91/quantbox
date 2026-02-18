@@ -6,11 +6,13 @@ as the backtest engine for:
   2. MTF confirmation (blocking + leverage)
   3. Effective leverage (backtest signal magnitude == live leverage)
   4. CLI defaults don't override .env values
+  5. Incomplete bar exclusion (live must drop open candle)
 
 These tests exist because parity violations = silent money loss.
 """
 
 import math
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -355,7 +357,7 @@ def test_live_mtf_blocks_counter_trend():
 # ── Test 7: btc_directional_period matches backtest ──
 
 def test_btc_directional_period_default_matches_backtest():
-    """btc_directional_period must be 48 (v11.0 Maeoknam A/B winner).
+    """btc_directional_period must be 48 (v11.0 A/B validated).
 
     With period=48, BTC momentum over 12h enables Risk-Off entries
     (sympathy pullback). A/B tested: Calmar 5.14 → 19.65 (+282%).
@@ -364,3 +366,179 @@ def test_btc_directional_period_default_matches_backtest():
     cfg = RubberBandConfig()
     assert cfg.btc_directional_period == 48, \
         f"btc_directional_period={cfg.btc_directional_period}, should be 48 (v11.0)"
+
+
+# ── Test 8: Incomplete bar exclusion (critical parity fix) ──
+
+def test_download_klines_drops_incomplete_bar():
+    """download_klines must drop the last (incomplete) candle from Binance.
+
+    Binance futures_klines ALWAYS includes the currently-open candle as
+    the last element. The backtest only sees completed bars, so live must
+    also exclude the incomplete bar to maintain signal parity.
+
+    Without this fix: close[-1] in live = few-seconds-old open price of new bar,
+    while in backtest close[i] = the fully closed bar. The 8-bar return
+    calculation diverges, causing the live system to rarely trigger signals.
+    """
+    from quantbox.scalper import RubberBandScalper
+
+    # Create a bare scalper instance with mocked client (skip __init__)
+    scalper = object.__new__(RubberBandScalper)
+
+    # Simulate 201 klines from Binance (200 complete + 1 incomplete)
+    fake_klines = []
+    for i in range(201):
+        # [open_time, open, high, low, close, volume, close_time,
+        #  quote_vol, n_trades, taker_buy_base, taker_buy_quote, ignore]
+        price = 100.0 + i * 0.1
+        fake_klines.append([
+            1000000 + i * 900000,    # open_time
+            str(price),              # open
+            str(price + 0.5),        # high
+            str(price - 0.5),        # low
+            str(price),              # close
+            str(1000.0),             # volume
+            1000000 + (i + 1) * 900000,  # close_time
+            str(10000.0),            # quote volume
+            100,                     # n_trades
+            str(400.0),              # taker buy base
+            str(4000.0),             # taker buy quote
+            '0',                     # ignore
+        ])
+
+    # The last kline is the incomplete candle (current bar)
+    # Set it to a wildly different price to make the bug obvious
+    fake_klines[-1][4] = str(999.0)  # close = 999 (garbage incomplete data)
+
+    mock_client = MagicMock()
+    mock_client.futures_klines.return_value = fake_klines
+    scalper.client = mock_client
+    scalper.paper_mode = True
+
+    # Test basic (close only)
+    close = scalper.download_klines('BTCUSDT', 200)
+    assert close is not None
+    assert len(close) == 200, f"Expected 200 completed bars, got {len(close)}"
+    # Last bar should be the penultimate kline, not the incomplete one
+    assert close[-1] != 999.0, "Incomplete bar was NOT dropped!"
+    assert close[-1] == pytest.approx(100.0 + 199 * 0.1, abs=0.01)
+
+    # Test full (close + high + low + volume + taker)
+    mock_client.futures_klines.return_value = fake_klines
+    result = scalper.download_klines('BTCUSDT', 200, full=True)
+    assert result is not None
+    close_f, high_f, low_f, vol_f, taker_f = result
+    assert len(close_f) == 200
+    assert close_f[-1] != 999.0, "Incomplete bar was NOT dropped (full mode)!"
+
+
+# ── Test 9: Stateless on_bar (ghost-position prevention) ──
+
+def test_on_bar_stateless_no_ghost_position():
+    """on_bar must evaluate ONLY the last bar, not carry forward virtual state.
+
+    Bug history: on_bar ran compute_signals_v9 on 200 bars and took sigs[-1].
+    If an earlier bar (e.g. bar 150) triggered a virtual entry, sigs[-1]
+    reflected that stale position — not a fresh signal at bar 199.
+
+    Fix: on_bar now evaluates the last bar statelessly.
+    """
+    cfg = RubberBandConfig(
+        entry_mode='confidence',
+        min_confidence=1,
+        threshold=0.032,
+        lookback=8,
+        stoch_enabled=True,
+        stoch_k_period=3,
+        stoch_d_period=3,
+        macd_enabled=True,
+    )
+    strategy = RubberBandStrategy(cfg)
+
+    n = 200
+    # Price flat everywhere — no signal anywhere
+    close = np.ones(n, dtype=np.float64) * 100.0
+    btc = np.ones(n, dtype=np.float64) * 50000.0
+    volume = np.ones(n, dtype=np.float64) * 1000.0
+    taker = np.ones(n, dtype=np.float64) * 400.0
+    high = close.copy()
+    low = close.copy()
+
+    # Inject a big dip at bar 150 (would trigger virtual entry in old code)
+    close[150] = 95.0   # -5% dip
+    high[150] = 100.0
+    low[150] = 94.5
+
+    # But bar 199 (the last bar) is back to flat — NO signal at last bar
+    close[199] = 100.0
+
+    strategy.update_market_data("SYM", volume, taker, high, low)
+
+    sig = strategy.on_bar("SYM", close, btc)
+    # Old code: sigs[-1] could be non-zero from bar 150 virtual entry
+    # Fixed code: evaluates bar 199 only → flat → signal=0
+    assert sig == 0, (
+        f"Ghost signal detected! on_bar returned {sig} but last bar is flat. "
+        "This means on_bar is still carrying virtual position state."
+    )
+
+
+def test_on_bar_stateless_detects_fresh_entry():
+    """on_bar must detect a fresh entry at the last bar even when earlier bars
+    would have occupied a virtual position slot.
+
+    Bug history: If a virtual entry at bar 170 was still held at bar 199,
+    compute_signals_v9 was in the exit branch and never re-evaluated
+    bar 199 for a new entry. sigs[-1] == old_position, not fresh signal.
+
+    Fix: on_bar evaluates bar 199 independently.
+    """
+    cfg = RubberBandConfig(
+        entry_mode='confidence',
+        min_confidence=1,
+        threshold=0.032,
+        lookback=8,
+        stoch_enabled=True,
+        stoch_k_period=3,
+        stoch_d_period=3,
+        macd_enabled=True,
+        mtf_confirmation_enabled=False,  # Disable MTF to isolate entry logic
+    )
+    strategy = RubberBandStrategy(cfg)
+
+    n = 200
+    # Create two separate dips:
+    # Dip 1 at bar 170 (would occupy virtual position slot in old code)
+    # Dip 2 at bar 199 (the last bar — should trigger fresh)
+    close = np.ones(n, dtype=np.float64) * 100.0
+    btc = np.ones(n, dtype=np.float64) * 50000.0
+    # BTC falling → sympathy long entries enabled
+    btc[-49:] = np.linspace(50000, 49000, 49)
+    volume = np.ones(n, dtype=np.float64) * 1000.0
+    taker = np.ones(n, dtype=np.float64) * 400.0
+    high = close.copy()
+    low = close.copy()
+
+    # Dip 1: bar 170 drops to 96 (-4%)
+    close[170] = 96.0
+    high[170] = 100.0
+    low[170] = 95.5
+    # Bars 171-198 stay at 100 (virtual position would still be active)
+    # Dip 2: bar 199 drops to 95 (-5%, fresh signal)
+    close[199] = 95.0
+    high[199] = 100.0
+    low[199] = 94.5
+
+    strategy.update_market_data("SYM", volume, taker, high, low)
+
+    sig = strategy.on_bar("SYM", close, btc)
+    # Old code: sigs[-1] from stale bar-170 position (direction might match
+    #           but entry price is wrong) or sigs[-1]==0 after max_hold exit
+    # Fixed code: evaluates bar 199 independently → fresh long signal
+    assert sig != 0, (
+        "Missed signal! Last bar has a -5% dip qualifying for entry, "
+        "but on_bar returned 0. The virtual position from bar 170 "
+        "may have blocked evaluation of bar 199."
+    )
+    assert sig == 1, f"Expected long signal (+1) at -5% dip, got {sig}"
