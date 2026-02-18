@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 11.5.0  
-> 최종 업데이트: 2025년 7월 21일
+> 버전: 11.6.0  
+> 최종 업데이트: 2025년 2월 18일
 
 ---
 
@@ -38,21 +38,21 @@ QuantBox는 암호화폐 트레이딩을 위한 종합 퀀트 프레임워크입
 
 ---
 
-## 3. 🔥 Rubber Band Scalper (v11.1 — Critical Fixes + Pool Expansion)
+## 3. 🔥 Rubber Band Scalper (v11.4 — Adaptive Threshold)
 
 ### 3.1 전략 개요
 
-Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. 3.2% 이상 급등/급락 후 발생하는 기계적 반등(snap-back)을 포착합니다.
+Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응합니다.
 
-**v11.1 핵심 개선:**
-- **Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어 + 레버리지 설정 검증
-- **Pool Expansion**: Top-15→Top-20 (A/B 검증: 3384% ret, Calmar 155.22 vs baseline 1470%)
-- **v10.0 Entry Optimization**: threshold 0.045→0.032 (+162% ret), min_confidence 2→1 (MTF as quality gate)
-- **v10.0 Extended Hold**: max_hold 10→20 (+24% ret), stoch_k 5→3 (+5% Calmar)
+**v11.4 핵심 개선:**
+- **Adaptive Threshold**: 고정 3.2% → `clip(2.5 × ATR%(48), 1%, 6%)` 적응형 (OOS Sharpe 8.23, OOS/IS 1.09)
+  - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
+  - 변동성 높은 시장에서는 임계값 자동 확대, 낮은 시장에서는 타이트하게 조정
+  - 레버리지 최적화: 1×~5× 그리드 → 현행 3.75× 유지 결정
+- **Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어
 - **v9.0 Fibonacci Exit**: target 0.382, stop 0.786 (R:R 0.486, Calmar +29%)
 - **v9.0 S+R+M Confluence**: MACD(12,26,14) + Stochastic(3,3) 컨피던스 증거
 - **v7.0 MTF Confirmation**: 4h SMA(12) 트렌드 필터 — MDD -74%, Calmar +275%
-- **v12.0 Diagnostic Logging**: JSONL 진단 로그 (진입 조건 분석용)
 
 **알파 소스:**
 - 청산 캐스케이드(liquidation cascades)로 인한 오버슈트
@@ -89,7 +89,11 @@ python -m quantbox.scalper
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | lookback | 8 | 이동 측정 기간 (봉 수, 8×15m = 2시간) |
-| threshold | 0.032 | v10.0: 최소 진입 이동 폭 (3.2%, +162% ret vs 4.5%) |
+| threshold | 0.032 | ATR NaN 시 고정 임계값 폴백 (3.2%) |
+| **atr_period** | **48** | **v11.4: ATR EMA 기간 (48 × 15분 = 12시간)** |
+| **atr_multiplier** | **2.5** | **v11.4: ATR 배수 (threshold = 2.5 × ATR%)** |
+| **threshold_floor** | **0.01** | **v11.4: 최소 임계값 (1%)** |
+| **threshold_cap** | **0.06** | **v11.4: 최대 임계값 (6%)** |
 | target_retrace | 0.382 | 이익 실현: 이동 폭의 38.2% 되돌림 (Fibonacci golden ratio, v9.0) |
 | stop_mult | 0.786 | 손절: 이동 폭의 0.786배 (Fibonacci deep correction, v9.0) |
 | max_hold | 20 | v10.0: 최대 보유 기간 (20봉 = 5시간, +24% ret vs 10) |
@@ -320,6 +324,10 @@ MACD 히스토그램 기울기가 트레이드 방향과 일치하면 +1 컨피�
 | RB_STOCH_ENABLED | true | 스토캐스틱 크로스 컨피던스 증거 활성화 |
 | RB_STOCH_K_PERIOD | 3 | v10.0: 스토캐스틱 %K 기간 (3=ultra fast, +5% Calmar vs 5) |
 | RB_STOCH_D_PERIOD | 3 | 스토캐스틱 %D 기간 |
+| **RB_ATR_PERIOD** | **48** | **v11.4: ATR EMA 기간 (48 × 15분 = 12시간)** |
+| **RB_ATR_MULTIPLIER** | **2.5** | **v11.4: ATR 배수 (threshold = 2.5 × ATR%)** |
+| **RB_THRESHOLD_FLOOR** | **0.01** | **v11.4: 최소 임계값 (1%)** |
+| **RB_THRESHOLD_CAP** | **0.06** | **v11.4: 최대 임계값 (6%)** |
 
 #### 3.8.4 Live Pipeline 확장 (v9.0)
 
@@ -550,6 +558,12 @@ RB_STOCH_ENABLED=true              # 스토캐스틱 크로스 컨피던스 증�
 RB_STOCH_K_PERIOD=3                # v10.0: 스토캐스틱 %K 기간 (3=ultra fast, +5% Calmar vs 5)
 RB_STOCH_D_PERIOD=3                # 스토캐스틱 %D 기간
 
+# v11.4 Adaptive Threshold (Walk-Forward Validated)
+RB_ATR_PERIOD=48                   # ATR EMA 기간 (48 × 15분 = 12시간)
+RB_ATR_MULTIPLIER=2.5              # ATR 배수
+RB_THRESHOLD_FLOOR=0.01            # 최소 임계값 (1%)
+RB_THRESHOLD_CAP=0.06              # 최대 임계값 (6%)
+
 # v7.0 Independent 4H Rubber Band
 # 4h 타임프레임에서 독립적으로 평균회귀 트레이딩
 # 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
@@ -614,7 +628,7 @@ quantbox/
 │   ├── downloader.py       # 바이낸스 데이터 다운로드
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 계층
-│   ├── rubberband.py       # Rubber Band Scalper (v11.1, Numba 가속)
+│   ├── rubberband.py       # Rubber Band Scalper (v11.4, Numba 가속)
 │   ├── elliott.py          # Elliott Wave 전략 (v11.5, Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
