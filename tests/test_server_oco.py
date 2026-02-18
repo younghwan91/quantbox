@@ -462,3 +462,136 @@ class TestTPStatePersistence:
         assert len(scalper._trade_history) == 1
         assert scalper._trade_history[0]['reason'] == 'server_tp'
         assert scalper._trade_history[0]['pnl_usd'] > 0  # TP = profit
+
+
+# ─────────────────────────── Bracket Repair ──────────────────────
+
+
+class TestBracketRepair:
+    """v11.4.2: _sync_server_orders repairs missing SL/TP for restored positions."""
+
+    def test_repair_both_missing(self):
+        """Positions with None SL and TP get both placed on sync."""
+        scalper = _make_scalper(paper=False)
+        scalper.strategy.open_position(
+            symbol='FETUSDT', signal=1, entry_price=0.17,
+            notional=100.0, leverage=5, move_size=0.04,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
+        )
+
+        call_count = {'n': 0}
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'post':
+                call_count['n'] += 1
+                return {'algoId': 70000 + call_count['n']}
+            return {'algoStatus': 'NEW'}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
+
+        scalper._sync_server_orders()
+
+        pos = scalper.strategy._positions['FETUSDT']
+        assert pos['server_sl_order_id'] is not None
+        assert pos['server_tp_order_id'] is not None
+        # Two POST calls: one for SL, one for TP
+        post_calls = [
+            c for c in scalper.client._request_futures_api.call_args_list
+            if c[0][0] == 'post'
+        ]
+        assert len(post_calls) == 2
+
+    def test_repair_sl_only(self):
+        """Only SL is missing — only SL gets placed."""
+        scalper = _make_scalper(paper=False)
+        scalper.strategy.open_position(
+            symbol='XLMUSDT', signal=-1, entry_price=0.16,
+            notional=80.0, leverage=3, move_size=0.035,
+            server_sl_order_id=None,
+            server_tp_order_id='existing_tp_9999',
+        )
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'post':
+                return {'algoId': 88001}
+            return {'algoStatus': 'NEW'}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
+
+        scalper._sync_server_orders()
+
+        pos = scalper.strategy._positions['XLMUSDT']
+        assert pos['server_sl_order_id'] == '88001'
+        assert pos['server_tp_order_id'] == 'existing_tp_9999'
+
+    def test_repair_tp_only(self):
+        """Only TP is missing — only TP gets placed, SL untouched."""
+        scalper = _make_scalper(paper=False)
+        scalper.strategy.open_position(
+            symbol='ADAUSDT', signal=1, entry_price=0.50,
+            notional=200.0, leverage=4, move_size=0.03,
+            server_sl_order_id='existing_sl_5555',
+            server_tp_order_id=None,
+        )
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'post':
+                return {'algoId': 99002}
+            if method == 'get' and data.get('algoId') == 'existing_sl_5555':
+                return {'algoStatus': 'NEW'}
+            return {'algoStatus': 'NEW'}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
+
+        scalper._sync_server_orders()
+
+        pos = scalper.strategy._positions['ADAUSDT']
+        assert pos['server_sl_order_id'] == 'existing_sl_5555'
+        assert pos['server_tp_order_id'] == '99002'
+
+    def test_no_repair_when_both_exist(self):
+        """Positions with valid SL and TP don't trigger repair."""
+        scalper = _make_scalper(paper=False)
+        scalper.strategy.open_position(
+            symbol='SOLUSDT', signal=1, entry_price=100.0,
+            notional=500.0, leverage=5, move_size=0.05,
+            server_sl_order_id='sl_existing',
+            server_tp_order_id='tp_existing',
+        )
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            return {'algoStatus': 'NEW'}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
+
+        scalper._sync_server_orders()
+
+        # Only GET calls for checking status — no POST calls
+        post_calls = [
+            c for c in scalper.client._request_futures_api.call_args_list
+            if c[0][0] == 'post'
+        ]
+        assert len(post_calls) == 0
+
+    def test_repair_saves_state(self):
+        """Bracket repair calls _save_state after placing orders."""
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper.strategy.open_position(
+            symbol='DOTUSDT', signal=1, entry_price=5.00,
+            notional=100.0, leverage=3, move_size=0.04,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
+        )
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'post':
+                return {'algoId': 'repaired_123'}
+            return {'algoStatus': 'NEW'}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
+
+        scalper._sync_server_orders()
+
+        scalper._save_state.assert_called_once()
