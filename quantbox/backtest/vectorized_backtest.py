@@ -65,6 +65,7 @@ def _backtest_core_partial(
     signals: np.ndarray,
     cost_per_side: float,
     funding_per_bar: float,
+    bars_per_day: float = 96.0,
 ) -> tuple:
     """Core backtest loop with delta-based costs for partial exits (Numba).
 
@@ -147,7 +148,7 @@ def _backtest_core_partial(
         rets[i] = equity[i + 1] / equity[i] - 1.0
     mean_r = np.mean(rets)
     std_r = np.std(rets)
-    sharpe = mean_r / std_r * np.sqrt(96.0 * 365.25) if std_r > 0 else 0.0
+    sharpe = mean_r / std_r * np.sqrt(bars_per_day * 365.25) if std_r > 0 else 0.0
 
     win_rate = n_wins / n_trades * 100.0 if n_trades > 0 else 0.0
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
@@ -169,8 +170,18 @@ def _backtest_core(
     signals: np.ndarray,
     cost_per_side: float,
     funding_per_bar: float,
+    bars_per_day: float = 96.0,
 ) -> tuple:
     """Core backtest loop (Numba-compiled).
+
+    Args:
+        close: Close price array.
+        signals: Signal array. Magnitude controls position size
+                 (e.g., ±2.0 = 2x effective leverage).
+        cost_per_side: Transaction cost per side.
+        funding_per_bar: Funding cost per bar.
+        bars_per_day: Bars per day for Sharpe annualization
+                      (96 for 15m, 6 for 4h).
 
     Returns:
         (equity_curve, total_return, sharpe, max_dd, win_rate,
@@ -243,13 +254,13 @@ def _backtest_core(
 
     total_return = equity[-1] / equity[0] - 1.0
 
-    # Sharpe (annualized from 15m bars)
+    # Sharpe (annualized using bars_per_day)
     rets = np.empty(n - 1)
     for i in range(n - 1):
         rets[i] = equity[i + 1] / equity[i] - 1.0
     mean_r = np.mean(rets)
     std_r = np.std(rets)
-    sharpe = mean_r / std_r * np.sqrt(96.0 * 365.25) if std_r > 0 else 0.0
+    sharpe = mean_r / std_r * np.sqrt(bars_per_day * 365.25) if std_r > 0 else 0.0
 
     win_rate = n_wins / n_trades * 100.0 if n_trades > 0 else 0.0
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
@@ -287,12 +298,14 @@ class VectorizedBacktest:
         Returns:
             BacktestResult with all metrics.
         """
+        bars_per_day = 24 * 60 / self.config.bar_interval_minutes
         equity, total_ret, sharpe, max_dd, wr, n_trades, bars_in, pf, avg_ret, _ = (
             _backtest_core(
                 close.astype(np.float64),
                 signals.astype(np.float64),
                 self.config.cost_per_side,
                 self.config.funding_per_bar,
+                bars_per_day,
             )
         )
 
@@ -321,12 +334,14 @@ class VectorizedBacktest:
         (|new - old|) instead of close+reopen. Required for partial
         exit signals (±0.5). Identical results for non-partial scenarios.
         """
+        bars_per_day = 24 * 60 / self.config.bar_interval_minutes
         equity, total_ret, sharpe, max_dd, wr, n_trades, bars_in, pf, avg_ret, _ = (
             _backtest_core_partial(
                 close.astype(np.float64),
                 signals.astype(np.float64),
                 self.config.cost_per_side,
                 self.config.funding_per_bar,
+                bars_per_day,
             )
         )
 
@@ -398,8 +413,9 @@ class VectorizedBacktest:
         port_dd = np.max((port_peak - portfolio_eq) / port_peak) * 100
 
         rets = np.diff(portfolio_eq) / portfolio_eq[:-1]
+        bars_per_day = 24 * 60 / self.config.bar_interval_minutes
         port_sharpe = (
-            np.mean(rets) / np.std(rets) * np.sqrt(96 * 365.25)
+            np.mean(rets) / np.std(rets) * np.sqrt(bars_per_day * 365.25)
             if np.std(rets) > 0 else 0.0
         )
 
@@ -453,6 +469,7 @@ class VectorizedBacktest:
         from quantbox.strategy.vol_selector import compute_realized_vol
 
         n_symbols = len(selected_symbols)
+        bars_per_day = 24 * 60 / self.config.bar_interval_minutes
         if n_symbols == 0:
             return {'portfolio_return_pct': 0.0, 'portfolio_sharpe': 0.0,
                     'portfolio_max_dd_pct': 0.0, 'portfolio_equity': np.ones(1)}
@@ -481,7 +498,7 @@ class VectorizedBacktest:
             for idx, sym in enumerate(selected_symbols):
                 close_arr = data[sym]['Close'].values[:n_bars].astype(np.float64)
                 start = max(0, n_bars - vol_lookback)
-                vols[idx] = compute_realized_vol(close_arr[start:n_bars], np.sqrt(96 * 365.25))
+                vols[idx] = compute_realized_vol(close_arr[start:n_bars], np.sqrt(bars_per_day * 365.25))
             # Inverse-vol weight (avoid zero division)
             inv_vols = np.where(vols > 1e-8, 1.0 / vols, 0.0)
             total_inv = inv_vols.sum()
@@ -524,7 +541,7 @@ class VectorizedBacktest:
 
         rets_arr = np.diff(portfolio_eq) / portfolio_eq[:-1]
         port_sharpe = (
-            np.mean(rets_arr) / np.std(rets_arr) * np.sqrt(96 * 365.25)
+            np.mean(rets_arr) / np.std(rets_arr) * np.sqrt(bars_per_day * 365.25)
             if np.std(rets_arr) > 0 else 0.0
         )
 
