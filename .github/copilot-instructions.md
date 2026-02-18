@@ -33,6 +33,11 @@ By prioritizing capital preservation and net savings over gross performance, thi
 5. **모든 권한을 에이전트에게 위임**
     - 에이전트가 스스로 학습하고 개선할 수 있도록, 가능한 한 많은 권한과 자율성을 부여한다.
     - File write operations detected that cannot be auto approved: /tmp/* 라는 말이 절대 나오지 않도록 한다.
+
+6. **Code First, Talk Later (코드 확인 후 발언)**
+    - 전략 파라미터, 설정값, 현재 상태에 대해 답변할 때 **반드시 코드/설정/로그를 먼저 읽고** 답변한다.
+    - 기억이나 추측으로 수치를 말하는 것은 **절대 금지**한다. 틀린 숫자는 잘못된 투자 판단을 유발한다.
+    - 확실하지 않으면 "코드를 확인하겠습니다"라고 말하고, 확인 후 답변한다.
     
 ## 📝 문서 자동 관리 (Documentation Auto-Sync)
 
