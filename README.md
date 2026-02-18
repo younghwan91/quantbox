@@ -8,9 +8,13 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v11.1 — Critical Fixes + Pool Expansion)
-- **Alpha**: 3.2% 이상 급등/급락 후 반등을 포착하는 단일 자산 평균회귀 전략
-- **v10.0 Entry Optimization**: threshold 0.045→0.032 (+162% ret, +324% trades), min_confidence 2→1 (MTF as quality gate, +86.9% ret)
+### 🔥 Rubber Band Scalper (v11.4 — Adaptive Threshold)
+- **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
+- **v11.4 Adaptive Threshold**: 고정 3.2% → ATR(48)×2.5 적응형 (OOS Sharpe 8.23, OOS/IS 1.09, 제로 과적합)
+  - 공식: `threshold = clip(2.5 × ATR%(48), 1%, 6%)` — 변동성 높으면 넓고, 낮으면 타이트
+  - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
+  - 레버리지 최적화: 1×~5× 그리드 → Sharpe 단조 감소, 현행 3.75× 유지 결정
+- **v10.0 Entry Optimization**: threshold fallback 0.032 (ATR NaN 시), min_confidence 1 (MTF as quality gate)
 - **v10.0 Extended Hold**: max_hold 10→20 (+24% ret, strictly better)
 - **v10.0 Faster Stochastic**: stoch_k 5→3 (+5% Calmar)
 - **v11.1 Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어 + 레버리지 설정 검증
@@ -69,7 +73,7 @@
 
 ### 전략 프레임워크
 - **Rubber Band Mean-Reversion (v11.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-20 심볼 화이트리스트
-- **Elliott Wave Strategy (v11.5)**: 매옥남 챔피언십 메소드 — ZigZag ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
+- **Elliott Wave Strategy (v11.5)**: ZigZag ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
   - 4h 타임프레임, EMA(20/50/100/200/500), RSI(14/9), MACD(12/26/9), Stochastic(14/3)
   - **Quality Scoring (v11.5)**: W2 retrace/W3 extension/B retrace/C:A ratio/구조적 규칙 5차원 0-100점 (임계: 40점)
   - **Risk-Sized Leverage (v11.5)**: `lev = min(2.0, 2%/stop_dist)` — 트레이드당 최대 2% 자기자본 위험으로 일관된 리스크 관리
@@ -166,7 +170,7 @@ quantbox/
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 컴포넌트
 │   ├── rubberband.py       # Rubber Band Scalper (기본, Numba 가속)
-│   ├── elliott.py          # Elliott Wave 전략 (매옥남 메소드, Numba 가속)
+│   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
 ├── backtest/               # 백테스팅 프레임워크
@@ -178,10 +182,11 @@ quantbox/
 
 scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
+├── download_extended_data.py # 장기 과거 데이터 다운로드
+├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
 ├── elliott_backtest.py     # Elliott Wave 365일 백테스트
-├── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
-└── download_15m_data.py    # 멀티 타임프레임 데이터 다운로드
-tests/                      # 유닛 테스트 (514개)
+└── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
+tests/                      # 유닛 테스트 (540개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)

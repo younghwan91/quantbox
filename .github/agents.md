@@ -10,7 +10,8 @@
 QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
 두 가지 전략을 지원한다:
 1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
-2. **Elliott Wave Strategy** (v11.4): 매옥남 챔피언십 메소드 — ZigZag ABC 패턴 + Fibonacci 검증 (4h)
+2. **Elliott Wave Strategy** (v11.4): ZigZag ABC 패턴 + Fibonacci 검증 (4h)
+**v11.4: Adaptive Threshold + Leverage Optimization** — ATR 기반 적응형 임계값 (`clip(2.5 × ATR%(48), 1%, 6%)`). 18-variant walk-forward sweep + 14-variant leverage grid → 2.5x_f1 선택. OOS Return +5069%, MDD 19.0%, Calmar 266.6. MTF 레버리지 2.0→2.5× (실효 3.75×).
 **v11.4: Elliott Wave Strategy** — ZigZag ABC 패턴 인식, 2단계 포지셔닝 (2% 탐색적 → 8% 확인), 50% 부분 익절 + 브레이크이븐 스탑, BTC 매크로 바이어스, Numba 가속 지표.
 **v11.3: 1-Minute Polling Loop** — 15분 대기 대신 60초 간격 폴링으로 반응성 개선.
 **v11.1: Critical Fixes + Pool Expansion** — 서버사이드 손절(STOP 주문), 레버리지 검증, Top-20 심볼 화이트리스트 (A/B validated: +130% return vs Top-15).
@@ -35,12 +36,12 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Fibonacci + S+R+M Confluence v9.0 + Entry Optimization v10.0 + Critical Fixes v11.1)
+전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Fibonacci + S+R+M Confluence v9.0 + Entry Optimization v10.0 + Critical Fixes v11.1 + Adaptive Threshold v11.4)
 심볼선택: Top-20 whitelist (FILUSDT, PEPEUSDT, XRPUSDT, XLMUSDT, ADAUSDT,
                           FETUSDT, ETHUSDT, ARBUSDT, SHIBUSDT, LINKUSDT,
                           ATOMUSDT, OPUSDT, DOTUSDT, NEARUSDT, AAVEUSDT,
                           BCHUSDT, HBARUSDT, SOLUSDT, ICPUSDT, BNBUSDT)
-파라미터: lookback=8, threshold=0.032, target=0.382, stop=0.786, max_hold=20
+파라미터: lookback=8, threshold=0.032 (adaptive fallback), target=0.382, stop=0.786, max_hold=20
          stop_decay=0.0
          entry_mode='confidence'
          min_confidence=1 (MTF is the real quality gate)
@@ -48,6 +49,11 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
          asset_trend_period=192 (48h SMA for classic pullback)
          btc_directional_period=48 (12h BTC momentum for sympathy)
          base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
+         # v11.4 Adaptive Threshold (2.5x_f1 variant, walk-forward validated)
+         atr_period=48 (12h ATR lookback)
+         atr_multiplier=2.5 (ATR × 2.5)
+         threshold_floor=0.01 (1% minimum)
+         threshold_cap=0.06 (6% maximum)
          partial_exit_enabled=false
          dynamic_capital_enabled=true (balance / max(1, n_active+1))
          # v9.0 Fibonacci Exit Levels
@@ -65,7 +71,7 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
          # v7.0 MTF Confirmation
          mtf_confirmation_enabled=true
          mtf_sma_period=12 (4h SMA, 2일)
-         mtf_leverage_mult=2.0 (MTF 확인 시 실효 3.0x)
+         mtf_leverage_mult=2.5 (MTF 확인 시 실효 3.75x, v11.4 leverage grid validated)
          # v7.0 Independent 4H Rubber Band
          htf_independent_enabled=true
          htf_rb_lookback=3, htf_rb_threshold=0.10
@@ -73,14 +79,14 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
          htf_rb_max_hold=12, htf_rb_btc_sma_period=48
 비용:     0.04%/side + 펀딩비
 
-성과 (365일, v11.1 Pool Expansion, Top-20 유니버스, 5 slots):
-  Return:    +3384.3%
-  Max DD:    21.8%
-  Calmar:    155.22
-  Trades:    936
-  Win Rate:  69.7%
-  Profit Factor: 2.66
-  Sharpe:    5.02
+성과 (365일, v11.4 Adaptive Threshold 2.5x_f1, Top-20 유니버스, 5 slots):
+  Return:    +5069.4% (OOS walk-forward)
+  Max DD:    19.0%
+  Calmar:    266.6
+  Trades:    969
+  Win Rate:  70.1%
+  Profit Factor: 2.83
+  Sharpe:    5.31
   Dynamic Capital: balance / max(1, n_active+1), 50% cap
   안전장치: 서버사이드 STOP 손절 (클라이언트 크래시 방어), 레버리지 검증
 ```
@@ -118,7 +124,13 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 
 ### 2.1 신호 생성 (RubberBandStrategy.on_bar)
 
-단일 자산의 15m close/volume/taker_buy 배열과 BTC close, 그리고 선택적 high/low 배열을 받아 신호를 생성한다. MACD 또는 Stochastic 활성화 시 `compute_signals_v9()` (Numba 컴파일)로 디스패치하고, 그렇지 않으면 `compute_signals_confidence()` (Numba 컴파일)로 신호를 생성한다:
+단일 자산의 15m close/volume/taker_buy 배열과 BTC close, 그리고 선택적 high/low 배열을 받아 신호를 생성한다. MACD 또는 Stochastic 활성화 시 `compute_signals_v9()` (Numba 컴파일)로 디스패치하고, 그렇지 않으면 `compute_signals_confidence()` (Numba 컴파일)로 신호를 생성한다.
+
+**v11.4 Adaptive Threshold:**
+- `atr_period > 0` 이면 per-bar 적응형 임계값 활성화: `thr[i] = clip(atr_multiplier × ATR%(atr_period)[i], threshold_floor, threshold_cap)`
+- ATR%는 EMA-smoothed ATR / close 비율 (`compute_atr_pct()` Numba 함수)
+- 고변동 구간에서 자동으로 임계값 상승 → 노이즈 필터링, 저변동 구간에서 하락 → 민감도 증가
+- `atr_period=0` 이면 기존 고정 threshold 사용 (backward compatible):
 
 **Confidence-Scored Multi-Evidence Entry (v6.0):**
 
@@ -233,7 +245,7 @@ else:
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
-| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage`, `apply_mtf_confirmation`, `apply_mtf_leverage`, `compute_signals_4h_independent`, `_compute_ema_inline`, `_compute_stochastic_inline`, `_compute_macd_inline`, `compute_signals_v9` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 + **MTF 확인 (v7.0)** + **독립 4H 트레이딩 (v7.0)** + **Fibonacci Exit + MACD/Stochastic Confluence (v9.0)** (Numba 컴파일) |
+| `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage`, `apply_mtf_confirmation`, `apply_mtf_leverage`, `compute_signals_4h_independent`, `_compute_ema_inline`, `_compute_stochastic_inline`, `_compute_macd_inline`, `compute_signals_v9`, `compute_atr_pct` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 + **MTF 확인 (v7.0)** + **독립 4H 트레이딩 (v7.0)** + **Fibonacci Exit + MACD/Stochastic Confluence (v9.0)** + **Adaptive Threshold (v11.4)** (Numba 컴파일) |
 | `elliott.py` | `ElliottConfig`, `ElliottStrategy`, `compute_elliott_signals`, `compute_ema`, `compute_rsi`, `compute_macd`, `compute_stochastic`, `compute_atr`, `zigzag_pivots`, `detect_abc_patterns`, `detect_bullish_divergence`, `detect_bearish_divergence`, `check_macd_reversal`, `check_stoch_cross`, `detect_ending_diagonal`, `detect_triangle` | Elliott Wave ABC 패턴 전략 (Numba 가속). ZigZag + Fibonacci + 다이버전스/MACD/스토캐스틱 확인 + 웨지/삼각 감지 + 2단계 포지셔닝 + 자본 보존 익절 |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
@@ -314,6 +326,8 @@ else:
 - [x] **v9.0 Fibonacci Exit**: `target_retrace=0.382`, `stop_mult=0.786` 백테스트 ↔ 라이브 동일 적용
 - [x] **v9.0 MACD/Stochastic**: `compute_signals_v9()` 백테스트 ↔ `on_bar()` 라이브 v9 디스패치 패리티
 - [x] **v9.0 Live Pipeline**: `download_klines(full=True)` 5-tuple (close, high, low, volume, taker_buy) 반환
+- [x] **v11.4 Adaptive Threshold**: `compute_atr_pct()` + per-bar `thr` 백테스트 ↔ `on_bar()` 라이브 ATR 계산 패리티
+- [x] **v11.4 Leverage**: `mtf_leverage_mult=2.5` (실효 3.75×) 백테스트 ↔ 라이브 동일 적용
 
 ---
 
@@ -373,7 +387,7 @@ else:
 | `min_rr_for_leverage` | 0.30 | `RubberBandConfig` | 레버리지 허용 최소 R:R 값 |
 | `mtf_confirmation_enabled` | True | `RubberBandConfig` | **v7.0** 4h 트렌드 확인 활성화 |
 | `mtf_sma_period` | 12 (2일) | `RubberBandConfig` | **v7.0** 4h SMA 기간 |
-| `mtf_leverage_mult` | 2.0 | `RubberBandConfig` | **v7.0** MTF 확인 시 레버리지 배수 (실효 3.0x) |
+| `mtf_leverage_mult` | 2.5 | `RubberBandConfig` | **v7.0** MTF 확인 시 레버리지 배수 (실효 3.75x, v11.4 leverage grid) |
 | `htf_independent_enabled` | True | `RubberBandConfig` | **v7.0** 독립 4시간 트레이딩 활성화 |
 | `htf_rb_lookback` | 3 (12h) | `RubberBandConfig` | **v7.0** 4h lookback |
 | `htf_rb_threshold` | 0.10 (10%) | `RubberBandConfig` | **v7.0** 4h 최소 무브 크기 |
@@ -389,6 +403,10 @@ else:
 | `stoch_enabled` | True | `RubberBandConfig` | **v9.0** 스토캐스틱 크로스 컨피던스 증거 활성화 |
 | `stoch_k_period` | 5 | `RubberBandConfig` | **v9.0** 스토캐스틱 %K 기간 (very fast) |
 | `stoch_d_period` | 3 | `RubberBandConfig` | **v9.0** 스토캐스틱 %D 기간 |
+| `atr_period` | 48 (12h) | `RubberBandConfig` | **v11.4** 적응형 임계값 ATR lookback (0=비활성, 고정 threshold 사용) |
+| `atr_multiplier` | 2.5 | `RubberBandConfig` | **v11.4** ATR × 배수 (walk-forward sweep 최적) |
+| `threshold_floor` | 0.01 (1%) | `RubberBandConfig` | **v11.4** 적응형 임계값 하한 |
+| `threshold_cap` | 0.06 (6%) | `RubberBandConfig` | **v11.4** 적응형 임계값 상한 |
 
 ### 6.2 Alpha Engine 파라미터
 
@@ -430,7 +448,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (30+파일, 415개)
+## 7. 테스트 현황 (30+파일, 540개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
