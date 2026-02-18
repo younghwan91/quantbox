@@ -3,7 +3,7 @@ Strategy module — Rubber Band + Elliott Wave + Alpha Engine.
 
 Strategies:
   - RubberBand: Mean-reversion scalper (15m/4h)
-  - Elliott: Maeoknam Championship Method — ABC wave + Fibonacci (4h/15m)
+  - Elliott: ABC wave pattern + Fibonacci validation (4h/15m)
   - Alpha: Multi-factor alpha engine (hybrid)
 """
 
@@ -52,7 +52,7 @@ __all__ = [
     "calculate_position_size",
     "compute_confidence_leverage",
     "apply_confidence_leverage",
-    # Elliott Wave (Maeoknam Championship Method)
+    # Elliott Wave (ABC pattern + Fibonacci)
     "ElliottConfig",
     "ElliottStrategy",
     "compute_elliott_signals",
