@@ -34,36 +34,39 @@
 
 ### 1.1 QuantBox란?
 
-QuantBox는 암호화폐 트레이딩을 위한 종합 퀀트 프레임워크입니다. **Rubber Band Scalper**(단일 자산 평균회귀)와 **페어 트레이딩** 두 가지 전략을 지원하며, 백테스팅과 실거래에서 동일한 코드를 사용합니다.
+QuantBox는 암호화폐 트레이딩을 위한 종합 퀀트 프레임워크입니다. **Rubber Band Scalper**(15m 단일 자산 평균회귀)와 **Elliott Wave Strategy**(4h ABC 패턴) 두 가지 전략을 지원하며, 백테스팅과 실거래에서 동일한 코드를 사용합니다.
 
 ---
 
-## 3. 🔥 Rubber Band Scalper (v3.3 — Enhanced MTF)
+## 3. 🔥 Rubber Band Scalper (v11.1 — Critical Fixes + Pool Expansion)
 
 ### 3.1 전략 개요
 
-Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. 2.5% 이상 급등/급락 후 발생하는 기계적 반등(snap-back)을 포착합니다.
+Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. 3.2% 이상 급등/급락 후 발생하는 기계적 반등(snap-back)을 포착합니다.
 
-**v3.3 핵심 개선:**
-- **Enhanced MTF Confirmation**: 16h SMA 기반 3-mode HTF 필터 (block/neutral/agree)
-- **HTF Agree Discount**: HTF 동의 시 15% 더 쉬운 진입 (0.85×) + 5% 타이트한 스톱 (0.95×)
-- **Stop Decay**: 보유 시간에 따른 30% 스톱 감쇠
-- **entry_stop_mult 패리티**: Numba 백테스트와 라이브 트레이딩 간 정확한 스톱 일치
-- **성과**: +63.18% (90일), Sharpe 6.52, Max DD 7.08%, Calmar 8.92
+**v11.1 핵심 개선:**
+- **Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어 + 레버리지 설정 검증
+- **Pool Expansion**: Top-15→Top-20 (A/B 검증: 3384% ret, Calmar 155.22 vs baseline 1470%)
+- **v10.0 Entry Optimization**: threshold 0.045→0.032 (+162% ret), min_confidence 2→1 (MTF as quality gate)
+- **v10.0 Extended Hold**: max_hold 10→20 (+24% ret), stoch_k 5→3 (+5% Calmar)
+- **v9.0 Fibonacci Exit**: target 0.382, stop 0.786 (R:R 0.486, Calmar +29%)
+- **v9.0 S+R+M Confluence**: MACD(12,26,14) + Stochastic(3,3) 컨피던스 증거
+- **v7.0 MTF Confirmation**: 4h SMA(12) 트렌드 필터 — MDD -74%, Calmar +275%
+- **v12.0 Diagnostic Logging**: JSONL 진단 로그 (진입 조건 분석용)
 
 **알파 소스:**
 - 청산 캐스케이드(liquidation cascades)로 인한 오버슈트
 - 스톱 헌팅 + 강제 청산 후 자연적 반등
-- 2시간(8×15m 봉) 내 50% 되돌림
-- HTF 트렌드 동의 시 진입 확률 증가 + 스톱 조기 잘림
+- 2시간(8×15m 봉) 내 38.2% 피보나치 되돌림
+- MTF 4h 트렌드 확인 시 역추세 진입 차단
 
-**검증 결과 (30 symbols, 90일, 15m 데이터, Vol Top-3):**
-- 포트폴리오 수익률: +63.18%
-- Sharpe: 6.52
-- Max Drawdown: 7.08%
-- Calmar: 8.92
-- Win Rate: 56.5%, Profit Factor: 1.17
-- Trades/Day: ~15.5
+**검증 결과 (Top-20 심볼, 365일, 15m 데이터, v11.1):**
+- Portfolio Return: **+3384.3%**
+- Sharpe: 5.02
+- Max Drawdown: 21.8%
+- Calmar: **155.22**
+- Win Rate: 69.7%, Profit Factor: 2.66
+- Trades: 936
 
 ### 3.2 실행 방법
 
@@ -86,10 +89,10 @@ python -m quantbox.scalper
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | lookback | 8 | 이동 측정 기간 (봉 수, 8×15m = 2시간) |
-| threshold | 0.045 | 최소 진입 이동 폭 (4.5% — 노이즈 필터링) |
+| threshold | 0.032 | v10.0: 최소 진입 이동 폭 (3.2%, +162% ret vs 4.5%) |
 | target_retrace | 0.382 | 이익 실현: 이동 폭의 38.2% 되돌림 (Fibonacci golden ratio, v9.0) |
 | stop_mult | 0.786 | 손절: 이동 폭의 0.786배 (Fibonacci deep correction, v9.0) |
-| max_hold | 10 | 최대 보유 기간 (봉 수, 2.5시간) |
+| max_hold | 20 | v10.0: 최대 보유 기간 (20봉 = 5시간, +24% ret vs 10) |
 | stop_decay | 0.0 | 시간감쇠 비활성화 (장기 안정성 확보) |
 | htf_period | 0 | MTF SMA 기간 (0=비활성화 — 장기 성능 저하) |
 | htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%, MTF 비활성 시 미사용) |
@@ -124,7 +127,7 @@ print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
 
 ### 3.5 Elliott Wave Strategy (v11.5)
 
-매옥남 챔피언십 메소드 — Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage 기반 전략.
+Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage 기반 전략.
 
 #### v11.5 핵심 개선:
 - **Quality Scoring**: W2/W3/B retrace, C:A ratio, 구조적 규칙 5차원 0-100점 스코어. 임계값 40점 이하 패턴 제거
@@ -134,16 +137,16 @@ print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
 - **Tighter Fibonacci Ranges**: W3 extension min 1.272, C/A 0.786-2.000, C Fib tolerance 0.10
 - **Risk Filter**: entry-to-stop 거리 최대 3% 제한
 
-#### 백테스트 결과 (365일, 20심볼, relaxed mode):
+#### 백테스트 결과 (365일, 8심볼, sweep-optimized, relaxed mode):
 | 지표 | 값 |
 |------|-----|
 | Active Symbols | 8 |
-| Total Trades | 12 |
-| Win Rate | 66.7% |
-| Portfolio Return | +1.24% |
-| Portfolio MaxDD | 1.55% |
-| Sharpe Ratio | 0.59 |
-| Calmar Ratio | 0.80 |
+| Total Trades | 8 |
+| Win Rate | 75.0% |
+| Portfolio Return | +4.84% |
+| Portfolio MaxDD | 1.96% |
+| Sharpe Ratio | 1.11 |
+| Calmar Ratio | 2.47 |
 
 #### 실행 방법
 
@@ -172,7 +175,7 @@ python -m quantbox.scalper --strategy elliott
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| zigzag_threshold | 0.03 | ZigZag 피봇 최소 변동 (3%) |
+| zigzag_threshold | 0.02 | ZigZag 피봇 최소 변동 (2%, sweep-optimized: 0.02 > 0.03) |
 | zigzag_threshold_minor | 0.015 | 소 패턴 ZigZag (1.5%) |
 | ema_periods | [20,50,100,200,500] | EMA 기간 세트 |
 | rsi_period / rsi_fast | 14 / 9 | RSI 기간 (표준/다이나믹) |
@@ -193,7 +196,7 @@ python -m quantbox.scalper --strategy elliott
 | min_pattern_quality | 40.0 | 최소 패턴 품질 점수 (0-100) |
 | risk_per_trade | 0.02 | 트레이드당 자기자본 위험 (2%) |
 | risk_sized_leverage | True | 스탑 거리 기반 레버리지 자동 조정 |
-| trail_atr_mult | 2.0 | 트레일링 스탑 ATR 배수 |
+| trail_atr_mult | 1.5 | 트레일링 스탑 ATR 배수 (sweep-optimized: 1.5 > 2.0) |
 
 #### 백테스트
 
@@ -310,12 +313,12 @@ MACD 히스토그램 기울기가 트레이드 방향과 일치하면 +1 컨피�
 
 #### 3.8.3 Stochastic Cross Evidence (NEW)
 
-스토캐스틱 %K가 %D를 트레이드 방향으로 크로스하면 +1 컨피던스를 추가합니다. Very fast 설정(5,3)은 스캘핑에 최적화. high/low 캔들 데이터를 요구하며 라이브 파이프라인에 추가됨.
+스토캐스틱 %K가 %D를 트레이드 방향으로 크로스하면 +1 컨피던스를 추가합니다. Very fast 설정(3,3)은 스캘핑에 최적화 (v10.0: 5→3, +5% Calmar). high/low 캔들 데이터를 요구하며 라이브 파이프라인에 추가됨.
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
 | RB_STOCH_ENABLED | true | 스토캐스틱 크로스 컨피던스 증거 활성화 |
-| RB_STOCH_K_PERIOD | 5 | 스토캐스틱 %K 기간 (5=very fast, 스캘핑 최적) |
+| RB_STOCH_K_PERIOD | 3 | v10.0: 스토캐스틱 %K 기간 (3=ultra fast, +5% Calmar vs 5) |
 | RB_STOCH_D_PERIOD | 3 | 스토캐스틱 %D 기간 |
 
 #### 3.8.4 Live Pipeline 확장 (v9.0)
@@ -421,8 +424,8 @@ symbols = loader.get_available_symbols()
 
 ```bash
 # 저장소 클론
-git clone https://github.com/younghwan91/trading_code.git
-cd trading_code
+git clone https://github.com/younghwan91/quantbox.git
+cd quantbox
 
 # 개발 모드 설치 (권장)
 pip install -e .
@@ -518,7 +521,7 @@ RB_BTC_REGIME_PERIOD=96            # BTC SMA period for regime detection (96봉 
 RB_ASSET_TREND_PERIOD=192          # Asset SMA period for classic pullback (192봉 = 48시간)
 
 # Confidence Scoring (v6.0, 365일 A/B 검증)
-RB_MIN_CONFIDENCE=2                # 최소 증거 점수 (1-5, 2=최적: +9% Calmar, 동일 DD)
+RB_MIN_CONFIDENCE=1                # v10.0: 최소 증거 점수 1 (MTF가 진짜 필터, +86.9% ret)
 RB_CONFIDENCE_LEVERAGE_STEP=0.0    # 컨피던스당 추가 레버리지 (0=고정, 1.0=moderate)
 RB_RSI_PERIOD=14                   # RSI 계산 기간
 RB_VOL_PERIOD=20                   # 거래량 SMA 기간 (스파이크 감지)
@@ -544,7 +547,7 @@ RB_MACD_FAST=12                    # MACD fast EMA 기간
 RB_MACD_SLOW=26                    # MACD slow EMA 기간
 RB_MACD_SIGNAL_PERIOD=14           # MACD signal EMA 기간 (14=최적)
 RB_STOCH_ENABLED=true              # 스토캐스틱 크로스 컨피던스 증거
-RB_STOCH_K_PERIOD=5                # 스토캐스틱 %K 기간 (5=very fast, 최적)
+RB_STOCH_K_PERIOD=3                # v10.0: 스토캐스틱 %K 기간 (3=ultra fast, +5% Calmar vs 5)
 RB_STOCH_D_PERIOD=3                # 스토캐스틱 %D 기간
 
 # v7.0 Independent 4H Rubber Band
@@ -600,26 +603,27 @@ DISCORD_CHANNEL_ID=            # 명령 수신 채널 ID (숫자)
 
 ```
 quantbox/
-├── core/                    # 핵심 엔진
+├── core/                    # 핵심 컴포넌트
 │   ├── config.py           # 설정 관리
-│   ├── engine.py           # 트레이딩 엔진
 │   ├── events.py           # 이벤트 시스템
-│   ├── execution.py        # 주문 실행
-│   └── portfolio.py        # 포지션 관리
+│   ├── limit_chaser.py     # 지정가 추격 주문
+│   ├── settings.py         # 환경변수 검증 (pydantic-settings)
+│   └── state_persistence.py # 상태 영속화 (JSON, 크래시 복구)
 ├── data/                    # 데이터 계층
 │   ├── cache.py            # 2단계 캐싱 (LRU + gzip)
 │   ├── downloader.py       # 바이낸스 데이터 다운로드
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 계층
-│   ├── rubberband.py       # Rubber Band Scalper (Numba 가속)
-│   ├── elliott.py          # Elliott Wave 전략 (매옥남 메소드, Numba 가속)
+│   ├── rubberband.py       # Rubber Band Scalper (v11.1, Numba 가속)
+│   ├── elliott.py          # Elliott Wave 전략 (v11.5, Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
 ├── backtest/               # 백테스팅
-│   └── vectorized_backtest.py  # 벡터화 백테스트 (Numba)
+│   └── vectorized_backtest.py  # 벡터화 백테스트 (Numba, bars_per_day 동적)
 ├── notifications/          # 알림 & 원격 제어
 │   ├── discord.py          # Discord 웹훅 (단방향 알림)
 │   └── bot.py              # Discord 봇 (양방향 명령)
+├── scalper.py              # 멀티 전략 실거래 트레이더 (--strategy rubberband|elliott)
 └── utils/                  # 유틸리티
 ```
 
@@ -2207,4 +2211,4 @@ $$
 
 ---
 
-*이 문서는 QuantBox 1.1.0 기준으로 작성되었습니다.*
+*이 문서는 QuantBox 11.5.0 기준으로 작성되었습니다. (Sweep-Optimized: 2025-02-18)*
