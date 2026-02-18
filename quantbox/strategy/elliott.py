@@ -58,7 +58,7 @@ class ElliottConfig:
     # Multi-scale zigzag for fractal structure (winning_strategy §1)
     zigzag_thresholds: tuple[float, ...] = (0.02, 0.04, 0.06)
     # How many bars back a pattern's C can be and still be actionable
-    pattern_lookback_bars: int = 5
+    pattern_lookback_bars: int = 12
 
     # ── EMA periods (winning_strategy §2.1) ──
     ema_periods: tuple[int, ...] = (20, 50, 100, 200, 500)
@@ -891,11 +891,14 @@ def _validate_bullish_impulse_abc(
         return None
 
     # ── Targets (§5, §6) ──
-    # TP1: B price level (first realistic resistance — recovery from C)
-    # TP2: 1.618 × Wave 1 from C (Fibonacci extension of new impulse)
+    # TP1: W5 level — prior impulse peak as first structural resistance.
+    #   The ABC correction retraced the impulse; if C is truly the end
+    #   the new wave should recover back to W5 at minimum.
+    # TP2: C + 1.0 × impulse_size — new impulse mirrors the prior one
+    #   (equal-wave projection). Conservative vs 1.618 extension.
     # §4.2: "50% partial take-profit upon reaching primary target"
-    target_1 = B  # recovery to B — practical near-term target
-    target_2 = C + 1.618 * wave1  # new impulse extension
+    target_1 = W5  # prior impulse peak — first major resistance
+    target_2 = C + 1.0 * total_impulse  # equal-wave projection from C
 
     # Stop: tight below C (§3.1: if C is the correction low and price
     # revisits it, our wave count is WRONG → exit immediately).
@@ -1021,10 +1024,11 @@ def _validate_bearish_impulse_abc(
         return None
 
     # ── Targets (§5, §6) ──
-    # TP1: B price level (first realistic support — decline from C)
-    # TP2: 1.618 × Wave 1 from C (extension of new bearish impulse)
-    target_1 = B  # recovery to B — practical near-term target
-    target_2 = C - 1.618 * wave1  # new impulse extension
+    # TP1: W5 level — prior impulse low as first structural support.
+    #   Bearish impulse base; new decline should reach W5 at minimum.
+    # TP2: C - 1.0 × impulse_size — equal-wave projection downward.
+    target_1 = W5  # prior impulse low — first major support
+    target_2 = C - 1.0 * total_impulse  # equal-wave projection from C
 
     # Stop: tight above C (wave count invalidation → immediate exit)
     stop = C * (1.0 + config.sl_buffer_pct)
@@ -1593,11 +1597,29 @@ class ElliottStrategy:
                 pos['best_pnl'] = gain
                 return 'partial_close'
 
-        # Trailing stop: protect 50% of best unrealized gain
-        if pos['partial_closed'] and pos['best_pnl'] > 0.01:
-            trail_level = pos['best_pnl'] * 0.50
-            if gain < trail_level:
-                return 'trailing_stop'
+        # Trailing stop: ATR-based trailing (parity with backtest)
+        # Backtest uses: new_trail = extreme_price - trail_atr_mult * ATR
+        # Live must match: compute ATR from 4h data, trail from extreme.
+        if pos['partial_closed']:
+            close_4h = self._htf_close.get(symbol)
+            high_4h = self._htf_high.get(symbol)
+            low_4h = self._htf_low.get(symbol)
+            if close_4h is not None and high_4h is not None and low_4h is not None and len(close_4h) >= 14:
+                atr_arr = compute_atr(high_4h, low_4h, close_4h, 14)
+                atr_now = float(atr_arr[-1])
+                if pos['signal'] == 1:
+                    new_trail = current_price - cfg.trail_atr_mult * atr_now
+                    if new_trail > pos.get('trail_stop', pos['stop_price']):
+                        pos['trail_stop'] = new_trail
+                    if current_price <= pos.get('trail_stop', pos['stop_price']):
+                        return 'trailing_stop'
+                else:
+                    new_trail = current_price + cfg.trail_atr_mult * atr_now
+                    existing = pos.get('trail_stop', pos['stop_price'])
+                    if existing == 0.0 or new_trail < existing:
+                        pos['trail_stop'] = new_trail
+                    if current_price >= pos.get('trail_stop', pos['stop_price']):
+                        return 'trailing_stop'
 
         # Extended target_2 (full exit, rare — trend exhaustion)
         if pos['partial_closed']:
@@ -1819,8 +1841,9 @@ def compute_elliott_signals(
       BTC below 200+500 EMA → only short
       BTC between 200 and 500 EMA → both directions allowed (neutral)
 
-    Confirmation Protocol (§2.2):
-      Divergence REQUIRED + at least 1 of {MACD reversal, Stoch cross}
+    Confluence Protocol (§2.2):
+      Require ≥ 2 of {divergence, MACD reversal, Stoch cross}
+      3/3 → instant primary entry; 2/3 → exploratory with confirmation window
 
     Capital Management (§4):
       10% max margin, effective leverage 2.0x (20x × 10%)
@@ -2053,25 +2076,27 @@ def compute_elliott_signals(
             continue
         # neutral → allow both
 
-        # Confirmation Protocol (§2.2): divergence window check
+        # Confluence Protocol (§2.2): require ≥ 2 of {divergence, MACD, Stoch}
         direction = pattern['signal']
         c_idx = pattern['c_idx']
         div_lo = max(min_start, c_idx - div_margin)
 
+        confirmations = 0
         if direction == 1:
-            has_div = _any_in_range(bull_cum, div_lo, bar)
+            if _any_in_range(bull_cum, div_lo, bar):
+                confirmations += 1
         else:
-            has_div = _any_in_range(bear_cum, div_lo, bar)
+            if _any_in_range(bear_cum, div_lo, bar):
+                confirmations += 1
 
-        if not has_div:
-            continue
-
-        has_macd = check_macd_reversal(macd_hist_4h[:bar + 1], direction)
-        has_stoch = check_stoch_cross(
+        if check_macd_reversal(macd_hist_4h[:bar + 1], direction):
+            confirmations += 1
+        if check_stoch_cross(
             stoch_k_4h[:bar + 1], stoch_d_4h[:bar + 1], direction,
-        )
+        ):
+            confirmations += 1
 
-        if not (has_macd or has_stoch):
+        if confirmations < 2:
             continue
 
         # ── Quality filter: only trade high-quality wave structures ──
@@ -2092,7 +2117,6 @@ def compute_elliott_signals(
         pos_direction = direction
         pos_entry_price = entry_price
         pos_entry_bar = bar
-        pos_confirmed = True  # strict mode already has div+corroboration
         pos_partial_done = False
         pos_stop = float(pattern['stop'])
         pos_tp1 = float(pattern['target_1'])
@@ -2106,7 +2130,12 @@ def compute_elliott_signals(
             trade_lev = lev_primary
         trade_lev_after_tp = trade_lev * cfg.partial_tp_fraction
 
-        # Start at primary leverage since we have full confirmation
-        signals[bar] = float(direction) * trade_lev
+        # 3/3 confluence → instant primary; 2/3 → exploratory with confirm window
+        if confirmations >= 3:
+            pos_confirmed = True
+            signals[bar] = float(direction) * trade_lev
+        else:
+            pos_confirmed = False
+            signals[bar] = float(direction) * lev_exploratory
 
     return signals, adj_close

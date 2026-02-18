@@ -120,11 +120,11 @@ def compute_signals_relaxed(
     btc_close_4h: np.ndarray,
     config: ElliottConfig | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Position signals with full lifecycle — relaxed confluence.
+    """Position signals with full lifecycle — unified 2-of-3 confluence.
 
     Same position management as compute_elliott_signals (stops, partial TP,
-    trailing, max hold) but only requires 1 of {divergence, MACD, Stoch}
-    for entry instead of mandatory divergence.
+    trailing, max hold). Requires ≥ 2 of {divergence, MACD, Stoch} for entry.
+    3/3 → instant primary entry; 2/3 → exploratory with confirmation window.
 
     Position States (winning_strategy §4-§5):
       Entry:      exploratory 0.4x (2%) → primary 2.0x (10%) on confirmation
@@ -342,7 +342,7 @@ def compute_signals_relaxed(
         if check_stoch_cross(stoch_k[:bar+1], stoch_d[:bar+1], direction):
             confirmations += 1
 
-        if confirmations < 1:
+        if confirmations < 2:
             continue
 
         # ── Risk filter: only enter if stop distance from entry is tight ──
