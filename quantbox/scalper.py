@@ -571,7 +571,71 @@ class RubberBandScalper:
         rounded = math.floor(qty / step) * step
         return round(rounded, prec)
 
-    # ==================== Server-Side Stop-Loss (v11.1 Safety) ====================
+    # ==================== Server-Side Orders (Algo Order API) ====================
+
+    def _place_algo_order(
+        self, symbol: str, side: str, order_type: str,
+        quantity: float, trigger_price: float,
+        limit_price: float | None = None,
+        label: str = 'order',
+    ) -> str | None:
+        """Place a conditional order via Binance Algo Order API.
+
+        Binance migrated STOP/STOP_MARKET/TAKE_PROFIT/TAKE_PROFIT_MARKET
+        to POST /fapi/v1/algoOrder with algoType=CONDITIONAL.
+
+        Args:
+            symbol: Trading symbol.
+            side: 'BUY' or 'SELL'.
+            order_type: 'STOP', 'STOP_MARKET', 'TAKE_PROFIT', etc.
+            quantity: Position quantity.
+            trigger_price: Price at which the order triggers.
+            limit_price: Limit price for STOP/TAKE_PROFIT. None for MARKET types.
+            label: Description for logging.
+
+        Returns:
+            algoId string, or None on failure.
+        """
+        if self.paper_mode:
+            return f"paper_{label}_{int(time.time() * 1000)}"
+
+        params: dict = {
+            'algoType': 'CONDITIONAL',
+            'symbol': symbol,
+            'side': side,
+            'type': order_type,
+            'quantity': str(quantity),
+            'triggerPrice': str(trigger_price),
+            'reduceOnly': 'true',
+        }
+        if limit_price is not None:
+            params['price'] = str(limit_price)
+            params['timeInForce'] = 'GTC'
+
+        lp_str = f"${limit_price:.6f}" if limit_price is not None else "N/A"
+        logger.debug(
+            f"[{symbol}] Algo order request: {label} "
+            f"side={side} type={order_type} qty={quantity:.6f} "
+            f"trigger=${trigger_price:.6f} limit={lp_str}"
+        )
+
+        try:
+            resp = self.client._request_futures_api(
+                'post', 'algoOrder', signed=True, data=params,
+            )
+            algo_id = str(resp['algoId'])
+            logger.info(
+                f"[{symbol}] SERVER {label.upper()} placed via Algo API: "
+                f"{side} {quantity:.6f} @ trigger=${trigger_price:.6f} "
+                f"limit={lp_str} (algoId={algo_id})"
+            )
+            return algo_id
+        except Exception as e:
+            logger.error(
+                f"[{symbol}] SERVER {label.upper()} FAILED: {e}. "
+                f"params={params}"
+            )
+            return None
 
     def _place_server_stop_loss(
         self, symbol: str, signal: int, quantity: float,
@@ -583,7 +647,7 @@ class RubberBandScalper:
         The stop price is set at the strategy's stop-loss level (move_size * stop_mult)
         with a 0.5% buffer beyond to account for slippage in fast markets.
 
-        v11.1: Critical safety feature — positions are NEVER left unprotected.
+        Uses Binance Algo Order API (POST /fapi/v1/algoOrder, algoType=CONDITIONAL).
 
         Args:
             symbol: Trading symbol.
@@ -594,7 +658,7 @@ class RubberBandScalper:
             stop_mult: Stop loss multiplier.
 
         Returns:
-            Order ID string, or None on failure (position still tracked).
+            algoId string, or None on failure (position still tracked).
         """
         if self.paper_mode:
             return f"paper_sl_{int(time.time() * 1000)}"
@@ -624,35 +688,30 @@ class RubberBandScalper:
             round(limit_price / tick_size) * tick_size, price_precision
         )
 
-        try:
-            order = self.client.futures_create_order(
-                symbol=symbol,
-                side=close_side,
-                type='STOP',
-                timeInForce='GTC',
-                quantity=quantity,
-                price=str(limit_price),
-                stopPrice=str(stop_price),
-                reduceOnly=True,
-            )
-            order_id = str(order['orderId'])
-            logger.info(
-                f"[{symbol}] SERVER STOP-LOSS placed: "
-                f"{close_side} {quantity:.6f} @ stop=${stop_price:.4f} "
-                f"limit=${limit_price:.4f} (orderId={order_id})"
-            )
-            return order_id
-        except Exception as e:
+        dist_pct = stop_distance * 100
+        logger.info(
+            f"[{symbol}] SL calc: entry=${entry_price:.4f} "
+            f"move={move_size*100:.2f}% × stop_mult={stop_mult:.4f} "
+            f"→ dist={dist_pct:.2f}% trigger=${stop_price:.4f} "
+            f"limit=${limit_price:.4f} side={close_side}"
+        )
+
+        algo_id = self._place_algo_order(
+            symbol=symbol, side=close_side, order_type='STOP',
+            quantity=quantity, trigger_price=stop_price,
+            limit_price=limit_price, label='stop-loss',
+        )
+        if algo_id is None:
             logger.error(
-                f"[{symbol}] SERVER STOP-LOSS FAILED: {e}. "
-                f"Position is UNPROTECTED — client-side stop still active."
+                f"[{symbol}] Position is UNPROTECTED — "
+                f"client-side stop still active."
             )
             self.discord.send(content=(
                 f"\u26a0\ufe0f **SERVER STOP FAILED** [{symbol}] — "
                 f"Position unprotected on exchange side. "
                 f"Client-side stop still active."
             ))
-            return None
+        return algo_id
 
     def _place_server_take_profit(
         self, symbol: str, signal: int, quantity: float,
@@ -664,8 +723,7 @@ class RubberBandScalper:
         by the 15m polling cycle. Combined with the server stop-loss,
         this creates an OCO-like bracket around the position.
 
-        v11.2: Reduces fat tail exposure by executing TP at exact target
-        without waiting for bar close.
+        Uses Binance Algo Order API (POST /fapi/v1/algoOrder, algoType=CONDITIONAL).
 
         Args:
             symbol: Trading symbol.
@@ -676,7 +734,7 @@ class RubberBandScalper:
             target_retrace: Fraction of move to target (e.g. 0.382).
 
         Returns:
-            Order ID string, or None on failure.
+            algoId string, or None on failure.
         """
         if self.paper_mode:
             return f"paper_tp_{int(time.time() * 1000)}"
@@ -686,12 +744,12 @@ class RubberBandScalper:
         buffer = 0.002  # 0.2% inside target to ensure fill
 
         if signal == 1:  # Long: TP above entry
-            stop_price = entry_price * (1.0 + target_distance)
-            limit_price = stop_price * (1.0 - buffer)  # Sell limit slightly below trigger
+            trigger_price = entry_price * (1.0 + target_distance)
+            limit_price = trigger_price * (1.0 - buffer)
             close_side = 'SELL'
         else:  # Short: TP below entry
-            stop_price = entry_price * (1.0 - target_distance)
-            limit_price = stop_price * (1.0 + buffer)  # Buy limit slightly above trigger
+            trigger_price = entry_price * (1.0 - target_distance)
+            limit_price = trigger_price * (1.0 + buffer)
             close_side = 'BUY'
 
         info = self.get_symbol_info(symbol)
@@ -699,68 +757,76 @@ class RubberBandScalper:
         price_precision = info.get('price_precision', 2)
 
         # Round prices to tick size
-        stop_price = round(
-            round(stop_price / tick_size) * tick_size, price_precision
+        trigger_price = round(
+            round(trigger_price / tick_size) * tick_size, price_precision
         )
         limit_price = round(
             round(limit_price / tick_size) * tick_size, price_precision
         )
 
-        try:
-            order = self.client.futures_create_order(
-                symbol=symbol,
-                side=close_side,
-                type='TAKE_PROFIT',
-                timeInForce='GTC',
-                quantity=quantity,
-                price=str(limit_price),
-                stopPrice=str(stop_price),
-                reduceOnly=True,
+        dist_pct = target_distance * 100
+        logger.info(
+            f"[{symbol}] TP calc: entry=${entry_price:.4f} "
+            f"move={move_size*100:.2f}% × retrace={target_retrace:.3f} "
+            f"→ dist={dist_pct:.2f}% trigger=${trigger_price:.4f} "
+            f"limit=${limit_price:.4f} side={close_side}"
+        )
+
+        algo_id = self._place_algo_order(
+            symbol=symbol, side=close_side, order_type='TAKE_PROFIT',
+            quantity=quantity, trigger_price=trigger_price,
+            limit_price=limit_price, label='take-profit',
+        )
+        if algo_id is None:
+            logger.warning(
+                f"[{symbol}] Server TP failed — "
+                f"will rely on client-side TP check."
             )
-            order_id = str(order['orderId'])
-            logger.info(
-                f"[{symbol}] SERVER TAKE-PROFIT placed: "
-                f"{close_side} {quantity:.6f} @ trigger=${stop_price:.4f} "
-                f"limit=${limit_price:.4f} (orderId={order_id})"
-            )
-            return order_id
-        except Exception as e:
-            logger.error(
-                f"[{symbol}] SERVER TAKE-PROFIT FAILED: {e}. "
-                f"Will rely on client-side TP check."
-            )
-            return None
+        return algo_id
 
     def _cancel_server_order(self, symbol: str, order_id: str,
                              label: str = 'order') -> None:
-        """Cancel a server-side order (stop-loss or take-profit).
+        """Cancel a server-side algo order (stop-loss or take-profit).
 
+        Uses Binance Algo Order API (DELETE /fapi/v1/algoOrder).
         Must be called BEFORE placing a close order to avoid the server
         order triggering while we're trying to close.
 
         Args:
             symbol: Trading symbol.
-            order_id: The order ID to cancel.
+            order_id: The algoId to cancel.
             label: Description for logging (e.g. 'stop-loss', 'take-profit').
         """
         if self.paper_mode or not order_id or order_id.startswith('paper_'):
             return
 
         try:
-            self.client.futures_cancel_order(
-                symbol=symbol, orderId=int(order_id),
+            resp = self.client._request_futures_api(
+                'delete', 'algoOrder', signed=True,
+                data={'algoId': int(order_id)},
             )
-            logger.debug(f"[{symbol}] Server {label} cancelled: {order_id}")
+            logger.info(
+                f"[{symbol}] Server {label} cancelled: "
+                f"algoId={order_id} resp={resp}"
+            )
         except BinanceAPIException as e:
-            if 'Unknown order' in str(e) or '-2011' in str(e):
-                # Already cancelled or filled — OK
+            err_str = str(e)
+            if 'Unknown' in err_str or '-2011' in err_str or '-25029' in err_str:
+                # Already cancelled, filled, or expired — OK
                 logger.debug(
-                    f"[{symbol}] Server {label} already gone: {order_id}"
+                    f"[{symbol}] Server {label} already gone: "
+                    f"algoId={order_id} ({e})"
                 )
             else:
                 logger.warning(
-                    f"[{symbol}] Failed to cancel server {label}: {e}"
+                    f"[{symbol}] Failed to cancel server {label}: "
+                    f"algoId={order_id} error={e}"
                 )
+        except Exception as e:
+            logger.warning(
+                f"[{symbol}] Unexpected error cancelling server {label}: "
+                f"algoId={order_id} error={e}"
+            )
 
     def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
         """Cancel the server-side stop-loss."""
@@ -771,21 +837,59 @@ class RubberBandScalper:
         self._cancel_server_order(symbol, order_id, 'take-profit')
 
     def _check_order_filled(self, symbol: str, order_id: str) -> dict | None:
-        """Check if a server-side order has been filled.
+        """Check if a server-side algo order has been filled (TRIGGERED).
 
-        Returns the order info dict if FILLED, None otherwise.
+        Uses Binance Algo Order API (GET /fapi/v1/algoOrder).
+        Algo orders transition to algoStatus='TRIGGERED' when filled,
+        then an actual order is placed. We check for TRIGGERED status.
+
+        Returns a dict with 'avgPrice' and 'executedQty' if filled,
+        None otherwise.
         """
         if self.paper_mode or not order_id or order_id.startswith('paper_'):
             return None
 
         try:
-            order = self.client.futures_get_order(
-                symbol=symbol, orderId=int(order_id),
+            resp = self.client._request_futures_api(
+                'get', 'algoOrder', signed=True,
+                data={'algoId': int(order_id)},
             )
-            if order.get('status') == 'FILLED':
-                return order
+            algo_status = resp.get('algoStatus', '')
+            logger.debug(
+                f"[{symbol}] Algo order check: algoId={order_id} "
+                f"status={algo_status} type={resp.get('orderType', '?')}"
+            )
+
+            if algo_status == 'TRIGGERED':
+                # When triggered, the algo order creates an actual order.
+                # Extract fill info from the algo order response.
+                actual_price = resp.get('actualPrice', '0')
+                actual_qty = resp.get('quantity', '0')
+                trigger_price = resp.get('triggerPrice', '0')
+
+                logger.info(
+                    f"[{symbol}] Algo order TRIGGERED: algoId={order_id} "
+                    f"type={resp.get('orderType')} "
+                    f"triggerPrice={trigger_price} "
+                    f"actualPrice={actual_price} qty={actual_qty}"
+                )
+
+                # Use triggerPrice as fill proxy if actualPrice is zero
+                fill_price = float(actual_price)
+                if fill_price == 0:
+                    fill_price = float(trigger_price)
+
+                return {
+                    'avgPrice': str(fill_price),
+                    'executedQty': actual_qty,
+                    'status': 'FILLED',
+                    'algoId': order_id,
+                }
         except Exception as e:
-            logger.debug(f"[{symbol}] Order status check failed: {e}")
+            logger.debug(
+                f"[{symbol}] Algo order status check failed: "
+                f"algoId={order_id} error={e}"
+            )
         return None
 
     def _sync_server_orders(self) -> None:
@@ -804,15 +908,25 @@ class RubberBandScalper:
             if not pos:
                 continue
 
-            # Check TP order first (the happy path)
             tp_oid = pos.get('server_tp_order_id')
+            sl_oid = pos.get('server_sl_order_id')
+            logger.debug(
+                f"[{sym}] Sync check: sl_algoId={sl_oid} tp_algoId={tp_oid} "
+                f"entry=${pos.get('entry_price', 0):.4f} "
+                f"signal={'LONG' if pos.get('signal') == 1 else 'SHORT'}"
+            )
+
+            # Check TP order first (the happy path)
             if tp_oid:
                 filled = self._check_order_filled(sym, tp_oid)
                 if filled:
                     fill_price = float(filled['avgPrice'])
                     fill_qty = float(filled['executedQty'])
+                    logger.info(
+                        f"[{sym}] Server TP TRIGGERED intra-bar: "
+                        f"fill=${fill_price:.4f} qty={fill_qty:.6f}"
+                    )
                     # Cancel the counterpart SL
-                    sl_oid = pos.get('server_sl_order_id')
                     if sl_oid:
                         self._cancel_server_stop_loss(sym, sl_oid)
                     self._record_server_fill(
@@ -821,12 +935,15 @@ class RubberBandScalper:
                     continue
 
             # Check SL order
-            sl_oid = pos.get('server_sl_order_id')
             if sl_oid:
                 filled = self._check_order_filled(sym, sl_oid)
                 if filled:
                     fill_price = float(filled['avgPrice'])
                     fill_qty = float(filled['executedQty'])
+                    logger.info(
+                        f"[{sym}] Server SL TRIGGERED intra-bar: "
+                        f"fill=${fill_price:.4f} qty={fill_qty:.6f}"
+                    )
                     # Cancel the counterpart TP
                     if tp_oid:
                         self._cancel_server_take_profit(sym, tp_oid)
@@ -1019,8 +1136,15 @@ class RubberBandScalper:
         # Compute effective stop (HTF agree parity)
         eff_stop = self.strategy.get_effective_stop_mult(close_prices)
 
-        # ═══ v11.1: Place server-side stop-loss FIRST ═══
-        # Protects position even if client crashes after this point.
+        notional = fill_qty * fill_price
+        direction = 'LONG' if signal > 0 else 'SHORT'
+        logger.info(
+            f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
+            f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
+            f"move={move_size*100:.2f}%, eff_stop={eff_stop:.4f})"
+        )
+
+        # ═══ Place server-side bracket orders via Algo API ═══
         sl_order_id = self._place_server_stop_loss(
             symbol=symbol,
             signal=signal,
@@ -1030,7 +1154,6 @@ class RubberBandScalper:
             stop_mult=eff_stop,
         )
 
-        # ═══ v11.2: Place server-side take-profit ═══
         # Captures intra-bar TP hits that 15m polling would miss.
         tp_order_id = self._place_server_take_profit(
             symbol=symbol,
@@ -1039,6 +1162,14 @@ class RubberBandScalper:
             entry_price=fill_price,
             move_size=move_size,
             target_retrace=cfg.target_retrace,
+        )
+
+        sl_status = "OK" if sl_order_id else "FAILED"
+        tp_status = "OK" if tp_order_id else "FAILED"
+        logger.info(
+            f"[{symbol}] Server bracket: SL={sl_status} "
+            f"(algoId={sl_order_id}) TP={tp_status} "
+            f"(algoId={tp_order_id})"
         )
 
         # Record in strategy
