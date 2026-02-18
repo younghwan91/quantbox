@@ -1971,7 +1971,7 @@ class RubberBandScalper:
         self._high_water_mark = state.get('high_water_mark', 0)
 
         self._trade_history = state.get('trade_history', [])
-        self._cycle_count = state.get('cycle_count', 0)
+        self._cycle_count = 0  # Always reset per session (new log file each run)
 
         # Restore positions
         positions = state.get('positions', {})
