@@ -89,7 +89,7 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
   Profit Factor: 2.83
   Sharpe:    5.31
   Dynamic Capital: balance / max(1, n_active+1), 50% cap
-  안전장치: 서버사이드 STOP 손절 (클라이언트 크래시 방어), 레버리지 검증
+  안전장치: 서버사이드 Algo Order 손절 (클라이언트 크래시 방어), v11.4.2 Bracket Repair (복원 시 누락 SL/TP 자동 복구), 레버리지 검증
 ```
 
 ---
@@ -309,6 +309,7 @@ else:
 - [ ] `_load_scalper_state()` — 시작 시 크래시 전 상태 복원
 - [ ] 포지션 + 잔고 + 거래 히스토리 직렬화
 - [ ] 로그 파일 로테이션 — RotatingFileHandler 50MB/5백업
+- [ ] **v11.4.2 Bracket Repair** — 복원된 포지션의 누락 SL/TP 자동 배치 (`_sync_server_orders`)
 
 ### 4.5 실거래-백테스트 패리티
 - [x] 동일 신호 로직 (`compute_signals_mtf`)

@@ -190,7 +190,7 @@ scripts/                    # 유틸리티 스크립트
 ├── elliott_wave_timing_research.py  # Elliott 타이밍 알파 피처 리서치
 ├── elliott_timing_backtest.py       # Elliott 타이밍 알파 Round 1 백테스트
 └── elliott_timing_backtest_r2.py    # Elliott 타이밍 알파 Round 2 정제
-tests/                      # 유닛 테스트 (562개)
+tests/                      # 유닛 테스트 (567개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
