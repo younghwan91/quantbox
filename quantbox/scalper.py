@@ -33,6 +33,7 @@ import logging
 import logging.handlers
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -73,6 +74,41 @@ from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
 
 load_dotenv()
 
+# ──────────────────────── Git Commit Tracking ─────────────────────────
+
+
+def _get_git_commit() -> dict[str, str]:
+    """Get current git commit info for log traceability.
+
+    Returns:
+        Dict with 'short', 'full', 'message', 'date' keys.
+        All values are empty strings if git is unavailable.
+    """
+    info = {'short': '', 'full': '', 'message': '', 'date': ''}
+    try:
+        info['short'] = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        info['full'] = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        info['message'] = subprocess.run(
+            ['git', 'log', '-1', '--format=%s'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        info['date'] = subprocess.run(
+            ['git', 'log', '-1', '--format=%ci'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except Exception:
+        pass
+    return info
+
+
+GIT_COMMIT = _get_git_commit()
+
 # ──────────────────────── Logging ──────────────────────────────────────
 
 def _setup_logging() -> Path:
@@ -80,6 +116,15 @@ def _setup_logging() -> Path:
     log_dir.mkdir(exist_ok=True)
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_file = log_dir / f'scalper_{ts}.log'
+
+    # Write git commit header before configuring logging handlers
+    # so the log file starts with version traceability info
+    if GIT_COMMIT['short']:
+        with open(log_file, 'w') as f:
+            f.write(f"# Commit: {GIT_COMMIT['short']} ({GIT_COMMIT['date']})\n")
+            f.write(f"# Message: {GIT_COMMIT['message']}\n")
+            f.write(f"# Full SHA: {GIT_COMMIT['full']}\n")
+            f.write("#\n")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -177,8 +222,10 @@ STATE_DIR = Path('data/state')
 STATE_FILE = STATE_DIR / 'scalper_state.json'
 
 
-def _save_scalper_state(state: dict, filepath: Path = STATE_FILE) -> None:
+def _save_scalper_state(state: dict, filepath: Path | None = None) -> None:
     """Atomic JSON write."""
+    if filepath is None:
+        filepath = STATE_FILE
     filepath.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(filepath.parent), suffix='.tmp')
     try:
@@ -193,7 +240,9 @@ def _save_scalper_state(state: dict, filepath: Path = STATE_FILE) -> None:
         raise
 
 
-def _load_scalper_state(filepath: Path = STATE_FILE) -> dict | None:
+def _load_scalper_state(filepath: Path | None = None) -> dict | None:
+    if filepath is None:
+        filepath = STATE_FILE
     if not filepath.exists():
         return None
     try:
@@ -461,9 +510,17 @@ class RubberBandScalper:
 
     def _place_order(
         self, symbol: str, side: str, quantity: float,
-        leverage: int = 1,
+        leverage: int = 1, reduce_only: bool = False,
     ) -> dict | None:
         """Place order via LimitOrderChaser.
+
+        Args:
+            symbol: Trading symbol.
+            side: 'BUY' or 'SELL'.
+            quantity: Order quantity.
+            leverage: Leverage to set before order.
+            reduce_only: If True, pass reduceOnly=True to exchange.
+                Must be True when closing positions to avoid margin errors.
 
         Returns dict with avgPrice, executedQty on success, None on failure.
         """
@@ -530,7 +587,15 @@ class RubberBandScalper:
                 price_precision=price_precision,
                 step_size=step_size,
                 quantity_precision=qty_precision,
+                reduce_only=reduce_only,
             )
+
+            if result.status == ChaseFillStatus.NO_POSITION:
+                logger.warning(
+                    f"[{symbol}] NO POSITION on exchange — "
+                    f"reduceOnly rejected. Position already closed."
+                )
+                return {'status': 'NO_POSITION'}
 
             if result.status in (
                 ChaseFillStatus.FILLED, ChaseFillStatus.FALLBACK_MARKET
@@ -631,10 +696,15 @@ class RubberBandScalper:
             )
             return algo_id
         except Exception as e:
+            err_str = str(e)
             logger.error(
                 f"[{symbol}] SERVER {label.upper()} FAILED: {e}. "
                 f"params={params}"
             )
+            # -2021: "Order would immediately trigger" — price already past
+            # the stop level. Return sentinel so caller can force-close.
+            if '-2021' in err_str:
+                return 'WOULD_TRIGGER'
             return None
 
     def _place_server_stop_loss(
@@ -701,15 +771,27 @@ class RubberBandScalper:
             quantity=quantity, trigger_price=stop_price,
             limit_price=limit_price, label='stop-loss',
         )
+        if algo_id == 'WOULD_TRIGGER':
+            logger.error(
+                f"[{symbol}] SL WOULD IMMEDIATELY TRIGGER — "
+                f"price already past stop level ${stop_price:.4f}. "
+                f"Returning sentinel for force-close."
+            )
+            self.discord.send(content=(
+                f"\U0001f6a8 **SL 즉시체결** [{symbol}] — "
+                f"현재가가 SL ${stop_price:.4f}을 이미 이탈. "
+                f"강제 청산 필요."
+            ))
+            return 'WOULD_TRIGGER'
         if algo_id is None:
             logger.error(
                 f"[{symbol}] Position is UNPROTECTED — "
                 f"client-side stop still active."
             )
             self.discord.send(content=(
-                f"\u26a0\ufe0f **SERVER STOP FAILED** [{symbol}] — "
-                f"Position unprotected on exchange side. "
-                f"Client-side stop still active."
+                f"\u26a0\ufe0f **서버 SL 실패** [{symbol}] — "
+                f"거래소측 보호주문 없음 (클라이언트 SL만 작동). "
+                f"다음 사이클에 재시도."
             ))
         return algo_id
 
@@ -886,7 +968,7 @@ class RubberBandScalper:
                     'algoId': order_id,
                 }
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 f"[{symbol}] Algo order status check failed: "
                 f"algoId={order_id} error={e}"
             )
@@ -950,6 +1032,103 @@ class RubberBandScalper:
                     self._record_server_fill(
                         sym, fill_price, fill_qty, 'server_sl',
                     )
+                    continue
+
+            # ═══ v11.4.2 BRACKET REPAIR: Place missing SL/TP for restored positions ═══
+            # Positions restored from state may have None algoIds (e.g. old session
+            # failed to place them). Detect and repair to ensure server-side protection.
+            missing_sl = sl_oid is None
+            missing_tp = tp_oid is None
+
+            if missing_sl or missing_tp:
+                quantity = pos['notional'] / pos['entry_price']
+                quantity = self._round_qty(quantity, sym)
+                signal = pos['signal']
+                entry_price = pos['entry_price']
+                move_size = pos.get('move_size', 0.03)
+                stop_mult = pos.get(
+                    'entry_stop_mult', self.config.stop_mult,
+                )
+
+                if missing_sl:
+                    new_sl = self._place_server_stop_loss(
+                        symbol=sym, signal=signal, quantity=quantity,
+                        entry_price=entry_price, move_size=move_size,
+                        stop_mult=stop_mult,
+                    )
+                    if new_sl == 'WOULD_TRIGGER':
+                        # ═══ FORCE-CLOSE: Price blew past SL level ═══
+                        # The stop price is already behind the market.
+                        # Close the position immediately at market with
+                        # reduceOnly to prevent the "margin insufficient"
+                        # error that killed us before.
+                        logger.critical(
+                            f"[{sym}] BRACKET REPAIR → FORCE CLOSE: "
+                            f"Price past SL. Closing at market."
+                        )
+                        self.discord.send(content=(
+                            f"\U0001f6a8 **강제청산** [{sym}] — "
+                            f"SL 가격 이탈 감지. 시장가 긴급 청산 실행."
+                        ))
+                        closed = self._close_position(
+                            sym, 'force_sl_breach', 0.0,
+                        )
+                        if closed:
+                            logger.info(
+                                f"[{sym}] FORCE CLOSE SUCCESS — "
+                                f"position liquidated at market."
+                            )
+                        else:
+                            logger.critical(
+                                f"[{sym}] FORCE CLOSE FAILED — "
+                                f"MANUAL INTERVENTION REQUIRED!"
+                            )
+                            self.discord.send(content=(
+                                f"\U0001f6a8\U0001f6a8 **강제청산 실패** "
+                                f"[{sym}] — 수동 청산 필요! 즉시 거래소 확인!"
+                            ))
+                        continue  # Skip TP repair — position gone
+                    elif new_sl:
+                        pos['server_sl_order_id'] = new_sl
+                        logger.info(
+                            f"[{sym}] BRACKET REPAIR: SL placed "
+                            f"algoId={new_sl}"
+                        )
+                    else:
+                        logger.error(
+                            f"[{sym}] BRACKET REPAIR FAILED: "
+                            f"Could not place SL — position UNPROTECTED"
+                        )
+
+                if missing_tp:
+                    new_tp = self._place_server_take_profit(
+                        symbol=sym, signal=signal, quantity=quantity,
+                        entry_price=entry_price, move_size=move_size,
+                        target_retrace=self.config.target_retrace,
+                    )
+                    if new_tp:
+                        pos['server_tp_order_id'] = new_tp
+                        logger.info(
+                            f"[{sym}] BRACKET REPAIR: TP placed "
+                            f"algoId={new_tp}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[{sym}] BRACKET REPAIR: TP failed — "
+                            f"client-side TP still active"
+                        )
+
+                if missing_sl or missing_tp:
+                    self._save_state()
+                    sl_id = pos.get('server_sl_order_id')
+                    tp_id = pos.get('server_tp_order_id')
+                    logger.info(
+                        f"[{sym}] Bracket repair complete: "
+                        f"SL={'OK' if sl_id else 'MISSING'} "
+                        f"(algoId={sl_id}) "
+                        f"TP={'OK' if tp_id else 'MISSING'} "
+                        f"(algoId={tp_id})"
+                    )
 
     def _record_server_fill(
         self, symbol: str, fill_price: float, fill_qty: float, reason: str,
@@ -1000,21 +1179,25 @@ class RubberBandScalper:
         wr = wins_total / n_trades * 100 if n_trades > 0 else 0
         hold_time = pos['bars_held'] * 15
 
+        _dir = 'LONG ↑' if pos['signal'] == 1 else 'SHORT ↓'
+        _fill_type = '서버 TP 체결 (바 중간 익절)' if reason == 'server_tp' else '서버 SL 체결 (안전장치)'
+        n_remaining = self.strategy.n_active
         self.discord.send(embed={
-            'title': f"{emoji} {symbol} {reason.upper().replace('_', ' ')} FILLED",
+            'title': f"{emoji} {symbol} {_dir} | 서버체결",
             'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
-            'description': (
-                'Server-side TP hit intra-bar!' if reason == 'server_tp'
-                else 'Server-side SL triggered (safety net).'
-            ),
+            'description': f"{_fill_type}",
             'fields': [
-                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
-                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
-                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
-                {'name': 'Hold Time', 'value': f'{hold_time}m ({pos["bars_held"]} bars)', 'inline': True},
-                {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades}T, {wr:.0f}%WR)', 'inline': False},
+                {'name': '진입가', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': '체결가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '보유시간', 'value': f'{hold_time}분 ({pos["bars_held"]}바)', 'inline': True},
+                {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': '순수익', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': '체결방식', 'value': '🟢 거래소(서버)', 'inline': True},
+                {'name': '── 세션 현황 ──', 'value': (
+                    f'누적 PnL: ${cum_pnl:+,.2f} | '
+                    f'{n_trades}건 | 승률 {wr:.0f}%\n'
+                    f'남은 포지션: {n_remaining}개'
+                ), 'inline': False},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1230,20 +1413,32 @@ class RubberBandScalper:
 
         balance_after = self.get_balance()
         n_active = self.strategy.n_active
+        _dir = 'LONG ↑' if signal == 1 else 'SHORT ↓'
+        # Server bracket status
+        _sl_tag = '🟢 서버' if sl_order_id else '🟡 클라이언트'
+        _tp_tag = '🟢 서버' if tp_order_id else '🟡 클라이언트'
+        # Active positions summary
+        _pos_lines = []
+        for _sym, _p in self.strategy.active_positions.items():
+            _pd = 'L' if _p['signal'] == 1 else 'S'
+            _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
+        _pos_summary = '\n'.join(_pos_lines) if _pos_lines else '없음'
+
         self.discord.send(embed={
-            'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} "
-                     f"{'LONG' if signal == 1 else 'SHORT'}",
+            'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} {_dir} | 진입",
             'color': 0x00C853 if signal == 1 else 0xFF1744,
             'fields': [
-                {'name': 'Entry', 'value': f'${fill_price:.4f}', 'inline': True},
-                {'name': 'Size', 'value': f'${fill_qty * fill_price:.2f}',
-                 'inline': True},
-                {'name': 'Leverage', 'value': f'{lev_int}x', 'inline': True},
-                {'name': 'Move', 'value': f'{move_size*100:.2f}%', 'inline': True},
-                {'name': 'TP', 'value': f'${tp_price:.4f}', 'inline': True},
-                {'name': 'SL', 'value': f'${sl_price:.4f}', 'inline': True},
-                {'name': 'Slots', 'value': f'{n_active}/{cfg.max_concurrent}', 'inline': True},
-                {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
+                {'name': '진입가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '포지션', 'value': f'${fill_qty * fill_price:,.2f}', 'inline': True},
+                {'name': '레버리지', 'value': f'{lev_int}x', 'inline': True},
+                {'name': '이동폭', 'value': f'{move_size*100:.2f}%', 'inline': True},
+                {'name': '🎯 TP', 'value': f'${tp_price:.4f}', 'inline': True},
+                {'name': '🛑 SL', 'value': f'${sl_price:.4f}', 'inline': True},
+                {'name': 'TP 방식', 'value': _tp_tag, 'inline': True},
+                {'name': 'SL 방식', 'value': _sl_tag, 'inline': True},
+                {'name': '슬롯', 'value': f'{n_active}/{cfg.max_concurrent}', 'inline': True},
+                {'name': '── 활성 포지션 ──', 'value': f'```\n{_pos_summary}\n```', 'inline': False},
+                {'name': '잔고', 'value': f'${balance_after:,.2f}', 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1283,7 +1478,7 @@ class RubberBandScalper:
         # Reverse the entry side to close
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
-        result = self._place_order(symbol, side, close_qty)
+        result = self._place_order(symbol, side, close_qty, reduce_only=True)
         if result is None:
             # Failed: revert partial_closed flag
             pos['partial_closed'] = False
@@ -1356,19 +1551,23 @@ class RubberBandScalper:
             f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
             f"→ remaining ${pos['notional']:.2f}, BE stop active"
         )
+        _dir = 'LONG ↑' if pos['signal'] == 1 else 'SHORT ↓'
+        # Remaining bracket status
+        _r_sl = '🟢 서버 (BE)' if pos.get('server_sl_order_id') else '🟡 클라이언트 (BE)'
+        _r_tp = '🟢 서버' if pos.get('server_tp_order_id') else '🟡 클라이언트'
         self.discord.send(embed={
-            'title': f"🔒 {symbol} PARTIAL CLOSE ({fraction*100:.0f}%)",
+            'title': f"🔒 {symbol} {_dir} | 부분청산 {fraction*100:.0f}%",
             'color': 0xFFC107,
-            'description': 'Capital secured. Remaining rides with break-even stop.',
+            'description': '원금 확보 완료. 나머지는 손익분기점 스톱으로 안전 운영.',
             'fields': [
-                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
-                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                {'name': 'Locked $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
-                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
-                {'name': 'Remaining', 'value': f'${pos["notional"]:.2f}', 'inline': True},
-                {'name': 'Stop', 'value': 'Break-even', 'inline': True},
-                {'name': 'Bars Held', 'value': str(pos['bars_held']), 'inline': True},
+                {'name': '진입가', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': '체결가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '보유', 'value': f'{pos["bars_held"]}바', 'inline': True},
+                {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': '확보금액', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': '남은포지션', 'value': f'${pos["notional"]:,.2f}', 'inline': True},
+                {'name': 'TP 방식', 'value': _r_tp, 'inline': True},
+                {'name': 'SL 방식', 'value': _r_sl, 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1431,13 +1630,13 @@ class RubberBandScalper:
             f"total ${total_notional:.2f} @ blended ${blended_entry:.4f}"
         )
         self.discord.send(embed={
-            'title': f"✅ {symbol} CONFIRMED — Primary Entry",
+            'title': f"✅ {symbol} 확정진입 | 다이버전스 검증",
             'color': 0x2196F3,
-            'description': 'Divergence validated. Upgraded to 10% margin.',
+            'description': '다이버전스 확인. 10% 마진으로 업그레이드.',
             'fields': [
-                {'name': 'Added', 'value': f'${new_notional:.2f}', 'inline': True},
-                {'name': 'Total', 'value': f'${total_notional:.2f}', 'inline': True},
-                {'name': 'Blended Entry', 'value': f'${blended_entry:.4f}', 'inline': True},
+                {'name': '추가금액', 'value': f'${new_notional:.2f}', 'inline': True},
+                {'name': '총포지션', 'value': f'${total_notional:.2f}', 'inline': True},
+                {'name': '평균진입가', 'value': f'${blended_entry:.4f}', 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1505,13 +1704,13 @@ class RubberBandScalper:
             f"${unrealized:.2f} unrealized → total ${total_notional:.2f}"
         )
         self.discord.send(embed={
-            'title': f"📈 {symbol} PYRAMID — Wave 3/C Momentum",
+            'title': f"📈 {symbol} 피라미딩 | Wave 3/C 모멘텀",
             'color': 0x4CAF50,
-            'description': 'Pyramiding with unrealized profits. Stop trailed to BE.',
+            'description': '미실현 수익으로 추가진입. 스톱 BE로 이동.',
             'fields': [
-                {'name': 'Added', 'value': f'${new_notional:.2f}', 'inline': True},
-                {'name': 'Total', 'value': f'${total_notional:.2f}', 'inline': True},
-                {'name': 'Unrealized', 'value': f'${unrealized:.2f}', 'inline': True},
+                {'name': '추가금액', 'value': f'${new_notional:.2f}', 'inline': True},
+                {'name': '총포지션', 'value': f'${total_notional:.2f}', 'inline': True},
+                {'name': '미실현', 'value': f'${unrealized:.2f}', 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1522,9 +1721,11 @@ class RubberBandScalper:
     ) -> bool:
         """Close an existing position.
 
-        Returns True if closed successfully.
+        Returns True if closed successfully.  Also returns True when the
+        exchange reports NO_POSITION (-4118/-2022) because the position is
+        already gone — we just clean up our internal state.
         """
-        pos = self.strategy.close_position(symbol)
+        pos = self.strategy._positions.get(symbol)
         if pos is None:
             return False
 
@@ -1546,10 +1747,129 @@ class RubberBandScalper:
         # Reverse the entry side
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
-        result = self._place_order(symbol, side, quantity)
+        result = self._place_order(symbol, side, quantity, reduce_only=True)
+
+        # ── NO_POSITION: exchange says position already gone ──
+        # This typically means a server-side TP/SL filled between cycles.
+        # We MUST record the trade — otherwise trade count and PnL stay at 0.
+        if isinstance(result, dict) and result.get('status') == 'NO_POSITION':
+            logger.warning(
+                f"[{symbol}] Position already closed on exchange — "
+                f"recording trade & cleaning up (reason={reason})"
+            )
+            # Pop the position from internal tracking
+            closed_pos = self.strategy.close_position(symbol)
+            if closed_pos:
+                # Try to get actual fill price from recent exchange trades
+                fill_price = current_price  # fallback
+                try:
+                    recent_trades = self.client.futures_account_trades(
+                        symbol=symbol, limit=10,
+                    )
+                    if recent_trades:
+                        # Find the most recent CLOSE trade (opposite side)
+                        close_side = 'SELL' if closed_pos['signal'] == 1 else 'BUY'
+                        for t in reversed(recent_trades):
+                            if t.get('side') == close_side and t.get('realizedPnl', '0') != '0':
+                                fill_price = float(t['price'])
+                                logger.info(
+                                    f"[{symbol}] NO_POSITION fill recovered: "
+                                    f"price=${fill_price:.4f} "
+                                    f"realizedPnl={t.get('realizedPnl')}"
+                                )
+                                break
+                except Exception as e:
+                    logger.warning(
+                        f"[{symbol}] Could not fetch fill info: {e}. "
+                        f"Using current_price=${current_price:.4f} as fallback."
+                    )
+
+                # PnL calculation
+                if closed_pos['signal'] == 1:
+                    pnl_pct = (fill_price - closed_pos['entry_price']) / closed_pos['entry_price']
+                else:
+                    pnl_pct = (closed_pos['entry_price'] - fill_price) / closed_pos['entry_price']
+
+                pnl_usd = pnl_pct * closed_pos['notional']
+                cost = closed_pos['notional'] * self.config.round_trip_cost
+                net_pnl = pnl_usd - cost
+
+                # Trade record
+                trade = {
+                    'symbol': symbol,
+                    'signal': closed_pos['signal'],
+                    'entry_price': closed_pos['entry_price'],
+                    'exit_price': fill_price,
+                    'pnl_pct': pnl_pct * 100,
+                    'pnl_usd': net_pnl,
+                    'notional': closed_pos['notional'],
+                    'bars_held': closed_pos['bars_held'],
+                    'reason': f'{reason}_no_position',
+                    'time': datetime.now(timezone.utc).isoformat(),
+                }
+                self._trade_history.append(trade)
+
+                # v12.0: Exit diagnostic to JSONL
+                _diag_logger.log_exit(
+                    self._cycle_count,
+                    datetime.now(timezone.utc).isoformat(),
+                    trade,
+                )
+
+                _exit_side = 'LONG' if closed_pos['signal'] == 1 else 'SHORT'
+                print(format_exit(
+                    symbol=symbol,
+                    side=_exit_side,
+                    entry_price=closed_pos['entry_price'],
+                    exit_price=fill_price,
+                    pnl_usd=net_pnl,
+                    pnl_pct=pnl_pct * 100,
+                    reason=f'{reason} (no_position)',
+                    bars_held=closed_pos['bars_held'],
+                ))
+                logger.info(
+                    f"[{symbol}] NO_POSITION trade recorded: {_exit_side} "
+                    f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+                    f"exit=${fill_price:.4f} held={closed_pos['bars_held']} bars"
+                )
+
+                # Session stats
+                cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+                n_trades = len(self._trade_history)
+                wins_total = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+                wr = wins_total / n_trades * 100 if n_trades > 0 else 0
+                balance_after = self.get_balance()
+                hold_time = closed_pos['bars_held'] * 15  # minutes
+
+                _dir_kr = 'LONG ↑' if closed_pos['signal'] == 1 else 'SHORT ↓'
+                _reason_kr = reason.upper().replace('_', ' ')
+                n_remaining = self.strategy.n_active
+
+                self.discord.send(embed={
+                    'title': f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr} (서버체결)",
+                    'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
+                    'fields': [
+                        {'name': '진입가', 'value': f'${closed_pos["entry_price"]:.4f}', 'inline': True},
+                        {'name': '청산가', 'value': f'${fill_price:.4f}', 'inline': True},
+                        {'name': '보유시간', 'value': f'{hold_time}분 ({closed_pos["bars_held"]}바)', 'inline': True},
+                        {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                        {'name': '순수익', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                        {'name': '체결방식', 'value': '🟢 거래소(서버)', 'inline': True},
+                        {'name': '── 세션 현황 ──', 'value': (
+                            f'누적 PnL: ${cum_pnl:+,.2f} | '
+                            f'{n_trades}건 | 승률 {wr:.0f}%\n'
+                            f'남은 포지션: {n_remaining}개 | '
+                            f'잔고: ${balance_after:,.2f}'
+                        ), 'inline': False},
+                    ],
+                    'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+                })
+            self._save_state()
+            return True
+
         if result is None:
-            # Failed to close — re-add position for retry (SL/TP already
-            # cancelled, so we need to re-place them)
+            # Failed to close — position stays in state for retry
+            # SL/TP already cancelled, so re-place them
             new_sl_oid = self._place_server_stop_loss(
                 symbol=symbol,
                 signal=pos['signal'],
@@ -1566,17 +1886,19 @@ class RubberBandScalper:
                 move_size=pos['move_size'],
                 target_retrace=self.config.target_retrace,
             )
-            self.strategy.open_position(
-                symbol=symbol,
-                signal=pos['signal'],
-                entry_price=pos['entry_price'],
-                notional=pos['notional'],
-                leverage=pos['leverage'],
-                move_size=pos['move_size'],
-                entry_stop_mult=pos.get('entry_stop_mult'),
-                server_sl_order_id=new_sl_oid,
-                server_tp_order_id=new_tp_oid,
-            )
+            # Update existing position's server order IDs
+            # Guard against sentinel values being stored as order IDs
+            if new_sl_oid and new_sl_oid != 'WOULD_TRIGGER':
+                pos['server_sl_order_id'] = new_sl_oid
+            else:
+                pos['server_sl_order_id'] = None
+            pos['server_tp_order_id'] = new_tp_oid
+            self._save_state()
+            return False
+
+        # ── Successful close — NOW remove from state ──
+        pos = self.strategy.close_position(symbol)
+        if pos is None:
             return False
 
         fill_price = float(result['avgPrice'])
@@ -1640,19 +1962,32 @@ class RubberBandScalper:
         balance_after = self.get_balance()
         hold_time = pos['bars_held'] * 15  # minutes
 
+        _dir_kr = 'LONG ↑' if pos['signal'] == 1 else 'SHORT ↓'
+        _reason_kr = reason.upper().replace('_', ' ')
+        n_remaining = self.strategy.n_active
+        # Remaining positions summary
+        _pos_lines = []
+        for _sym, _p in self.strategy.active_positions.items():
+            _pd = 'L' if _p['signal'] == 1 else 'S'
+            _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
+        _pos_summary = '\n'.join(_pos_lines) if _pos_lines else '없음'
+
         self.discord.send(embed={
-            'title': f"{emoji} {symbol} CLOSED — {reason.upper().replace('_', ' ')}",
+            'title': f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr}",
             'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
             'fields': [
-                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
-                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
-                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
-                {'name': 'Hold Time', 'value': f'{hold_time}m ({pos["bars_held"]} bars)', 'inline': True},
-                {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades} trades)', 'inline': True},
-                {'name': 'Win Rate', 'value': f'{wr:.0f}%', 'inline': True},
-                {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
+                {'name': '진입가', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': '청산가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '보유시간', 'value': f'{hold_time}분 ({pos["bars_held"]}바)', 'inline': True},
+                {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': '순수익', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': '체결방식', 'value': '🔵 클라이언트', 'inline': True},
+                {'name': '── 세션 현황 ──', 'value': (
+                    f'누적 PnL: ${cum_pnl:+,.2f} | '
+                    f'{n_trades}건 | 승률 {wr:.0f}%\n'
+                    f'잔고: ${balance_after:,.2f}'
+                ), 'inline': False},
+                {'name': '── 남은 포지션 ──', 'value': f'```\n{_pos_summary}\n```', 'inline': False},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1684,11 +2019,44 @@ class RubberBandScalper:
             max_slots=self.config.max_concurrent,
         )
         print(header)
+
+        # ── Enhanced cycle header with HWM / DD / cum PnL ──
+        hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+        dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
+        cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        n_trades = len(self._trade_history)
         logger.info(
             f"Cycle #{self._cycle_count} | "
             f"Balance=${balance:.2f} | "
-            f"Positions={self.strategy.n_active}/{self.config.max_concurrent}"
+            f"HWM=${hwm:.2f} | DD={dd_pct:.1f}% | "
+            f"Positions={self.strategy.n_active}/{self.config.max_concurrent} | "
+            f"Trades={n_trades} CumPnL=${cum_pnl:+.2f}"
         )
+
+        # ── Log each active position status ──
+        for sym, pos in self.strategy.active_positions.items():
+            try:
+                book = self.client.futures_orderbook_ticker(symbol=sym)
+                cur_px = float(book['bidPrice']) if pos['signal'] == 1 else float(book['askPrice'])
+            except Exception:
+                cur_px = pos.get('entry_price', 0)
+            entry_px = pos.get('entry_price', 0)
+            if entry_px > 0:
+                if pos['signal'] == 1:
+                    upnl_pct = (cur_px - entry_px) / entry_px * 100
+                else:
+                    upnl_pct = (entry_px - cur_px) / entry_px * 100
+            else:
+                upnl_pct = 0.0
+            sl_id = pos.get('server_sl_order_id')
+            tp_id = pos.get('server_tp_order_id')
+            bars = pos.get('bars_held', 0)
+            direction = 'L' if pos.get('signal') == 1 else 'S'
+            logger.info(
+                f"  [{sym}] {direction} entry=${entry_px:.4f} now=${cur_px:.4f} "
+                f"uPnL={upnl_pct:+.2f}% bars={bars} "
+                f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}"
+            )
 
         # 1. Risk check
         risk_blocked = self._check_risk_limits(balance)
@@ -1718,6 +2086,14 @@ class RubberBandScalper:
         # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
         self._sync_server_orders()
 
+        # Log server order sync result
+        for sym, pos in self.strategy.active_positions.items():
+            sl_id = pos.get('server_sl_order_id')
+            tp_id = pos.get('server_tp_order_id')
+            logger.debug(
+                f"  [{sym}] Post-sync: SL={sl_id or 'NONE'} TP={tp_id or 'NONE'}"
+            )
+
         # 4. Process existing positions (always, even when paused)
         for sym in list(self.strategy.active_positions):
             close = self.download_klines(sym, 200)
@@ -1727,6 +2103,9 @@ class RubberBandScalper:
             current_price = close[-1]
             exit_reason = self.strategy.update_position(sym, current_price)
             if exit_reason:
+                logger.info(
+                    f"  [{sym}] Exit signal: {exit_reason} @ ${current_price:.4f}"
+                )
                 if exit_reason == 'partial_close':
                     self._partial_close_position(sym, current_price)
                 elif exit_reason == 'confirm_entry':
@@ -1740,6 +2119,13 @@ class RubberBandScalper:
                     self._close_position(sym, exit_reason, current_price)
                 else:
                     self._close_position(sym, exit_reason, current_price)
+            else:
+                pos = self.strategy._positions.get(sym)
+                if pos:
+                    logger.debug(
+                        f"  [{sym}] HOLD: bars={pos.get('bars_held', 0)}/{self.config.max_hold} "
+                        f"best_pnl={pos.get('best_pnl', 0)*100:.2f}%"
+                    )
 
         # 5. Look for new entries (skip if risk blocked or paused)
         if self._paused:
@@ -1755,8 +2141,8 @@ class RubberBandScalper:
         # 6. Save state
         self._save_state()
 
-        # 7. Periodic summary
-        if self._cycle_count % 4 == 0:  # Every hour
+        # 7. Periodic summary (every cycle for active positions, full every hour)
+        if self.strategy.n_active > 0 or self._cycle_count % 4 == 0:
             self._log_summary(balance)
 
     def _scan_entries(
@@ -1838,7 +2224,7 @@ class RubberBandScalper:
                 top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
                 logger.info(
                     f"No candidates — top moves: {', '.join(top3)} "
-                    f"(need >{self.config.threshold*100:.1f}%)"
+                    f"(base >{self.config.threshold*100:.1f}%, adaptive per-symbol)"
                 )
 
         # v12.0: Write structured diagnostics to JSONL
@@ -1860,19 +2246,20 @@ class RubberBandScalper:
             )
 
     def _log_summary(self, balance: float) -> None:
-        """Log hourly summary."""
+        """Log periodic summary — always, even with 0 trades."""
         positions = self.strategy.active_positions
         n_trades = len(self._trade_history)
-        if n_trades == 0:
-            return
-
         wins = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
         total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
         wr = wins / n_trades * 100 if n_trades > 0 else 0
 
+        hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+        dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
+
         logger.info(
             f"[Summary] Trades={n_trades}, WR={wr:.0f}%, "
             f"PnL=${total_pnl:+.2f}, Balance=${balance:.2f}, "
+            f"HWM=${hwm:.2f}, DD={dd_pct:.1f}%, "
             f"Active={len(positions)}"
         )
 
@@ -1881,8 +2268,10 @@ class RubberBandScalper:
             logger.info(
                 f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
                 f"entry=${pos['entry_price']:.4f} "
-                f"bars={pos['bars_held']} "
-                f"best_pnl={pos['best_pnl']*100:.2f}%"
+                f"bars={pos['bars_held']}/{self.config.max_hold} "
+                f"best_pnl={pos.get('best_pnl', 0)*100:.2f}% "
+                f"SL={pos.get('server_sl_order_id') or 'NONE'} "
+                f"TP={pos.get('server_tp_order_id') or 'NONE'}"
             )
 
     # ==================== Discord Bot Commands ====================
@@ -2214,29 +2603,42 @@ class RubberBandScalper:
             logger.info("Discord Bot started for interactive commands")
 
         n_symbols = len(self.config.symbol_whitelist) if self.config.symbol_whitelist else 0
+        commit_str = f"`{GIT_COMMIT['short']}`" if GIT_COMMIT['short'] else 'unknown'
+        eff_lev = self.config.base_leverage * self.config.mtf_leverage_mult
+        _mtf_str = f"ON (SMA {self.config.mtf_sma_period})" if self.config.mtf_confirmation_enabled else "OFF"
+        _adaptive_str = (
+            f"적응형 {self.config.atr_multiplier}x "
+            f"(floor {self.config.threshold_floor*100:.1f}%, cap {self.config.threshold_cap*100:.1f}%)"
+            if self.config.atr_period > 0
+            else f"고정 {self.config.threshold*100:.1f}%"
+        )
+        # Recovered positions from state
+        n_recovered = self.strategy.n_active
         self.discord.send(embed={
-            'title': '🚀 QuantBox Scalper Started',
+            'title': '🚀 QuantBox 스캘퍼 시작',
             'color': 0x2979FF,
             'description': (
-                f"Rubber Band mean-reversion scalper initialized.\n"
-                f"Use `!help` for interactive commands."
+                f"러버밴드 평균회귀 스캘퍼 초기화 완료.\n"
+                f"`!help`로 명령어 확인."
             ),
             'fields': [
-                {'name': 'Mode', 'value': f"**{mode_str}**", 'inline': True},
-                {'name': 'Balance', 'value': f'${balance:,.2f}', 'inline': True},
-                {'name': 'Slots', 'value': f'{self.strategy.n_active}/{self.config.max_concurrent}', 'inline': True},
-                {'name': 'Strategy', 'value': (
-                    f"LB={self.config.lookback} | "
-                    f"Thr={self.config.threshold} | "
+                {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},
+                {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
+                {'name': '슬롯', 'value': f'{n_recovered}/{self.config.max_concurrent}', 'inline': True},
+                {'name': '── 전략 설정 ──', 'value': (
+                    f"진입: {_adaptive_str}\n"
                     f"TP={self.config.target_retrace} | "
-                    f"SL={self.config.stop_mult}x"
+                    f"SL={self.config.stop_mult}x | "
+                    f"MaxHold={self.config.max_hold}바"
                 ), 'inline': False},
-                {'name': 'Universe', 'value': f'{n_symbols} symbols', 'inline': True},
-                {'name': 'Max Hold', 'value': f'{self.config.max_hold} bars', 'inline': True},
-                {'name': 'Leverage', 'value': (
-                    f'Base {self.config.base_leverage}x, '
-                    f'MTF {self.config.mtf_leverage_mult}x'
+                {'name': 'MTF', 'value': _mtf_str, 'inline': True},
+                {'name': '레버리지', 'value': (
+                    f'Base {self.config.base_leverage}x × '
+                    f'MTF {self.config.mtf_leverage_mult}x = '
+                    f'{eff_lev:.1f}x'
                 ), 'inline': True},
+                {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
+                {'name': '커밋', 'value': commit_str, 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -2272,9 +2674,9 @@ class RubberBandScalper:
             except Exception as e:
                 logger.error(f"Cycle error: {e}", exc_info=True)
                 self.discord.send(embed={
-                    'title': '🚨 Cycle Error',
+                    'title': '🚨 사이클 오류',
                     'color': 0xFF1744,
-                    'description': str(e)[:500],
+                    'description': f'포지션 {self.strategy.n_active}개 활성 중\n```\n{str(e)[:400]}\n```',
                     'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
                 })
                 time.sleep(60)
@@ -2313,19 +2715,19 @@ class RubberBandScalper:
         ))
 
         fields = [
-            {'name': 'Cycles', 'value': str(self._cycle_count), 'inline': True},
-            {'name': 'Trades', 'value': f'{n_trades} (WR {wr:.0f}%)', 'inline': True},
-            {'name': 'Total PnL', 'value': f'${total_pnl:+,.2f}', 'inline': True},
-            {'name': 'Balance', 'value': f'${balance_now:,.2f}', 'inline': True},
-            {'name': 'Session ROI', 'value': f'{session_return:+.2f}%', 'inline': True},
+            {'name': '사이클', 'value': str(self._cycle_count), 'inline': True},
+            {'name': '거래', 'value': f'{n_trades}건 (승률 {wr:.0f}%)', 'inline': True},
+            {'name': '총 수익', 'value': f'${total_pnl:+,.2f}', 'inline': True},
+            {'name': '잔고', 'value': f'${balance_now:,.2f}', 'inline': True},
+            {'name': '세션 ROI', 'value': f'{session_return:+.2f}%', 'inline': True},
         ]
         if best:
-            fields.append({'name': 'Best', 'value': f"{best['symbol']} ${best['pnl_usd']:+,.2f}", 'inline': True})
+            fields.append({'name': '최고 수익', 'value': f"{best['symbol']} ${best['pnl_usd']:+,.2f}", 'inline': True})
         if worst:
-            fields.append({'name': 'Worst', 'value': f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", 'inline': True})
+            fields.append({'name': '최대 손실', 'value': f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", 'inline': True})
 
         self.discord.send(embed={
-            'title': '🛑 QuantBox Scalper Stopped',
+            'title': '🛑 QuantBox 스켈퍼 종료',
             'color': 0xFF1744 if total_pnl < 0 else 0x00C853,
             'fields': fields,
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
@@ -2336,6 +2738,10 @@ class RubberBandScalper:
         settings = get_settings()
         mode_str = 'PAPER' if self.paper_mode else 'LIVE'
         print_banner()
+        if GIT_COMMIT['short']:
+            logger.info(
+                f"Git: {GIT_COMMIT['short']} — {GIT_COMMIT['message']}"
+            )
         print_system_info(
             mode=mode_str,
             strategy=self.strategy_name,
@@ -2380,7 +2786,8 @@ class RubberBandScalper:
         target = self._next_bar_time()
         remaining = (target - datetime.now(timezone.utc)).total_seconds()
         if remaining > 0:
-            logger.debug(f"Waiting {remaining:.0f}s for next bar close")
+            next_str = target.strftime('%H:%M:%S UTC')
+            logger.info(f"Waiting {remaining:.0f}s for next bar close ({next_str})")
 
         BOT_POLL_INTERVAL = 5.0    # Check bot commands every 5s
         SYNC_INTERVAL = 60.0       # Sync server orders every 60s
@@ -2462,7 +2869,7 @@ def main():
         partial_exit_fraction=settings.rb_partial_exit_fraction,
         rr_leverage_enabled=settings.rb_rr_leverage_enabled,
         min_rr_for_leverage=settings.rb_min_rr_for_leverage,
-        max_concurrent=args.max_slots if args.max_slots is not None else 5,
+        max_concurrent=args.max_slots if args.max_slots is not None else settings.rb_max_concurrent,
         # v6.0: Confidence scoring
         entry_mode=settings.rb_entry_mode,
         btc_regime_period=settings.rb_btc_regime_period,
