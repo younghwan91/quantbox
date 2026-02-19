@@ -778,9 +778,9 @@ class RubberBandScalper:
                 f"Returning sentinel for force-close."
             )
             self.discord.send(content=(
-                f"\U0001f6a8 **SL WOULD TRIGGER** [{symbol}] — "
-                f"Price blew past SL ${stop_price:.4f}. "
-                f"Force-close required."
+                f"\U0001f6a8 **SL 즉시체결** [{symbol}] — "
+                f"현재가가 SL ${stop_price:.4f}을 이미 이탈. "
+                f"강제 청산 필요."
             ))
             return 'WOULD_TRIGGER'
         if algo_id is None:
@@ -789,9 +789,9 @@ class RubberBandScalper:
                 f"client-side stop still active."
             )
             self.discord.send(content=(
-                f"\u26a0\ufe0f **SERVER STOP FAILED** [{symbol}] — "
-                f"Position unprotected on exchange side. "
-                f"Client-side stop still active."
+                f"\u26a0\ufe0f **서버 SL 실패** [{symbol}] — "
+                f"거래소측 보호주문 없음 (클라이언트 SL만 작동). "
+                f"다음 사이클에 재시도."
             ))
         return algo_id
 
@@ -1067,8 +1067,8 @@ class RubberBandScalper:
                             f"Price past SL. Closing at market."
                         )
                         self.discord.send(content=(
-                            f"\U0001f6a8 **FORCE CLOSE** [{sym}] — "
-                            f"Price blew past SL. Emergency market close."
+                            f"\U0001f6a8 **강제청산** [{sym}] — "
+                            f"SL 가격 이탈 감지. 시장가 긴급 청산 실행."
                         ))
                         closed = self._close_position(
                             sym, 'force_sl_breach', 0.0,
@@ -1084,8 +1084,8 @@ class RubberBandScalper:
                                 f"MANUAL INTERVENTION REQUIRED!"
                             )
                             self.discord.send(content=(
-                                f"\U0001f6a8\U0001f6a8 **FORCE CLOSE FAILED** "
-                                f"[{sym}] — MANUAL CLOSE REQUIRED NOW!"
+                                f"\U0001f6a8\U0001f6a8 **강제청산 실패** "
+                                f"[{sym}] — 수동 청산 필요! 즉시 거래소 확인!"
                             ))
                         continue  # Skip TP repair — position gone
                     elif new_sl:
@@ -1179,21 +1179,25 @@ class RubberBandScalper:
         wr = wins_total / n_trades * 100 if n_trades > 0 else 0
         hold_time = pos['bars_held'] * 15
 
+        _dir = 'LONG ↑' if pos['signal'] == 1 else 'SHORT ↓'
+        _fill_type = '서버 TP 체결 (바 중간 익절)' if reason == 'server_tp' else '서버 SL 체결 (안전장치)'
+        n_remaining = self.strategy.n_active
         self.discord.send(embed={
-            'title': f"{emoji} {symbol} {reason.upper().replace('_', ' ')} FILLED",
+            'title': f"{emoji} {symbol} {_dir} | 서버체결",
             'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
-            'description': (
-                'Server-side TP hit intra-bar!' if reason == 'server_tp'
-                else 'Server-side SL triggered (safety net).'
-            ),
+            'description': f"{_fill_type}",
             'fields': [
-                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
-                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
-                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
-                {'name': 'Hold Time', 'value': f'{hold_time}m ({pos["bars_held"]} bars)', 'inline': True},
-                {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades}T, {wr:.0f}%WR)', 'inline': False},
+                {'name': '진입가', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': '체결가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '보유시간', 'value': f'{hold_time}분 ({pos["bars_held"]}바)', 'inline': True},
+                {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': '순수익', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': '체결방식', 'value': '🟢 거래소(서버)', 'inline': True},
+                {'name': '── 세션 현황 ──', 'value': (
+                    f'누적 PnL: ${cum_pnl:+,.2f} | '
+                    f'{n_trades}건 | 승률 {wr:.0f}%\n'
+                    f'남은 포지션: {n_remaining}개'
+                ), 'inline': False},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1409,20 +1413,32 @@ class RubberBandScalper:
 
         balance_after = self.get_balance()
         n_active = self.strategy.n_active
+        _dir = 'LONG ↑' if signal == 1 else 'SHORT ↓'
+        # Server bracket status
+        _sl_tag = '🟢 서버' if sl_order_id else '🟡 클라이언트'
+        _tp_tag = '🟢 서버' if tp_order_id else '🟡 클라이언트'
+        # Active positions summary
+        _pos_lines = []
+        for _sym, _p in self.strategy.active_positions.items():
+            _pd = 'L' if _p['signal'] == 1 else 'S'
+            _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
+        _pos_summary = '\n'.join(_pos_lines) if _pos_lines else '없음'
+
         self.discord.send(embed={
-            'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} "
-                     f"{'LONG' if signal == 1 else 'SHORT'}",
+            'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} {_dir} | 진입",
             'color': 0x00C853 if signal == 1 else 0xFF1744,
             'fields': [
-                {'name': 'Entry', 'value': f'${fill_price:.4f}', 'inline': True},
-                {'name': 'Size', 'value': f'${fill_qty * fill_price:.2f}',
-                 'inline': True},
-                {'name': 'Leverage', 'value': f'{lev_int}x', 'inline': True},
-                {'name': 'Move', 'value': f'{move_size*100:.2f}%', 'inline': True},
-                {'name': 'TP', 'value': f'${tp_price:.4f}', 'inline': True},
-                {'name': 'SL', 'value': f'${sl_price:.4f}', 'inline': True},
-                {'name': 'Slots', 'value': f'{n_active}/{cfg.max_concurrent}', 'inline': True},
-                {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
+                {'name': '진입가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '포지션', 'value': f'${fill_qty * fill_price:,.2f}', 'inline': True},
+                {'name': '레버리지', 'value': f'{lev_int}x', 'inline': True},
+                {'name': '이동폭', 'value': f'{move_size*100:.2f}%', 'inline': True},
+                {'name': '🎯 TP', 'value': f'${tp_price:.4f}', 'inline': True},
+                {'name': '🛑 SL', 'value': f'${sl_price:.4f}', 'inline': True},
+                {'name': 'TP 방식', 'value': _tp_tag, 'inline': True},
+                {'name': 'SL 방식', 'value': _sl_tag, 'inline': True},
+                {'name': '슬롯', 'value': f'{n_active}/{cfg.max_concurrent}', 'inline': True},
+                {'name': '── 활성 포지션 ──', 'value': f'```\n{_pos_summary}\n```', 'inline': False},
+                {'name': '잔고', 'value': f'${balance_after:,.2f}', 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1535,19 +1551,23 @@ class RubberBandScalper:
             f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
             f"→ remaining ${pos['notional']:.2f}, BE stop active"
         )
+        _dir = 'LONG ↑' if pos['signal'] == 1 else 'SHORT ↓'
+        # Remaining bracket status
+        _r_sl = '🟢 서버 (BE)' if pos.get('server_sl_order_id') else '🟡 클라이언트 (BE)'
+        _r_tp = '🟢 서버' if pos.get('server_tp_order_id') else '🟡 클라이언트'
         self.discord.send(embed={
-            'title': f"🔒 {symbol} PARTIAL CLOSE ({fraction*100:.0f}%)",
+            'title': f"🔒 {symbol} {_dir} | 부분청산 {fraction*100:.0f}%",
             'color': 0xFFC107,
-            'description': 'Capital secured. Remaining rides with break-even stop.',
+            'description': '원금 확보 완료. 나머지는 손익분기점 스톱으로 안전 운영.',
             'fields': [
-                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
-                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                {'name': 'Locked $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
-                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
-                {'name': 'Remaining', 'value': f'${pos["notional"]:.2f}', 'inline': True},
-                {'name': 'Stop', 'value': 'Break-even', 'inline': True},
-                {'name': 'Bars Held', 'value': str(pos['bars_held']), 'inline': True},
+                {'name': '진입가', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': '체결가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '보유', 'value': f'{pos["bars_held"]}바', 'inline': True},
+                {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': '확보금액', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': '남은포지션', 'value': f'${pos["notional"]:,.2f}', 'inline': True},
+                {'name': 'TP 방식', 'value': _r_tp, 'inline': True},
+                {'name': 'SL 방식', 'value': _r_sl, 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1610,13 +1630,13 @@ class RubberBandScalper:
             f"total ${total_notional:.2f} @ blended ${blended_entry:.4f}"
         )
         self.discord.send(embed={
-            'title': f"✅ {symbol} CONFIRMED — Primary Entry",
+            'title': f"✅ {symbol} 확정진입 | 다이버전스 검증",
             'color': 0x2196F3,
-            'description': 'Divergence validated. Upgraded to 10% margin.',
+            'description': '다이버전스 확인. 10% 마진으로 업그레이드.',
             'fields': [
-                {'name': 'Added', 'value': f'${new_notional:.2f}', 'inline': True},
-                {'name': 'Total', 'value': f'${total_notional:.2f}', 'inline': True},
-                {'name': 'Blended Entry', 'value': f'${blended_entry:.4f}', 'inline': True},
+                {'name': '추가금액', 'value': f'${new_notional:.2f}', 'inline': True},
+                {'name': '총포지션', 'value': f'${total_notional:.2f}', 'inline': True},
+                {'name': '평균진입가', 'value': f'${blended_entry:.4f}', 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1684,13 +1704,13 @@ class RubberBandScalper:
             f"${unrealized:.2f} unrealized → total ${total_notional:.2f}"
         )
         self.discord.send(embed={
-            'title': f"📈 {symbol} PYRAMID — Wave 3/C Momentum",
+            'title': f"📈 {symbol} 피라미딩 | Wave 3/C 모멘텀",
             'color': 0x4CAF50,
-            'description': 'Pyramiding with unrealized profits. Stop trailed to BE.',
+            'description': '미실현 수익으로 추가진입. 스톱 BE로 이동.',
             'fields': [
-                {'name': 'Added', 'value': f'${new_notional:.2f}', 'inline': True},
-                {'name': 'Total', 'value': f'${total_notional:.2f}', 'inline': True},
-                {'name': 'Unrealized', 'value': f'${unrealized:.2f}', 'inline': True},
+                {'name': '추가금액', 'value': f'${new_notional:.2f}', 'inline': True},
+                {'name': '총포지션', 'value': f'${total_notional:.2f}', 'inline': True},
+                {'name': '미실현', 'value': f'${unrealized:.2f}', 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -1821,19 +1841,26 @@ class RubberBandScalper:
                 balance_after = self.get_balance()
                 hold_time = closed_pos['bars_held'] * 15  # minutes
 
+                _dir_kr = 'LONG ↑' if closed_pos['signal'] == 1 else 'SHORT ↓'
+                _reason_kr = reason.upper().replace('_', ' ')
+                n_remaining = self.strategy.n_active
+
                 self.discord.send(embed={
-                    'title': f"{'✅' if net_pnl > 0 else '❌'} {symbol} CLOSED — {reason.upper()} (server fill)",
+                    'title': f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr} (서버체결)",
                     'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
                     'fields': [
-                        {'name': 'Direction', 'value': _exit_side, 'inline': True},
-                        {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                        {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                        {'name': 'Entry', 'value': f'${closed_pos["entry_price"]:.4f}', 'inline': True},
-                        {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
-                        {'name': 'Hold Time', 'value': f'{hold_time}m ({closed_pos["bars_held"]} bars)', 'inline': True},
-                        {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades} trades)', 'inline': True},
-                        {'name': 'Win Rate', 'value': f'{wr:.0f}%', 'inline': True},
-                        {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
+                        {'name': '진입가', 'value': f'${closed_pos["entry_price"]:.4f}', 'inline': True},
+                        {'name': '청산가', 'value': f'${fill_price:.4f}', 'inline': True},
+                        {'name': '보유시간', 'value': f'{hold_time}분 ({closed_pos["bars_held"]}바)', 'inline': True},
+                        {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                        {'name': '순수익', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                        {'name': '체결방식', 'value': '🟢 거래소(서버)', 'inline': True},
+                        {'name': '── 세션 현황 ──', 'value': (
+                            f'누적 PnL: ${cum_pnl:+,.2f} | '
+                            f'{n_trades}건 | 승률 {wr:.0f}%\n'
+                            f'남은 포지션: {n_remaining}개 | '
+                            f'잔고: ${balance_after:,.2f}'
+                        ), 'inline': False},
                     ],
                     'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
                 })
@@ -1935,19 +1962,32 @@ class RubberBandScalper:
         balance_after = self.get_balance()
         hold_time = pos['bars_held'] * 15  # minutes
 
+        _dir_kr = 'LONG ↑' if pos['signal'] == 1 else 'SHORT ↓'
+        _reason_kr = reason.upper().replace('_', ' ')
+        n_remaining = self.strategy.n_active
+        # Remaining positions summary
+        _pos_lines = []
+        for _sym, _p in self.strategy.active_positions.items():
+            _pd = 'L' if _p['signal'] == 1 else 'S'
+            _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
+        _pos_summary = '\n'.join(_pos_lines) if _pos_lines else '없음'
+
         self.discord.send(embed={
-            'title': f"{'✅' if net_pnl > 0 else '❌'} {symbol} CLOSED — {reason.upper().replace('_', ' ')}",
+            'title': f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr}",
             'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
             'fields': [
-                {'name': 'Direction', 'value': 'LONG' if pos['signal'] == 1 else 'SHORT', 'inline': True},
-                {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
-                {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
-                {'name': 'Entry', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
-                {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
-                {'name': 'Hold Time', 'value': f'{hold_time}m ({pos["bars_held"]} bars)', 'inline': True},
-                {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades} trades)', 'inline': True},
-                {'name': 'Win Rate', 'value': f'{wr:.0f}%', 'inline': True},
-                {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
+                {'name': '진입가', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': '청산가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '보유시간', 'value': f'{hold_time}분 ({pos["bars_held"]}바)', 'inline': True},
+                {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': '순수익', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': '체결방식', 'value': '🔵 클라이언트', 'inline': True},
+                {'name': '── 세션 현황 ──', 'value': (
+                    f'누적 PnL: ${cum_pnl:+,.2f} | '
+                    f'{n_trades}건 | 승률 {wr:.0f}%\n'
+                    f'잔고: ${balance_after:,.2f}'
+                ), 'inline': False},
+                {'name': '── 남은 포지션 ──', 'value': f'```\n{_pos_summary}\n```', 'inline': False},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -2564,30 +2604,41 @@ class RubberBandScalper:
 
         n_symbols = len(self.config.symbol_whitelist) if self.config.symbol_whitelist else 0
         commit_str = f"`{GIT_COMMIT['short']}`" if GIT_COMMIT['short'] else 'unknown'
+        eff_lev = self.config.base_leverage * self.config.mtf_leverage_mult
+        _mtf_str = f"ON (SMA {self.config.mtf_sma_period})" if self.config.mtf_confirmation_enabled else "OFF"
+        _adaptive_str = (
+            f"적응형 {self.config.atr_multiplier}x "
+            f"(floor {self.config.threshold_floor*100:.1f}%, cap {self.config.threshold_cap*100:.1f}%)"
+            if self.config.atr_period > 0
+            else f"고정 {self.config.threshold*100:.1f}%"
+        )
+        # Recovered positions from state
+        n_recovered = self.strategy.n_active
         self.discord.send(embed={
-            'title': '🚀 QuantBox Scalper Started',
+            'title': '🚀 QuantBox 스캘퍼 시작',
             'color': 0x2979FF,
             'description': (
-                f"Rubber Band mean-reversion scalper initialized.\n"
-                f"Use `!help` for interactive commands."
+                f"러버밴드 평균회귀 스캘퍼 초기화 완료.\n"
+                f"`!help`로 명령어 확인."
             ),
             'fields': [
-                {'name': 'Mode', 'value': f"**{mode_str}**", 'inline': True},
-                {'name': 'Balance', 'value': f'${balance:,.2f}', 'inline': True},
-                {'name': 'Slots', 'value': f'{self.strategy.n_active}/{self.config.max_concurrent}', 'inline': True},
-                {'name': 'Strategy', 'value': (
-                    f"LB={self.config.lookback} | "
-                    f"Thr={self.config.threshold} | "
+                {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},
+                {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
+                {'name': '슬롯', 'value': f'{n_recovered}/{self.config.max_concurrent}', 'inline': True},
+                {'name': '── 전략 설정 ──', 'value': (
+                    f"진입: {_adaptive_str}\n"
                     f"TP={self.config.target_retrace} | "
-                    f"SL={self.config.stop_mult}x"
+                    f"SL={self.config.stop_mult}x | "
+                    f"MaxHold={self.config.max_hold}바"
                 ), 'inline': False},
-                {'name': 'Universe', 'value': f'{n_symbols} symbols', 'inline': True},
-                {'name': 'Max Hold', 'value': f'{self.config.max_hold} bars', 'inline': True},
-                {'name': 'Leverage', 'value': (
-                    f'Base {self.config.base_leverage}x, '
-                    f'MTF {self.config.mtf_leverage_mult}x'
+                {'name': 'MTF', 'value': _mtf_str, 'inline': True},
+                {'name': '레버리지', 'value': (
+                    f'Base {self.config.base_leverage}x × '
+                    f'MTF {self.config.mtf_leverage_mult}x = '
+                    f'{eff_lev:.1f}x'
                 ), 'inline': True},
-                {'name': 'Commit', 'value': commit_str, 'inline': True},
+                {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
+                {'name': '커밋', 'value': commit_str, 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -2623,9 +2674,9 @@ class RubberBandScalper:
             except Exception as e:
                 logger.error(f"Cycle error: {e}", exc_info=True)
                 self.discord.send(embed={
-                    'title': '🚨 Cycle Error',
+                    'title': '🚨 사이클 오류',
                     'color': 0xFF1744,
-                    'description': str(e)[:500],
+                    'description': f'포지션 {self.strategy.n_active}개 활성 중\n```\n{str(e)[:400]}\n```',
                     'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
                 })
                 time.sleep(60)
@@ -2664,19 +2715,19 @@ class RubberBandScalper:
         ))
 
         fields = [
-            {'name': 'Cycles', 'value': str(self._cycle_count), 'inline': True},
-            {'name': 'Trades', 'value': f'{n_trades} (WR {wr:.0f}%)', 'inline': True},
-            {'name': 'Total PnL', 'value': f'${total_pnl:+,.2f}', 'inline': True},
-            {'name': 'Balance', 'value': f'${balance_now:,.2f}', 'inline': True},
-            {'name': 'Session ROI', 'value': f'{session_return:+.2f}%', 'inline': True},
+            {'name': '사이클', 'value': str(self._cycle_count), 'inline': True},
+            {'name': '거래', 'value': f'{n_trades}건 (승률 {wr:.0f}%)', 'inline': True},
+            {'name': '총 수익', 'value': f'${total_pnl:+,.2f}', 'inline': True},
+            {'name': '잔고', 'value': f'${balance_now:,.2f}', 'inline': True},
+            {'name': '세션 ROI', 'value': f'{session_return:+.2f}%', 'inline': True},
         ]
         if best:
-            fields.append({'name': 'Best', 'value': f"{best['symbol']} ${best['pnl_usd']:+,.2f}", 'inline': True})
+            fields.append({'name': '최고 수익', 'value': f"{best['symbol']} ${best['pnl_usd']:+,.2f}", 'inline': True})
         if worst:
-            fields.append({'name': 'Worst', 'value': f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", 'inline': True})
+            fields.append({'name': '최대 손실', 'value': f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", 'inline': True})
 
         self.discord.send(embed={
-            'title': '🛑 QuantBox Scalper Stopped',
+            'title': '🛑 QuantBox 스켈퍼 종료',
             'color': 0xFF1744 if total_pnl < 0 else 0x00C853,
             'fields': fields,
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
