@@ -93,7 +93,7 @@ Numba: 루프가 10,000회 이상 반복되는 연산(백테스트)에는 반드
 1. feature/fix 브랜치 작업 완료 시 **반드시 develop에 머지**한 뒤 push한다. 브랜치만 push하고 develop을 안 건드리면 안 된다.
 2. develop에 직접 커밋하지 않고, 항상 feature/fix 브랜치를 경유한다.
 3. main에는 릴리스 준비가 완료된 develop만 머지한다.
-4. feature/fix → develop 머지 시 **`--squash`** 옵션으로 스콰시 머지한다. (`git merge --squash feature/xxx && git commit`)
-5. develop → main 머지 시 `--no-ff` 옵션으로 머지 커밋을 남긴다.
+4. feature/fix → develop 머지 시 **`--no-ff`** 옵션으로 머지 커밋을 남긴다. (`git merge --no-ff feature/xxx`)
+5. develop → main 머지 시에도 `--no-ff` 옵션으로 머지 커밋을 남긴다.
 
 **Agent Note:** 사용자는 엄격하며 공격적인 퀀트 트레이더입니다. 코드가 예쁘게 보이는 것보다, **돈을 잃지 않는 안전장치(Safety check)**가 구현되었는지를 가장 중요하게 생각합니다.
