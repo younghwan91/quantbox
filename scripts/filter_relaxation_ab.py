@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Universe Expansion Sweep — Does adding more symbols increase trade frequency
-while maintaining quality with conf≥3 + MTF block?
+Filter Relaxation A/B Test — More Opportunities Without Sacrificing Performance
+================================================================================
+Goal: The B-50 universe + strict filters (conf≥3, MTF block, ATR 2.5×) produce
+high Sharpe but low trade frequency. This test systematically relaxes filters
+to find the Pareto-optimal balance between opportunity count and quality.
 
-Variants tested:
-  B-20:    20 symbols, 2 slots (current baseline)
-  B-30:    30 symbols, 2 slots (more symbols → quality filter)
-  B-30-3s: 30 symbols, 3 slots (more symbols + capacity)
-  B-30-4s: 30 symbols, 4 slots (max parallelism)
-
-All variants use conf≥3, MTF block, 3.75× trend-aligned leverage.
-
-Reuses the EXACT generate_signals / simulate_portfolio from
-performance_assessment_abc.py (proven correct) to ensure parity.
+Variants (all use 50 symbols, 3-year data):
+  A: Baseline (current B-50: conf≥3, ATR 2.5×, floor 1%, cap 6%, MTF block, 2 slots)
+  B: conf≥2 (lower confidence gate)
+  C: Wider ATR (2.0× mult, 0.8% floor → lower adaptive threshold)
+  D: Combo (conf≥2 + ATR 2.0× + floor 0.8%)
+  E: D + 3 slots (more capital deployed simultaneously)
+  F: D + MTF soft (MTF leverage boost only, no counter-trend block)
 
 Usage:
-    PYTHONUNBUFFERED=1 uv run python scripts/universe_expansion_sweep.py
+    PYTHONUNBUFFERED=1 uv run python scripts/filter_relaxation_ab.py
 """
 
 import sys
@@ -23,7 +23,7 @@ import time
 import json
 import subprocess
 import numpy as np
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -41,10 +41,6 @@ from quantbox.strategy.rubberband import (
 CACHE_DIR = Path(__file__).parent.parent / 'data' / 'cache_extended'
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  Git Commit Info
-# ═══════════════════════════════════════════════════════════════════════
-
 def _get_git_commit() -> str:
     try:
         return subprocess.check_output(
@@ -56,93 +52,10 @@ def _get_git_commit() -> str:
         return 'unknown'
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  Data Download & Loading (identical to performance_assessment_abc.py)
-# ═══════════════════════════════════════════════════════════════════════
-
 def _find_cache(symbol: str, interval: str, days: int) -> Path | None:
     pattern = f'{symbol}_{interval}_{days}d_*.npz'
     matches = sorted(CACHE_DIR.glob(pattern), reverse=True)
     return matches[0] if matches else None
-
-
-def _cache_path(symbol: str, interval: str, days: int) -> Path:
-    today = datetime.now(timezone.utc).strftime('%Y%m%d')
-    return CACHE_DIR / f'{symbol}_{interval}_{days}d_{today}.npz'
-
-
-def download_15m(client, symbol: str, days: int) -> dict | None:
-    """Download 15m OHLCV data. Returns dict of numpy arrays."""
-    cache = _find_cache(symbol, '15m', days)
-    if cache is not None and cache.exists():
-        d = np.load(cache)
-        return {k: d[k] for k in ['close', 'high', 'low', 'volume', 'taker_buy']}
-
-    cache = _cache_path(symbol, '15m', days)
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=days + 1)
-    start_ms, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
-
-    all_klines, cur = [], start_ms
-    while cur < end_ms:
-        klines = client.futures_klines(
-            symbol=symbol, interval='15m',
-            startTime=cur, endTime=end_ms, limit=1500,
-        )
-        if not klines:
-            break
-        all_klines.extend(klines)
-        cur = klines[-1][0] + 1
-        time.sleep(0.35)
-
-    if len(all_klines) < 200:
-        return None
-    all_klines = all_klines[:-1]
-
-    close = np.array([float(k[4]) for k in all_klines], dtype=np.float64)
-    high = np.array([float(k[2]) for k in all_klines], dtype=np.float64)
-    low = np.array([float(k[3]) for k in all_klines], dtype=np.float64)
-    volume = np.array([float(k[5]) for k in all_klines], dtype=np.float64)
-    taker_buy = np.array([float(k[9]) for k in all_klines], dtype=np.float64)
-
-    np.savez_compressed(cache, close=close, high=high, low=low,
-                        volume=volume, taker_buy=taker_buy)
-    print(f"    ✓ Saved 15m: {len(close)} bars", flush=True)
-    return {'close': close, 'high': high, 'low': low,
-            'volume': volume, 'taker_buy': taker_buy}
-
-
-def download_4h(client, symbol: str, days: int) -> np.ndarray | None:
-    """Download 4h close data for MTF."""
-    cache = _find_cache(symbol, '4h', days)
-    if cache is not None and cache.exists():
-        d = np.load(cache)
-        return d['close']
-
-    cache = _cache_path(symbol, '4h', days)
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=days + 1)
-    start_ms, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
-
-    all_klines, cur = [], start_ms
-    while cur < end_ms:
-        klines = client.futures_klines(
-            symbol=symbol, interval='4h',
-            startTime=cur, endTime=end_ms, limit=1500,
-        )
-        if not klines:
-            break
-        all_klines.extend(klines)
-        cur = klines[-1][0] + 1
-        time.sleep(0.35)
-
-    if len(all_klines) < 12:
-        return None
-    all_klines = all_klines[:-1]
-    close = np.array([float(k[4]) for k in all_klines], dtype=np.float64)
-    np.savez_compressed(cache, close=close)
-    print(f"    ✓ Saved 4h: {len(close)} bars", flush=True)
-    return close
 
 
 def load_15m(symbol: str, days: int) -> dict | None:
@@ -162,16 +75,16 @@ def load_4h(symbol: str, days: int) -> np.ndarray | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Signal Generation (IDENTICAL to performance_assessment_abc.py)
+#  Signal Generation
 # ═══════════════════════════════════════════════════════════════════════
 
 def generate_signals(
     data: dict, btc: np.ndarray, close_4h: np.ndarray | None,
     cfg: RubberBandConfig,
     atr_period: int, atr_mult: float, floor: float, cap: float,
-    mtf_enabled: bool, mtf_sma: int, mtf_lev: float,
+    mtf_enabled: bool, mtf_block: bool, mtf_sma: int, mtf_lev: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Generate signals. Returns (close, signals)."""
+    """Generate signals with configurable MTF block vs leverage-only."""
     c = data['close']
     h = data['high']
     l = data['low']
@@ -197,14 +110,17 @@ def generate_signals(
     )
 
     if mtf_enabled and close_4h is not None:
-        sigs = apply_mtf_confirmation(sigs, close_4h, mtf_sma, ratio=16)
+        if mtf_block:
+            # Full MTF: block counter-trend + boost aligned
+            sigs = apply_mtf_confirmation(sigs, close_4h, mtf_sma, ratio=16)
+        # Always apply leverage boost for MTF-aligned trades
         sigs = apply_mtf_leverage(sigs, mtf_lev)
 
     return c, sigs
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Portfolio Simulator (IDENTICAL to performance_assessment_abc.py)
+#  Portfolio Simulator (shared)
 # ═══════════════════════════════════════════════════════════════════════
 
 def simulate_portfolio(
@@ -216,7 +132,6 @@ def simulate_portfolio(
     funding_per_bar: float = 0.01 / 100 / 32,
     reinvest: bool = False,
 ) -> dict:
-    """Simulate portfolio with shared capital and slot limits."""
     symbols = sorted(all_close.keys())
     n_bars = min(len(all_close[s]) for s in symbols)
 
@@ -343,11 +258,8 @@ def simulate_portfolio(
 
     calmar = total_return / (max_dd * 100) if max_dd > 0 else 0.0
 
-    avg_bars = np.mean([t['bars_held'] for t in trades]) if trades else 0
-    avg_pnl = np.mean([t['pnl_usd'] for t in trades]) if trades else 0
     avg_pnl_pct = np.mean([t['pnl_pct'] for t in trades]) if trades else 0
 
-    # Long/short breakdown
     long_trades = [t for t in trades if t['signal'] > 0]
     short_trades = [t for t in trades if t['signal'] < 0]
     long_wins = [t for t in long_trades if t['pnl_usd'] > 0]
@@ -367,24 +279,16 @@ def simulate_portfolio(
         'profit_factor': round(profit_factor, 2),
         'gross_profit': round(gross_profit, 0),
         'gross_loss': round(gross_loss, 0),
-        'avg_bars_held': round(avg_bars, 1),
-        'avg_pnl_usd': round(avg_pnl, 2),
         'avg_pnl_pct': round(avg_pnl_pct, 3),
         'max_slots': max_slots,
         'long_trades': len(long_trades),
         'short_trades': len(short_trades),
-        'long_wins': len(long_wins),
-        'short_wins': len(short_wins),
         'long_wr': round(len(long_wins) / len(long_trades) * 100, 1) if long_trades else 0,
         'short_wr': round(len(short_wins) / len(short_trades) * 100, 1) if short_trades else 0,
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  Yearly Breakdown (identical to performance_assessment_abc.py)
-# ═══════════════════════════════════════════════════════════════════════
-
-def yearly_breakdown(result: dict, days: int = 1095) -> list[dict]:
+def yearly_breakdown(result: dict) -> list[dict]:
     bars_per_year = 96 * 365
     trades = result['trades']
     capital = result['initial_capital']
@@ -397,8 +301,7 @@ def yearly_breakdown(result: dict, days: int = 1095) -> list[dict]:
 
         n_t = len(year_trades)
         wins = [t for t in year_trades if t['pnl_usd'] > 0]
-        n_wins = len(wins)
-        wr = n_wins / n_t * 100 if n_t > 0 else 0.0
+        wr = len(wins) / n_t * 100 if n_t > 0 else 0.0
 
         gp = sum(t['pnl_usd'] for t in wins)
         gl = sum(abs(t['pnl_usd']) for t in year_trades if t['pnl_usd'] <= 0)
@@ -407,39 +310,24 @@ def yearly_breakdown(result: dict, days: int = 1095) -> list[dict]:
         total_pnl = sum(t['pnl_usd'] for t in year_trades)
         ret_pct = total_pnl / capital * 100
 
-        long_t = [t for t in year_trades if t['signal'] > 0]
-        short_t = [t for t in year_trades if t['signal'] < 0]
-
         eq = result['equity_curve']
         eq_slice = eq[start_bar:min(end_bar, len(eq))]
-        if len(eq_slice) > 0:
+        if len(eq_slice) > 1:
             peak = np.maximum.accumulate(eq_slice)
             dd = (peak - eq_slice) / np.maximum(peak, 1e-10)
             year_max_dd = float(np.max(dd)) * 100
-        else:
-            year_max_dd = 0.0
-
-        if len(eq_slice) > 1:
             eq_rets = np.diff(eq_slice) / np.maximum(eq_slice[:-1], 1e-10)
             eq_rets = eq_rets[~np.isnan(eq_rets)]
-            if len(eq_rets) > 0 and np.std(eq_rets) > 0:
-                yr_sharpe = float(np.mean(eq_rets) / np.std(eq_rets) * np.sqrt(96 * 365.25))
-            else:
-                yr_sharpe = 0.0
+            yr_sharpe = float(np.mean(eq_rets) / np.std(eq_rets) * np.sqrt(96 * 365.25)) if np.std(eq_rets) > 0 else 0.0
         else:
+            year_max_dd = 0.0
             yr_sharpe = 0.0
 
         years.append({
             'year': y + 1,
-            'label': [
-                '2023-02→2024-02 (Recovery/Bull)',
-                '2024-02→2025-02 (Bull/Mixed)',
-                '2025-02→2026-02 (Bear/Current)',
-            ][y],
+            'label': ['2023-02→2024-02', '2024-02→2025-02', '2025-02→2026-02'][y],
             'return_pct': round(ret_pct, 1),
             'trades': n_t,
-            'longs': len(long_t),
-            'shorts': len(short_t),
             'win_rate': round(wr, 1),
             'profit_factor': round(pf, 2),
             'max_dd_pct': round(year_max_dd, 1),
@@ -457,94 +345,83 @@ def main():
     commit = _get_git_commit()
     settings = get_settings()
 
-    print("=" * 70)
-    print("  UNIVERSE EXPANSION SWEEP")
+    print("=" * 80)
+    print("  FILTER RELAXATION A/B TEST — More Opportunities vs Performance")
     print(f"  Commit: {commit}")
     print(f"  Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    print("  conf≥3 + MTF block + Adaptive 2.5×_f1")
-    print("=" * 70)
+    print("  Baseline: B-50 (conf≥3, MTF block, ATR 2.5×, 2 slots)")
+    print("=" * 80)
 
-    # ── Symbol Lists ──
-    SYMBOLS_20 = [
+    # ── Symbol list (B-50) ──
+    SYMBOLS_50 = [
         'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT', 'DOGEUSDT',
         'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'XLMUSDT', 'DOTUSDT', '1000PEPEUSDT',
         'ARBUSDT', 'FETUSDT', '1000SHIBUSDT', 'OPUSDT', 'ATOMUSDT', 'HBARUSDT',
         'ICPUSDT', 'FILUSDT',
-    ]
-    EXTRA_10 = [
         'TRXUSDT', 'SUIUSDT', 'TONUSDT', 'LTCUSDT', 'BCHUSDT',
         'UNIUSDT', 'NEARUSDT', 'APTUSDT', 'AAVEUSDT', 'INJUSDT',
+        'ETCUSDT', 'MATICUSDT', 'GRTUSDT', 'STXUSDT', 'FTMUSDT',
+        'EGLDUSDT', 'AXSUSDT', 'SANDUSDT', 'THETAUSDT', 'ALGOUSDT',
+        'RUNEUSDT', 'DYDXUSDT', 'CRVUSDT', 'LDOUSDT', 'COMPUSDT',
+        'MKRUSDT', 'SNXUSDT', 'VETUSDT', 'EOSUSDT', 'APEUSDT',
     ]
-    SYMBOLS_30 = SYMBOLS_20 + EXTRA_10
 
     DAYS = 1095
     CAPITAL = 2095.0
     COST = 0.0004
     FUNDING = 0.01 / 100 / 32
 
-    # ── Config (Option B: conf≥3, MTF block) ──
-    base_cfg = RubberBandConfig()
-    base_cfg.lookback = settings.rb_lookback
-    base_cfg.threshold = settings.rb_threshold
-    base_cfg.target_retrace = settings.rb_target_retrace
-    base_cfg.stop_mult = settings.rb_stop_mult
-    base_cfg.max_hold = settings.rb_max_hold
-    base_cfg.stop_decay = settings.rb_stop_decay
-    base_cfg.btc_directional_period = settings.rb_btc_directional_period
-    base_cfg.btc_regime_period = settings.rb_btc_regime_period
-    base_cfg.asset_trend_period = settings.rb_asset_trend_period
-    base_cfg.base_leverage = settings.rb_base_leverage
-    base_cfg.confidence_leverage_step = settings.rb_confidence_leverage_step
-    base_cfg.max_leverage = settings.rb_max_leverage
-    base_cfg.rsi_period = settings.rb_rsi_period
-    base_cfg.vol_period = settings.rb_vol_period
-    base_cfg.stoch_enabled = settings.rb_stoch_enabled
-    base_cfg.stoch_k_period = settings.rb_stoch_k_period
-    base_cfg.stoch_d_period = settings.rb_stoch_d_period
-    base_cfg.macd_enabled = settings.rb_macd_enabled
-    base_cfg.macd_fast = settings.rb_macd_fast
-    base_cfg.macd_slow = settings.rb_macd_slow
-    base_cfg.macd_signal_period = settings.rb_macd_signal_period
-    base_cfg.dynamic_target_enabled = settings.rb_dynamic_target_enabled
-    base_cfg.target_conf3 = settings.rb_target_conf3
-    base_cfg.target_conf4 = settings.rb_target_conf4
-    base_cfg.target_conf5 = settings.rb_target_conf5
-    base_cfg.min_confidence = 3  # Option B
+    # ── Base config (shared across all variants) ──
+    def make_cfg(min_conf: int = 3) -> RubberBandConfig:
+        cfg = RubberBandConfig()
+        cfg.lookback = settings.rb_lookback
+        cfg.threshold = settings.rb_threshold
+        cfg.target_retrace = settings.rb_target_retrace
+        cfg.stop_mult = settings.rb_stop_mult
+        cfg.max_hold = settings.rb_max_hold
+        cfg.stop_decay = settings.rb_stop_decay
+        cfg.btc_directional_period = settings.rb_btc_directional_period
+        cfg.btc_regime_period = settings.rb_btc_regime_period
+        cfg.asset_trend_period = settings.rb_asset_trend_period
+        cfg.base_leverage = settings.rb_base_leverage
+        cfg.confidence_leverage_step = settings.rb_confidence_leverage_step
+        cfg.max_leverage = settings.rb_max_leverage
+        cfg.rsi_period = settings.rb_rsi_period
+        cfg.vol_period = settings.rb_vol_period
+        cfg.stoch_enabled = settings.rb_stoch_enabled
+        cfg.stoch_k_period = settings.rb_stoch_k_period
+        cfg.stoch_d_period = settings.rb_stoch_d_period
+        cfg.macd_enabled = settings.rb_macd_enabled
+        cfg.macd_fast = settings.rb_macd_fast
+        cfg.macd_slow = settings.rb_macd_slow
+        cfg.macd_signal_period = settings.rb_macd_signal_period
+        cfg.dynamic_target_enabled = settings.rb_dynamic_target_enabled
+        cfg.target_conf3 = settings.rb_target_conf3
+        cfg.target_conf4 = settings.rb_target_conf4
+        cfg.target_conf5 = settings.rb_target_conf5
+        cfg.min_confidence = min_conf
+        return cfg
 
-    # Variant signal-gen params
-    ATR_PERIOD = 48
-    ATR_MULT = 2.5
-    FLOOR = 0.01
-    CAP = 0.06
-    MTF_SMA = 12
-    MTF_LEV = 2.5
+    # ── Variant definitions ──
+    # Each variant: (name, description, cfg, atr_period, atr_mult, floor, cap,
+    #                mtf_enabled, mtf_block, mtf_sma, mtf_lev, slots)
+    variants = [
+        ('A-Base',    'conf≥3, ATR 2.5×, MTF block, 2 slots',
+         make_cfg(3), 48, 2.5, 0.01, 0.06, True, True, 12, 2.5, 2),
+        ('B-Conf2',   'conf≥2, ATR 2.5×, MTF block, 2 slots',
+         make_cfg(2), 48, 2.5, 0.01, 0.06, True, True, 12, 2.5, 2),
+        ('C-WideATR', 'conf≥3, ATR 2.0×, floor 0.8%, MTF block, 2 slots',
+         make_cfg(3), 48, 2.0, 0.008, 0.06, True, True, 12, 2.5, 2),
+        ('D-Combo',   'conf≥2, ATR 2.0×, floor 0.8%, MTF block, 2 slots',
+         make_cfg(2), 48, 2.0, 0.008, 0.06, True, True, 12, 2.5, 2),
+        ('E-3Slot',   'conf≥2, ATR 2.0×, floor 0.8%, MTF block, 3 slots',
+         make_cfg(2), 48, 2.0, 0.008, 0.06, True, True, 12, 2.5, 3),
+        ('F-NoBlk',   'conf≥2, ATR 2.0×, floor 0.8%, MTF lev only (no block), 2 slots',
+         make_cfg(2), 48, 2.0, 0.008, 0.06, True, False, 12, 2.5, 2),
+    ]
 
-    # ── Step 1: Download missing data ──
-    print(f"\n📥 Checking data for {len(SYMBOLS_30)} symbols × {DAYS}d...")
-
-    need_download = []
-    for sym in SYMBOLS_30:
-        if _find_cache(sym, '15m', DAYS) is None or _find_cache(sym, '4h', DAYS) is None:
-            need_download.append(sym)
-
-    if need_download:
-        print(f"  Need to download: {', '.join(need_download)}")
-        from binance.client import Client
-        client = Client(settings.binance_api_key, settings.binance_api_secret)
-
-        for i, sym in enumerate(need_download):
-            print(f"  [{i+1}/{len(need_download)}] {sym}:")
-            if _find_cache(sym, '15m', DAYS) is None:
-                print(f"    Downloading 15m ({DAYS}d)...")
-                download_15m(client, sym, DAYS)
-            if _find_cache(sym, '4h', DAYS) is None:
-                print(f"    Downloading 4h ({DAYS}d)...")
-                download_4h(client, sym, DAYS)
-    else:
-        print("  All data cached ✓")
-
-    # ── Step 2: Load all data ──
-    print(f"\n📊 Loading data...")
+    # ── Load data (all cached from previous sweep) ──
+    print(f"\n📊 Loading 50-symbol data ({DAYS}d)...")
 
     btc_data = load_15m('BTCUSDT', DAYS)
     if btc_data is None:
@@ -554,7 +431,7 @@ def main():
 
     all_data: dict[str, dict] = {}
     all_4h: dict[str, np.ndarray] = {}
-    for sym in SYMBOLS_30:
+    for sym in SYMBOLS_50:
         d = load_15m(sym, DAYS)
         if d is None:
             print(f"  SKIP {sym} (no 15m data)")
@@ -564,72 +441,48 @@ def main():
         if h4 is not None:
             all_4h[sym] = h4
 
-    available_20 = [s for s in SYMBOLS_20 if s in all_data]
-    available_30 = [s for s in SYMBOLS_30 if s in all_data]
-    print(f"  20-universe: {len(available_20)} loaded")
-    print(f"  30-universe: {len(available_30)} loaded")
+    available = [s for s in SYMBOLS_50 if s in all_data]
+    print(f"  Loaded: {len(available)} symbols")
 
-    # ── Step 3: Generate signals for all 30 symbols ──
-    print(f"\n⚡ Generating signals (conf≥3 + MTF)...")
-
-    all_close_map: dict[str, np.ndarray] = {}
-    all_signals_map: dict[str, np.ndarray] = {}
-
-    for sym in available_30:
-        data = all_data[sym]
-        close_4h = all_4h.get(sym)
-        c, sigs = generate_signals(
-            data, btc_close, close_4h, base_cfg,
-            ATR_PERIOD, ATR_MULT, FLOOR, CAP,
-            True, MTF_SMA, MTF_LEV,
-        )
-        all_close_map[sym] = c
-        all_signals_map[sym] = sigs
-
-        n_entries = int(np.sum((sigs[1:] != 0) & (sigs[:-1] == 0)))
-        n_long = int(np.sum((sigs[1:] > 0) & (sigs[:-1] == 0)))
-        n_short = int(np.sum((sigs[1:] < 0) & (sigs[:-1] == 0)))
-        marker = ' *NEW*' if sym in EXTRA_10 else ''
-        print(f"  {sym:<16} {n_entries:>4} entries (L:{n_long} S:{n_short})  [{len(c)} bars]{marker}")
-
-    # ── Step 3b: Left-pad shorter symbols to equal length ──
-    # Some symbols (TON, SUI, PEPE, ARB) have <3yr of data.
-    # Left-pad close with first price, signals with 0.0,
-    # so all variants sim the same 3-year period fairly.
-    max_bars = max(len(v) for v in all_close_map.values())
-    padded_count = 0
-    for sym in list(all_close_map.keys()):
-        c = all_close_map[sym]
-        s = all_signals_map[sym]
-        if len(c) < max_bars:
-            pad_n = max_bars - len(c)
-            all_close_map[sym] = np.concatenate([np.full(pad_n, c[0]), c])
-            all_signals_map[sym] = np.concatenate([np.zeros(pad_n), s])
-            padded_count += 1
-            print(f"  ⚠ {sym}: left-padded {pad_n} bars ({pad_n/96:.0f} days) to match {max_bars} bars")
-
-    if padded_count > 0:
-        print(f"  Aligned {padded_count} symbols to {max_bars} bars ({max_bars/96:.0f} days)")
-    else:
-        print(f"  All symbols already {max_bars} bars ✓")
-
-    # ── Step 4: Run 4 variants ──
-    variants = {
-        'B-20': {'symbols': available_20, 'slots': 2},
-        'B-30': {'symbols': available_30, 'slots': 2},
-        'B-30-3s': {'symbols': available_30, 'slots': 3},
-        'B-30-4s': {'symbols': available_30, 'slots': 4},
-    }
-
+    # ── Run all variants ──
     results: dict[str, dict] = {}
-    for name, var in variants.items():
-        syms = var['symbols']
-        slots = var['slots']
-        print(f"\n🔄 Simulating {name} ({len(syms)} symbols, {slots} slots)...")
 
-        sym_close = {s: all_close_map[s] for s in syms}
-        sym_sigs = {s: all_signals_map[s] for s in syms}
+    for name, desc, cfg, atr_p, atr_m, flr, cap, mtf_en, mtf_blk, mtf_sma, mtf_lev, slots in variants:
+        print(f"\n{'─' * 60}")
+        print(f"  ⚡ {name}: {desc}")
+        print(f"{'─' * 60}")
 
+        # Generate signals for this variant
+        sym_close: dict[str, np.ndarray] = {}
+        sym_sigs: dict[str, np.ndarray] = {}
+        total_entries = 0
+
+        for sym in available:
+            data = all_data[sym]
+            close_4h = all_4h.get(sym)
+            c, sigs = generate_signals(
+                data, btc_close, close_4h, cfg,
+                atr_p, atr_m, flr, cap,
+                mtf_en, mtf_blk, mtf_sma, mtf_lev,
+            )
+            sym_close[sym] = c
+            sym_sigs[sym] = sigs
+            n_entries = int(np.sum((sigs[1:] != 0) & (sigs[:-1] == 0)))
+            total_entries += n_entries
+
+        # Left-pad
+        max_bars = max(len(v) for v in sym_close.values())
+        for sym in list(sym_close.keys()):
+            c = sym_close[sym]
+            s = sym_sigs[sym]
+            if len(c) < max_bars:
+                pad_n = max_bars - len(c)
+                sym_close[sym] = np.concatenate([np.full(pad_n, c[0]), c])
+                sym_sigs[sym] = np.concatenate([np.zeros(pad_n), s])
+
+        print(f"  Raw signal entries: {total_entries:,}")
+
+        # Simulate
         t0 = time.time()
         result = simulate_portfolio(
             sym_close, sym_sigs,
@@ -639,19 +492,26 @@ def main():
         )
         elapsed = time.time() - t0
 
-        years = yearly_breakdown(result, DAYS)
         n_days = len(result['equity_curve']) / 96
+        trades_per_day = round(result['n_trades'] / n_days, 2)
+        years = yearly_breakdown(result)
 
-        result_summary = {
-            'symbols': len(syms),
+        summary = {
+            'description': desc,
+            'symbols': len(available),
             'slots': slots,
+            'min_confidence': cfg.min_confidence,
+            'atr_mult': atr_m,
+            'threshold_floor': flr,
+            'mtf_block': mtf_blk,
             'total_return_pct': result['total_return_pct'],
             'final_balance': result['final_balance'],
             'max_dd_pct': result['max_dd_pct'],
             'sharpe': result['sharpe'],
             'calmar': result['calmar'],
             'n_trades': result['n_trades'],
-            'trades_per_day': round(result['n_trades'] / n_days, 2),
+            'trades_per_day': trades_per_day,
+            'raw_signals': total_entries,
             'win_rate': result['win_rate'],
             'profit_factor': result['profit_factor'],
             'avg_pnl_pct': result['avg_pnl_pct'],
@@ -662,40 +522,50 @@ def main():
             'yearly': years,
             'elapsed': round(elapsed, 2),
         }
-        results[name] = result_summary
+        results[name] = summary
 
         print(f"  Return: {result['total_return_pct']:+,.1f}%  Sharpe: {result['sharpe']:.2f}  "
-              f"DD: {result['max_dd_pct']:.1f}%  Trades: {result['n_trades']} "
-              f"({result_summary['trades_per_day']}/day)  WR: {result['win_rate']:.1f}%  "
-              f"PF: {result['profit_factor']:.2f}  [{elapsed:.1f}s]")
+              f"DD: {result['max_dd_pct']:.1f}%  Calmar: {result['calmar']:.1f}  "
+              f"Trades: {result['n_trades']} ({trades_per_day}/day)  "
+              f"WR: {result['win_rate']:.1f}%  PF: {result['profit_factor']:.2f}  [{elapsed:.1f}s]")
 
     # ══════════════════════════════════════════════════════════════
     #   RESULTS TABLE
     # ══════════════════════════════════════════════════════════════
     names = list(results.keys())
-    print(f"\n\n{'=' * 80}")
-    print("  UNIVERSE EXPANSION SWEEP — RESULTS")
-    print(f"{'=' * 80}\n")
+    base = results['A-Base']
 
+    print(f"\n\n{'=' * 100}")
+    print("  FILTER RELAXATION A/B TEST — RESULTS")
+    print(f"{'=' * 100}\n")
+
+    col_w = 12
     print(f"  {'Metric':<20}", end='')
     for n in names:
-        print(f"  {n:>14}", end='')
+        print(f"  {n:>{col_w}}", end='')
     print()
-    print("  " + "-" * (20 + 16 * len(names)))
+    print("  " + "-" * (20 + (col_w + 2) * len(names)))
 
     rows = [
-        ('Symbols', 'symbols', '{:d}'),
         ('Slots', 'slots', '{:d}'),
+        ('Min Confidence', 'min_confidence', '{:d}'),
+        ('ATR Mult', 'atr_mult', '{:.1f}×'),
+        ('Thres Floor', 'threshold_floor', '{:.1%}'),
+        ('MTF Block', 'mtf_block', '{}'),
+        ('', None, None),  # separator
+        ('Raw Signals', 'raw_signals', '{:,d}'),
+        ('Total Trades', 'n_trades', '{:,d}'),
+        ('Trades/Day', 'trades_per_day', '{:.2f}'),
+        ('', None, None),
         ('Total Return', 'total_return_pct', '{:+,.1f}%'),
         ('Final Balance', 'final_balance', '${:,.0f}'),
         ('Sharpe', 'sharpe', '{:.2f}'),
         ('Calmar', 'calmar', '{:.1f}'),
         ('Max Drawdown', 'max_dd_pct', '{:.1f}%'),
-        ('Total Trades', 'n_trades', '{:,d}'),
-        ('Trades/Day', 'trades_per_day', '{:.2f}'),
         ('Win Rate', 'win_rate', '{:.1f}%'),
         ('Profit Factor', 'profit_factor', '{:.2f}'),
         ('Avg PnL/Trade', 'avg_pnl_pct', '{:+.3f}%'),
+        ('', None, None),
         ('Longs', 'long_trades', '{:,d}'),
         ('Shorts', 'short_trades', '{:,d}'),
         ('Long WR', 'long_wr', '{:.1f}%'),
@@ -703,99 +573,123 @@ def main():
     ]
 
     for label, key, fmt in rows:
+        if key is None:
+            print()
+            continue
         print(f"  {label:<20}", end='')
         for n in names:
             val = results[n][key]
-            print(f"  {fmt.format(val):>14}", end='')
+            if isinstance(val, bool):
+                s = 'Yes' if val else 'No'
+            else:
+                s = fmt.format(val)
+            print(f"  {s:>{col_w}}", end='')
+        print()
+
+    # ── Delta vs Baseline ──
+    print(f"\n{'─' * 100}")
+    print("  DELTA vs A-Base")
+    print(f"{'─' * 100}\n")
+
+    delta_rows = [
+        ('ΔTrades/Day', 'trades_per_day'),
+        ('ΔReturn', 'total_return_pct'),
+        ('ΔSharpe', 'sharpe'),
+        ('ΔCalmar', 'calmar'),
+        ('ΔMax DD', 'max_dd_pct'),
+        ('ΔAvg PnL/Trade', 'avg_pnl_pct'),
+    ]
+
+    print(f"  {'Metric':<20}", end='')
+    for n in names:
+        print(f"  {n:>{col_w}}", end='')
+    print()
+    print("  " + "-" * (20 + (col_w + 2) * len(names)))
+
+    for label, key in delta_rows:
+        print(f"  {label:<20}", end='')
+        for n in names:
+            val = results[n][key]
+            base_val = base[key]
+            if base_val != 0:
+                delta_pct = (val / base_val - 1) * 100
+                print(f"  {delta_pct:>+10.1f}%", end='  ')
+            else:
+                print(f"  {'—':>{col_w}}", end='')
         print()
 
     # ── Yearly breakdown ──
-    print(f"\n{'─' * 80}")
+    print(f"\n{'─' * 100}")
     print("  YEARLY BREAKDOWN")
-    print(f"{'─' * 80}")
+    print(f"{'─' * 100}")
 
     for y in range(3):
-        print(f"\n  Year {y+1} ({results[names[0]]['yearly'][y]['label']}):")
+        yr = results[names[0]]['yearly'][y]
+        print(f"\n  Year {y+1} ({yr['label']}):")
         print(f"  {'Metric':<18}", end='')
         for n in names:
-            print(f"  {n:>14}", end='')
+            print(f"  {n:>{col_w}}", end='')
         print()
 
-        year_rows = [
+        for label, key, fmt in [
             ('Return', 'return_pct', '{:+,.1f}%'),
             ('Trades', 'trades', '{:,d}'),
-            ('Longs', 'longs', '{:,d}'),
-            ('Shorts', 'shorts', '{:,d}'),
             ('Win Rate', 'win_rate', '{:.1f}%'),
             ('Profit Factor', 'profit_factor', '{:.2f}'),
             ('Max DD', 'max_dd_pct', '{:.1f}%'),
             ('Sharpe', 'sharpe', '{:.2f}'),
-        ]
-
-        for label, key, fmt in year_rows:
+        ]:
             print(f"    {label:<16}", end='')
             for n in names:
                 val = results[n]['yearly'][y][key]
-                print(f"  {fmt.format(val):>14}", end='')
+                print(f"  {fmt.format(val):>{col_w}}", end='')
             print()
 
-    # ── Per-symbol signal counts ──
-    print(f"\n{'─' * 80}")
-    print("  PER-SYMBOL SIGNAL COUNTS (conf≥3, MTF blocked)")
-    print(f"{'─' * 80}\n")
+    # ── Recommendation ──
+    print(f"\n{'=' * 100}")
+    print("  RECOMMENDATION")
+    print(f"{'=' * 100}\n")
 
-    signal_counts = []
-    for sym in available_30:
-        sigs = all_signals_map[sym]
-        n_entries = int(np.sum((sigs[1:] != 0) & (sigs[:-1] == 0)))
-        n_long = int(np.sum((sigs[1:] > 0) & (sigs[:-1] == 0)))
-        n_short = int(np.sum((sigs[1:] < 0) & (sigs[:-1] == 0)))
-        signal_counts.append((sym, n_entries, n_long, n_short))
+    # Score: weighted combination (Sharpe×0.3 + Calmar×0.2 + trades_per_day×0.2 + return×0.15 + -DD×0.15)
+    best_name = None
+    best_score = -float('inf')
+    for n, r in results.items():
+        score = (
+            (r['sharpe'] / max(base['sharpe'], 0.01)) * 0.30 +
+            (r['calmar'] / max(base['calmar'], 0.01)) * 0.20 +
+            (r['trades_per_day'] / max(base['trades_per_day'], 0.01)) * 0.20 +
+            (r['total_return_pct'] / max(base['total_return_pct'], 0.01)) * 0.15 +
+            (base['max_dd_pct'] / max(r['max_dd_pct'], 0.01)) * 0.15
+        )
+        suffix = ' ★ WINNER' if score == best_score else ''
+        if score > best_score:
+            best_score = score
+            best_name = n
 
-    signal_counts.sort(key=lambda x: x[1], reverse=True)
-    print(f"  {'Symbol':<16} {'Total':>8} {'Long':>8} {'Short':>8} {'L/S':>8}")
-    for sym, total, lng, sht in signal_counts:
-        ls_ratio = lng / sht if sht > 0 else float('inf')
-        marker = ' *' if sym in EXTRA_10 else ''
-        print(f"  {sym:<16} {total:>8} {lng:>8} {sht:>8} {ls_ratio:>8.1f}{marker}")
+    for n, r in results.items():
+        score = (
+            (r['sharpe'] / max(base['sharpe'], 0.01)) * 0.30 +
+            (r['calmar'] / max(base['calmar'], 0.01)) * 0.20 +
+            (r['trades_per_day'] / max(base['trades_per_day'], 0.01)) * 0.20 +
+            (r['total_return_pct'] / max(base['total_return_pct'], 0.01)) * 0.15 +
+            (base['max_dd_pct'] / max(r['max_dd_pct'], 0.01)) * 0.15
+        )
+        tag = ' ★ WINNER' if n == best_name else ''
+        print(f"  {n:>12}: score={score:.3f}  Sharpe={r['sharpe']:.2f}  "
+              f"Calmar={r['calmar']:.1f}  trades/day={r['trades_per_day']:.2f}  "
+              f"DD={r['max_dd_pct']:.1f}%{tag}")
 
-    extra_total = sum(t for s, t, _, _ in signal_counts if s in EXTRA_10)
-    base_total = sum(t for s, t, _, _ in signal_counts if s in SYMBOLS_20)
-    if base_total > 0:
-        print(f"\n  Base 20 symbols: {base_total:,} total signals")
-        print(f"  Extra 10 symbols: {extra_total:,} total signals ({extra_total/base_total*100:.0f}% increase)")
-
-    # ── Analysis ──
-    print(f"\n{'=' * 80}")
-    print("  ANALYSIS")
-    print(f"{'=' * 80}")
-
-    b20 = results['B-20']
-
-    print(f"\n  Trade frequency change (vs B-20 baseline):")
-    for name, r in results.items():
-        delta = (r['trades_per_day'] / b20['trades_per_day'] - 1) * 100 if b20['trades_per_day'] > 0 else 0
-        print(f"    {name:>10}: {r['trades_per_day']:.2f} trades/day ({delta:+.0f}%)")
-
-    print(f"\n  Return comparison:")
-    for name, r in results.items():
-        delta = (r['total_return_pct'] / b20['total_return_pct'] - 1) * 100 if b20['total_return_pct'] != 0 else 0
-        print(f"    {name:>10}: {r['total_return_pct']:+,.1f}% ({delta:+.1f}% vs baseline)")
-
-    print(f"\n  Sharpe comparison:")
-    for name, r in results.items():
-        delta = (r['sharpe'] / b20['sharpe'] - 1) * 100 if b20['sharpe'] != 0 else 0
-        print(f"    {name:>10}: {r['sharpe']:.2f} ({delta:+.1f}% vs baseline)")
+    print(f"\n  → {best_name} achieves the best balance of opportunity and performance.")
 
     # ── Save results ──
-    output_path = Path(__file__).parent.parent / 'logs' / 'universe_expansion_results.json'
+    output_path = Path(__file__).parent.parent / 'logs' / 'filter_relaxation_ab_results.json'
     with open(output_path, 'w') as f:
         json.dump(results, f, indent=2, default=str)
     print(f"\n  Results saved to {output_path}")
 
-    print(f"\n{'=' * 80}")
+    print(f"\n{'=' * 100}")
     print("  DONE")
-    print(f"{'=' * 80}")
+    print(f"{'=' * 100}")
 
 
 if __name__ == '__main__':

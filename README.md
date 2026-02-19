@@ -14,12 +14,12 @@
   - 공식: `threshold = clip(2.5 × ATR%(48), 1%, 6%)` — 변동성 높으면 넓고, 낮으면 타이트
   - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
   - 레버리지 최적화: 1×~5× 그리드 → Sharpe 단조 감소, 현행 3.75× 유지 결정
-- **v10.0 Entry Optimization**: threshold fallback 0.032 (ATR NaN 시), min_confidence 3 (v12.1 B-50 quality gate)
+- **v10.0 Entry Optimization**: threshold fallback 0.032 (ATR NaN 시), min_confidence 2 (v12.2 E-3Slot quality gate)
 - **v10.0 Extended Hold**: max_hold 10→20 (+24% ret, strictly better)
 - **v10.0 Faster Stochastic**: stoch_k 5→3 (+5% Calmar)
 - **v11.1 Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어 + 레버리지 설정 검증
-- **v12.1 B-50 Universe**: Top-20→Top-50 (4 tiers: T1=20 originals, T2=10 v1 sweep, T3=10 mid-cap, T4=10 mid-cap)
-- **v10.0 Symbol Whitelist**: Top-50 검증된 심볼만 거래 (B-50 config, RB_MAX_CONCURRENT=2)
+- **v12.2 E-3Slot Universe**: Top-50 (4 tiers) + 필터 완화 (conf≥2, ATR 2.0×, floor 0.8%, 3 slots)
+- **v10.0 Symbol Whitelist**: Top-50 검증된 심볼만 거래 (E-3Slot config, RB_MAX_CONCURRENT=3)
 - **v10.0 Dynamic Capital**: balance / max(1, n_active+1) — 유휴 자본 최소화, 50% cap 안전장치
 - **Fibonacci Exit Levels (v9.0)**: 피보나치 기반 정밀 목표/손절 — target 0.382 (golden ratio), stop 0.786 (deep correction)
   - R:R 0.444→0.486 (+9.5%), Calmar +29% vs 기존 0.4/0.9
@@ -38,7 +38,7 @@
 - **MTF Leverage Boost (v7.0)**: MTF 확인 통과 트레이드에 2.0x 레버리지 부스트 (실효 3.0x)
 - **Confidence-Scored Entry (v6.0)**: 멀티 증거 기반 컨피던스 필터링 + 졸업 레버리지
   - RSI, 거래량 스파이크, 테이커 매수/매도 비율, SMA 거리, BTC 모멘텀, MACD 히스토그램(v9.0), 스토캐스틱 크로스(v9.0) — 최대 7가지 증거
-  - min_confidence=3: v12.1 B-50 강화 필터 (Sharpe 7.24, Calmar 751)
+  - min_confidence=2: v12.2 E-3Slot 최적 필터 (Sharpe 6.41, Calmar 795, +138% trades/day)
   - 선택적 졸업 레버리지: 증거 많을수록 포지션 확대
 - **Regime-Switch Dual Entry (v5.0 base)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
   - Risk-On (BTC > SMA96): Classic Pullback — 자산 자체 상승추세에서 조정 시 매수
@@ -72,7 +72,7 @@
 - **바이낸스 연동**: Rate limiting과 배치 처리 지원
 
 ### 전략 프레임워크
-- **Rubber Band Mean-Reversion (v12.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-50 심볼 화이트리스트 (B-50)
+- **Rubber Band Mean-Reversion (v12.2 E-3Slot)**: ATR 2.0× 적응형 임계값 + MACD/Stochastic 컨플루언스 + Top-50 심볼 + 3슬롯 분산
 - **Elliott Wave Strategy (v11.6)**: ZigZag ABC 패턴 + 5차원 품질 스코어링 + Timing Alpha Filter + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
   - 4h 타임프레임, EMA(20/50/100/200/500), RSI(14/9), MACD(12/26/9), Stochastic(14/3)
   - **Timing Alpha (v11.6)**: W3/W1 가속도 + 정정/충격 시간비율 + W3/W1 바 비율 필터 (Calmar 5.10, Sharpe 1.69)
@@ -87,7 +87,7 @@
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
-- **Walk-Forward 검증**: 365일 롤링 윈도우, v12.1 B-50: 50 심볼, RB_MAX_CONCURRENT=2
+- **Walk-Forward 검증**: 365일 롤링 윈도우, v12.2 E-3Slot: 50 심볼, RB_MAX_CONCURRENT=3
 
 ### 실거래 안전장치
 - **Server-Side Stop-Loss (v11.1)**: 바이난스 STOP 주문으로 클라이언트 크래시/네트워크 단절 시 손절 보장
@@ -185,11 +185,9 @@ scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
 ├── download_extended_data.py # 장기 과거 데이터 다운로드
 ├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
-├── elliott_backtest.py     # Elliott Wave 365일 백테스트
-├── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
-├── elliott_wave_timing_research.py  # Elliott 타이밍 알파 피처 리서치
-├── elliott_timing_backtest.py       # Elliott 타이밍 알파 Round 1 백테스트
-└── elliott_timing_backtest_r2.py    # Elliott 타이밍 알파 Round 2 정제
+├── portfolio_backtest_2slot.py     # 포트폴리오 백테스트 (2-slot)
+├── universe_expansion_sweep_v2.py  # B-50 유니버스 확장 스윉
+└── filter_relaxation_ab.py         # 필터 완화 A/B 테스트 (E-3Slot winner)
 tests/                      # 유닛 테스트 (578개)
 \`\`\`
 
@@ -205,7 +203,7 @@ tests/                      # 유닛 테스트 (578개)
 | Trades | 798 | 798 | 798 | 318 | **936** |
 | Profit Factor | N/A | N/A | N/A | N/A | **2.66** |
 
-> **v12.1 핵심**: Top-20→Top-50 B-50 Universe Expansion (4 tiers: T1=20 originals, T2=10 v1 sweep, T3=10 mid-cap, T4=10 mid-cap). RB_MIN_CONFIDENCE 1→3, RB_MAX_CONCURRENT=2 슬롯 집중 전략. 서버사이드 STOP 손절로 클라이언트 크래시 방어.
+> **v12.2 핵심**: E-3Slot 필터 완화 — conf≥3→≥2, ATR 2.5×→2.0×, floor 1%→0.8%, 2→3 slots. +138% trades/day, Calmar 795 (+5.8%), Sharpe 6.41. MTF block 유지 (제거 시 Sharpe -3.11 — 비협상).
 
 ## 🧪 테스트
 
