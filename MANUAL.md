@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 11.6.0  
-> 최종 업데이트: 2025년 2월 18일
+> 버전: 12.1.0  
+> 최종 업데이트: 2026년 2월 19일
 
 ---
 
@@ -61,7 +61,7 @@ Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. ATR 기�
 - 2시간(8×15m 봉) 내 38.2% 피보나치 되돌림
 - MTF 4h 트렌드 확인 시 역추세 진입 차단
 
-**검증 결과 (Top-20 심볼, 365일, 15m 데이터, v11.1):**
+**검증 결과 (Top-50 B-50 심볼, 365일, 15m 데이터, v12.1):**
 - Portfolio Return: **+3384.3%**
 - Sharpe: 5.02
 - Max Drawdown: 21.8%
@@ -103,7 +103,7 @@ python -m quantbox.scalper
 | htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%, MTF 비활성 시 미사용) |
 | htf_agree_discount | 0.85 | HTF 동의 시 진입 임계값 할인 (MTF 비활성 시 미사용) |
 | htf_agree_stop_mult | 0.95 | HTF 동의 시 스톱 배수 (MTF 비활성 시 미사용) |
-| max_concurrent | 5 | 최대 동시 포지션 |
+| max_concurrent | 2 | v12.1: B-50 최적 동시 포지션 (RB_MAX_CONCURRENT) |
 | risk_per_trade | 0.01 | 트레이드당 리스크 (자본의 1%) |
 
 ### 3.4 안전장치
@@ -536,7 +536,7 @@ RB_BTC_REGIME_PERIOD=96            # BTC SMA period for regime detection (96봉 
 RB_ASSET_TREND_PERIOD=192          # Asset SMA period for classic pullback (192봉 = 48시간)
 
 # Confidence Scoring (v6.0, 365일 A/B 검증)
-RB_MIN_CONFIDENCE=1                # v10.0: 최소 증거 점수 1 (MTF가 진짜 필터, +86.9% ret)
+RB_MIN_CONFIDENCE=3                # v12.1: B-50 최소 증거 점수 3 (Sharpe 7.24, Calmar 751)
 RB_CONFIDENCE_LEVERAGE_STEP=0.0    # 컨피던스당 추가 레버리지 (0=고정, 1.0=moderate)
 RB_RSI_PERIOD=14                   # RSI 계산 기간
 RB_VOL_PERIOD=20                   # 거래량 SMA 기간 (스파이크 감지)
@@ -603,8 +603,13 @@ SLIPPAGE=0.001                 # 슬리피지 (0.10%)
 FUNDING_RATE_8H=0.0001         # 8시간 펀딩비 (0.01%)
 
 # 유니버스 & 페이퍼 트레이딩
-N_COINS=30                     # 상위 N개 코인 사용
+N_COINS=50                     # v12.1: B-50 상위 50개 코인 스캔
 PAPER_BALANCE=1000             # 페이퍼 트레이딩 시 가상 잔고 ($)
+
+# v12.1 Symbol Whitelist (B-50: 4 tiers)
+# T1 (20): 오리지널 Top-20 | T2 (10): v1 sweep 추가 | T3 (10): mid-cap | T4 (10): mid-cap
+RB_SYMBOL_WHITELIST=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,XLMUSDT,DOTUSDT,1000PEPEUSDT,ARBUSDT,FETUSDT,1000SHIBUSDT,OPUSDT,ATOMUSDT,HBARUSDT,ICPUSDT,FILUSDT,TRXUSDT,SUIUSDT,TONUSDT,LTCUSDT,BCHUSDT,UNIUSDT,NEARUSDT,APTUSDT,AAVEUSDT,INJUSDT,ETCUSDT,MATICUSDT,GRTUSDT,STXUSDT,FTMUSDT,EGLDUSDT,AXSUSDT,SANDUSDT,THETAUSDT,ALGOUSDT,RUNEUSDT,DYDXUSDT,CRVUSDT,LDOUSDT,COMPUSDT,MKRUSDT,SNXUSDT,VETUSDT,EOSUSDT,APEUSDT
+RB_MAX_CONCURRENT=2            # v12.1: B-50 최적 슬롯 (2 slots, Calmar 751)
 
 # 알림 (Discord Webhook - 단방향 알림)
 DISCORD_WEBHOOK_URL=           # 미설정 시 알림 비활성화
