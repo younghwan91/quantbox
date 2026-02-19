@@ -33,6 +33,7 @@ import logging
 import logging.handlers
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -73,6 +74,41 @@ from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
 
 load_dotenv()
 
+# ──────────────────────── Git Commit Tracking ─────────────────────────
+
+
+def _get_git_commit() -> dict[str, str]:
+    """Get current git commit info for log traceability.
+
+    Returns:
+        Dict with 'short', 'full', 'message', 'date' keys.
+        All values are empty strings if git is unavailable.
+    """
+    info = {'short': '', 'full': '', 'message': '', 'date': ''}
+    try:
+        info['short'] = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        info['full'] = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        info['message'] = subprocess.run(
+            ['git', 'log', '-1', '--format=%s'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        info['date'] = subprocess.run(
+            ['git', 'log', '-1', '--format=%ci'],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except Exception:
+        pass
+    return info
+
+
+GIT_COMMIT = _get_git_commit()
+
 # ──────────────────────── Logging ──────────────────────────────────────
 
 def _setup_logging() -> Path:
@@ -80,6 +116,15 @@ def _setup_logging() -> Path:
     log_dir.mkdir(exist_ok=True)
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_file = log_dir / f'scalper_{ts}.log'
+
+    # Write git commit header before configuring logging handlers
+    # so the log file starts with version traceability info
+    if GIT_COMMIT['short']:
+        with open(log_file, 'w') as f:
+            f.write(f"# Commit: {GIT_COMMIT['short']} ({GIT_COMMIT['date']})\n")
+            f.write(f"# Message: {GIT_COMMIT['message']}\n")
+            f.write(f"# Full SHA: {GIT_COMMIT['full']}\n")
+            f.write("#\n")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -2518,6 +2563,7 @@ class RubberBandScalper:
             logger.info("Discord Bot started for interactive commands")
 
         n_symbols = len(self.config.symbol_whitelist) if self.config.symbol_whitelist else 0
+        commit_str = f"`{GIT_COMMIT['short']}`" if GIT_COMMIT['short'] else 'unknown'
         self.discord.send(embed={
             'title': '🚀 QuantBox Scalper Started',
             'color': 0x2979FF,
@@ -2541,6 +2587,7 @@ class RubberBandScalper:
                     f'Base {self.config.base_leverage}x, '
                     f'MTF {self.config.mtf_leverage_mult}x'
                 ), 'inline': True},
+                {'name': 'Commit', 'value': commit_str, 'inline': True},
             ],
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
@@ -2640,6 +2687,10 @@ class RubberBandScalper:
         settings = get_settings()
         mode_str = 'PAPER' if self.paper_mode else 'LIVE'
         print_banner()
+        if GIT_COMMIT['short']:
+            logger.info(
+                f"Git: {GIT_COMMIT['short']} — {GIT_COMMIT['message']}"
+            )
         print_system_info(
             mode=mode_str,
             strategy=self.strategy_name,
