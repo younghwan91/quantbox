@@ -27,3 +27,4 @@ Example: `5ec5007_20260219_3year_ab_test.md`
 | `6eb0212` | 2026-02-19 | Universe Expansion 20→30 symbols (4 variants, 3yr portfolio) — 1095d, 30 symbols | **B-30 wins**: Sharpe 7.09 (+19%), +58% return, same DD 9.7% |
 | `dab1f80` | 2026-02-19 | Universe B-30/40/50 Sweep (3 sizes, 3yr portfolio) — 1095d, 50 symbols | **B-50 wins**: Sharpe 7.24, +6812%, DD 9.1%, Calmar 751 |
 | `be25665` | 2026-02-19 | Filter Relaxation A/B (6 variants, 3yr portfolio) — 1095d, 50 symbols | **E-3Slot wins**: Sharpe 6.41, +8785%, DD 11.1%, 26.11 trades/day (+138%) |
+| `5900fa5` | 2026-02-19 | Partial Exit + Trailing Stop A/B (6 variants, 3yr portfolio) — 1095d, 50 symbols | **E-BE15 wins**: R:R 0.98→1.51 (+54%), Sharpe 6.41→6.84, PF 1.76→1.96, DD 10.7% |
