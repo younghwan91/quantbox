@@ -185,11 +185,8 @@ scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
 ├── download_extended_data.py # 장기 과거 데이터 다운로드
 ├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
-├── elliott_backtest.py     # Elliott Wave 365일 백테스트
-├── elliott_param_sweep.py  # Elliott 글로벌 파라미터 서치 + AB 테스트
-├── elliott_wave_timing_research.py  # Elliott 타이밍 알파 피처 리서치
-├── elliott_timing_backtest.py       # Elliott 타이밍 알파 Round 1 백테스트
-└── elliott_timing_backtest_r2.py    # Elliott 타이밍 알파 Round 2 정제
+├── portfolio_backtest_2slot.py     # 포트폴리오 백테스트 (2-slot)
+└── universe_expansion_sweep_v2.py  # B-50 유니버스 확장 스윕
 tests/                      # 유닛 테스트 (578개)
 \`\`\`
 
