@@ -177,8 +177,10 @@ STATE_DIR = Path('data/state')
 STATE_FILE = STATE_DIR / 'scalper_state.json'
 
 
-def _save_scalper_state(state: dict, filepath: Path = STATE_FILE) -> None:
+def _save_scalper_state(state: dict, filepath: Path | None = None) -> None:
     """Atomic JSON write."""
+    if filepath is None:
+        filepath = STATE_FILE
     filepath.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(filepath.parent), suffix='.tmp')
     try:
@@ -193,7 +195,9 @@ def _save_scalper_state(state: dict, filepath: Path = STATE_FILE) -> None:
         raise
 
 
-def _load_scalper_state(filepath: Path = STATE_FILE) -> dict | None:
+def _load_scalper_state(filepath: Path | None = None) -> dict | None:
+    if filepath is None:
+        filepath = STATE_FILE
     if not filepath.exists():
         return None
     try:
