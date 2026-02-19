@@ -24,6 +24,24 @@ def _clear_settings_cache():
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_state_file(tmp_path):
+    """Redirect scalper state file to tmp_path so tests never corrupt
+    the production state (data/state/scalper_state.json).
+
+    This is CRITICAL — without this, any test calling _sync_server_orders()
+    or _save_state() would overwrite the live bot's position state.
+    """
+    import quantbox.scalper as _mod
+    orig_file = _mod.STATE_FILE
+    orig_dir = _mod.STATE_DIR
+    _mod.STATE_DIR = tmp_path
+    _mod.STATE_FILE = tmp_path / 'scalper_state.json'
+    yield
+    _mod.STATE_FILE = orig_file
+    _mod.STATE_DIR = orig_dir
+
+
 def _get_real_data_loader():
     """Get the real data loader instance."""
     from quantbox.data.real_data_loader import RealDataLoader
