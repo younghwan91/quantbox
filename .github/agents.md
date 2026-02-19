@@ -284,11 +284,13 @@ else:
 | `discord.py` | Webhook 기반 알림 (진입/청산/에러/일일보고) |
 | `bot.py` | Discord Bot 기반 원격 제어 (!status, !close, !pause 등) |
 
+> **Discord 알림 언어:** 모든 Discord 메시지는 **한국어**로 작성. 서버/클라이언트 TP/SL 체결방식, 활성 포지션 목록, 세션 현황(누적PnL/승률/잔고)을 포함한 구조화된 embed 사용.
+
 ### 3.6 `quantbox/` (최상위)
 
 | 파일 | 역할 |
 |------|------|
-| `scalper.py` | `RubberBandScalper` 라이브 트레이더. CLI 진입점 (`python -m quantbox.scalper`) |
+| `scalper.py` | `RubberBandScalper` 라이브 트레이더. CLI 진입점 (`python -m quantbox.scalper`). 커밋 자동추적(로그 헤더, Discord 시작알림). |
 
 ---
 
