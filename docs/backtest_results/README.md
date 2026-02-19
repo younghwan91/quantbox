@@ -24,3 +24,4 @@ Example: `5ec5007_20260219_3year_ab_test.md`
 | `6618f55` | 2026-02-19 | 3-Year A/B Test (7 dimensions, 34 variants) — 1095d, 20 symbols | Sharpe 5.61, $2,095→$85,697 |
 | `76d71af` | 2026-02-19 | Performance Assessment A/B/C (3 configs, 3yr portfolio) — 1095d, 20 symbols | **B wins**: Sharpe 6.07, Calmar 330.7, DD 10.1% |
 | `f26299b` | 2026-02-19 | Bidirectional "Flip" Assessment (4 variants, 3yr portfolio) — 1095d, 20 symbols | **MTF Block wins**: more trades ≠ better; blocked signals are net losers |
+| `6eb0212` | 2026-02-19 | Universe Expansion 20→30 symbols (4 variants, 3yr portfolio) — 1095d, 30 symbols | **B-30 wins**: Sharpe 7.09 (+19%), +58% return, same DD 9.7% |
