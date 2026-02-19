@@ -1834,11 +1834,44 @@ class RubberBandScalper:
             max_slots=self.config.max_concurrent,
         )
         print(header)
+
+        # ── Enhanced cycle header with HWM / DD / cum PnL ──
+        hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+        dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
+        cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        n_trades = len(self._trade_history)
         logger.info(
             f"Cycle #{self._cycle_count} | "
             f"Balance=${balance:.2f} | "
-            f"Positions={self.strategy.n_active}/{self.config.max_concurrent}"
+            f"HWM=${hwm:.2f} | DD={dd_pct:.1f}% | "
+            f"Positions={self.strategy.n_active}/{self.config.max_concurrent} | "
+            f"Trades={n_trades} CumPnL=${cum_pnl:+.2f}"
         )
+
+        # ── Log each active position status ──
+        for sym, pos in self.strategy.active_positions.items():
+            try:
+                book = self.client.futures_orderbook_ticker(symbol=sym)
+                cur_px = float(book['bidPrice']) if pos['signal'] == 1 else float(book['askPrice'])
+            except Exception:
+                cur_px = pos.get('entry_price', 0)
+            entry_px = pos.get('entry_price', 0)
+            if entry_px > 0:
+                if pos['signal'] == 1:
+                    upnl_pct = (cur_px - entry_px) / entry_px * 100
+                else:
+                    upnl_pct = (entry_px - cur_px) / entry_px * 100
+            else:
+                upnl_pct = 0.0
+            sl_id = pos.get('server_sl_order_id')
+            tp_id = pos.get('server_tp_order_id')
+            bars = pos.get('bars_held', 0)
+            direction = 'L' if pos.get('signal') == 1 else 'S'
+            logger.info(
+                f"  [{sym}] {direction} entry=${entry_px:.4f} now=${cur_px:.4f} "
+                f"uPnL={upnl_pct:+.2f}% bars={bars} "
+                f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}"
+            )
 
         # 1. Risk check
         risk_blocked = self._check_risk_limits(balance)
@@ -1868,6 +1901,14 @@ class RubberBandScalper:
         # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
         self._sync_server_orders()
 
+        # Log server order sync result
+        for sym, pos in self.strategy.active_positions.items():
+            sl_id = pos.get('server_sl_order_id')
+            tp_id = pos.get('server_tp_order_id')
+            logger.debug(
+                f"  [{sym}] Post-sync: SL={sl_id or 'NONE'} TP={tp_id or 'NONE'}"
+            )
+
         # 4. Process existing positions (always, even when paused)
         for sym in list(self.strategy.active_positions):
             close = self.download_klines(sym, 200)
@@ -1877,6 +1918,9 @@ class RubberBandScalper:
             current_price = close[-1]
             exit_reason = self.strategy.update_position(sym, current_price)
             if exit_reason:
+                logger.info(
+                    f"  [{sym}] Exit signal: {exit_reason} @ ${current_price:.4f}"
+                )
                 if exit_reason == 'partial_close':
                     self._partial_close_position(sym, current_price)
                 elif exit_reason == 'confirm_entry':
@@ -1890,6 +1934,13 @@ class RubberBandScalper:
                     self._close_position(sym, exit_reason, current_price)
                 else:
                     self._close_position(sym, exit_reason, current_price)
+            else:
+                pos = self.strategy._positions.get(sym)
+                if pos:
+                    logger.debug(
+                        f"  [{sym}] HOLD: bars={pos.get('bars_held', 0)}/{self.config.max_hold} "
+                        f"best_pnl={pos.get('best_pnl', 0)*100:.2f}%"
+                    )
 
         # 5. Look for new entries (skip if risk blocked or paused)
         if self._paused:
@@ -1905,8 +1956,8 @@ class RubberBandScalper:
         # 6. Save state
         self._save_state()
 
-        # 7. Periodic summary
-        if self._cycle_count % 4 == 0:  # Every hour
+        # 7. Periodic summary (every cycle for active positions, full every hour)
+        if self.strategy.n_active > 0 or self._cycle_count % 4 == 0:
             self._log_summary(balance)
 
     def _scan_entries(
@@ -2010,19 +2061,20 @@ class RubberBandScalper:
             )
 
     def _log_summary(self, balance: float) -> None:
-        """Log hourly summary."""
+        """Log periodic summary — always, even with 0 trades."""
         positions = self.strategy.active_positions
         n_trades = len(self._trade_history)
-        if n_trades == 0:
-            return
-
         wins = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
         total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
         wr = wins / n_trades * 100 if n_trades > 0 else 0
 
+        hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+        dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
+
         logger.info(
             f"[Summary] Trades={n_trades}, WR={wr:.0f}%, "
             f"PnL=${total_pnl:+.2f}, Balance=${balance:.2f}, "
+            f"HWM=${hwm:.2f}, DD={dd_pct:.1f}%, "
             f"Active={len(positions)}"
         )
 
@@ -2031,8 +2083,10 @@ class RubberBandScalper:
             logger.info(
                 f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
                 f"entry=${pos['entry_price']:.4f} "
-                f"bars={pos['bars_held']} "
-                f"best_pnl={pos['best_pnl']*100:.2f}%"
+                f"bars={pos['bars_held']}/{self.config.max_hold} "
+                f"best_pnl={pos.get('best_pnl', 0)*100:.2f}% "
+                f"SL={pos.get('server_sl_order_id') or 'NONE'} "
+                f"TP={pos.get('server_tp_order_id') or 'NONE'}"
             )
 
     # ==================== Discord Bot Commands ====================
@@ -2530,7 +2584,8 @@ class RubberBandScalper:
         target = self._next_bar_time()
         remaining = (target - datetime.now(timezone.utc)).total_seconds()
         if remaining > 0:
-            logger.debug(f"Waiting {remaining:.0f}s for next bar close")
+            next_str = target.strftime('%H:%M:%S UTC')
+            logger.info(f"Waiting {remaining:.0f}s for next bar close ({next_str})")
 
         BOT_POLL_INTERVAL = 5.0    # Check bot commands every 5s
         SYNC_INTERVAL = 60.0       # Sync server orders every 60s
