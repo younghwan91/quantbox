@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 11.6.0  
-> 최종 업데이트: 2025년 2월 18일
+> 버전: 12.1.0  
+> 최종 업데이트: 2026년 2월 19일
 
 ---
 
@@ -12,7 +12,7 @@
 1. [개요](#1-개요)
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
 3. [🔥 Rubber Band Scalper (v2.0)](#3-rubber-band-scalper)
-3.5. [🌊 Elliott Wave Strategy (v11.5)](#35-elliott-wave-strategy)
+3.5. [🌊 Elliott Wave Strategy (v11.6)](#35-elliott-wave-strategy)
 4. [아키텍처 이해](#4-아키텍처-이해)
 5. [핵심 모듈 상세](#5-핵심-모듈-상세)
 6. [데이터 관리](#6-데이터-관리)
@@ -49,7 +49,8 @@ Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. ATR 기�
   - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
   - 변동성 높은 시장에서는 임계값 자동 확대, 낮은 시장에서는 타이트하게 조정
   - 레버리지 최적화: 1×~5× 그리드 → 현행 3.75× 유지 결정
-- **Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어
+- **Server-Side Stop-Loss**: 바이낸스 Algo Order API로 클라이언트 크래시 방어
+  - **v11.4.2 Bracket Repair**: 복원된 포지션의 누락된 SL/TP를 자동 복구
 - **v9.0 Fibonacci Exit**: target 0.382, stop 0.786 (R:R 0.486, Calmar +29%)
 - **v9.0 S+R+M Confluence**: MACD(12,26,14) + Stochastic(3,3) 컨피던스 증거
 - **v7.0 MTF Confirmation**: 4h SMA(12) 트렌드 필터 — MDD -74%, Calmar +275%
@@ -60,7 +61,7 @@ Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. ATR 기�
 - 2시간(8×15m 봉) 내 38.2% 피보나치 되돌림
 - MTF 4h 트렌드 확인 시 역추세 진입 차단
 
-**검증 결과 (Top-20 심볼, 365일, 15m 데이터, v11.1):**
+**검증 결과 (Top-50 B-50 심볼, 365일, 15m 데이터, v12.1):**
 - Portfolio Return: **+3384.3%**
 - Sharpe: 5.02
 - Max Drawdown: 21.8%
@@ -102,7 +103,7 @@ python -m quantbox.scalper
 | htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%, MTF 비활성 시 미사용) |
 | htf_agree_discount | 0.85 | HTF 동의 시 진입 임계값 할인 (MTF 비활성 시 미사용) |
 | htf_agree_stop_mult | 0.95 | HTF 동의 시 스톱 배수 (MTF 비활성 시 미사용) |
-| max_concurrent | 5 | 최대 동시 포지션 |
+| max_concurrent | 2 | v12.1: B-50 최적 동시 포지션 (RB_MAX_CONCURRENT) |
 | risk_per_trade | 0.01 | 트레이드당 리스크 (자본의 1%) |
 
 ### 3.4 안전장치
@@ -129,9 +130,16 @@ result = bt.run_single(close, signals, "BTCUSDT")
 print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
 ```
 
-### 3.5 Elliott Wave Strategy (v11.5)
+### 3.5 Elliott Wave Strategy (v11.6)
 
-Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage 기반 전략.
+Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Timing Alpha Filter + Risk-Sized Leverage 기반 전략.
+
+#### v11.6 핵심 개선:
+- **Timing Alpha Filter**: 97패턴 리서치 기반 3중 타이밍 게이트 (accel≥0, corr≥0.20, W3/W1≤2.5)
+  - `impulse_accel`: W3/W1 속도 가속도 (감속 임펄스 제거 → 패자 40% 필터)
+  - `corr_impulse_ratio`: ABC 정정 시간 / 임펄스 시간 (너무 짧은 정정 제거)
+  - `max_w3_w1_time_ratio`: W3/W1 바 비율 (지연된 W3 제거)
+  - 파라미터 비감응: accel -0.3~+0.3 동일 결과 → 과적합 아님
 
 #### v11.5 핵심 개선:
 - **Quality Scoring**: W2/W3/B retrace, C:A ratio, 구조적 규칙 5차원 0-100점 스코어. 임계값 40점 이하 패턴 제거
@@ -141,16 +149,15 @@ Elliott Wave ABC 패턴 + 5차원 품질 스코어링 + Risk-Sized Leverage 기�
 - **Tighter Fibonacci Ranges**: W3 extension min 1.272, C/A 0.786-2.000, C Fib tolerance 0.10
 - **Risk Filter**: entry-to-stop 거리 최대 3% 제한
 
-#### 백테스트 결과 (365일, 8심볼, sweep-optimized, relaxed mode):
-| 지표 | 값 |
-|------|-----|
-| Active Symbols | 8 |
-| Total Trades | 8 |
-| Win Rate | 75.0% |
-| Portfolio Return | +4.84% |
-| Portfolio MaxDD | 1.96% |
-| Sharpe Ratio | 1.11 |
-| Calmar Ratio | 2.47 |
+#### 백테스트 결과 (365일, 18심볼, timing alpha, best_refined):
+| 지표 | v11.5 | v11.6 (timing) |
+|------|-------|----------------|
+| Active Symbols | 8 | 12 |
+| Total Trades | 8 | 21 |
+| Portfolio Return | +4.84% | **+5.61%** |
+| Portfolio MaxDD | 1.96% | 1.10% |
+| Sharpe Ratio | 1.11 | **1.69** |
+| Calmar Ratio | 2.47 | **5.10** |
 
 #### 실행 방법
 
@@ -529,7 +536,7 @@ RB_BTC_REGIME_PERIOD=96            # BTC SMA period for regime detection (96봉 
 RB_ASSET_TREND_PERIOD=192          # Asset SMA period for classic pullback (192봉 = 48시간)
 
 # Confidence Scoring (v6.0, 365일 A/B 검증)
-RB_MIN_CONFIDENCE=1                # v10.0: 최소 증거 점수 1 (MTF가 진짜 필터, +86.9% ret)
+RB_MIN_CONFIDENCE=3                # v12.1: B-50 최소 증거 점수 3 (Sharpe 7.24, Calmar 751)
 RB_CONFIDENCE_LEVERAGE_STEP=0.0    # 컨피던스당 추가 레버리지 (0=고정, 1.0=moderate)
 RB_RSI_PERIOD=14                   # RSI 계산 기간
 RB_VOL_PERIOD=20                   # 거래량 SMA 기간 (스파이크 감지)
@@ -596,8 +603,13 @@ SLIPPAGE=0.001                 # 슬리피지 (0.10%)
 FUNDING_RATE_8H=0.0001         # 8시간 펀딩비 (0.01%)
 
 # 유니버스 & 페이퍼 트레이딩
-N_COINS=30                     # 상위 N개 코인 사용
+N_COINS=50                     # v12.1: B-50 상위 50개 코인 스캔
 PAPER_BALANCE=1000             # 페이퍼 트레이딩 시 가상 잔고 ($)
+
+# v12.1 Symbol Whitelist (B-50: 4 tiers)
+# T1 (20): 오리지널 Top-20 | T2 (10): v1 sweep 추가 | T3 (10): mid-cap | T4 (10): mid-cap
+RB_SYMBOL_WHITELIST=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,XLMUSDT,DOTUSDT,1000PEPEUSDT,ARBUSDT,FETUSDT,1000SHIBUSDT,OPUSDT,ATOMUSDT,HBARUSDT,ICPUSDT,FILUSDT,TRXUSDT,SUIUSDT,TONUSDT,LTCUSDT,BCHUSDT,UNIUSDT,NEARUSDT,APTUSDT,AAVEUSDT,INJUSDT,ETCUSDT,MATICUSDT,GRTUSDT,STXUSDT,FTMUSDT,EGLDUSDT,AXSUSDT,SANDUSDT,THETAUSDT,ALGOUSDT,RUNEUSDT,DYDXUSDT,CRVUSDT,LDOUSDT,COMPUSDT,MKRUSDT,SNXUSDT,VETUSDT,EOSUSDT,APEUSDT
+RB_MAX_CONCURRENT=2            # v12.1: B-50 최적 슬롯 (2 slots, Calmar 751)
 
 # 알림 (Discord Webhook - 단방향 알림)
 DISCORD_WEBHOOK_URL=           # 미설정 시 알림 비활성화

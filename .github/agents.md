@@ -10,8 +10,9 @@
 QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
 두 가지 전략을 지원한다:
 1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
-2. **Elliott Wave Strategy** (v11.4): ZigZag ABC 패턴 + Fibonacci 검증 (4h)
+2. **Elliott Wave Strategy** (v11.6): ZigZag ABC 패턴 + Fibonacci 검증 + Timing Alpha Filter (4h)
 **v11.4: Adaptive Threshold + Leverage Optimization** — ATR 기반 적응형 임계값 (`clip(2.5 × ATR%(48), 1%, 6%)`). 18-variant walk-forward sweep + 14-variant leverage grid → 2.5x_f1 선택. OOS Return +5069%, MDD 19.0%, Calmar 266.6. MTF 레버리지 2.0→2.5× (실효 3.75×).
+**v11.6: Elliott Wave Timing Alpha** — 97패턴 리서치 기반 3중 타이밍 필터 (impulse_accel≥0, corr_ratio≥0.20, w3w1≤2.5). Calmar 1.51→5.10, Sharpe 1.07→1.69. 파라미터 비감응 (-0.3~+0.3 동일 결과).
 **v11.4: Elliott Wave Strategy** — ZigZag ABC 패턴 인식, 2단계 포지셔닝 (2% 탐색적 → 8% 확인), 50% 부분 익절 + 브레이크이븐 스탑, BTC 매크로 바이어스, Numba 가속 지표.
 **v11.3: 1-Minute Polling Loop** — 15분 대기 대신 60초 간격 폴링으로 반응성 개선.
 **v11.1: Critical Fixes + Pool Expansion** — 서버사이드 손절(STOP 주문), 레버리지 검증, Top-20 심볼 화이트리스트 (A/B validated: +130% return vs Top-15).
@@ -79,16 +80,28 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
          htf_rb_max_hold=12, htf_rb_btc_sma_period=48
 비용:     0.04%/side + 펀딩비
 
-성과 (365일, v11.4 Adaptive Threshold 2.5x_f1, Top-20 유니버스, 5 slots):
-  Return:    +5069.4% (OOS walk-forward)
-  Max DD:    19.0%
-  Calmar:    266.6
-  Trades:    969
-  Win Rate:  70.1%
-  Profit Factor: 2.83
-  Sharpe:    5.31
+성과 (365일, v11.4 Adaptive Threshold 2.5x_f1, Top-20 유니버스):
+  ── Per-Symbol Independent (5 slots, $10K reference) ──
+  ΣReturn:   +79,523% (OOS walk-forward)
+  Max DD:    18.9%
+  Sharpe:    8.23 (OOS), OOS/IS Ratio: 1.09
+  Trades:    5,670
+  Win Rate:  67.6%
+
+  ── Portfolio-Level ($2,280, 2 slots, flat sizing, no reinvest) ──
+  Return:    +1,165% annual
+  Max DD:    12.5%
+  Sharpe:    6.55
+  Calmar:    93.4
+  Trades:    2,391
+  Win Rate:  65.2%
+  Profit Factor: 2.11
+  Avg PnL/Trade: +1.125% on margin ($12.82)
+  Avg Win: +3.28%  |  Avg Loss: -2.93%
+  Trades/day: 6.6  |  Avg hold: 6.7 bars (~1.7h)
+  Conservative (50% live discount): +582% → ~$13,300/yr
   Dynamic Capital: balance / max(1, n_active+1), 50% cap
-  안전장치: 서버사이드 STOP 손절 (클라이언트 크래시 방어), 레버리지 검증
+  안전장치: 서버사이드 Algo Order 손절 (클라이언트 크래시 방어), v11.4.2 Bracket Repair (복원 시 누락 SL/TP 자동 복구), 레버리지 검증
 ```
 
 ---
@@ -271,11 +284,13 @@ else:
 | `discord.py` | Webhook 기반 알림 (진입/청산/에러/일일보고) |
 | `bot.py` | Discord Bot 기반 원격 제어 (!status, !close, !pause 등) |
 
+> **Discord 알림 언어:** 모든 Discord 메시지는 **한국어**로 작성. 서버/클라이언트 TP/SL 체결방식, 활성 포지션 목록, 세션 현황(누적PnL/승률/잔고)을 포함한 구조화된 embed 사용.
+
 ### 3.6 `quantbox/` (최상위)
 
 | 파일 | 역할 |
 |------|------|
-| `scalper.py` | `RubberBandScalper` 라이브 트레이더. CLI 진입점 (`python -m quantbox.scalper`) |
+| `scalper.py` | `RubberBandScalper` 라이브 트레이더. CLI 진입점 (`python -m quantbox.scalper`). 커밋 자동추적(로그 헤더, Discord 시작알림). |
 
 ---
 
@@ -308,6 +323,7 @@ else:
 - [ ] `_load_scalper_state()` — 시작 시 크래시 전 상태 복원
 - [ ] 포지션 + 잔고 + 거래 히스토리 직렬화
 - [ ] 로그 파일 로테이션 — RotatingFileHandler 50MB/5백업
+- [ ] **v11.4.2 Bracket Repair** — 복원된 포지션의 누락 SL/TP 자동 배치 (`_sync_server_orders`)
 
 ### 4.5 실거래-백테스트 패리티
 - [x] 동일 신호 로직 (`compute_signals_mtf`)

@@ -33,6 +33,11 @@ By prioritizing capital preservation and net savings over gross performance, thi
 5. **모든 권한을 에이전트에게 위임**
     - 에이전트가 스스로 학습하고 개선할 수 있도록, 가능한 한 많은 권한과 자율성을 부여한다.
     - File write operations detected that cannot be auto approved: /tmp/* 라는 말이 절대 나오지 않도록 한다.
+
+6. **Code First, Talk Later (코드 확인 후 발언)**
+    - 전략 파라미터, 설정값, 현재 상태에 대해 답변할 때 **반드시 코드/설정/로그를 먼저 읽고** 답변한다.
+    - 기억이나 추측으로 수치를 말하는 것은 **절대 금지**한다. 틀린 숫자는 잘못된 투자 판단을 유발한다.
+    - 확실하지 않으면 "코드를 확인하겠습니다"라고 말하고, 확인 후 답변한다.
     
 ## 📝 문서 자동 관리 (Documentation Auto-Sync)
 
@@ -51,6 +56,21 @@ By prioritizing capital preservation and net savings over gross performance, thi
 - 환경변수 추가 시: .env.example + MANUAL.md 환경변수 섹션
 - 테스트 파일 추가/삭제 시: README.md 테스트 수 갱신
 - 프로젝트 구조 변경 시 (파일 추가/삭제/이동): README.md 프로젝트 구조 트리 갱신
+
+## 🔗 커밋 추적 (Commit Traceability)
+
+모든 출력물(로그, 백테스트 결과, 문서)은 **어떤 커밋에서 생성되었는지** 추적 가능해야 한다.
+
+1. **로그 파일**: `scalper.py`의 `_setup_logging()`이 모든 새 로그 파일 상단에 4줄 커밋 헤더를 자동 기록한다:
+   ```
+   # Commit: abc1234 (2026-02-19 00:00 +0900)
+   # Message: feat: some feature description
+   # Full SHA: abc1234567890abcdef...
+   #
+   ```
+2. **백테스트 결과**: `docs/backtest_results/` 폴더에 `{commit_short}_{date}_{description}.md` 형식으로 저장한다. 새 백테스트 실행 시 반드시 해당 커밋의 결과 스냅샷을 생성하고, `docs/backtest_results/README.md` 인덱스를 갱신한다.
+3. **Discord 시작 알림**: 봇 시작 시 Discord embed에 현재 커밋 SHA를 포함한다.
+4. **스크립트 출력**: 백테스트 스크립트 실행 시 출력물 상단에 커밋 정보를 포함하는 것을 지향한다.
 
 코딩 컨벤션 및 타입
 Type Hinting: typing.List, typing.Dict 대신 Python 3.9+ 표준인 list[], dict[], tuple[] 사용을 지향한다.
@@ -73,6 +93,7 @@ Numba: 루프가 10,000회 이상 반복되는 연산(백테스트)에는 반드
 1. feature/fix 브랜치 작업 완료 시 **반드시 develop에 머지**한 뒤 push한다. 브랜치만 push하고 develop을 안 건드리면 안 된다.
 2. develop에 직접 커밋하지 않고, 항상 feature/fix 브랜치를 경유한다.
 3. main에는 릴리스 준비가 완료된 develop만 머지한다.
-4. 머지 시 `--no-ff` 옵션으로 머지 커밋을 남긴다.
+4. feature/fix → develop 머지 시 **`--no-ff`** 옵션으로 머지 커밋을 남긴다. (`git merge --no-ff feature/xxx`)
+5. develop → main 머지 시에도 `--no-ff` 옵션으로 머지 커밋을 남긴다.
 
 **Agent Note:** 사용자는 엄격하며 공격적인 퀀트 트레이더입니다. 코드가 예쁘게 보이는 것보다, **돈을 잃지 않는 안전장치(Safety check)**가 구현되었는지를 가장 중요하게 생각합니다.

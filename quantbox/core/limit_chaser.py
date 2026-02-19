@@ -31,6 +31,7 @@ class ChaseFillStatus(Enum):
     FALLBACK_MARKET = "fallback_market"
     FAILED = "failed"
     TIMEOUT = "timeout"
+    NO_POSITION = "no_position"  # -4118/-2022: position already closed
 
 
 @dataclass
@@ -170,6 +171,7 @@ class LimitOrderChaser:
         price_precision: int = 2,
         step_size: float = 0.0,
         quantity_precision: int = 8,
+        reduce_only: bool = False,
     ) -> ChaseResult:
         """Limit 지정가 추격 주문 실행.
 
@@ -187,6 +189,9 @@ class LimitOrderChaser:
             step_size: LOT_SIZE 필터의 stepSize (수량 정밀도).
                 0이면 수량 반올림을 건너뛴다 (하위 호환성).
             quantity_precision: 수량 소수점 자릿수.
+            reduce_only: True면 reduceOnly=True로 주문.
+                포지션 종료 시 반드시 True로 설정해야 한다.
+                False면 신규 포지션 오픈 주문.
 
         Returns:
             ChaseResult with 체결 정보.
@@ -244,7 +249,7 @@ class LimitOrderChaser:
 
             # 3. Place limit order
             try:
-                order = self.client.futures_create_order(
+                order_params = dict(
                     symbol=symbol,
                     side=side,
                     type="LIMIT",
@@ -252,13 +257,29 @@ class LimitOrderChaser:
                     quantity=remaining_qty,
                     price=str(limit_price),
                 )
+                if reduce_only:
+                    order_params['reduceOnly'] = 'true'
+                order = self.client.futures_create_order(**order_params)
                 last_order_id = str(order["orderId"])
                 logger.debug(
                     f"[{symbol}] Limit {side} {remaining_qty} @ {limit_price} "
-                    f"(chase #{chase_count})"
+                    f"(chase #{chase_count}, reduceOnly={reduce_only})"
                 )
             except Exception as e:
+                err_str = str(e)
                 logger.error(f"[{symbol}] Limit order failed: {e}")
+                # -4118: ReduceOnly order failed (no position exists)
+                # -2022: ReduceOnly order rejected
+                if '-4118' in err_str or '-2022' in err_str:
+                    return ChaseResult(
+                        status=ChaseFillStatus.NO_POSITION,
+                        filled_quantity=0.0,
+                        avg_price=0.0,
+                        order_id='',
+                        chase_count=chase_count,
+                        elapsed_seconds=time.monotonic() - start_time,
+                        maker_fill=False,
+                    )
                 break
 
             # 4. Wait and check fill
@@ -392,8 +413,19 @@ class LimitOrderChaser:
                 f"{remaining_qty:.6f} (filled {total_filled:.6f} via limit)"
             )
             market_result = self._market_fallback(
-                symbol, side, remaining_qty, step_size, quantity_precision
+                symbol, side, remaining_qty, step_size, quantity_precision,
+                reduce_only=reduce_only,
             )
+            if market_result == 'NO_POSITION':
+                return ChaseResult(
+                    status=ChaseFillStatus.NO_POSITION,
+                    filled_quantity=0.0,
+                    avg_price=0.0,
+                    order_id='',
+                    chase_count=chase_count,
+                    elapsed_seconds=time.monotonic() - start_time,
+                    maker_fill=False,
+                )
             if market_result is not None:
                 mkt_qty, mkt_price, mkt_oid = market_result
                 weighted_price_sum += mkt_qty * mkt_price
@@ -433,6 +465,7 @@ class LimitOrderChaser:
         quantity: float,
         step_size: float = 0.0,
         quantity_precision: int = 8,
+        reduce_only: bool = False,
     ) -> tuple[float, float, str] | None:
         """시장가 fallback 주문.
 
@@ -446,6 +479,7 @@ class LimitOrderChaser:
             quantity: 주문 수량.
             step_size: LOT_SIZE 필터의 stepSize.
             quantity_precision: 수량 소수점 자릿수.
+            reduce_only: True면 reduceOnly=True로 주문.
 
         Returns:
             (filled_qty, avg_price, order_id) 또는 None.
@@ -460,13 +494,16 @@ class LimitOrderChaser:
                 )
                 return None
         try:
-            order = self.client.futures_create_order(
+            order_params = dict(
                 symbol=symbol,
                 side=side,
                 type="MARKET",
                 quantity=quantity,
                 newOrderRespType="RESULT",
             )
+            if reduce_only:
+                order_params['reduceOnly'] = 'true'
+            order = self.client.futures_create_order(**order_params)
             order_id = str(order["orderId"])
 
             # 1차: fills 배열에서 정확한 체결 데이터 추출
@@ -517,7 +554,11 @@ class LimitOrderChaser:
                 symbol, side, quantity, order_id
             )
         except Exception as e:
+            err_str = str(e)
             logger.error(f"[{symbol}] Market fallback FAILED: {e}")
+            # -4118/-2022: position already gone — not a real error
+            if '-4118' in err_str or '-2022' in err_str:
+                return 'NO_POSITION'
             return None
 
     def _verify_market_order(
