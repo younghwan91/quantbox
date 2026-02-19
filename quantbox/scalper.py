@@ -923,7 +923,7 @@ class RubberBandScalper:
                     'algoId': order_id,
                 }
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 f"[{symbol}] Algo order status check failed: "
                 f"algoId={order_id} error={e}"
             )
@@ -1685,17 +1685,113 @@ class RubberBandScalper:
         result = self._place_order(symbol, side, quantity, reduce_only=True)
 
         # ── NO_POSITION: exchange says position already gone ──
+        # This typically means a server-side TP/SL filled between cycles.
+        # We MUST record the trade — otherwise trade count and PnL stay at 0.
         if isinstance(result, dict) and result.get('status') == 'NO_POSITION':
             logger.warning(
                 f"[{symbol}] Position already closed on exchange — "
-                f"cleaning up internal state (reason={reason})"
+                f"recording trade & cleaning up (reason={reason})"
             )
-            self.discord.send(content=(
-                f"\u26a0\ufe0f **NO POSITION** [{symbol}] — "
-                f"Position gone on exchange. State cleanup."
-            ))
-            # Remove from internal tracking
-            self.strategy.close_position(symbol)
+            # Pop the position from internal tracking
+            closed_pos = self.strategy.close_position(symbol)
+            if closed_pos:
+                # Try to get actual fill price from recent exchange trades
+                fill_price = current_price  # fallback
+                try:
+                    recent_trades = self.client.futures_account_trades(
+                        symbol=symbol, limit=10,
+                    )
+                    if recent_trades:
+                        # Find the most recent CLOSE trade (opposite side)
+                        close_side = 'SELL' if closed_pos['signal'] == 1 else 'BUY'
+                        for t in reversed(recent_trades):
+                            if t.get('side') == close_side and t.get('realizedPnl', '0') != '0':
+                                fill_price = float(t['price'])
+                                logger.info(
+                                    f"[{symbol}] NO_POSITION fill recovered: "
+                                    f"price=${fill_price:.4f} "
+                                    f"realizedPnl={t.get('realizedPnl')}"
+                                )
+                                break
+                except Exception as e:
+                    logger.warning(
+                        f"[{symbol}] Could not fetch fill info: {e}. "
+                        f"Using current_price=${current_price:.4f} as fallback."
+                    )
+
+                # PnL calculation
+                if closed_pos['signal'] == 1:
+                    pnl_pct = (fill_price - closed_pos['entry_price']) / closed_pos['entry_price']
+                else:
+                    pnl_pct = (closed_pos['entry_price'] - fill_price) / closed_pos['entry_price']
+
+                pnl_usd = pnl_pct * closed_pos['notional']
+                cost = closed_pos['notional'] * self.config.round_trip_cost
+                net_pnl = pnl_usd - cost
+
+                # Trade record
+                trade = {
+                    'symbol': symbol,
+                    'signal': closed_pos['signal'],
+                    'entry_price': closed_pos['entry_price'],
+                    'exit_price': fill_price,
+                    'pnl_pct': pnl_pct * 100,
+                    'pnl_usd': net_pnl,
+                    'notional': closed_pos['notional'],
+                    'bars_held': closed_pos['bars_held'],
+                    'reason': f'{reason}_no_position',
+                    'time': datetime.now(timezone.utc).isoformat(),
+                }
+                self._trade_history.append(trade)
+
+                # v12.0: Exit diagnostic to JSONL
+                _diag_logger.log_exit(
+                    self._cycle_count,
+                    datetime.now(timezone.utc).isoformat(),
+                    trade,
+                )
+
+                _exit_side = 'LONG' if closed_pos['signal'] == 1 else 'SHORT'
+                print(format_exit(
+                    symbol=symbol,
+                    side=_exit_side,
+                    entry_price=closed_pos['entry_price'],
+                    exit_price=fill_price,
+                    pnl_usd=net_pnl,
+                    pnl_pct=pnl_pct * 100,
+                    reason=f'{reason} (no_position)',
+                    bars_held=closed_pos['bars_held'],
+                ))
+                logger.info(
+                    f"[{symbol}] NO_POSITION trade recorded: {_exit_side} "
+                    f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+                    f"exit=${fill_price:.4f} held={closed_pos['bars_held']} bars"
+                )
+
+                # Session stats
+                cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+                n_trades = len(self._trade_history)
+                wins_total = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+                wr = wins_total / n_trades * 100 if n_trades > 0 else 0
+                balance_after = self.get_balance()
+                hold_time = closed_pos['bars_held'] * 15  # minutes
+
+                self.discord.send(embed={
+                    'title': f"{'✅' if net_pnl > 0 else '❌'} {symbol} CLOSED — {reason.upper()} (server fill)",
+                    'color': 0x00C853 if net_pnl > 0 else 0xFF1744,
+                    'fields': [
+                        {'name': 'Direction', 'value': _exit_side, 'inline': True},
+                        {'name': 'PnL', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                        {'name': 'Net $', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                        {'name': 'Entry', 'value': f'${closed_pos["entry_price"]:.4f}', 'inline': True},
+                        {'name': 'Exit', 'value': f'${fill_price:.4f}', 'inline': True},
+                        {'name': 'Hold Time', 'value': f'{hold_time}m ({closed_pos["bars_held"]} bars)', 'inline': True},
+                        {'name': 'Cum PnL', 'value': f'${cum_pnl:+,.2f} ({n_trades} trades)', 'inline': True},
+                        {'name': 'Win Rate', 'value': f'{wr:.0f}%', 'inline': True},
+                        {'name': 'Balance', 'value': f'${balance_after:,.2f}', 'inline': True},
+                    ],
+                    'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+                })
             self._save_state()
             return True
 
@@ -2043,7 +2139,7 @@ class RubberBandScalper:
                 top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
                 logger.info(
                     f"No candidates — top moves: {', '.join(top3)} "
-                    f"(need >{self.config.threshold*100:.1f}%)"
+                    f"(base >{self.config.threshold*100:.1f}%, adaptive per-symbol)"
                 )
 
         # v12.0: Write structured diagnostics to JSONL

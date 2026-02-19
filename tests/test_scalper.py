@@ -111,3 +111,151 @@ class TestScalperConfig:
         assert cfg.lookback == 10
         assert cfg.threshold == 0.03
         assert cfg.max_concurrent == 3
+
+
+# ── NO_POSITION Trade Recording ──
+
+class TestNoPositionTradeRecording:
+    """Test that the NO_POSITION path in _close_position records trades.
+
+    When a server-side TP/SL fills between cycles, the scalper's reduceOnly
+    close order fails with -4118. The NO_POSITION path must still record the
+    trade in _trade_history — otherwise CumPnL and trade count stay at 0.
+    """
+
+    @pytest.fixture
+    def mock_scalper(self, tmp_path):
+        """Create a paper-mode scalper with mocked exchange client."""
+        with (
+            patch('quantbox.scalper.get_settings') as mock_settings,
+            patch('quantbox.scalper.Client') as MockClient,
+            patch('quantbox.scalper.DiscordNotifier') as MockDiscord,
+            patch('quantbox.scalper.DiscordBotRunner', None),
+        ):
+            mock_settings.return_value = MagicMock(
+                binance_api_key='test_key',
+                binance_api_secret='test_secret',
+                binance_testnet=False,
+                discord_webhook_url='',
+                discord_bot_token='',
+                discord_channel_id='',
+                paper_balance=2000.0,
+            )
+            scalper = RubberBandScalper(paper_mode=False)
+
+        scalper.client = MagicMock()
+        scalper.discord = MagicMock()
+        scalper._symbol_info_cache = {
+            'AAVEUSDT': {
+                'tick_size': 0.01,
+                'step_size': 0.001,
+                'price_precision': 2,
+                'qty_precision': 3,
+                'min_notional': 5.0,
+            },
+        }
+        return scalper
+
+    def test_no_position_records_trade(self, mock_scalper):
+        """When exchange returns NO_POSITION, trade is still recorded."""
+        scalper = mock_scalper
+
+        # Set up a LONG position as if it was opened earlier
+        scalper.strategy.open_position(
+            symbol='AAVEUSDT', signal=1, entry_price=122.13,
+            notional=500.0, leverage=2.0, move_size=0.03,
+        )
+        pos = scalper.strategy._positions['AAVEUSDT']
+        pos['bars_held'] = 14
+        pos['server_sl_order_id'] = 'algo_sl_123'
+        pos['server_tp_order_id'] = 'algo_tp_456'
+
+        # Mock _place_order to return NO_POSITION (TP already filled)
+        scalper._place_order = MagicMock(
+            return_value={'status': 'NO_POSITION'},
+        )
+        # Mock cancel methods
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._cancel_server_take_profit = MagicMock()
+        # Mock get_balance
+        scalper.get_balance = MagicMock(return_value=2155.0)
+
+        # Mock futures_account_trades — simulate exchange returning recent fills
+        scalper.client.futures_account_trades = MagicMock(return_value=[
+            {
+                'symbol': 'AAVEUSDT',
+                'side': 'SELL',
+                'price': '123.51',
+                'qty': '4.093',
+                'realizedPnl': '5.65',
+                'commission': '0.02',
+                'time': 1740000000000,
+            },
+        ])
+
+        # Before: no trades recorded
+        assert len(scalper._trade_history) == 0
+
+        # Call _close_position with current_price close to TP
+        result = scalper._close_position(
+            symbol='AAVEUSDT',
+            reason='target',
+            current_price=123.33,
+        )
+
+        # After: trade must be recorded
+        assert result is True
+        assert len(scalper._trade_history) == 1
+
+        trade = scalper._trade_history[0]
+        assert trade['symbol'] == 'AAVEUSDT'
+        assert trade['signal'] == 1  # LONG
+        assert trade['entry_price'] == 122.13
+        assert trade['exit_price'] == 123.51  # from exchange fill, not current_price
+        assert trade['pnl_pct'] > 0  # profitable
+        assert trade['pnl_usd'] > 0  # profitable after cost
+        assert trade['bars_held'] == 14
+        assert 'no_position' in trade['reason']
+        assert trade['time'] is not None
+
+        # Position should be removed from strategy
+        assert not scalper.strategy.has_position('AAVEUSDT')
+
+    def test_no_position_fallback_to_current_price(self, mock_scalper):
+        """When exchange trade fetch fails, fallback to current_price."""
+        scalper = mock_scalper
+
+        # Set up a SHORT position
+        scalper.strategy.open_position(
+            symbol='AAVEUSDT', signal=-1, entry_price=130.0,
+            notional=500.0, leverage=2.0, move_size=0.03,
+        )
+        pos = scalper.strategy._positions['AAVEUSDT']
+        pos['bars_held'] = 5
+        pos['server_sl_order_id'] = None
+        pos['server_tp_order_id'] = None
+
+        scalper._place_order = MagicMock(
+            return_value={'status': 'NO_POSITION'},
+        )
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._cancel_server_take_profit = MagicMock()
+        scalper.get_balance = MagicMock(return_value=2100.0)
+
+        # Exchange trade fetch fails
+        scalper.client.futures_account_trades = MagicMock(
+            side_effect=Exception("API timeout"),
+        )
+
+        result = scalper._close_position(
+            symbol='AAVEUSDT',
+            reason='stop_loss',
+            current_price=128.0,
+        )
+
+        assert result is True
+        assert len(scalper._trade_history) == 1
+        trade = scalper._trade_history[0]
+        assert trade['exit_price'] == 128.0  # fallback to current_price
+        assert trade['signal'] == -1  # SHORT
+        assert 'no_position' in trade['reason']
