@@ -2869,7 +2869,7 @@ def main():
         partial_exit_fraction=settings.rb_partial_exit_fraction,
         rr_leverage_enabled=settings.rb_rr_leverage_enabled,
         min_rr_for_leverage=settings.rb_min_rr_for_leverage,
-        max_concurrent=args.max_slots if args.max_slots is not None else 5,
+        max_concurrent=args.max_slots if args.max_slots is not None else settings.rb_max_concurrent,
         # v6.0: Confidence scoring
         entry_mode=settings.rb_entry_mode,
         btc_regime_period=settings.rb_btc_regime_period,
