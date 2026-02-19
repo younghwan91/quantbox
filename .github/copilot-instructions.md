@@ -57,6 +57,21 @@ By prioritizing capital preservation and net savings over gross performance, thi
 - 테스트 파일 추가/삭제 시: README.md 테스트 수 갱신
 - 프로젝트 구조 변경 시 (파일 추가/삭제/이동): README.md 프로젝트 구조 트리 갱신
 
+## 🔗 커밋 추적 (Commit Traceability)
+
+모든 출력물(로그, 백테스트 결과, 문서)은 **어떤 커밋에서 생성되었는지** 추적 가능해야 한다.
+
+1. **로그 파일**: `scalper.py`의 `_setup_logging()`이 모든 새 로그 파일 상단에 4줄 커밋 헤더를 자동 기록한다:
+   ```
+   # Commit: abc1234 (2026-02-19 00:00 +0900)
+   # Message: feat: some feature description
+   # Full SHA: abc1234567890abcdef...
+   #
+   ```
+2. **백테스트 결과**: `docs/backtest_results/` 폴더에 `{commit_short}_{date}_{description}.md` 형식으로 저장한다. 새 백테스트 실행 시 반드시 해당 커밋의 결과 스냅샷을 생성하고, `docs/backtest_results/README.md` 인덱스를 갱신한다.
+3. **Discord 시작 알림**: 봇 시작 시 Discord embed에 현재 커밋 SHA를 포함한다.
+4. **스크립트 출력**: 백테스트 스크립트 실행 시 출력물 상단에 커밋 정보를 포함하는 것을 지향한다.
+
 코딩 컨벤션 및 타입
 Type Hinting: typing.List, typing.Dict 대신 Python 3.9+ 표준인 list[], dict[], tuple[] 사용을 지향한다.
 Docstring: Google Style Docstring을 사용하여 입출력 데이터의 형상을 명시한다.
