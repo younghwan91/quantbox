@@ -114,8 +114,8 @@ class QuantBoxSettings(BaseSettings):
     rb_btc_regime_period: int = 96            # BTC SMA period for regime detection (96봉 = 24시간)
     rb_asset_trend_period: int = 192          # Asset SMA period for classic pullback (192봉 = 48시간)
 
-    # ── Confidence Scoring (v10.0, MTF acts as quality gate) ──
-    rb_min_confidence: int = 1                # v10.0: 최소 1 (MTF가 진짜 필터, +86.9% ret)
+    # ── Confidence Scoring (v12.1, B-50 A/B validated) ──
+    rb_min_confidence: int = 3                # v12.1: 최소 3 (B-50 winner: Sharpe 7.24, Calmar 751)
     rb_confidence_leverage_step: float = 0.0  # 컨피던스당 추가 레버리지 (0=고정)
     rb_rsi_period: int = 14                   # RSI 계산 기간
     rb_vol_period: int = 20                   # 거래량 SMA 기간 (스파이크 감지)
@@ -176,9 +176,21 @@ class QuantBoxSettings(BaseSettings):
     rb_rr_leverage_enabled: bool = True       # R:R 기준 레버리지 게이트 활성화
     rb_min_rr_for_leverage: float = 0.30      # 레버리지 허용 최소 R:R 비율
 
-    # ── v10.0 Symbol Whitelist & Dynamic Capital ──
-    rb_symbol_whitelist: str = 'FILUSDT,1000PEPEUSDT,XRPUSDT,XLMUSDT,ADAUSDT,FETUSDT,ETHUSDT,ARBUSDT,1000SHIBUSDT,LINKUSDT,ATOMUSDT,OPUSDT,DOTUSDT,NEARUSDT,AAVEUSDT,BCHUSDT,HBARUSDT,SOLUSDT,ICPUSDT,BNBUSDT'
-    rb_dynamic_capital_enabled: bool = True  # balance / max(1, n_active+1) 동적 자본 배분
+    # ── v12.1 Symbol Whitelist & Dynamic Capital (B-50 winner) ──
+    rb_symbol_whitelist: str = (
+        'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,DOGEUSDT,'
+        'ADAUSDT,AVAXUSDT,LINKUSDT,XLMUSDT,DOTUSDT,1000PEPEUSDT,'
+        'ARBUSDT,FETUSDT,1000SHIBUSDT,OPUSDT,ATOMUSDT,HBARUSDT,'
+        'ICPUSDT,FILUSDT,'
+        'TRXUSDT,SUIUSDT,TONUSDT,LTCUSDT,BCHUSDT,'
+        'UNIUSDT,NEARUSDT,APTUSDT,AAVEUSDT,INJUSDT,'
+        'ETCUSDT,MATICUSDT,GRTUSDT,STXUSDT,FTMUSDT,'
+        'EGLDUSDT,AXSUSDT,SANDUSDT,THETAUSDT,ALGOUSDT,'
+        'RUNEUSDT,DYDXUSDT,CRVUSDT,LDOUSDT,COMPUSDT,'
+        'MKRUSDT,SNXUSDT,VETUSDT,EOSUSDT,APEUSDT'
+    )
+    rb_max_concurrent: int = 2               # v12.1: B-50 최적 슬롯 수 (2 slots, Calmar 751)
+    rb_dynamic_capital_enabled: bool = True   # balance / max(1, n_active+1) 동적 자본 배분
 
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부

@@ -14,12 +14,12 @@
   - 공식: `threshold = clip(2.5 × ATR%(48), 1%, 6%)` — 변동성 높으면 넓고, 낮으면 타이트
   - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
   - 레버리지 최적화: 1×~5× 그리드 → Sharpe 단조 감소, 현행 3.75× 유지 결정
-- **v10.0 Entry Optimization**: threshold fallback 0.032 (ATR NaN 시), min_confidence 1 (MTF as quality gate)
+- **v10.0 Entry Optimization**: threshold fallback 0.032 (ATR NaN 시), min_confidence 3 (v12.1 B-50 quality gate)
 - **v10.0 Extended Hold**: max_hold 10→20 (+24% ret, strictly better)
 - **v10.0 Faster Stochastic**: stoch_k 5→3 (+5% Calmar)
 - **v11.1 Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어 + 레버리지 설정 검증
-- **v11.1 Pool Expansion**: Top-15→Top-20 (A/B validated: 3384% ret, Calmar 155.22 vs baseline 1470%)
-- **v10.0 Symbol Whitelist**: Top-20 검증된 심볼만 거래 — 3384% ret, WR 69.7%, Calmar 155.22
+- **v12.1 B-50 Universe**: Top-20→Top-50 (4 tiers: T1=20 originals, T2=10 v1 sweep, T3=10 mid-cap, T4=10 mid-cap)
+- **v10.0 Symbol Whitelist**: Top-50 검증된 심볼만 거래 (B-50 config, RB_MAX_CONCURRENT=2)
 - **v10.0 Dynamic Capital**: balance / max(1, n_active+1) — 유휴 자본 최소화, 50% cap 안전장치
 - **Fibonacci Exit Levels (v9.0)**: 피보나치 기반 정밀 목표/손절 — target 0.382 (golden ratio), stop 0.786 (deep correction)
   - R:R 0.444→0.486 (+9.5%), Calmar +29% vs 기존 0.4/0.9
@@ -38,7 +38,7 @@
 - **MTF Leverage Boost (v7.0)**: MTF 확인 통과 트레이드에 2.0x 레버리지 부스트 (실효 3.0x)
 - **Confidence-Scored Entry (v6.0)**: 멀티 증거 기반 컨피던스 필터링 + 졸업 레버리지
   - RSI, 거래량 스파이크, 테이커 매수/매도 비율, SMA 거리, BTC 모멘텀, MACD 히스토그램(v9.0), 스토캐스틱 크로스(v9.0) — 최대 7가지 증거
-  - min_confidence=1: MTF 4h 트렌드 필터가 실질적 품질 게이트 역할 (v10.0, +86.9% ret)
+  - min_confidence=3: v12.1 B-50 강화 필터 (Sharpe 7.24, Calmar 751)
   - 선택적 졸업 레버리지: 증거 많을수록 포지션 확대
 - **Regime-Switch Dual Entry (v5.0 base)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
   - Risk-On (BTC > SMA96): Classic Pullback — 자산 자체 상승추세에서 조정 시 매수
@@ -49,7 +49,7 @@
 - **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (R:R 게이트와 연동)
 - **MTF (v7.0)**: 4h SMA(12) 트렌드 확인 활성화 — MDD -74%, Calmar +275%
 - **Live/Backtest Parity (v7.0)**: volume/taker 데이터 _scan_entries() 연결 + 4h kline 다운로드 + main() v7.0 설정 전달
-- **365-Day Validated**: 30 심볼 × 35,040봉, 7/7 견고성 점수, 9/10 롤링 윈도우 수익
+- **365-Day Validated**: 50 심볼 × 35,040봉, 7/7 견고성 점수, 9/10 롤링 윈도우 수익
 - **v7.0 MTF Numba 함수**: `apply_mtf_confirmation()`, `apply_mtf_leverage()`, `compute_signals_4h_independent()` (Numba 가속)
 - **v9.0 S+R+M Numba 함수**: `_compute_ema_inline()`, `_compute_stochastic_inline()`, `_compute_macd_inline()`, `compute_signals_v9()` (Numba 가속)
 - **Volatility Selection**: 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일마다 리밸런싱)
@@ -72,7 +72,7 @@
 - **바이낸스 연동**: Rate limiting과 배치 처리 지원
 
 ### 전략 프레임워크
-- **Rubber Band Mean-Reversion (v11.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-20 심볼 화이트리스트
+- **Rubber Band Mean-Reversion (v12.1)**: 3.2%+ 급등/급락 후 피보나치 0.382 되돌림 포착 + MACD/Stochastic 컨플루언스 + Top-50 심볼 화이트리스트 (B-50)
 - **Elliott Wave Strategy (v11.6)**: ZigZag ABC 패턴 + 5차원 품질 스코어링 + Timing Alpha Filter + Risk-Sized Leverage + 50% 부분 익절 + 브레이크이븐 스탑
   - 4h 타임프레임, EMA(20/50/100/200/500), RSI(14/9), MACD(12/26/9), Stochastic(14/3)
   - **Timing Alpha (v11.6)**: W3/W1 가속도 + 정정/충격 시간비율 + W3/W1 바 비율 필터 (Calmar 5.10, Sharpe 1.69)
@@ -87,7 +87,7 @@
 - **Alpha Engine**: 볼륨/모멘텀/ATR 필터 토글 가능한 멀티팩터 엔진
 - **Hybrid Strategy**: 트렌드 방향 + 러버밴드 타이밍 ("상승장에서 저가 매수")
 - **Volatility Selector**: 실현변동성 기준 심볼 동적 선택 (10일 리밸런싱)
-- **Walk-Forward 검증**: 365일 롤링 윈도우, v11.1 Top-20: 3384% ret, Calmar 155.22
+- **Walk-Forward 검증**: 365일 롤링 윈도우, v12.1 B-50: 50 심볼, RB_MAX_CONCURRENT=2
 
 ### 실거래 안전장치
 - **Server-Side Stop-Loss (v11.1)**: 바이난스 STOP 주문으로 클라이언트 크래시/네트워크 단절 시 손절 보장
@@ -190,7 +190,7 @@ scripts/                    # 유틸리티 스크립트
 ├── elliott_wave_timing_research.py  # Elliott 타이밍 알파 피처 리서치
 ├── elliott_timing_backtest.py       # Elliott 타이밍 알파 Round 1 백테스트
 └── elliott_timing_backtest_r2.py    # Elliott 타이밍 알파 Round 2 정제
-tests/                      # 유닛 테스트 (567개)
+tests/                      # 유닛 테스트 (578개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
@@ -205,7 +205,7 @@ tests/                      # 유닛 테스트 (567개)
 | Trades | 798 | 798 | 798 | 318 | **936** |
 | Profit Factor | N/A | N/A | N/A | N/A | **2.66** |
 
-> **v11.1 핵심**: Top-15→Top-20 Pool Expansion (SHIBUSDT, LINKUSDT, ATOMUSDT, OPUSDT, DOTUSDT, HBARUSDT, ICPUSDT, BNBUSDT 추가). 5 slots 집중 전략이 8/10/15 slots 대비 압도적 성과. 서버사이드 STOP 손절로 클라이언트 크래시 방어.
+> **v12.1 핵심**: Top-20→Top-50 B-50 Universe Expansion (4 tiers: T1=20 originals, T2=10 v1 sweep, T3=10 mid-cap, T4=10 mid-cap). RB_MIN_CONFIDENCE 1→3, RB_MAX_CONCURRENT=2 슬롯 집중 전략. 서버사이드 STOP 손절로 클라이언트 크래시 방어.
 
 ## 🧪 테스트
 
