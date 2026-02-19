@@ -114,8 +114,8 @@ class QuantBoxSettings(BaseSettings):
     rb_btc_regime_period: int = 96            # BTC SMA period for regime detection (96봉 = 24시간)
     rb_asset_trend_period: int = 192          # Asset SMA period for classic pullback (192봉 = 48시간)
 
-    # ── Confidence Scoring (v12.1, B-50 A/B validated) ──
-    rb_min_confidence: int = 3                # v12.1: 최소 3 (B-50 winner: Sharpe 7.24, Calmar 751)
+    # ── Confidence Scoring (v12.2 E-3Slot, filter relaxation A/B validated) ──
+    rb_min_confidence: int = 2                # v12.2: 최소 2 (E-3Slot winner: Sharpe 6.41, Calmar 795, +138% trades/day)
     rb_confidence_leverage_step: float = 0.0  # 컨피던스당 추가 레버리지 (0=고정)
     rb_rsi_period: int = 14                   # RSI 계산 기간
     rb_vol_period: int = 20                   # 거래량 SMA 기간 (스파이크 감지)
@@ -149,8 +149,8 @@ class QuantBoxSettings(BaseSettings):
     # Per-bar threshold = clip(atr_multiplier × ATR%(atr_period), floor, cap)
     # Chosen config: 2.5x_f1 — OOS Sharpe 8.23, OOS/IS 1.09, zero overfitting.
     rb_atr_period: int = 48                   # ATR EMA 기간 (48 × 15분 = 12시간)
-    rb_atr_multiplier: float = 2.5            # ATR 배수
-    rb_threshold_floor: float = 0.01          # 최소 임계값 (1%)
+    rb_atr_multiplier: float = 2.0            # v12.2: ATR 배수 (2.5→2.0, E-3Slot A/B validated)
+    rb_threshold_floor: float = 0.008         # v12.2: 최소 임계값 (0.8%, 1%→0.8%)
     rb_threshold_cap: float = 0.06            # 최대 임계값 (6%)
 
     # ── v7.0 Independent 4H Rubber Band ──
@@ -189,7 +189,7 @@ class QuantBoxSettings(BaseSettings):
         'RUNEUSDT,DYDXUSDT,CRVUSDT,LDOUSDT,COMPUSDT,'
         'MKRUSDT,SNXUSDT,VETUSDT,EOSUSDT,APEUSDT'
     )
-    rb_max_concurrent: int = 2               # v12.1: B-50 최적 슬롯 수 (2 slots, Calmar 751)
+    rb_max_concurrent: int = 3               # v12.2: E-3Slot 최적 (3 slots, Calmar 795, +138% trades/day)
     rb_dynamic_capital_enabled: bool = True   # balance / max(1, n_active+1) 동적 자본 배분
 
     # ── Regime Protection ──
