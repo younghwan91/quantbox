@@ -22,3 +22,4 @@ Example: `5ec5007_20260219_3year_ab_test.md`
 |--------|------|-------------|-------------|
 | `8eb95b2` | 2026-02-18 | v11.4 Adaptive Threshold (2.5x_f1) — 365d, 20 symbols | Sharpe 7.78, ΣRet +79,523% |
 | `6618f55` | 2026-02-19 | 3-Year A/B Test (7 dimensions, 34 variants) — 1095d, 20 symbols | Sharpe 5.61, $2,095→$85,697 |
+| `76d71af` | 2026-02-19 | Performance Assessment A/B/C (3 configs, 3yr portfolio) — 1095d, 20 symbols | **B wins**: Sharpe 6.07, Calmar 330.7, DD 10.1% |
