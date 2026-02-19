@@ -80,14 +80,26 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
          htf_rb_max_hold=12, htf_rb_btc_sma_period=48
 비용:     0.04%/side + 펀딩비
 
-성과 (365일, v11.4 Adaptive Threshold 2.5x_f1, Top-20 유니버스, 5 slots):
-  Return:    +5069.4% (OOS walk-forward)
-  Max DD:    19.0%
-  Calmar:    266.6
-  Trades:    969
-  Win Rate:  70.1%
-  Profit Factor: 2.83
-  Sharpe:    5.31
+성과 (365일, v11.4 Adaptive Threshold 2.5x_f1, Top-20 유니버스):
+  ── Per-Symbol Independent (5 slots, $10K reference) ──
+  ΣReturn:   +79,523% (OOS walk-forward)
+  Max DD:    18.9%
+  Sharpe:    8.23 (OOS), OOS/IS Ratio: 1.09
+  Trades:    5,670
+  Win Rate:  67.6%
+
+  ── Portfolio-Level ($2,280, 2 slots, flat sizing, no reinvest) ──
+  Return:    +1,165% annual
+  Max DD:    12.5%
+  Sharpe:    6.55
+  Calmar:    93.4
+  Trades:    2,391
+  Win Rate:  65.2%
+  Profit Factor: 2.11
+  Avg PnL/Trade: +1.125% on margin ($12.82)
+  Avg Win: +3.28%  |  Avg Loss: -2.93%
+  Trades/day: 6.6  |  Avg hold: 6.7 bars (~1.7h)
+  Conservative (50% live discount): +582% → ~$13,300/yr
   Dynamic Capital: balance / max(1, n_active+1), 50% cap
   안전장치: 서버사이드 Algo Order 손절 (클라이언트 크래시 방어), v11.4.2 Bracket Repair (복원 시 누락 SL/TP 자동 복구), 레버리지 검증
 ```
