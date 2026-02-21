@@ -1132,6 +1132,13 @@ class RubberBandScalper:
                         continue  # Skip TP repair — position gone
                     elif new_sl:
                         pos['server_sl_order_id'] = new_sl
+                        # v12.4.4: Reset ratchet state when runner SL is
+                        # re-placed at breakeven. Without this, _server_sl_pct
+                        # retains the old ratcheted value, _ratchet_runner_sl
+                        # sees insufficient improvement (<0.5%), and skips
+                        # re-ratcheting — leaving server SL stuck at breakeven.
+                        if repair_stop_mult < 0.001:  # BE stop for runner
+                            pos['_server_sl_pct'] = 0.0
                         logger.info(
                             f"[{sym}] BRACKET REPAIR: SL placed "
                             f"algoId={new_sl}"
@@ -2230,6 +2237,12 @@ class RubberBandScalper:
                     stop_mult=0.0001,  # BE stop
                 )
                 new_tp_oid = None
+                # v12.4.4: Reset ratchet state so _ratchet_runner_sl
+                # re-ratchets from breakeven on the next cycle.
+                # Without this, stale _server_sl_pct from the previous
+                # ratcheted level prevents re-ratcheting (<0.5% improvement),
+                # leaving the server SL stuck at breakeven.
+                pos['_server_sl_pct'] = 0.0
             else:
                 # Phase 1: use original stop
                 new_sl_oid = self._place_server_stop_loss(
