@@ -300,3 +300,71 @@ class TestDiagnoseSignalParity:
         # Should NOT see old Risk-On types
         assert diag.get('entry_type') != 'classic_long'
         assert diag.get('entry_type') != 'classic_short'
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v12.4.2: Partial close failure path must not re-place server TP
+# ═══════════════════════════════════════════════════════════════════
+
+class TestPartialCloseFailureNoTP:
+    """When partial close fails and we restore brackets, server TP must
+    be skipped in PBT mode — same bug class as v12.4.1 CRITICAL #1."""
+
+    def test_pbt_failure_path_skips_server_tp(self):
+        """If partial close order fails in PBT mode, only SL is restored (no TP)."""
+        scalper = _make_scalper(paper=False, partial_exit_enabled=True)
+        scalper._save_state = MagicMock()
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._cancel_server_take_profit = MagicMock()
+        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
+        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        # Simulate market order failure (returns None)
+        scalper._place_order = MagicMock(return_value=None)
+
+        # Set up position
+        scalper.strategy.open_position(
+            symbol='ETHUSDT', signal=1, entry_price=100.0,
+            notional=100.0, leverage=2, move_size=0.05,
+            server_sl_order_id='sl_old', server_tp_order_id=None,
+        )
+
+        result = scalper._partial_close_position('ETHUSDT', 101.5)
+        assert result is False  # partial close failed
+
+        # SL should be re-placed to restore protection
+        scalper._place_server_stop_loss.assert_called_once()
+        # TP must NOT be re-placed in PBT mode
+        scalper._place_server_take_profit.assert_not_called()
+
+        # Verify position still tracked with SL but no TP
+        pos = scalper.strategy._positions.get('ETHUSDT')
+        assert pos is not None
+        assert pos['server_sl_order_id'] == 'sl_new'
+        assert pos['server_tp_order_id'] is None
+
+    def test_non_pbt_failure_path_restores_both(self):
+        """If partial close fails in non-PBT mode, both SL and TP are restored."""
+        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
+        scalper._save_state = MagicMock()
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._cancel_server_take_profit = MagicMock()
+        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
+        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_order = MagicMock(return_value=None)
+
+        scalper.strategy.open_position(
+            symbol='ETHUSDT', signal=1, entry_price=100.0,
+            notional=100.0, leverage=2, move_size=0.05,
+            server_sl_order_id='sl_old', server_tp_order_id='tp_old',
+        )
+
+        result = scalper._partial_close_position('ETHUSDT', 101.5)
+        assert result is False
+
+        # Both SL and TP should be re-placed
+        scalper._place_server_stop_loss.assert_called_once()
+        scalper._place_server_take_profit.assert_called_once()
+
+        pos = scalper.strategy._positions.get('ETHUSDT')
+        assert pos['server_sl_order_id'] == 'sl_new'
+        assert pos['server_tp_order_id'] == 'tp_new'
