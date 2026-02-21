@@ -36,3 +36,4 @@ Example: `5ec5007_20260219_3year_ab_test.md`
 | `3f63b4c` | 2026-02-20 | **R8 Stress Test** (5 configs × 4 tests, 6yr) — 2190d, 50 symbols | All PBT configs Grade A+. TierC-T100S38: R:R 1.66, BE margin +19.2pp, most regime-stable (96.9%). |
 | `d3de815` | 2026-02-21 | **Direction Asymmetry Analysis** (L vs S deep dive, 6yr) — 2190d, 50 symbols | **Longs +54% EV/trade**, R:R 2.02 vs 1.61, WR +2.2pp, PF 1.60 vs 1.34. Symmetric params leave alpha on table. |
 | `894139c` | 2026-02-21 | **Direction Asymmetry A/B Test** (16 variants, 6yr) — 2190d, 50 symbols | **★ H-LongWideS wins**: L stop 0.45×, Sharpe 5.21 (+0.45), DD 12.5% (−4.1pp), Calmar 190.0 (+33%). Same return, 25% less DD. |
+| `12e5c3b` | 2026-02-21 | **Direction Asymmetry R2 Fine-Tuning** (18 variants, 6yr) — 2190d, 50 symbols | **★★ FS-33 wins**: L0.45/S0.33, Sharpe 5.64 (+18.5%), DD 11.1% (−33%), Calmar 216.2 (+52%). H+E synergistic. S=0.33 beats S=0.30. |
