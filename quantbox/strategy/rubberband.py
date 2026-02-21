@@ -954,7 +954,7 @@ def compute_signals_confidence(
                 is_risk_on = btc_close[i] > btc_sma[i]
                 btc_mom = btc_close[i] / btc_close[i - btc_mom_period] - 1.0
                 entered = False
-                confidence = 1  # BTC regime alignment confirmed
+                confidence = 0  # v12.4.1: base=0 for backtest parity
 
                 if is_risk_on:
                     # ═══ RISK-ON: Classic Pullback + Confidence ═══
@@ -1225,7 +1225,7 @@ def compute_signals_v9(
                 is_risk_on = btc_close[i] > btc_sma[i]
                 btc_mom = btc_close[i] / btc_close[i - btc_mom_period] - 1.0
                 entered = False
-                confidence = 1  # BTC regime alignment confirmed
+                confidence = 0  # v12.4.1: base=0 for backtest parity
 
                 if is_risk_on:
                     # ═══ RISK-ON: Classic Pullback + Confidence ═══
@@ -2436,72 +2436,49 @@ class RubberBandStrategy:
                 if n > 1:
                     macd_hist_prev = float(mhist[-2])
 
-            # ── Confidence scoring (identical to compute_signals_v9) ──
-            confidence = 1  # BTC regime alignment confirmed
+            # ── Confidence scoring (v12.4.1: base=0 for backtest parity) ──
+            # Previously confidence=1 ("BTC regime base point"), but
+            # backtest scan_entries() starts at 0.  With min_confidence=3,
+            # this +1 inflation admitted 2-evidence trades in live (blocked
+            # in backtest) and over-sized all trades via SteepX.
+            confidence = 0
             signal = 0
 
-            if is_risk_on:
-                # ═══ RISK-ON ═══
-                if ret < -thr and is_uptrend:
-                    # LONG: alt dipped in its own uptrend during BTC bull
-                    if rsi_val < 40: confidence += 1
-                    if vol_ratio > 1.5: confidence += 1
-                    if taker_ratio_val < 0.45: confidence += 1
-                    if sma_dist < 0.02: confidence += 1
-                    if cfg.stoch_enabled and n > 1:
-                        if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
-                            confidence += 1
-                    if cfg.macd_enabled:
-                        if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
-                            confidence += 1
-                    if confidence >= cfg.min_confidence:
-                        signal = 1
+            # v12.4.1: ALWAYS use Risk-Off logic regardless of BTC regime.
+            # The Risk-On path (uptrend pullback with looser thresholds)
+            # was NEVER validated in the 6-year backtest which produced
+            # R:R 1.91.  Using untested signal paths in production is
+            # unacceptable.  Risk-Off sympathy logic was validated across
+            # all market regimes (bull + bear) → use it universally.
+            if ret < -thr and btc_mom < 0:
+                # LONG: alt dips with BTC → sympathy → mean revert
+                if rsi_val < 35: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val < 0.42: confidence += 1
+                if btc_mom < -0.01: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                        confidence += 1
+                if confidence >= cfg.min_confidence:
+                    signal = 1
 
-                elif ret > thr and not is_uptrend:
-                    # SHORT: alt surged but in downtrend → exhaustion
-                    if rsi_val > 60: confidence += 1
-                    if vol_ratio > 1.5: confidence += 1
-                    if taker_ratio_val > 0.55: confidence += 1
-                    if sma_dist < 0.02: confidence += 1
-                    if cfg.stoch_enabled and n > 1:
-                        if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
-                            confidence += 1
-                    if cfg.macd_enabled:
-                        if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
-                            confidence += 1
-                    if confidence >= cfg.min_confidence:
-                        signal = -1
-            else:
-                # ═══ RISK-OFF ═══
-                if ret < -thr and btc_mom < 0:
-                    # LONG: alt dips with BTC → sympathy → mean revert
-                    if rsi_val < 35: confidence += 1
-                    if vol_ratio > 1.5: confidence += 1
-                    if taker_ratio_val < 0.42: confidence += 1
-                    if btc_mom < -0.01: confidence += 1
-                    if cfg.stoch_enabled and n > 1:
-                        if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
-                            confidence += 1
-                    if cfg.macd_enabled:
-                        if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
-                            confidence += 1
-                    if confidence >= cfg.min_confidence:
-                        signal = 1
-
-                elif ret > thr and btc_mom > 0:
-                    # SHORT: alt pumps with BTC bounce → fades back
-                    if rsi_val > 65: confidence += 1
-                    if vol_ratio > 1.5: confidence += 1
-                    if taker_ratio_val > 0.58: confidence += 1
-                    if btc_mom > 0.01: confidence += 1
-                    if cfg.stoch_enabled and n > 1:
-                        if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
-                            confidence += 1
-                    if cfg.macd_enabled:
-                        if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
-                            confidence += 1
-                    if confidence >= cfg.min_confidence:
-                        signal = -1
+            elif ret > thr and btc_mom > 0:
+                # SHORT: alt pumps with BTC bounce → fades back
+                if rsi_val > 65: confidence += 1
+                if vol_ratio > 1.5: confidence += 1
+                if taker_ratio_val > 0.58: confidence += 1
+                if btc_mom > 0.01: confidence += 1
+                if cfg.stoch_enabled and n > 1:
+                    if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                        confidence += 1
+                if cfg.macd_enabled:
+                    if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                        confidence += 1
+                if confidence >= cfg.min_confidence:
+                    signal = -1
 
             # ═══ v7.0 MTF Confirmation (LIVE — inline latest-bar check) ═══
             htf_close = self._htf_close_data.get(symbol)
@@ -2781,73 +2758,41 @@ class RubberBandStrategy:
         if not diag['passed_threshold']:
             return diag
 
-        # ── Confidence scoring (mirrors compute_signals_v9 last bar) ──
-        confidence = 1  # BTC regime confirmed
+        # ── Confidence scoring (v12.4.1: base=0 for backtest parity) ──
+        confidence = 0
         entry_type = None
 
-        if is_risk_on:
-            if ret < -_diag_thr and is_uptrend:
-                entry_type = 'classic_long'
-                if rsi_val < 40: confidence += 1
-                if vol_ratio > 1.5: confidence += 1
-                if taker_ratio_val < 0.45: confidence += 1
-                if sma_dist < 0.02: confidence += 1
-                if cfg.stoch_enabled and n > 1:
-                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
-                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
-                    if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
-                        confidence += 1
-                if cfg.macd_enabled:
-                    if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
-                        confidence += 1
-            elif ret > _diag_thr and not is_uptrend:
-                entry_type = 'classic_short'
-                if rsi_val > 60: confidence += 1
-                if vol_ratio > 1.5: confidence += 1
-                if taker_ratio_val > 0.55: confidence += 1
-                if sma_dist < 0.02: confidence += 1
-                if cfg.stoch_enabled and n > 1:
-                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
-                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
-                    if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
-                        confidence += 1
-                if cfg.macd_enabled:
-                    if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
-                        confidence += 1
-            else:
-                # Threshold passed but trend/direction mismatch
-                entry_type = 'risk_on_blocked'
+        # v12.4.1: Always use Risk-Off (sympathy) logic — validated in backtest
+        if ret < -_diag_thr and btc_mom < 0:
+            entry_type = 'sympathy_long'
+            if rsi_val < 35: confidence += 1
+            if vol_ratio > 1.5: confidence += 1
+            if taker_ratio_val < 0.42: confidence += 1
+            if btc_mom < -0.01: confidence += 1
+            if cfg.stoch_enabled and n > 1:
+                sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
+                    confidence += 1
+            if cfg.macd_enabled:
+                if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
+                    confidence += 1
+        elif ret > _diag_thr and btc_mom > 0:
+            entry_type = 'sympathy_short'
+            if rsi_val > 65: confidence += 1
+            if vol_ratio > 1.5: confidence += 1
+            if taker_ratio_val > 0.58: confidence += 1
+            if btc_mom > 0.01: confidence += 1
+            if cfg.stoch_enabled and n > 1:
+                sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
+                sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
+                if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
+                    confidence += 1
+            if cfg.macd_enabled:
+                if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                    confidence += 1
         else:
-            if ret < -_diag_thr and btc_mom < 0:
-                entry_type = 'sympathy_long'
-                if rsi_val < 35: confidence += 1
-                if vol_ratio > 1.5: confidence += 1
-                if taker_ratio_val < 0.42: confidence += 1
-                if btc_mom < -0.01: confidence += 1
-                if cfg.stoch_enabled and n > 1:
-                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
-                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
-                    if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
-                        confidence += 1
-                if cfg.macd_enabled:
-                    if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
-                        confidence += 1
-            elif ret > _diag_thr and btc_mom > 0:
-                entry_type = 'sympathy_short'
-                if rsi_val > 65: confidence += 1
-                if vol_ratio > 1.5: confidence += 1
-                if taker_ratio_val > 0.58: confidence += 1
-                if btc_mom > 0.01: confidence += 1
-                if cfg.stoch_enabled and n > 1:
-                    sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
-                    sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
-                    if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
-                        confidence += 1
-                if cfg.macd_enabled:
-                    if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
-                        confidence += 1
-            else:
-                entry_type = 'risk_off_blocked'
+            entry_type = 'blocked'
 
         diag['entry_type'] = entry_type
         diag['confidence'] = confidence
@@ -2855,9 +2800,9 @@ class RubberBandStrategy:
 
         # Determine raw signal (before MTF)
         raw_signal = 0
-        if entry_type in ('classic_long', 'sympathy_long') and confidence >= cfg.min_confidence:
+        if entry_type == 'sympathy_long' and confidence >= cfg.min_confidence:
             raw_signal = 1
-        elif entry_type in ('classic_short', 'sympathy_short') and confidence >= cfg.min_confidence:
+        elif entry_type == 'sympathy_short' and confidence >= cfg.min_confidence:
             raw_signal = -1
         diag['raw_signal'] = raw_signal
 
