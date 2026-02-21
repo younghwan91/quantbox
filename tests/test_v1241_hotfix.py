@@ -368,3 +368,106 @@ class TestPartialCloseFailureNoTP:
         pos = scalper.strategy._positions.get('ETHUSDT')
         assert pos['server_sl_order_id'] == 'sl_new'
         assert pos['server_tp_order_id'] == 'tp_new'
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v12.4.3: _close_position failure path must not re-place server TP
+# ═══════════════════════════════════════════════════════════════════
+
+class TestClosePositionFailureNoTP:
+    """When _close_position fails and we restore brackets, server TP must
+    be skipped in PBT mode for Phase 1 positions — same bug class as
+    v12.4.1 CRITICAL #1.
+
+    Scenario: Phase 1 trailing_stop fires → close order fails (API error)
+    → server TP re-placed at TP1 → price recovers → server TP closes 100%
+    → PBT partial close flow bypassed, runner never created.
+    """
+
+    def test_pbt_phase1_close_failure_skips_tp(self):
+        """Phase 1 close failure in PBT mode: SL restored, TP skipped."""
+        scalper = _make_scalper(paper=False, partial_exit_enabled=True)
+        scalper._save_state = MagicMock()
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._cancel_server_take_profit = MagicMock()
+        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
+        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        # Close order FAILS
+        scalper._place_order = MagicMock(return_value=None)
+
+        scalper.strategy.open_position(
+            symbol='ETHUSDT', signal=1, entry_price=100.0,
+            notional=100.0, leverage=2, move_size=0.05,
+            server_sl_order_id='sl_old', server_tp_order_id=None,
+        )
+
+        result = scalper._close_position('ETHUSDT', 'trailing_stop', 99.0)
+        assert result is False  # close failed
+
+        # SL must be re-placed
+        scalper._place_server_stop_loss.assert_called_once()
+        # TP must NOT be re-placed in PBT mode
+        scalper._place_server_take_profit.assert_not_called()
+
+        pos = scalper.strategy._positions.get('ETHUSDT')
+        assert pos is not None
+        assert pos['server_sl_order_id'] == 'sl_new'
+        assert pos['server_tp_order_id'] is None
+
+    def test_non_pbt_close_failure_restores_both(self):
+        """Non-PBT close failure: both SL and TP restored."""
+        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
+        scalper._save_state = MagicMock()
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._cancel_server_take_profit = MagicMock()
+        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
+        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_order = MagicMock(return_value=None)
+
+        scalper.strategy.open_position(
+            symbol='ETHUSDT', signal=1, entry_price=100.0,
+            notional=100.0, leverage=2, move_size=0.05,
+            server_sl_order_id='sl_old', server_tp_order_id='tp_old',
+        )
+
+        result = scalper._close_position('ETHUSDT', 'stop_loss', 97.0)
+        assert result is False
+
+        scalper._place_server_stop_loss.assert_called_once()
+        scalper._place_server_take_profit.assert_called_once()
+
+        pos = scalper.strategy._positions.get('ETHUSDT')
+        assert pos['server_sl_order_id'] == 'sl_new'
+        assert pos['server_tp_order_id'] == 'tp_new'
+
+    def test_runner_close_failure_skips_tp(self):
+        """Runner close failure: BE SL restored, no TP (already correct pre-fix)."""
+        scalper = _make_scalper(
+            paper=False, partial_exit_enabled=True,
+            breakeven_after_partial=True,
+        )
+        scalper._save_state = MagicMock()
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._cancel_server_take_profit = MagicMock()
+        scalper._place_server_stop_loss = MagicMock(return_value='sl_be')
+        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_order = MagicMock(return_value=None)
+
+        scalper.strategy.open_position(
+            symbol='ETHUSDT', signal=1, entry_price=100.0,
+            notional=50.0, leverage=2, move_size=0.05,
+            server_sl_order_id='sl_old', server_tp_order_id=None,
+        )
+        scalper.strategy._positions['ETHUSDT']['partial_closed'] = True
+
+        result = scalper._close_position('ETHUSDT', 'trail_runner', 100.5)
+        assert result is False
+
+        # SL re-placed with BE stop
+        scalper._place_server_stop_loss.assert_called_once()
+        # TP must NOT be re-placed for runner
+        scalper._place_server_take_profit.assert_not_called()
+
+        pos = scalper.strategy._positions.get('ETHUSDT')
+        assert pos['server_sl_order_id'] == 'sl_be'
+        assert pos['server_tp_order_id'] is None
