@@ -780,7 +780,7 @@ class TestForceCloseOnWouldTrigger:
 
     def test_close_position_failure_keeps_state(self):
         """When close order fails, position stays in state for retry."""
-        scalper = _make_scalper(paper=False)
+        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper._save_state = MagicMock()
         scalper._place_order = MagicMock(return_value=None)
         # Mock SL/TP re-placement
@@ -809,7 +809,7 @@ class TestForceCloseOnWouldTrigger:
         v12.3.1: When SL returns WOULD_TRIGGER during re-placement and
         reason is not force_*, it recursively force-closes. We use a
         force_ reason to test the guard path (no recursion)."""
-        scalper = _make_scalper(paper=False)
+        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper._save_state = MagicMock()
         scalper._place_order = MagicMock(return_value=None)
         scalper._place_server_stop_loss = MagicMock(
