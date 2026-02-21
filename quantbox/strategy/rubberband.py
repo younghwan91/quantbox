@@ -196,6 +196,15 @@ class RubberBandConfig:
     trail_atr_mult: float = 1.5            # ATR multiplier for runner trailing stop
     breakeven_after_partial: bool = True    # Move stop to breakeven after TP1
 
+    # ── v12.3.3 Pre-TP1 Trailing Parameters (R5 A/B validated defaults) ──
+    # Controls when the "give-back prevention" trailing kicks in BEFORE TP1.
+    # Activation: trail starts when best_pnl > target × activation.
+    # Factor: exit when gain < best_pnl × factor (gave back too much).
+    # Higher activation → trail only when closer to target (more R:R headroom).
+    # Higher factor → wider retracement tolerance (less trigger-happy).
+    pre_tp1_trail_activation: float = 0.5  # R5 default: trail after 50% of target
+    pre_tp1_trail_factor: float = 0.3      # R5 default: exit at 30% of best
+
     # ── v12.3 SteepX Confidence Sizing (R6 M-2SSTSX, A/B validated) ──
     # Scale position size by confidence level. Low conf → tiny, high conf → big.
     steep_cap_curve: bool = True           # Enable confidence-based sizing
@@ -1632,10 +1641,13 @@ def compute_signals_with_partial_exit(
             effective_stop = move_size * stop_mult * time_factor
             target = move_size * target_retrace
 
-            # Priority: full exit conditions checked FIRST
+            # v12.3.3: TP1 hit → partial close 50%, enter Phase 2 runner.
+            # Previously this fully exited (position=0), violating backtest-
+            # live parity: the live system partial closes and runs a trailing
+            # runner at TP1, not a full exit.
             if gain >= target:
-                position = 0
-                phase = 0
+                phase = 2
+                best_pnl = gain
             elif gain < -effective_stop:
                 position = 0
                 phase = 0
@@ -1663,17 +1675,18 @@ def compute_signals_with_partial_exit(
 
             target = move_size * target_retrace
 
-            if gain >= target:
-                position = 0
-                phase = 0
-            elif gain <= 0:
+            # v12.3.3: Runner exits when:
+            # 1. Breakeven stop hit (gain <= 0)
+            # 2. Pre-TP1 trail: gave back too much unrealized profit
+            # 3. Max hold exceeded (2× original max_hold for runner)
+            if gain <= 0:
                 # Break-even stop: $0 risk on remaining half
                 position = 0
                 phase = 0
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
                 phase = 0
-            elif hold_count >= max_hold:
+            elif hold_count >= max_hold * 2:
                 position = 0
                 phase = 0
 
@@ -1754,9 +1767,10 @@ def compute_signals_partial_exit_btc_directional(
             effective_stop = move_size * stop_mult * time_factor
             target = move_size * target_retrace
 
+            # v12.3.3: TP1 hit → partial close, enter Phase 2 runner
             if gain >= target:
-                position = 0
-                phase = 0
+                phase = 2
+                best_pnl = gain
             elif gain < -effective_stop:
                 position = 0
                 phase = 0
@@ -1782,16 +1796,13 @@ def compute_signals_partial_exit_btc_directional(
 
             target = move_size * target_retrace
 
-            if gain >= target:
-                position = 0
-                phase = 0
-            elif gain <= 0:
+            if gain <= 0:
                 position = 0
                 phase = 0
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
                 phase = 0
-            elif hold_count >= max_hold:
+            elif hold_count >= max_hold * 2:
                 position = 0
                 phase = 0
 
@@ -2951,6 +2962,10 @@ class RubberBandStrategy:
             server_tp_order_id: Exchange-side take-profit order ID (v11.2).
                 Used for cancellation when position is closed normally.
         """
+        if entry_price <= 0:
+            raise ValueError(
+                f"Invalid entry_price for {symbol}: {entry_price}"
+            )
         self._positions[symbol] = {
             'signal': signal,
             'entry_price': entry_price,
@@ -3028,8 +3043,9 @@ class RubberBandStrategy:
                     return 'max_hold'
 
                 # Pre-TP1 trailing (only if gain exceeds activation threshold)
-                if (pos['best_pnl'] > target * 0.5
-                        and gain < pos['best_pnl'] * 0.3):
+                # v12.3.3: configurable params (were hardcoded 0.5/0.3)
+                if (pos['best_pnl'] > target * cfg.pre_tp1_trail_activation
+                        and gain < pos['best_pnl'] * cfg.pre_tp1_trail_factor):
                     return 'trailing_stop'
 
             else:
@@ -3038,7 +3054,9 @@ class RubberBandStrategy:
                     return 'target'
                 if gain < -effective_stop:
                     return 'stop_loss'
-                if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
+                # v12.3.3: configurable pre-TP1 trail params
+                if (pos['best_pnl'] > target * cfg.pre_tp1_trail_activation
+                        and gain < pos['best_pnl'] * cfg.pre_tp1_trail_factor):
                     return 'trailing_stop'
                 if pos['bars_held'] >= cfg.max_hold:
                     return 'max_hold'
@@ -3059,6 +3077,10 @@ class RubberBandStrategy:
             floor_val = pos.get('trail_floor')
             if floor_val is not None and trail_stop < floor_val:
                 trail_stop = floor_val
+
+            # v12.3.3: Store computed trail_stop for server-side ratcheting.
+            # Scalper reads this after update_position() to sync server SL.
+            pos['_computed_trail_stop'] = trail_stop
 
             if gain <= trail_stop:
                 return 'trail_runner'
