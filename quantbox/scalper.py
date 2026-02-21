@@ -68,7 +68,7 @@ from quantbox.notifications.bot import (
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.rubberband import (
     RubberBandConfig, RubberBandStrategy, calculate_position_size,
-    compute_confidence_leverage,
+    compute_atr_pct, compute_confidence_leverage,
 )
 from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
 
@@ -1193,14 +1193,17 @@ class RubberBandScalper:
         else:
             pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
 
-        notional = fill_qty * fill_price
+        # v12.3.2: Use entry-price-based notional for PnL, not exit-price.
+        # fill_qty * fill_price overstates winners and understates losers
+        # by a factor of fill_price/entry_price (~3-5% error per trade).
+        notional = pos['notional']
         pnl_usd = pnl_pct * notional
-        # v12.3 PBT: Runner positions had entry cost charged at opening.
-        # Use exit-only cost for partial_closed positions.
-        if pos.get('partial_closed'):
-            cost = notional * self.config.cost_per_side
-        else:
-            cost = notional * self.config.round_trip_cost
+        # v12.3.2: Always charge round_trip_cost for backtest parity.
+        # Both partial and runner portions must account for their share
+        # of entry + exit costs. The backtest delta model charges
+        # |delta| * cost_per_side per transition, totaling round_trip
+        # over the full lifecycle.
+        cost = notional * self.config.round_trip_cost
         net_pnl = pnl_usd - cost
 
         trade = {
@@ -1609,6 +1612,32 @@ class RubberBandScalper:
             pos['partial_closed'] = False
             pos['server_sl_order_id'] = None
             pos['server_tp_order_id'] = None
+            # v12.3.2: Re-place server SL/TP immediately to close
+            # the 15-minute protection gap (don't wait for bracket repair).
+            if not self.paper_mode:
+                new_sl = self._place_server_stop_loss(
+                    symbol=symbol, signal=pos['signal'],
+                    quantity=self._round_qty(full_quantity, symbol),
+                    entry_price=pos['entry_price'],
+                    move_size=pos['move_size'],
+                    stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
+                )
+                if new_sl and new_sl != 'WOULD_TRIGGER':
+                    pos['server_sl_order_id'] = new_sl
+                new_tp = self._place_server_take_profit(
+                    symbol=symbol, signal=pos['signal'],
+                    quantity=self._round_qty(full_quantity, symbol),
+                    entry_price=pos['entry_price'],
+                    move_size=pos['move_size'],
+                    target_retrace=self.config.target_retrace,
+                )
+                if new_tp and new_tp != 'WOULD_TRIGGER':
+                    pos['server_tp_order_id'] = new_tp
+                logger.info(
+                    f"[{symbol}] Partial close failed — re-placed server "
+                    f"SL={pos.get('server_sl_order_id')} "
+                    f"TP={pos.get('server_tp_order_id')}"
+                )
             return False
 
         # v12.3.1: Handle NO_POSITION — server order closed it between
@@ -1618,12 +1647,50 @@ class RubberBandScalper:
                 f"[{symbol}] Partial close got NO_POSITION — "
                 f"server order already closed the position"
             )
-            # Position is gone on exchange. Clean up completely.
+            # v12.3.2: Record trade INLINE — don't call _record_server_fill
+            # because close_position() already removes the position, and
+            # _record_server_fill calls close_position() again → returns
+            # None → trade silently dropped.
             closed_pos = self.strategy.close_position(symbol)
             if closed_pos:
-                # Record as server fill with best available info
-                self._record_server_fill(
-                    symbol, pos['entry_price'], close_qty, 'server_fill_race',
+                fill_price = pos['entry_price']  # fallback
+                try:
+                    recent_trades = self.client.futures_account_trades(
+                        symbol=symbol, limit=10,
+                    )
+                    if recent_trades:
+                        close_side = 'SELL' if closed_pos['signal'] == 1 else 'BUY'
+                        for t in reversed(recent_trades):
+                            if t.get('side') == close_side and t.get('realizedPnl', '0') != '0':
+                                fill_price = float(t['price'])
+                                break
+                except Exception:
+                    pass
+
+                if closed_pos['signal'] == 1:
+                    pnl_pct = (fill_price - closed_pos['entry_price']) / closed_pos['entry_price']
+                else:
+                    pnl_pct = (closed_pos['entry_price'] - fill_price) / closed_pos['entry_price']
+                pnl_usd = pnl_pct * closed_pos['notional']
+                cost = closed_pos['notional'] * self.config.round_trip_cost
+                net_pnl = pnl_usd - cost
+                trade = {
+                    'symbol': symbol,
+                    'signal': closed_pos['signal'],
+                    'entry_price': closed_pos['entry_price'],
+                    'exit_price': fill_price,
+                    'pnl_pct': pnl_pct * 100,
+                    'pnl_usd': net_pnl,
+                    'notional': closed_pos['notional'],
+                    'bars_held': closed_pos['bars_held'],
+                    'reason': 'server_fill_race',
+                    'time': datetime.now(timezone.utc).isoformat(),
+                }
+                self._trade_history.append(trade)
+                self._save_state()
+                logger.info(
+                    f"[{symbol}] NO_POSITION race recorded: "
+                    f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f})"
                 )
             return False
 
@@ -1635,13 +1702,25 @@ class RubberBandScalper:
         else:
             pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
 
-        partial_notional = close_qty * fill_price
+        # v12.3.2: Use entry-price notional for PnL (not exit-price).
+        # exit-price notional (close_qty * fill_price) overstates winners
+        # and understates losers by fill_price/entry_price ratio.
+        partial_notional = close_qty * pos['entry_price']
         pnl_usd = pnl_pct * partial_notional
-        cost = partial_notional * self.config.cost_per_side
+        # v12.3.2: Charge round_trip_cost (entry+exit) for backtest parity.
+        # Backtest _backtest_core_partial charges delta-based cost at each
+        # transition: 1.0*cps at entry + 0.5*cps at partial = 1.5*cps.
+        # For the partial portion, round_trip covers its share of entry+exit.
+        cost = partial_notional * self.config.round_trip_cost
         net_pnl = pnl_usd - cost
 
-        # Update position: reduce notional by closed amount
-        pos['notional'] -= partial_notional
+        # v12.3.2: Update remaining notional using ENTRY price, not fill price.
+        # Using fill_price causes notional drift: remaining_qty computed as
+        # (notional - close_qty*fill_price) / entry_price ≠ actual remaining.
+        # This leaves dust on exchange (~1-3% of position) that becomes
+        # an orphaned unmanaged position.
+        remaining_qty_exact = full_quantity - close_qty
+        pos['notional'] = remaining_qty_exact * pos['entry_price']
 
         # v11.1: Place new server SL for remaining quantity
         remaining_qty = self._round_qty(
@@ -1940,11 +2019,8 @@ class RubberBandScalper:
                     pnl_pct = (closed_pos['entry_price'] - fill_price) / closed_pos['entry_price']
 
                 pnl_usd = pnl_pct * closed_pos['notional']
-                # v12.3 PBT: Runner had entry cost already charged
-                if closed_pos.get('partial_closed'):
-                    cost = closed_pos['notional'] * self.config.cost_per_side
-                else:
-                    cost = closed_pos['notional'] * self.config.round_trip_cost
+                # v12.3.2: Always charge round_trip_cost for parity.
+                cost = closed_pos['notional'] * self.config.round_trip_cost
                 net_pnl = pnl_usd - cost
 
                 # Trade record
@@ -2098,12 +2174,10 @@ class RubberBandScalper:
             pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
 
         pnl_usd = pnl_pct * pos['notional']
-        # v12.3 PBT: Runner positions already had entry cost charged at
-        # opening. Use exit-only cost (cost_per_side), not round_trip_cost.
-        if pos.get('partial_closed'):
-            cost = pos['notional'] * self.config.cost_per_side
-        else:
-            cost = pos['notional'] * self.config.round_trip_cost
+        # v12.3.2: Always charge round_trip_cost for backtest parity.
+        # Each portion (partial and runner) accounts for its share
+        # of entry + exit costs. See _backtest_core_partial delta model.
+        cost = pos['notional'] * self.config.round_trip_cost
         net_pnl = pnl_usd - cost
 
         # Paper balance
@@ -2289,14 +2363,24 @@ class RubberBandScalper:
 
         # 4. Process existing positions (always, even when paused)
         for sym in list(self.strategy.active_positions):
-            close = self.download_klines(sym, 200)
-            if close is None:
+            # v12.3.2: Download full OHLC for active positions to compute
+            # fresh ATR. Previously only close was downloaded, so runner
+            # trailing used stale ATR from entry time (on_bar never called
+            # for symbols with open positions).
+            result_full = self.download_klines(sym, 200, full=True)
+            if result_full is None:
                 continue
+            close, high, low, _vol, _tb = result_full
 
             current_price = close[-1]
 
-            # v12.3: Pass ATR% to update_position for PBT runner trailing
-            current_atr = self.strategy.get_last_atr_pct(sym)
+            # v12.3.2: Compute FRESH ATR for PBT runner trailing
+            if self.config.atr_period > 0 and len(close) >= self.config.atr_period:
+                atr_arr = compute_atr_pct(high, low, close, self.config.atr_period)
+                atr_val = float(atr_arr[-1])
+                current_atr = atr_val if not np.isnan(atr_val) else 0.02
+            else:
+                current_atr = 0.02
 
             exit_reason = self.strategy.update_position(
                 sym, current_price, current_atr_pct=current_atr,
