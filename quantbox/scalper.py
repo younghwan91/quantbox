@@ -1754,9 +1754,13 @@ class RubberBandScalper:
             else:
                 pos['server_tp_order_id'] = None
 
-        # Paper mode
+        # Paper mode — charge EXIT-side cost only.
+        # Entry cost for the full position was already charged at _open_position.
+        # Using round_trip_cost here would double-count the entry fee for
+        # the partial portion (overcharge by 0.5 × cost_per_side per trade).
         if self.paper_mode:
-            self._paper_balance += pnl_usd - cost
+            paper_exit_cost = partial_notional * self.config.cost_per_side
+            self._paper_balance += pnl_usd - paper_exit_cost
 
         # Trade record (partial)
         trade = {
@@ -1800,6 +1804,99 @@ class RubberBandScalper:
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
         return True
+
+    def _ratchet_runner_sl(self, symbol: str, pos: dict) -> None:
+        """Ratchet server-side SL for a Phase 2 runner to protect profits.
+
+        v12.3.3: The runner's server SL starts at breakeven (stop_mult=0.0001).
+        As the runner's trailing stop floor climbs above breakeven, the server
+        SL should follow — otherwise a bot crash would lose all runner profits
+        above breakeven.
+
+        Only ratchets UPWARD (never moves SL against the position direction).
+        Checks every cycle but only places a new order when the computed
+        trail_stop has improved meaningfully (≥0.5% above last server SL).
+
+        Args:
+            symbol: Trading symbol.
+            pos: Position dict (mutated in place to update server_sl_order_id).
+        """
+        trail_stop_pct = pos.get('_computed_trail_stop')
+        if trail_stop_pct is None or trail_stop_pct <= 0:
+            return  # No improvement over breakeven yet
+
+        # Only ratchet if meaningful improvement (≥0.5% absolute gain above last)
+        last_server_floor = pos.get('_server_sl_pct', 0.0)
+        improvement = trail_stop_pct - last_server_floor
+        if improvement < 0.005:  # 0.5% minimum step to avoid API spam
+            return
+
+        entry_price = pos['entry_price']
+        signal = pos['signal']
+
+        # Convert trail_stop (return pct) to trigger price
+        if signal == 1:  # Long: SL below
+            trigger_price = entry_price * (1.0 + trail_stop_pct)
+            close_side = 'SELL'
+            buffer = -0.005  # 0.5% below trigger for limit
+        else:  # Short: SL above
+            trigger_price = entry_price * (1.0 - trail_stop_pct)
+            close_side = 'BUY'
+            buffer = 0.005  # 0.5% above trigger for limit
+
+        limit_price = trigger_price * (1.0 + buffer)
+
+        info = self.get_symbol_info(symbol)
+        tick_size = info.get('tick_size', 0.01)
+        price_precision = info.get('price_precision', 2)
+
+        trigger_price = round(
+            round(trigger_price / tick_size) * tick_size, price_precision
+        )
+        limit_price = round(
+            round(limit_price / tick_size) * tick_size, price_precision
+        )
+
+        # v12.3.3 SAFETY: Place new SL FIRST, then cancel old.
+        # Reversing this order (cancel-then-place) leaves the runner
+        # unprotected if the bot crashes between the two API calls.
+        # Binance allows multiple algo stop orders to coexist briefly.
+        quantity = pos['notional'] / pos['entry_price']
+        quantity = self._round_qty(quantity, symbol)
+        if quantity <= 0:
+            return
+
+        new_sl = self._place_algo_order(
+            symbol=symbol, side=close_side, order_type='STOP',
+            quantity=quantity, trigger_price=trigger_price,
+            limit_price=limit_price, label='runner-trail-sl',
+        )
+
+        if new_sl and new_sl != 'WOULD_TRIGGER':
+            # Success — now cancel old SL (runner always protected)
+            old_sl = pos.get('server_sl_order_id')
+            if old_sl:
+                self._cancel_server_stop_loss(symbol, old_sl)
+            pos['server_sl_order_id'] = new_sl
+            pos['_server_sl_pct'] = trail_stop_pct
+            logger.info(
+                f"[{symbol}] Runner SL RATCHETED: "
+                f"{last_server_floor*100:.2f}% → {trail_stop_pct*100:.2f}% "
+                f"(trigger=${trigger_price:.4f})"
+            )
+            self._save_state()
+        elif new_sl == 'WOULD_TRIGGER':
+            # Price already past trail stop — keep old SL, runner exits next cycle
+            logger.warning(
+                f"[{symbol}] Runner SL ratchet WOULD_TRIGGER — "
+                f"keeping old SL, update_position should catch this next bar"
+            )
+        else:
+            # Placement failed — keep old SL active (don't cancel!)
+            logger.warning(
+                f"[{symbol}] Runner SL ratchet FAILED — "
+                f"keeping old SL at {last_server_floor*100:.2f}%"
+            )
 
     # ── Elliott: Add-to-position methods ──
 
@@ -2409,6 +2506,11 @@ class RubberBandScalper:
                         f"  [{sym}] HOLD: bars={pos.get('bars_held', 0)}/{self.config.max_hold} "
                         f"best_pnl={pos.get('best_pnl', 0)*100:.2f}%"
                     )
+                    # v12.3.3: Ratchet server SL for runners to protect profits
+                    if (pos.get('partial_closed')
+                            and self.config.breakeven_after_partial
+                            and not self.paper_mode):
+                        self._ratchet_runner_sl(sym, pos)
 
         # 5. Look for new entries (skip if risk blocked or paused)
         if self._paused:
@@ -2864,6 +2966,15 @@ class RubberBandScalper:
                 self.strategy._positions[sym]['confidence'] = pos.get(
                     'confidence', 0
                 )
+                # v12.3.3: Restore server SL ratchet state for runners.
+                # Without these, a restarted runner triggers a redundant
+                # ratchet API call and has a brief inconsistency window.
+                self.strategy._positions[sym]['_computed_trail_stop'] = pos.get(
+                    '_computed_trail_stop'
+                )
+                self.strategy._positions[sym]['_server_sl_pct'] = pos.get(
+                    '_server_sl_pct', 0.0
+                )
 
         logger.info(
             f"Restored {len(positions)} positions, "
@@ -3180,6 +3291,8 @@ def main():
         partial_exit_fraction=settings.rb_partial_exit_fraction,
         trail_atr_mult=settings.rb_trail_atr_mult,
         breakeven_after_partial=settings.rb_breakeven_after_partial,
+        pre_tp1_trail_activation=settings.rb_pre_tp1_trail_activation,
+        pre_tp1_trail_factor=settings.rb_pre_tp1_trail_factor,
         rr_leverage_enabled=settings.rb_rr_leverage_enabled,
         min_rr_for_leverage=settings.rb_min_rr_for_leverage,
         max_concurrent=args.max_slots if args.max_slots is not None else settings.rb_max_concurrent,
