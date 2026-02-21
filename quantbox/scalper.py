@@ -2983,6 +2983,23 @@ class RubberBandScalper:
 
         # Restore positions
         positions = state.get('positions', {})
+
+        # v12.4.6: Reset session state when no positions survive restart.
+        # Persisting HWM across sessions with 0 positions causes
+        # immediate drawdown halt on restart (stale HWM >> current balance).
+        # Trade history from a finished session is also stale — it inflates
+        # the !pnl summary with trades that already settled into the balance.
+        # If positions exist, keep saved HWM + history to track their lifecycle.
+        if not positions:
+            balance = self.get_balance()
+            self._high_water_mark = balance
+            self._initial_balance = balance
+            self._trade_history = []
+            logger.info(
+                f"No positions to restore — fresh session: "
+                f"HWM reset to ${balance:.2f}, trade history cleared"
+            )
+
         for sym, pos in positions.items():
             self.strategy.open_position(
                 symbol=sym,
