@@ -1,0 +1,515 @@
+{
+  "commit": "a09a0da",
+  "date": "2026-02-21 16:25 UTC",
+  "data_days": 2190,
+  "n_symbols": 50,
+  "vwma_period": 100,
+  "factor_summary": {
+    "n_tagged_trades": 17165,
+    "btc_vol_ratio_mean": 1.0113,
+    "breadth_mean": 0.4633
+  },
+  "variants": {
+    "A-Baseline": {
+      "total_return_pct": 6300.9,
+      "final_balance": 134099.67,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.56,
+      "calmar": 833.9,
+      "n_trades": 17165,
+      "trades_per_day": 7.83,
+      "win_rate": 55.8,
+      "profit_factor": 1.56,
+      "rr": 1.91,
+      "long": {
+        "count": 8452,
+        "wr": 56.0,
+        "avg_pnl": 3.636,
+        "rr": 2.1,
+        "pf": 1.64,
+        "total_pnl": 80818.06
+      },
+      "short": {
+        "count": 8713,
+        "wr": 55.7,
+        "avg_pnl": 2.908,
+        "rr": 1.75,
+        "pf": 1.48,
+        "total_pnl": 68464.86
+      },
+      "elapsed": 2.5
+    },
+    "B-VWEntry0": {
+      "total_return_pct": 6129.4,
+      "final_balance": 130506.45,
+      "max_dd_pct": 7.7,
+      "sharpe": 5.47,
+      "calmar": 794.4,
+      "n_trades": 15222,
+      "trades_per_day": 6.95,
+      "win_rate": 56.7,
+      "profit_factor": 1.6,
+      "rr": 1.89,
+      "long": {
+        "count": 7471,
+        "wr": 57.1,
+        "avg_pnl": 3.831,
+        "rr": 2.08,
+        "pf": 1.68,
+        "total_pnl": 76582.71
+      },
+      "short": {
+        "count": 7751,
+        "wr": 56.4,
+        "avg_pnl": 3.001,
+        "rr": 1.73,
+        "pf": 1.53,
+        "total_pnl": 67275.26
+      },
+      "elapsed": 2.0
+    },
+    "C-VWE05": {
+      "total_return_pct": 6268.2,
+      "final_balance": 133412.97,
+      "max_dd_pct": 7.2,
+      "sharpe": 5.55,
+      "calmar": 871.4,
+      "n_trades": 14129,
+      "trades_per_day": 6.45,
+      "win_rate": 57.5,
+      "profit_factor": 1.65,
+      "rr": 1.87,
+      "long": {
+        "count": 6895,
+        "wr": 58.0,
+        "avg_pnl": 4.08,
+        "rr": 2.06,
+        "pf": 1.75,
+        "total_pnl": 77654.54
+      },
+      "short": {
+        "count": 7234,
+        "wr": 57.1,
+        "avg_pnl": 3.145,
+        "rr": 1.7,
+        "pf": 1.57,
+        "total_pnl": 67798.66
+      },
+      "elapsed": 2.0
+    },
+    "D-VWE10": {
+      "total_return_pct": 5938.5,
+      "final_balance": 126507.35,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.74,
+      "calmar": 782.4,
+      "n_trades": 12316,
+      "trades_per_day": 5.62,
+      "win_rate": 58.0,
+      "profit_factor": 1.68,
+      "rr": 1.85,
+      "long": {
+        "count": 5989,
+        "wr": 58.9,
+        "avg_pnl": 4.463,
+        "rr": 2.05,
+        "pf": 1.82,
+        "total_pnl": 74566.21
+      },
+      "short": {
+        "count": 6327,
+        "wr": 57.2,
+        "avg_pnl": 3.292,
+        "rr": 1.68,
+        "pf": 1.57,
+        "total_pnl": 61803.08
+      },
+      "elapsed": 2.1
+    },
+    "E-VWSt50": {
+      "total_return_pct": 6055.9,
+      "final_balance": 128965.34,
+      "max_dd_pct": 8.0,
+      "sharpe": 5.61,
+      "calmar": 752.6,
+      "n_trades": 18165,
+      "trades_per_day": 8.29,
+      "win_rate": 51.8,
+      "profit_factor": 1.55,
+      "rr": 2.24,
+      "long": {
+        "count": 8945,
+        "wr": 52.0,
+        "avg_pnl": 3.352,
+        "rr": 2.45,
+        "pf": 1.61,
+        "total_pnl": 76519.49
+      },
+      "short": {
+        "count": 9220,
+        "wr": 51.7,
+        "avg_pnl": 2.671,
+        "rr": 2.05,
+        "pf": 1.5,
+        "total_pnl": 68752.47
+      },
+      "elapsed": 2.0
+    },
+    "F-VWSt75": {
+      "total_return_pct": 6260.7,
+      "final_balance": 133257.24,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.64,
+      "calmar": 821.6,
+      "n_trades": 17089,
+      "trades_per_day": 7.8,
+      "win_rate": 54.9,
+      "profit_factor": 1.58,
+      "rr": 2.0,
+      "long": {
+        "count": 8398,
+        "wr": 55.0,
+        "avg_pnl": 3.559,
+        "rr": 2.21,
+        "pf": 1.66,
+        "total_pnl": 78839.02
+      },
+      "short": {
+        "count": 8691,
+        "wr": 54.8,
+        "avg_pnl": 2.808,
+        "rr": 1.81,
+        "pf": 1.51,
+        "total_pnl": 69493.69
+      },
+      "elapsed": 2.0
+    },
+    "G-VWStT": {
+      "total_return_pct": 5896.1,
+      "final_balance": 125617.79,
+      "max_dd_pct": 7.4,
+      "sharpe": 5.42,
+      "calmar": 794.8,
+      "n_trades": 18799,
+      "trades_per_day": 8.58,
+      "win_rate": 49.8,
+      "profit_factor": 1.53,
+      "rr": 2.4,
+      "long": {
+        "count": 9264,
+        "wr": 50.0,
+        "avg_pnl": 3.27,
+        "rr": 2.63,
+        "pf": 1.6,
+        "total_pnl": 76697.04
+      },
+      "short": {
+        "count": 9535,
+        "wr": 49.6,
+        "avg_pnl": 2.581,
+        "rr": 2.2,
+        "pf": 1.46,
+        "total_pnl": 65961.93
+      },
+      "elapsed": 2.1
+    },
+    "H-VWStW": {
+      "total_return_pct": 6551.7,
+      "final_balance": 139352.42,
+      "max_dd_pct": 7.9,
+      "sharpe": 5.79,
+      "calmar": 828.4,
+      "n_trades": 16584,
+      "trades_per_day": 7.57,
+      "win_rate": 58.2,
+      "profit_factor": 1.59,
+      "rr": 1.76,
+      "long": {
+        "count": 8154,
+        "wr": 58.3,
+        "avg_pnl": 3.767,
+        "rr": 1.94,
+        "pf": 1.66,
+        "total_pnl": 81623.2
+      },
+      "short": {
+        "count": 8430,
+        "wr": 58.0,
+        "avg_pnl": 3.027,
+        "rr": 1.61,
+        "pf": 1.52,
+        "total_pnl": 72220.09
+      },
+      "elapsed": 2.0
+    },
+    "I-VWTg10": {
+      "total_return_pct": 5533.2,
+      "final_balance": 118016.04,
+      "max_dd_pct": 7.1,
+      "sharpe": 5.81,
+      "calmar": 778.0,
+      "n_trades": 23933,
+      "trades_per_day": 10.92,
+      "win_rate": 64.0,
+      "profit_factor": 1.57,
+      "rr": 1.56,
+      "long": {
+        "count": 11714,
+        "wr": 63.9,
+        "avg_pnl": 2.84,
+        "rr": 1.72,
+        "pf": 1.67,
+        "total_pnl": 72652.88
+      },
+      "short": {
+        "count": 12219,
+        "wr": 64.2,
+        "avg_pnl": 2.46,
+        "rr": 1.42,
+        "pf": 1.49,
+        "total_pnl": 62984.3
+      },
+      "elapsed": 2.2
+    },
+    "J-VWTg08": {
+      "total_return_pct": 5117.7,
+      "final_balance": 109310.1,
+      "max_dd_pct": 7.3,
+      "sharpe": 6.01,
+      "calmar": 701.7,
+      "n_trades": 25280,
+      "trades_per_day": 11.54,
+      "win_rate": 65.2,
+      "profit_factor": 1.55,
+      "rr": 1.5,
+      "long": {
+        "count": 12391,
+        "wr": 65.2,
+        "avg_pnl": 2.747,
+        "rr": 1.67,
+        "pf": 1.65,
+        "total_pnl": 68778.16
+      },
+      "short": {
+        "count": 12889,
+        "wr": 65.2,
+        "avg_pnl": 2.313,
+        "rr": 1.36,
+        "pf": 1.47,
+        "total_pnl": 58634.96
+      },
+      "elapsed": 3.3
+    },
+    "K-VWTgW": {
+      "total_return_pct": 6364.5,
+      "final_balance": 135431.85,
+      "max_dd_pct": 7.5,
+      "sharpe": 5.6,
+      "calmar": 852.2,
+      "n_trades": 17135,
+      "trades_per_day": 7.82,
+      "win_rate": 55.8,
+      "profit_factor": 1.56,
+      "rr": 1.92,
+      "long": {
+        "count": 8440,
+        "wr": 56.0,
+        "avg_pnl": 3.649,
+        "rr": 2.11,
+        "pf": 1.65,
+        "total_pnl": 81196.09
+      },
+      "short": {
+        "count": 8695,
+        "wr": 55.7,
+        "avg_pnl": 2.915,
+        "rr": 1.75,
+        "pf": 1.49,
+        "total_pnl": 69406.78
+      },
+      "elapsed": 2.0
+    },
+    "L-VWFull": {
+      "total_return_pct": 5763.2,
+      "final_balance": 122835.02,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.99,
+      "calmar": 758.9,
+      "n_trades": 19987,
+      "trades_per_day": 9.12,
+      "win_rate": 64.4,
+      "profit_factor": 1.65,
+      "rr": 1.62,
+      "long": {
+        "count": 9646,
+        "wr": 64.7,
+        "avg_pnl": 3.32,
+        "rr": 1.77,
+        "pf": 1.76,
+        "total_pnl": 73322.92
+      },
+      "short": {
+        "count": 10341,
+        "wr": 64.0,
+        "avg_pnl": 2.764,
+        "rr": 1.49,
+        "pf": 1.56,
+        "total_pnl": 64661.75
+      },
+      "elapsed": 2.2
+    },
+    "M-DuVWS": {
+      "total_return_pct": 5978.3,
+      "final_balance": 127340.54,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.59,
+      "calmar": 790.1,
+      "n_trades": 18804,
+      "trades_per_day": 8.58,
+      "win_rate": 49.9,
+      "profit_factor": 1.54,
+      "rr": 2.4,
+      "long": {
+        "count": 9270,
+        "wr": 50.1,
+        "avg_pnl": 3.251,
+        "rr": 2.62,
+        "pf": 1.6,
+        "total_pnl": 77203.57
+      },
+      "short": {
+        "count": 9534,
+        "wr": 49.7,
+        "avg_pnl": 2.59,
+        "rr": 2.2,
+        "pf": 1.47,
+        "total_pnl": 67207.58
+      },
+      "elapsed": 2.1
+    },
+    "N-DuVWE": {
+      "total_return_pct": 6273.7,
+      "final_balance": 133528.29,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.66,
+      "calmar": 830.6,
+      "n_trades": 14049,
+      "trades_per_day": 6.41,
+      "win_rate": 57.7,
+      "profit_factor": 1.66,
+      "rr": 1.85,
+      "long": {
+        "count": 6843,
+        "wr": 58.5,
+        "avg_pnl": 4.089,
+        "rr": 2.01,
+        "pf": 1.74,
+        "total_pnl": 76581.89
+      },
+      "short": {
+        "count": 7206,
+        "wr": 57.0,
+        "avg_pnl": 3.121,
+        "rr": 1.7,
+        "pf": 1.58,
+        "total_pnl": 68888.75
+      },
+      "elapsed": 2.0
+    },
+    "O-DuVWF": {
+      "total_return_pct": 6092.8,
+      "final_balance": 129739.96,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.65,
+      "calmar": 797.9,
+      "n_trades": 16278,
+      "trades_per_day": 7.43,
+      "win_rate": 52.3,
+      "profit_factor": 1.6,
+      "rr": 2.25,
+      "long": {
+        "count": 7925,
+        "wr": 52.7,
+        "avg_pnl": 3.571,
+        "rr": 2.46,
+        "pf": 1.68,
+        "total_pnl": 76637.85
+      },
+      "short": {
+        "count": 8353,
+        "wr": 51.8,
+        "avg_pnl": 2.773,
+        "rr": 2.07,
+        "pf": 1.53,
+        "total_pnl": 67684.01
+      },
+      "elapsed": 2.2
+    },
+    "P-VolSt": {
+      "total_return_pct": 6223.9,
+      "final_balance": 132486.41,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.5,
+      "calmar": 823.7,
+      "n_trades": 17295,
+      "trades_per_day": 7.89,
+      "win_rate": 55.5,
+      "profit_factor": 1.55,
+      "rr": 1.94,
+      "long": {
+        "count": 8547,
+        "wr": 55.7,
+        "avg_pnl": 3.624,
+        "rr": 2.14,
+        "pf": 1.64,
+        "total_pnl": 80512.19
+      },
+      "short": {
+        "count": 8748,
+        "wr": 55.3,
+        "avg_pnl": 2.847,
+        "rr": 1.76,
+        "pf": 1.47,
+        "total_pnl": 67328.78
+      },
+      "elapsed": 2.2
+    },
+    "Q-BrdSz": {
+      "total_return_pct": 6157.4,
+      "final_balance": 131093.18,
+      "max_dd_pct": 7.4,
+      "sharpe": 5.31,
+      "calmar": 837.2,
+      "n_trades": 17165,
+      "trades_per_day": 7.83,
+      "win_rate": 55.8,
+      "profit_factor": 1.55,
+      "rr": 1.91,
+      "long": {
+        "count": 8452,
+        "wr": 56.0,
+        "avg_pnl": 3.636,
+        "rr": 2.1,
+        "pf": 1.7,
+        "total_pnl": 84797.7
+      },
+      "short": {
+        "count": 8713,
+        "wr": 55.7,
+        "avg_pnl": 2.908,
+        "rr": 1.75,
+        "pf": 1.42,
+        "total_pnl": 60779.56
+      },
+      "elapsed": 2.0
+    }
+  },
+  "best": {
+    "sharpe": "J-VWTg08",
+    "dd": "I-VWTg10",
+    "calmar": "C-VWE05",
+    "rr": "G-VWStT",
+    "ret": "H-VWStW"
+  },
+  "elapsed": 87.9
+}
