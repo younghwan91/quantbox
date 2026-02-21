@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 12.3.0  
-> 최종 업데이트: 2026년 2월 20일
+> 버전: 12.3.1  
+> 최종 업데이트: 2026년 2월 21일
 
 ---
 
@@ -123,6 +123,10 @@ python -m quantbox.scalper
 - **v12.3 Runner State Restore**: 봇 재시작 시 러너 trail_floor/highest_since_tp1 보존
 - **v12.3 Bracket Repair Guard**: 러너 포지션에 서버 TP 재배치 방지 (즉시 킬 방지)
 - **v12.3 Failed Partial Recovery**: 파셜 클로즈 실패 시 stale order ID 제거 → 브래킷 리페어 강제
+- **v12.3.1 Cancelled Order Detection**: 외부 취소/만료 알고 오더 감지 → 브래킷 리페어 자동 트리거
+- **v12.3.1 WOULD_TRIGGER Guard**: SL/TP 센티넬 값 저장 방지 + 재배치 시 force close
+- **v12.3.1 Runner BE Repair**: 러너 브래킷 리페어 시 breakeven stop(0.0001) 사용
+- **v12.3.1 State Persistence**: 서버 필/인터사이클 싱크 후 즉시 save_state
 - **Discord 알림**: 진입/청산, 드로다운 경고 전송
 
 ### 3.5 백테스트
