@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 12.4.0  
-> 최종 업데이트: 2026년 2월 24일
+> 버전: 12.4.6  
+> 최종 업데이트: 2026년 2월 21일
 
 ---
 
@@ -11,7 +11,7 @@
 
 1. [개요](#1-개요)
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
-3. [🔥 Rubber Band Scalper (v2.0)](#3-rubber-band-scalper)
+3. [🔥 Rubber Band Scalper (v12.4.6)](#3-rubber-band-scalper)
 3.5. [🌊 Elliott Wave Strategy (v11.6)](#35-elliott-wave-strategy)
 4. [아키텍처 이해](#4-아키텍처-이해)
 5. [핵심 모듈 상세](#5-핵심-모듈-상세)
@@ -38,7 +38,7 @@ QuantBox는 암호화폐 트레이딩을 위한 종합 퀀트 프레임워크입
 
 ---
 
-## 3. 🔥 Rubber Band Scalper (v11.4 — Adaptive Threshold)
+## 3. 🔥 Rubber Band Scalper (v12.4.6 — I-HybTight + Adaptive Threshold)
 
 ### 3.1 전략 개요
 
@@ -52,6 +52,10 @@ Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. ATR 기�
 - **Server-Side Stop-Loss**: 바이낸스 Algo Order API로 클라이언트 크래시 방어
   - **v11.4.2 Bracket Repair**: 복원된 포지션의 누락된 SL/TP를 자동 복구
 - **v12.4 I-HybTight Exit**: target 1.5, stop 0.382, trail ATR×1.0, runner 3× max_hold (R:R 1.91, Calmar 834)
+- **v12.4.1–v12.4.3 Server TP PBT audit**: 6 call-sites corrected to use 50% qty in PBT mode
+- **v12.4.4**: Stale `_server_sl_pct` reset after runner SL re-placed at breakeven
+- **v12.4.5**: Missing `_save_state()` after successful partial close
+- **v12.4.6**: HWM + trade history reset on restart with 0 positions (prevents phantom DD halt)
 - **v9.0 S+R+M Confluence**: MACD(12,26,14) + Stochastic(3,3) 컨피던스 증거
 - **v7.0 MTF Confirmation**: 4h SMA(12) 트렌드 필터 — MDD -74%, Calmar +275%
 
@@ -601,9 +605,12 @@ RB_HTF_RB_BTC_SMA_PERIOD=48        # BTC SMA (8일)
 RB_BTC_DIRECTIONAL_ENABLED=true   # BTC 방향 정렬: Long→BTC하락, Short→BTC상승 시만 진입
 RB_BTC_DIRECTIONAL_PERIOD=48      # BTC 모멘텀 lookback (48봉 = 12시간)
 
-# Capital Preservation (v4.4: 부분 청산 비활성화 — tighter stop이 DD 충분히 억제)
-RB_PARTIAL_EXIT_ENABLED=false     # 부분 청산 비활성화 (stop=0.9에서 오히려 손해)
+# v12.3 PBT Exit (Partial → Breakeven → Trailing Runner)
+RB_PARTIAL_EXIT_ENABLED=true      # v12.3: PBT 활성화 (50% partial → BE floor → ATR trailing)
 RB_PARTIAL_EXIT_FRACTION=0.5      # 부분 청산 비율 (0.5 = 50%)
+RB_TRAIL_ATR_MULT=1.0             # v12.4: 러너 ATR 트레일링 배수 (1.0×ATR, tighter trail)
+RB_BREAKEVEN_AFTER_PARTIAL=true   # 파셈 후 스톱을 브레이크이븐으로 이동
+RB_RUNNER_MAX_HOLD_MULT=3.0       # v12.4: 러너 최대 보유 = max_hold × 3.0 (75봉)
 
 # R:R-Gated Leverage (v4.4, 365일 A/B 검증)
 RB_RR_LEVERAGE_ENABLED=true       # R:R 기준 레버리지 게이트: 손익비 높을 때만 레버리지
@@ -624,7 +631,7 @@ PAPER_BALANCE=1000             # 페이퍼 트레이딩 시 가상 잔고 ($)
 # v12.2 Symbol Whitelist (E-3Slot: 4 tiers, 50 symbols)
 # T1 (20): 오리지널 Top-20 | T2 (10): v1 sweep 추가 | T3 (10): mid-cap | T4 (10): mid-cap
 RB_SYMBOL_WHITELIST=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,XLMUSDT,DOTUSDT,1000PEPEUSDT,ARBUSDT,FETUSDT,1000SHIBUSDT,OPUSDT,ATOMUSDT,HBARUSDT,ICPUSDT,FILUSDT,TRXUSDT,SUIUSDT,TONUSDT,LTCUSDT,BCHUSDT,UNIUSDT,NEARUSDT,APTUSDT,AAVEUSDT,INJUSDT,ETCUSDT,MATICUSDT,GRTUSDT,STXUSDT,FTMUSDT,EGLDUSDT,AXSUSDT,SANDUSDT,THETAUSDT,ALGOUSDT,RUNEUSDT,DYDXUSDT,CRVUSDT,LDOUSDT,COMPUSDT,MKRUSDT,SNXUSDT,VETUSDT,EOSUSDT,APEUSDT
-RB_MAX_CONCURRENT=3            # v12.2: E-3Slot 최적 (3 slots, Calmar 795, +138% trades/day)
+RB_MAX_CONCURRENT=2            # v12.3: M-2SSTSX (2 slots)
 
 # 알림 (Discord Webhook - 단방향 알림)
 DISCORD_WEBHOOK_URL=           # 미설정 시 알림 비활성화
@@ -655,7 +662,7 @@ quantbox/
 │   ├── downloader.py       # 바이낸스 데이터 다운로드
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 계층
-│   ├── rubberband.py       # Rubber Band Scalper (v11.4, Numba 가속)
+│   ├── rubberband.py       # Rubber Band Scalper (v12.4.6, Numba 가속)
 │   ├── elliott.py          # Elliott Wave 전략 (v11.5, Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
@@ -2252,4 +2259,4 @@ $$
 
 ---
 
-*이 문서는 QuantBox 11.5.0 기준으로 작성되었습니다. (Sweep-Optimized: 2025-02-18)*
+*이 문서는 QuantBox 12.4.6 기준으로 작성되었습니다. (2026-02-21)*
