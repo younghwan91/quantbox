@@ -967,6 +967,17 @@ class RubberBandScalper:
                     'status': 'FILLED',
                     'algoId': order_id,
                 }
+
+            # v12.3.1: Detect externally cancelled/expired orders.
+            # Without this, a cancelled order keeps its algoId in our state,
+            # _sync_server_orders skips bracket repair (oid is not None),
+            # and the position silently loses server-side protection.
+            if algo_status in ('CANCELLED', 'EXPIRED', 'USER_CANCELLED'):
+                logger.warning(
+                    f"[{symbol}] Algo order {algo_status}: "
+                    f"algoId={order_id} — will trigger bracket repair"
+                )
+                return {'status': 'CANCELLED', 'algoId': order_id}
         except Exception as e:
             logger.warning(
                 f"[{symbol}] Algo order status check failed: "
@@ -1001,7 +1012,7 @@ class RubberBandScalper:
             # Check TP order first (the happy path)
             if tp_oid:
                 filled = self._check_order_filled(sym, tp_oid)
-                if filled:
+                if filled and filled.get('status') == 'FILLED':
                     fill_price = float(filled['avgPrice'])
                     fill_qty = float(filled['executedQty'])
                     logger.info(
@@ -1015,11 +1026,19 @@ class RubberBandScalper:
                         sym, fill_price, fill_qty, 'server_tp',
                     )
                     continue
+                elif filled and filled.get('status') == 'CANCELLED':
+                    # v12.3.1: Externally cancelled — clear for bracket repair
+                    pos['server_tp_order_id'] = None
+                    tp_oid = None
+                    logger.warning(
+                        f"[{sym}] Server TP was externally cancelled — "
+                        f"cleared for bracket repair"
+                    )
 
             # Check SL order
             if sl_oid:
                 filled = self._check_order_filled(sym, sl_oid)
-                if filled:
+                if filled and filled.get('status') == 'FILLED':
                     fill_price = float(filled['avgPrice'])
                     fill_qty = float(filled['executedQty'])
                     logger.info(
@@ -1033,6 +1052,14 @@ class RubberBandScalper:
                         sym, fill_price, fill_qty, 'server_sl',
                     )
                     continue
+                elif filled and filled.get('status') == 'CANCELLED':
+                    # v12.3.1: Externally cancelled — clear for bracket repair
+                    pos['server_sl_order_id'] = None
+                    sl_oid = None
+                    logger.warning(
+                        f"[{sym}] Server SL was externally cancelled — "
+                        f"cleared for bracket repair"
+                    )
 
             # ═══ v11.4.2 BRACKET REPAIR: Place missing SL/TP for restored positions ═══
             # Positions restored from state may have None algoIds (e.g. old session
@@ -1051,10 +1078,15 @@ class RubberBandScalper:
                 )
 
                 if missing_sl:
+                    # v12.3.1: Runner needs BE stop, not original stop
+                    if pos.get('partial_closed') and self.config.breakeven_after_partial:
+                        repair_stop_mult = 0.0001  # BE stop for runner
+                    else:
+                        repair_stop_mult = stop_mult
                     new_sl = self._place_server_stop_loss(
                         symbol=sym, signal=signal, quantity=quantity,
                         entry_price=entry_price, move_size=move_size,
-                        stop_mult=stop_mult,
+                        stop_mult=repair_stop_mult,
                     )
                     if new_sl == 'WOULD_TRIGGER':
                         # ═══ FORCE-CLOSE: Price blew past SL level ═══
@@ -1070,8 +1102,18 @@ class RubberBandScalper:
                             f"\U0001f6a8 **강제청산** [{sym}] — "
                             f"SL 가격 이탈 감지. 시장가 긴급 청산 실행."
                         ))
+                        # v12.3.1: Fetch real price for force close
+                        # (0.0 would corrupt PnL if NO_POSITION fallback)
+                        _fc_price = entry_price  # safe fallback
+                        try:
+                            _book = self.client.futures_orderbook_ticker(
+                                symbol=sym,
+                            )
+                            _fc_price = float(_book['bidPrice'])
+                        except Exception:
+                            pass
                         closed = self._close_position(
-                            sym, 'force_sl_breach', 0.0,
+                            sym, 'force_sl_breach', _fc_price,
                         )
                         if closed:
                             logger.info(
@@ -1174,6 +1216,12 @@ class RubberBandScalper:
             'time': datetime.now(timezone.utc).isoformat(),
         }
         self._trade_history.append(trade)
+
+        # v12.3.1: Save state immediately after recording server fill.
+        # Without this, a crash before end-of-cycle _save_state() creates
+        # a ghost position on restart (position gone on exchange but
+        # still in our state file).
+        self._save_state()
 
         emoji = '🎯' if reason == 'server_tp' else '🛑'
         logger.info(
@@ -1395,6 +1443,13 @@ class RubberBandScalper:
             move_size=move_size,
             stop_mult=eff_stop,
         )
+        # v12.3.1: Guard against WOULD_TRIGGER sentinel — let bracket repair handle it
+        if sl_order_id == 'WOULD_TRIGGER':
+            logger.warning(
+                f"[{symbol}] SL WOULD_TRIGGER at entry — "
+                f"will rely on bracket repair next cycle"
+            )
+            sl_order_id = None
 
         # Captures intra-bar TP hits that 15m polling would miss.
         tp_order_id = self._place_server_take_profit(
@@ -1405,6 +1460,13 @@ class RubberBandScalper:
             move_size=move_size,
             target_retrace=cfg.target_retrace,
         )
+        # v12.3.1: Guard against WOULD_TRIGGER sentinel for TP too
+        if tp_order_id == 'WOULD_TRIGGER':
+            logger.warning(
+                f"[{symbol}] TP WOULD_TRIGGER at entry — "
+                f"will rely on client-side TP"
+            )
+            tp_order_id = None
 
         sl_status = "OK" if sl_order_id else "FAILED"
         tp_status = "OK" if tp_order_id else "FAILED"
@@ -1547,6 +1609,22 @@ class RubberBandScalper:
             pos['partial_closed'] = False
             pos['server_sl_order_id'] = None
             pos['server_tp_order_id'] = None
+            return False
+
+        # v12.3.1: Handle NO_POSITION — server order closed it between
+        # our cancel and our close attempt (race condition)
+        if isinstance(result, dict) and result.get('status') == 'NO_POSITION':
+            logger.warning(
+                f"[{symbol}] Partial close got NO_POSITION — "
+                f"server order already closed the position"
+            )
+            # Position is gone on exchange. Clean up completely.
+            closed_pos = self.strategy.close_position(symbol)
+            if closed_pos:
+                # Record as server fill with best available info
+                self._record_server_fill(
+                    symbol, pos['entry_price'], close_qty, 'server_fill_race',
+                )
             return False
 
         fill_price = float(result['avgPrice'])
@@ -1982,8 +2060,28 @@ class RubberBandScalper:
                 pos['server_sl_order_id'] = new_sl_oid
             else:
                 pos['server_sl_order_id'] = None
-            pos['server_tp_order_id'] = new_tp_oid
+            # v12.3.1: Guard TP sentinel too
+            if new_tp_oid and new_tp_oid != 'WOULD_TRIGGER':
+                pos['server_tp_order_id'] = new_tp_oid
+            else:
+                pos['server_tp_order_id'] = None
             self._save_state()
+
+            # v12.3.1: SL WOULD_TRIGGER = price already past stop level.
+            # Leaving position open with no SL for 15min is unacceptable.
+            # Guard against infinite recursion if this is already a force close.
+            if (
+                new_sl_oid == 'WOULD_TRIGGER'
+                and not reason.startswith('force_')
+            ):
+                logger.error(
+                    f"[{symbol}] SL WOULD_TRIGGER during re-placement — "
+                    f"price past stop level, forcing immediate close"
+                )
+                return self._close_position(
+                    symbol, 'force_sl_would_trigger', current_price,
+                )
+
             return False
 
         # ── Successful close — NOW remove from state ──
@@ -2935,6 +3033,7 @@ class RubberBandScalper:
             # Sync server-side TP/SL fills periodically (not every 5s)
             if time.monotonic() - last_sync >= SYNC_INTERVAL:
                 self._sync_server_orders()
+                self._save_state()  # v12.3.1: persist after inter-cycle sync
                 last_sync = time.monotonic()
 
             # Sleep 5s max for responsive bot commands
