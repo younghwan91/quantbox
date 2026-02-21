@@ -1,0 +1,179 @@
+==============================================================================================================
+  ALPHA SEARCH R10: Multi-Factor Adaptive + VWMA S/R Innovation
+  Commit: a09a0da
+  Date: 2026-02-21 16:24 UTC
+  Baseline: v12.4 I-HybTight (symmetric T150_S38_H25_PBT)
+  VWMA: 100-bar volume-weighted moving average on 15m
+  Data: 2190d (6yr), 50 symbols
+==============================================================================================================
+
+📊 Loading data...
+  Loaded 50 symbols
+
+🔍 Scanning entries (conf≥3)...
+  Left-padded to 210335 bars (2190 days)
+  Raw signals: 52,690
+
+📈 Computing VWMA(100) per symbol...
+  VWMA computed for 50/50 symbols
+
+🌐 Computing regime & factor arrays...
+  Dual-confirm: 39.8% bull / 33.7% bear / 26.5% choppy
+  BTC vol ratio: 207456/210335 valid bars, mean=1.011
+  Market breadth: 210335/210335 valid, mean=0.463
+
+🔬 Running baseline simulation for factor tagging...
+  Tagged 17165 trades with 5 factor values
+
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  PART A: MULTI-FACTOR INDEPENDENCE ANALYSIS — 17165 trades
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+  ── VWMA(100) Dist ──
+  Distribution: min=-0.2113  p25=0.0041  med=0.0131  p75=0.0249  max=0.5609
+  Tercile                   #Tr    WR%     PF    R:R      EV%     Total$
+  ────────────────────── ────── ────── ────── ────── ──────── ──────────
+  Lo (<0.007)              5716  52.1%  1.33  1.95   2.257%    26792.2
+  Mid                      5733  57.5%  1.60  1.86   2.836%    51036.4
+  Hi (>0.020)              5716  57.9%  1.71  1.85   4.709%    71454.4
+  ⚡ MONOTONIC INCREASING — factor predicts higher PnL ↑
+
+  ── Dual-Confirm Regime ──
+  Distribution: min=-1.0000  p25=-1.0000  med=0.0000  p75=1.0000  max=1.0000
+  Tercile                   #Tr    WR%     PF    R:R      EV%     Total$
+  ────────────────────── ────── ────── ────── ────── ──────── ──────────
+  Bear (-1)                5589  55.1%  1.47  1.84   3.227%    42521.5
+  Choppy (0)               4475  55.4%  1.56  1.98   3.187%    38064.0
+  Bull (+1)                7101  56.8%  1.63  1.95   3.348%    68697.5
+  ⚡ Non-monotonic — spread: 0.161%
+
+  ── BTC Vol Ratio ──
+  Distribution: min=0.1976  p25=0.7136  med=0.8948  p75=1.1391  max=4.7841
+  Tercile                   #Tr    WR%     PF    R:R      EV%     Total$
+  ────────────────────── ────── ────── ────── ────── ──────── ──────────
+  Lo (<0.775)              5679  54.9%  1.52  1.98   2.808%    45197.7
+  Mid                      5695  56.0%  1.55  1.90   3.110%    48588.0
+  Hi (>1.042)              5679  56.4%  1.58  1.84   3.781%    52890.0
+  ⚡ MONOTONIC INCREASING — factor predicts higher PnL ↑
+
+  ── Asset ATR Ratio ──
+  Distribution: min=0.3712  p25=0.8342  med=0.9672  p75=1.1393  max=5.7879
+  Tercile                   #Tr    WR%     PF    R:R      EV%     Total$
+  ────────────────────── ────── ────── ────── ────── ──────── ──────────
+  Lo (<0.879)              5716  56.8%  1.68  2.01   3.149%    55486.3
+  Mid                      5733  54.8%  1.44  1.91   2.900%    40598.4
+  Hi (>1.073)              5716  55.9%  1.56  1.85   3.752%    53198.3
+  ⚡ Non-monotonic — spread: 0.852%
+
+  ── Market Breadth ──
+  Distribution: min=0.0000  p25=0.2200  med=0.4400  p75=0.7200  max=1.0000
+  Tercile                   #Tr    WR%     PF    R:R      EV%     Total$
+  ────────────────────── ────── ────── ────── ────── ──────── ──────────
+  Lo (<0.280)              5369  54.9%  1.52  1.91   3.581%    46295.0
+  Mid                      6280  56.8%  1.58  1.86   3.187%    55946.3
+  Hi (>0.620)              5516  55.7%  1.57  2.01   3.051%    47041.6
+  ⚡ MONOTONIC DECREASING — factor predicts lower PnL ↓
+
+  ── Pairwise Correlations ──
+                       VWMA(100) Di Dual-Confirm BTC Vol Rati Asset ATR Ra Market Bread
+        VWMA(100) Dist       1.000       -0.035        0.145        0.170       -0.101 
+   Dual-Confirm Regime      -0.035        1.000       -0.052        0.019        0.301 
+         BTC Vol Ratio       0.145       -0.052        1.000        0.211       -0.111 
+       Asset ATR Ratio       0.170        0.019        0.211        1.000       -0.215 
+        Market Breadth      -0.101        0.301       -0.111       -0.215        1.000 
+
+  ── Factor → PnL Correlation ──
+  VWMA(100) Dist           r = +0.1357  (STRONG)
+  Dual-Confirm Regime      r = +0.0050  (WEAK)
+  BTC Vol Ratio            r = +0.0462  (MODERATE)
+  Asset ATR Ratio          r = +0.0642  (STRONG)
+  Market Breadth           r = -0.0202  (MODERATE)
+
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  PART B: VWMA + MULTI-FACTOR A/B TEST — 17 VARIANTS
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+🔬 [1/17] A-Baseline: Symmetric I-HybTight (prod, no adaptation)
+  Ret: 6,300.9%  DD: 7.6%  Sharpe: 5.56  Calmar: 833.9  WR: 55.8%  PF: 1.56  R:R: 1.91  #Tr: 17165
+
+🔬 [2/17] B-VWEntry0: VWMA entry gate: directional dist > 0%
+  Ret: 6,129.4%  DD: 7.7%  Sharpe: 5.47  Calmar: 794.4  WR: 56.7%  PF: 1.60  R:R: 1.89  #Tr: 15222
+
+🔬 [3/17] C-VWE05: VWMA entry gate: directional dist > 0.5%
+  Ret: 6,268.2%  DD: 7.2%  Sharpe: 5.55  Calmar: 871.4  WR: 57.5%  PF: 1.65  R:R: 1.87  #Tr: 14129
+
+🔬 [4/17] D-VWE10: VWMA entry gate: directional dist > 1.0%
+  Ret: 5,938.5%  DD: 7.6%  Sharpe: 5.74  Calmar: 782.4  WR: 58.0%  PF: 1.68  R:R: 1.85  #Tr: 12316
+
+🔬 [5/17] E-VWSt50: VWMA stop (replace): vwma_dist × 0.50
+  Ret: 6,055.9%  DD: 8.0%  Sharpe: 5.61  Calmar: 752.6  WR: 51.8%  PF: 1.55  R:R: 2.24  #Tr: 18165
+
+🔬 [6/17] F-VWSt75: VWMA stop (replace): vwma_dist × 0.75
+  Ret: 6,260.7%  DD: 7.6%  Sharpe: 5.64  Calmar: 821.6  WR: 54.9%  PF: 1.58  R:R: 2.00  #Tr: 17089
+
+🔬 [7/17] G-VWStT: VWMA stop (blend-tight): min(normal, vwma×0.50)
+  Ret: 5,896.1%  DD: 7.4%  Sharpe: 5.42  Calmar: 794.8  WR: 49.8%  PF: 1.53  R:R: 2.40  #Tr: 18799
+
+🔬 [8/17] H-VWStW: VWMA stop (blend-wide): max(normal, vwma×0.50)
+  Ret: 6,551.7%  DD: 7.9%  Sharpe: 5.79  Calmar: 828.4  WR: 58.2%  PF: 1.59  R:R: 1.76  #Tr: 16584
+
+🔬 [9/17] I-VWTg10: VWMA target (replace): vwma_dist × 1.0 (reach VWMA)
+  Ret: 5,533.2%  DD: 7.1%  Sharpe: 5.81  Calmar: 778.0  WR: 64.0%  PF: 1.57  R:R: 1.56  #Tr: 23933
+
+🔬 [10/17] J-VWTg08: VWMA target (replace): vwma_dist × 0.8
+  Ret: 5,117.7%  DD: 7.3%  Sharpe: 6.01  Calmar: 701.7  WR: 65.2%  PF: 1.55  R:R: 1.50  #Tr: 25280
+
+🔬 [11/17] K-VWTgW: VWMA target (blend-wide): max(normal, vwma×0.80)
+  Ret: 6,364.5%  DD: 7.5%  Sharpe: 5.60  Calmar: 852.2  WR: 55.8%  PF: 1.56  R:R: 1.92  #Tr: 17135
+
+🔬 [12/17] L-VWFull: VWMA: entry(>0) + stop(×0.50) + target(×1.0)
+  Ret: 5,763.2%  DD: 7.6%  Sharpe: 5.99  Calmar: 758.9  WR: 64.4%  PF: 1.65  R:R: 1.62  #Tr: 19987
+
+🔬 [13/17] M-DuVWS: Dual-confirm stops(.45/.30) + VWMA stop blend-tight
+  Ret: 5,978.3%  DD: 7.6%  Sharpe: 5.59  Calmar: 790.1  WR: 49.9%  PF: 1.54  R:R: 2.40  #Tr: 18804
+
+🔬 [14/17] N-DuVWE: Dual-confirm + VWMA entry gate(>0.5%)
+  Ret: 6,273.7%  DD: 7.6%  Sharpe: 5.66  Calmar: 830.6  WR: 57.7%  PF: 1.66  R:R: 1.85  #Tr: 14049
+
+🔬 [15/17] O-DuVWF: Dual-confirm + VWMA entry + stop + target
+  Ret: 6,092.8%  DD: 7.6%  Sharpe: 5.65  Calmar: 797.9  WR: 52.3%  PF: 1.60  R:R: 2.25  #Tr: 16278
+
+🔬 [16/17] P-VolSt: BTC vol adaptive stop: high→0.45, low→0.30
+  Ret: 6,223.9%  DD: 7.6%  Sharpe: 5.50  Calmar: 823.7  WR: 55.5%  PF: 1.55  R:R: 1.94  #Tr: 17295
+
+🔬 [17/17] Q-BrdSz: Market breadth sizing: panic→1.3×, euphoria→0.7×
+  Ret: 6,157.4%  DD: 7.4%  Sharpe: 5.31  Calmar: 837.2  WR: 55.8%  PF: 1.55  R:R: 1.91  #Tr: 17165
+
+==============================================================================================================
+  RESULTS — Alpha Search R10: Multi-Factor + VWMA
+==============================================================================================================
+  Variant      Desc                                                     Ret%   DD%  Sharpe  Calmar    WR    PF   R:R    #Tr
+  ──────────── ──────────────────────────────────────────────────── ──────── ───── ─────── ─────── ───── ───── ───── ──────
+    A-Baseline   Symmetric I-HybTight (prod, no adaptation)           6,300.9%  7.6%    5.56   833.9 55.8% 1.56 1.91  17165
+    B-VWEntry0   VWMA entry gate: directional dist > 0%               6,129.4%  7.7%    5.47   794.4 56.7% 1.60 1.89  15222
+ ★  C-VWE05      VWMA entry gate: directional dist > 0.5%             6,268.2%  7.2%    5.55   871.4 57.5% 1.65 1.87  14129
+ ◆  D-VWE10      VWMA entry gate: directional dist > 1.0%             5,938.5%  7.6%    5.74   782.4 58.0% 1.68 1.85  12316
+ ◆  E-VWSt50     VWMA stop (replace): vwma_dist × 0.50                6,055.9%  8.0%    5.61   752.6 51.8% 1.55 2.24  18165
+ ◆  F-VWSt75     VWMA stop (replace): vwma_dist × 0.75                6,260.7%  7.6%    5.64   821.6 54.9% 1.58 2.00  17089
+ ★  G-VWStT      VWMA stop (blend-tight): min(normal, vwma×0.50)      5,896.1%  7.4%    5.42   794.8 49.8% 1.53 2.40  18799
+ ◆▲ H-VWStW      VWMA stop (blend-wide): max(normal, vwma×0.50)       6,551.7%  7.9%    5.79   828.4 58.2% 1.59 1.76  16584
+ ★◆ I-VWTg10     VWMA target (replace): vwma_dist × 1.0 (reach VWMA)  5,533.2%  7.1%    5.81   778.0 64.0% 1.57 1.56  23933
+ ★◆ J-VWTg08     VWMA target (replace): vwma_dist × 0.8               5,117.7%  7.3%    6.01   701.7 65.2% 1.55 1.50  25280
+ ★◆▲K-VWTgW      VWMA target (blend-wide): max(normal, vwma×0.80)     6,364.5%  7.5%    5.60   852.2 55.8% 1.56 1.92  17135
+ ◆  L-VWFull     VWMA: entry(>0) + stop(×0.50) + target(×1.0)         5,763.2%  7.6%    5.99   758.9 64.4% 1.65 1.62  19987
+ ◆  M-DuVWS      Dual-confirm stops(.45/.30) + VWMA stop blend-tight  5,978.3%  7.6%    5.59   790.1 49.9% 1.54 2.40  18804
+ ◆  N-DuVWE      Dual-confirm + VWMA entry gate(>0.5%)                6,273.7%  7.6%    5.66   830.6 57.7% 1.66 1.85  14049
+ ◆  O-DuVWF      Dual-confirm + VWMA entry + stop + target            6,092.8%  7.6%    5.65   797.9 52.3% 1.60 2.25  16278
+    P-VolSt      BTC vol adaptive stop: high→0.45, low→0.30           6,223.9%  7.6%    5.50   823.7 55.5% 1.55 1.94  17295
+ ★  Q-BrdSz      Market breadth sizing: panic→1.3×, euphoria→0.7×     6,157.4%  7.4%    5.31   837.2 55.8% 1.55 1.91  17165
+
+  ★ = better DD than baseline  ◆ = better Sharpe  ▲ = better Return
+  Total time: 87.9s
+
+  🏆 Best Sharpe:  J-VWTg08 (6.01)
+  🏆 Best DD:      I-VWTg10 (7.1%)
+  🏆 Best Calmar:  C-VWE05 (871.4)
+  🏆 Best R:R:     G-VWStT (2.40)
+  🏆 Best Return:  H-VWStW (6,551.7%)
+
+💾 Results saved to /home/user/Documents/git/quantbox/logs/alpha_search_r10_results.json
