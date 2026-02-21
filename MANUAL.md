@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 12.3.1  
-> 최종 업데이트: 2026년 2월 21일
+> 버전: 12.4.0  
+> 최종 업데이트: 2026년 2월 24일
 
 ---
 
@@ -51,7 +51,7 @@ Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. ATR 기�
   - 레버리지 최적화: 1×~5× 그리드 → 현행 3.75× 유지 결정
 - **Server-Side Stop-Loss**: 바이낸스 Algo Order API로 클라이언트 크래시 방어
   - **v11.4.2 Bracket Repair**: 복원된 포지션의 누락된 SL/TP를 자동 복구
-- **v9.0 Fibonacci Exit**: target 0.382, stop 0.786 (R:R 0.486, Calmar +29%)
+- **v12.4 I-HybTight Exit**: target 1.5, stop 0.382, trail ATR×1.0, runner 3× max_hold (R:R 1.91, Calmar 834)
 - **v9.0 S+R+M Confluence**: MACD(12,26,14) + Stochastic(3,3) 컨피던스 증거
 - **v7.0 MTF Confirmation**: 4h SMA(12) 트렌드 필터 — MDD -74%, Calmar +275%
 
@@ -95,9 +95,9 @@ python -m quantbox.scalper
 | **atr_multiplier** | **2.0** | **v12.2: ATR 배수 (threshold = 2.0 × ATR%, E-3Slot A/B validated)** |
 | **threshold_floor** | **0.008** | **v12.2: 최소 임계값 (0.8%, E-3Slot A/B validated)** |
 | **threshold_cap** | **0.06** | **v11.4: 최대 임계값 (6%)** |
-| target_retrace | 1.0 | v12.3: 이익 실현 — 이동 폭의 100% 되돌림 (T100_S38_PBT champion) |
+| target_retrace | 1.5 | v12.4: 이익 실현 — 이동 폭의 150% 되돌림 (I-HybTight champion) |
 | stop_mult | 0.382 | v12.3: 손절 — 이동 폭의 0.382배 (R:R 2.62) |
-| max_hold | 20 | v10.0: 최대 보유 기간 (20봉 = 5시간, +24% ret vs 10) |
+| max_hold | 25 | v12.4: 최대 보유 기간 (25봉 = 6.25시간, I-HybTight patience) |
 | stop_decay | 0.0 | 시간감쇠 비활성화 (장기 안정성 확보) |
 | htf_period | 0 | MTF SMA 기간 (0=비활성화 — 장기 성능 저하) |
 | htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%, MTF 비활성 시 미사용) |
@@ -106,7 +106,8 @@ python -m quantbox.scalper
 | max_concurrent | 2 | v12.3: M-2SSTSX 2슬롯 집중 |
 | min_confidence | 3 | v12.3: 최소 증거 점수 3 (quality gate) |
 | **partial_exit** | **True** | **v12.3: PBT 50% 부분 익절 활성화** |
-| **trail_atr_mult** | **1.5** | **v12.3: 러너 ATR 트레일링 배수** |
+| **trail_atr_mult** | **1.0** | **v12.4: 러너 ATR 트레일링 배수 (tighter trail locks gains faster)** |
+| **runner_max_hold_mult** | **3.0** | **v12.4: 러너 최대 보유 배수 (max_hold × 3.0 = 75봉)** |
 | **breakeven_after_partial** | **True** | **v12.3: 파셜 후 BE 스톱 + 러너** |
 | **steep_cap_curve** | **True** | **v12.3: SteepX 컨피던스 사이징 (0.3/0.5/1.5/2.0×)** |
 | **soft_equity_scale** | **True** | **v12.3: SoftTight DD 스케일링 (2/4/6%DD)** |

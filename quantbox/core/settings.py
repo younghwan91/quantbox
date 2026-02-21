@@ -92,9 +92,9 @@ class QuantBoxSettings(BaseSettings):
     # ── Rubber Band Signal Parameters (v9.0, Fibonacci discipline) ──
     rb_lookback: int = 8               # Bars to measure move (2h at 15m) — SACRED
     rb_threshold: float = 0.032        # v10.0: Lower threshold (3.2%, +162% ret vs 4.5%)
-    rb_target_retrace: float = 1.0     # v12.3 T100_S38_PBT: full retrace target (R7/R8 champion)
+    rb_target_retrace: float = 1.5     # v12.4 HybTight: 1.5× retrace TP1 (AB-test winner, was 1.0)
     rb_stop_mult: float = 0.382        # v12.3 T100_S38_PBT: Fibonacci 0.382 stop (regime-stable)
-    rb_max_hold: int = 20              # v10.0: Extended hold (20 bars, +24% ret vs 10)
+    rb_max_hold: int = 25              # v12.4 HybTight: 25 bars patience (was 20)
     rb_stop_decay: float = 0.0         # Stop tightening disabled for robustness
 
     # ── Multi-timeframe Confirmation (DISABLED) ──
@@ -171,8 +171,9 @@ class QuantBoxSettings(BaseSettings):
     # ── v12.3 PBT Exit Mode (R7/R8 validated, T100_S38_PBT champion) ──
     rb_partial_exit_enabled: bool = True      # v12.3: PBT mode (R:R 1.22 → 1.66)
     rb_partial_exit_fraction: float = 0.5     # 부분 청산 비율 (0.5 = 50%)
-    rb_trail_atr_mult: float = 1.5            # ATR multiplier for runner trailing
+    rb_trail_atr_mult: float = 1.0            # v12.4 HybTight: 1.0×ATR (tighter trail, was 1.5)
     rb_breakeven_after_partial: bool = True   # Move stop to breakeven after TP1
+    rb_runner_max_hold_mult: float = 3.0      # v12.4 HybTight: runner max_hold multiplier (was hardcoded 2)
 
     # ── v12.3.3 Pre-TP1 Trailing Parameters (configurable, R5 defaults) ──
     rb_pre_tp1_trail_activation: float = 0.5  # Trail after 50% of target reached

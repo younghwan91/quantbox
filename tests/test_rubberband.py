@@ -228,7 +228,10 @@ class TestRubberBandStrategy:
 
     def test_position_lifecycle(self):
         """Open → update → close position flow."""
-        strat = RubberBandStrategy(RubberBandConfig(partial_exit_enabled=False))
+        strat = RubberBandStrategy(RubberBandConfig(
+            partial_exit_enabled=False,
+            target_retrace=0.382,  # Use old Fib target for lifecycle test
+        ))
         strat.open_position(
             symbol="TESTUSDT", signal=1, entry_price=100.0,
             notional=1000.0, leverage=2.0, move_size=0.03,
