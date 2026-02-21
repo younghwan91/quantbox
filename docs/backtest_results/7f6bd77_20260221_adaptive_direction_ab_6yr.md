@@ -52,21 +52,69 @@ Definitions:
 
 **Observation:** The aligned advantage is strongest in Yr1 (+1.20%) and Yr3 (+0.50%) — both sharp trend periods. In Yr2, Yr4, and Yr6, the gap is near zero or reverses. The signal is **inconsistent across time**.
 
-## Part B: Adaptive A/B Test — 14 Variants
+## Part B: Adaptive A/B Test — 23 Variants
 
 ### Design
 
-At each bar, BTC regime is determined by `BTC 4h close vs SMA(N)`. Trades in the "aligned" direction (long in bull, short in bear) get favorable exit params (wider stops, more generous targets, longer hold time). Misaligned trades get tighter params.
+At each bar, BTC regime is determined by one of five methods:
+1. **Single SMA**: BTC 4h close vs SMA(N) for N ∈ {50, 100, 200}
+2. **Dual-confirm**: Bull only when BTC > both SMA(50) AND SMA(200). Bear when < both. Otherwise "choppy" (treated as misaligned).
+3. **Golden cross**: SMA(50) > SMA(200) = bull, SMA(50) < SMA(200) = bear.
+
+Trades in the "aligned" direction (long in bull, short in bear) get favorable exit params (wider stops, more generous targets, longer hold time). Misaligned trades get tighter params.
 
 Parameters locked at entry — no mid-trade regime switching.
 
-### Results
+### Part A Extension: Dual-SMA Regime Diagnostics
+
+#### Dual-Confirm (BTC > both SMA50 & SMA200)
+
+| Regime | Time% |
+|--------|-------|
+| Bull (>both) | 39.8% |
+| Bear (<both) | 33.7% |
+| Choppy (between) | **26.5%** |
+
+| Category | #Trades | WR% | PF | R:R | EV% | Total$ |
+|----------|---------|-----|----|-----|-----|--------|
+| Bull-Long | 3,898 | 58.5% | 1.87 | 2.14 | 3.899% | $46,050 |
+| Bull-Short | 3,203 | 54.6% | 1.41 | 1.75 | 2.677% | $22,648 |
+| Bear-Long | 2,417 | 53.0% | 1.41 | 2.11 | 3.515% | $16,883 |
+| Bear-Short | 3,172 | 56.6% | 1.51 | 1.65 | 3.008% | $25,638 |
+| **ALIGNED** | **7,070** | **57.7%** | **1.70** | **1.88** | **3.500%** | **$71,688** |
+| **MISALIGNED** | **5,620** | **53.9%** | **1.41** | **1.90** | **3.037%** | **$39,531** |
+
+**Gap: EV +0.463% (+15.2%), WR +3.8pp, PF +0.29** — STRONGEST signal of all regimes tested.
+
+| Year | Bull% | Aligned EV | Misaligned EV | Gap |
+|------|-------|-----------|---------------|-----|
+| Yr1 (2020-21) | 53.0% | 5.978% | 5.814% | +0.164% |
+| Yr2 (2021-22) | 35.2% | 4.148% | 3.818% | +0.330% |
+| Yr3 (2022-23) | 30.2% | 3.207% | 2.422% | +0.785% |
+| Yr4 (2023-24) | 44.2% | 2.589% | 2.262% | +0.327% |
+| Yr5 (2024-25) | 42.6% | 3.254% | 2.437% | +0.817% |
+| Yr6 (2025-26) | 33.7% | 2.755% | 2.225% | +0.530% |
+
+**Key insight:** Dual-confirm gap is **positive in ALL 6 years** — the only regime type to achieve this. The single SMA(200) flipped in Yr6. But 26.5% of time is "choppy" (undefined regime), where trades fallback to misaligned treatment.
+
+#### Golden Cross (SMA50 > SMA200)
+
+| Category | #Trades | WR% | PF | R:R | EV% | Total$ |
+|----------|---------|-----|----|-----|-----|--------|
+| **ALIGNED** | **8,468** | **55.8%** | **1.54** | **1.86** | **3.183%** | **$70,977** |
+| **MISALIGNED** | **8,575** | **55.7%** | **1.56** | **1.95** | **3.277%** | **$75,296** |
+
+**Gap: EV −0.094% (−2.9%)** — Signal REVERSES. Misaligned actually wins.
+
+The golden cross is a trend-continuation signal, which **conflicts** with the mean-reversion rubberband strategy. When SMA(50) > SMA(200), long longs actually do worse than short shorts — likely because sharp counter-trend reversals are more profitable in established trends.
+
+### Results — All 23 Variants
 
 | Variant | Description | Ret% | DD% | Sharpe | Calmar | WR | PF | R:R | #Trades |
 |---------|------------|------|-----|--------|--------|----|----|-----|---------|
-| **A-Baseline** | Symmetric I-HybTight (prod) | **6,300.9%** | **7.6%** | 5.56 | **833.9** | 55.8% | 1.56 | 1.91 | 17,165 |
+| **A-Baseline** | Symmetric I-HybTight (prod) | 6,300.9% | **7.6%** | 5.56 | **833.9** | 55.8% | 1.56 | 1.91 | 17,165 |
 | B-Stop200 | SMA(200) stop .45/.30 | 6,264.8% | 8.1% | 5.65 | 770.8 | 55.2% | 1.56 | 1.95 | 17,307 |
-| **C-Stop100** | SMA(100) stop .45/.30 | 6,229.1% | 8.1% | **5.67** | 766.4 | 55.2% | 1.55 | **1.96** | 17,314 |
+| C-Stop100 | SMA(100) stop .45/.30 | 6,229.1% | 8.1% | **5.67** | 766.4 | 55.2% | 1.55 | 1.96 | 17,314 |
 | D-Stop50 | SMA(50) stop .45/.30 | 6,253.4% | 8.2% | 5.60 | 761.0 | 55.3% | 1.55 | 1.96 | 17,286 |
 | E-Tgt200 | SMA(200) target 2.0/1.0 | 6,190.1% | 9.0% | 5.31 | 685.6 | 56.7% | 1.55 | 1.83 | 17,596 |
 | F-StopTgt200 | SMA(200) stop+target | 6,264.8% | 8.9% | 5.32 | 704.2 | 56.2% | 1.56 | 1.88 | 17,703 |
@@ -78,6 +126,15 @@ Parameters locked at entry — no mid-trade regime switching.
 | L-Block200 | Block misaligned | 3,893.6% | 7.6% | 4.86 | 515.3 | 55.9% | 1.57 | 1.88 | 10,562 |
 | M-Mild200 | Mild stop .40/.35 | 6,226.8% | 7.8% | 5.53 | 802.9 | 55.5% | 1.55 | 1.93 | 17,271 |
 | N-MildFull200 | Mild stop+target | 6,206.4% | 8.7% | 5.42 | 714.9 | 55.8% | 1.55 | 1.90 | 17,353 |
+| **O-DualStop** | Dual-confirm stop .45/.30 | 6,328.0% | 8.1% | **5.67** | 778.5 | 56.1% | 1.56 | 1.90 | 17,078 |
+| **P-DualStopTgt** | Dual-confirm stop+target | **6,358.1%** | 8.9% | 5.31 | 714.7 | 55.5% | 1.57 | 1.88 | 16,933 |
+| Q-DualFull | Dual-confirm full adaptive | 5,930.8% | 12.1% | 5.05 | 491.8 | 55.0% | 1.53 | 1.88 | 16,462 |
+| R-DualConf | Dual-confirm +1 conf gate | 5,805.6% | 7.6% | 5.32 | 768.3 | 56.3% | 1.58 | 1.89 | 14,527 |
+| S-DualBlock | Dual-confirm block misaligned | 4,822.7% | 7.6% | 5.08 | 638.3 | 56.2% | 1.59 | 1.90 | 12,692 |
+| T-GCStop | Golden cross stop .45/.30 | 6,196.8% | 8.1% | 5.63 | 762.4 | 55.0% | 1.55 | **1.97** | 17,342 |
+| U-GCStopTgt | Golden cross stop+target | 6,156.1% | 8.9% | 5.31 | 692.0 | 56.4% | 1.55 | 1.87 | 17,894 |
+| V-GCFull | Golden cross full adaptive | 5,927.2% | 12.1% | 5.08 | 491.5 | 56.2% | 1.54 | 1.85 | 17,504 |
+| W-GCMild | Golden cross mild stop .40/.35 | 6,219.9% | 7.8% | 5.52 | 802.0 | 55.4% | 1.55 | 1.94 | 17,293 |
 
 ### Aligned vs Misaligned Detail
 
@@ -90,10 +147,14 @@ Parameters locked at entry — no mid-trade regime switching.
 | E-Tgt200 | 8,620 | 52.4% | 3.067% | 8,976 | 60.8% | 3.184% | −0.117% |
 | K-ConfGate200 | 10,024 | 56.2% | 3.269% | 3,200 | 56.0% | 3.287% | −0.018% |
 | L-Block200 | 10,562 | 55.9% | 3.249% | 0 | — | — | — |
+| **O-DualStop** | 11,189 | 59.1% | 3.509% | 5,889 | 50.5% | 2.846% | **+0.663%** |
+| **P-DualStopTgt** | 10,419 | 55.0% | 3.221% | 6,514 | 56.3% | 2.922% | +0.299% |
+| R-DualConf | 12,280 | 56.5% | 3.310% | 2,247 | 55.1% | 3.147% | +0.163% |
+| T-GCStop | 8,298 | 58.1% | 3.335% | 9,044 | 52.1% | 3.060% | +0.275% |
 
 ## Analysis
 
-### The BTC Regime Signal Is Real but Weak
+### The BTC Regime Signal Is Real but Weak (Single-SMA)
 
 1. **The mechanism works directionally.** Aligned trades (direction matches BTC regime) have +0.21% EV, +1.6pp WR, and +0.12 PF over misaligned. The stop adaptation variants successfully widen this gap to +0.71% (C-Stop100).
 
@@ -107,7 +168,29 @@ Parameters locked at entry — no mid-trade regime switching.
 
 5. **The regime signal is temporally inconsistent.** Yr1 (+1.20% gap) and Yr3 (+0.50%) show strong aligned advantage. Yr2, Yr4, and Yr6 show near-zero or negative gap. Any fixed regime-response mapping will overfit to specific periods.
 
-### Why Adaptive Fails Here
+### Dual-Confirm: Strongest Signal, First to Beat Baseline on Return
+
+The dual-confirm regime (require BTC > BOTH SMA50 and SMA200 for bull) produces the strongest directional signal (+0.463% EV gap, +15.2%) — more than double the single SMA(200) gap (+0.209%). Critically, **the gap is positive in ALL 6 years**, whereas single-SMA signals flip negative in some years.
+
+This yields the first variants to beat baseline on return:
+
+| | Ret% | DD% | Sharpe | Calmar |
+|-|------|-----|--------|--------|
+| A-Baseline | 6,300.9% | 7.6% | 5.56 | 833.9 |
+| **P-DualStopTgt** | **6,358.1%** (+0.9%) | 8.9% (+17%) | 5.31 (−4.5%) | 714.7 (−14%) |
+| O-DualStop | 6,328.0% (+0.4%) | 8.1% (+6.6%) | 5.67 (+2.0%) | 778.5 (−6.6%) |
+
+**P-DualStopTgt** wins on Return (+$3.8K), but the DD increase from 7.6% → 8.9% (+17%) makes it a poor Calmar tradeoff. **O-DualStop** ties for best Sharpe (5.67) with minimal DD increase (+6.6%), but still can't beat baseline Calmar.
+
+**Why dual-confirm is stronger:** The "choppy" zone (26.5% of time) — where BTC is between SMA50 and SMA200 — acts as a natural noise filter. Only high-conviction regime states (above BOTH or below BOTH) get favorable treatment. This selectivity increases signal quality at the cost of regime coverage.
+
+### Golden Cross: Signal Reverses — Wrong Abstraction
+
+The golden cross (SMA50 > SMA200) produces a **negative** signal: misaligned trades actually outperform aligned by −0.094% EV. The crossover signal identifies long-term trend direction but for a mean-reversion strategy, counter-trend trades are more profitable in established trends than with-trend trades.
+
+Golden cross variants (T-W) all underperform their dual-confirm counterparts. T-GCStop achieves best R:R (1.97) but loses on return, DD, and Calmar vs baseline.
+
+### Why Adaptive Fails to Beat Baseline on Risk-Adjusted Metrics
 
 The fundamental issue: the regime indicator (BTC vs SMA) is a **trend-following** signal applied to a **mean-reversion** strategy. Rubberband entries already counter-trade the trend by design. Adding a trend-aligned filter creates conflicting signals:
 
@@ -116,26 +199,28 @@ The fundamental issue: the regime indicator (BTC vs SMA) is a **trend-following*
 
 These two signals partially cancel. The regime filter adds value (aligned trades ARE better), but the improvement is too small to justify the increased DD from the parameter modifications.
 
-### SMA Period Comparison
+### SMA Period / Regime Type Comparison
 
-| SMA Period | Sharpe (Stop variant) | DD% | Signal Lag |
-|-----------|----------------------|-----|------------|
-| SMA(50)  | 5.60 | 8.2% | Fast, noisy |
-| SMA(100) | 5.67 | 8.1% | Medium |
-| SMA(200) | 5.65 | 8.1% | Slow, stable |
+| Regime | Sharpe (Stop variant) | DD% | EV Gap | Signal Quality |
+|--------|----------------------|-----|--------|----------------|
+| SMA(50) | 5.60 | 8.2% | +0.522% | Fast, noisy |
+| SMA(100) | 5.67 | 8.1% | +0.384% | Medium |
+| SMA(200) | 5.65 | 8.1% | +0.209% | Slow, stable |
+| **Dual-confirm** | **5.67** | **8.1%** | **+0.463%** | **Selective, consistent** |
+| Golden cross | 5.63 | 8.1% | −0.094% | Reversed signal |
 
-SMA(100) marginally wins on Sharpe but all three are within noise. No clear optimal period.
+Dual-confirm ties for best Sharpe among all regimes, with the strongest and most temporally consistent EV gap. But the 26.5% "choppy" time reduces the number of regime-differentiated trades.
 
 ## Verdict
 
-**NO PRODUCTION CHANGE.** The symmetric I-HybTight baseline (A) dominates on the metrics that matter most for capital preservation:
-- **Best Return:** 6,300.9% (none beat it)
-- **Best/Tied DD:** 7.6% (K, L match but with worse returns)
-- **Best Calmar:** 833.9 (no variant comes close)
+**NO PRODUCTION CHANGE.** The symmetric I-HybTight baseline (A) still dominates on risk-adjusted metrics:
+- **Best DD:** 7.6% (A-Baseline) — no adaptive variant matches it without sacrificing return
+- **Best Calmar:** 833.9 (A-Baseline) — dominant by 7%+ over all variants
+- **Best Return:** 6,358.1% (**P-DualStopTgt**) — first variant to beat baseline on return (+0.9%), but DD +17%
 
-The +2% Sharpe gain from C-Stop100 is not worth the +6.6% DD increase. For a live system where drawdowns create psychological pressure and margin risk, the conservative choice is unambiguously correct.
+The dual-confirm regime is the strongest and most consistent signal found (EV gap positive ALL 6 years), and it produced the first variant to beat baseline on raw return. However, the +0.9% return gain comes with +17% DD increase — an unfavorable tradeoff for capital preservation.
 
-The BTC regime signal is stored and documented for potential future use in a **softer** application — e.g., as a confidence tiebreaker when ranking candidates, rather than as a parameter modifier. But even that application would need further validation.
+**Notable finding:** The dual-confirm "choppy" zone concept (26.5% undefined regime) is a promising filtering mechanism. Future work could explore using this uncertainty signal for position sizing rather than parameter modification — e.g., reducing size when BTC is between SMA50 and SMA200, rather than modifying stop/target params.
 
 ## Files
 
