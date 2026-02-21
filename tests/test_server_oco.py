@@ -678,12 +678,19 @@ class TestForceCloseOnWouldTrigger:
         scalper.client._request_futures_api = MagicMock(
             side_effect=mock_algo_api,
         )
+        # v12.3.1: Mock orderbook ticker to fail so force-close uses
+        # entry_price as fallback (not MagicMock's float() → 1.0)
+        scalper.client.futures_orderbook_ticker = MagicMock(
+            side_effect=Exception("not available in test"),
+        )
 
         scalper._sync_server_orders()
 
-        # Must call _close_position with force_sl_breach reason
+        # Must call _close_position with force_sl_breach reason.
+        # v12.3.1: Uses entry_price (0.1686) as fallback instead of 0.0
+        # because futures_orderbook_ticker raises on MagicMock.
         scalper._close_position.assert_called_once_with(
-            'FETUSDT', 'force_sl_breach', 0.0,
+            'FETUSDT', 'force_sl_breach', 0.1686,
         )
 
     def test_bracket_repair_force_close_failure_alerts(self):
@@ -709,6 +716,9 @@ class TestForceCloseOnWouldTrigger:
 
         scalper.client._request_futures_api = MagicMock(
             side_effect=mock_algo_api,
+        )
+        scalper.client.futures_orderbook_ticker = MagicMock(
+            side_effect=Exception("not available in test"),
         )
 
         scalper._sync_server_orders()
@@ -795,7 +805,10 @@ class TestForceCloseOnWouldTrigger:
         assert pos['server_tp_order_id'] == 'tp_new'
 
     def test_would_trigger_not_stored_as_order_id(self):
-        """WOULD_TRIGGER sentinel must not be saved as server_sl_order_id."""
+        """WOULD_TRIGGER sentinel must not be saved as server_sl_order_id.
+        v12.3.1: When SL returns WOULD_TRIGGER during re-placement and
+        reason is not force_*, it recursively force-closes. We use a
+        force_ reason to test the guard path (no recursion)."""
         scalper = _make_scalper(paper=False)
         scalper._save_state = MagicMock()
         scalper._place_order = MagicMock(return_value=None)
@@ -811,7 +824,9 @@ class TestForceCloseOnWouldTrigger:
             server_tp_order_id=None,
         )
 
-        scalper._close_position('FETUSDT', 'stop_loss', 0.16)
+        # Use force_ prefix so the recursion guard kicks in
+        # (non-force reasons would try to recurse)
+        scalper._close_position('FETUSDT', 'force_stop_loss', 0.16)
 
         pos = scalper.strategy._positions['FETUSDT']
         assert pos['server_sl_order_id'] is None

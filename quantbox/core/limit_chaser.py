@@ -417,6 +417,23 @@ class LimitOrderChaser:
                 reduce_only=reduce_only,
             )
             if market_result == 'NO_POSITION':
+                # v12.3.1: If we already had partial limit fills before
+                # NO_POSITION, report them — otherwise the caller thinks
+                # nothing filled but there's phantom quantity on exchange.
+                if total_filled > 0:
+                    logger.warning(
+                        f"[{symbol}] NO_POSITION but had {total_filled:.6f} "
+                        f"prior limit fills — reporting as FILLED"
+                    )
+                    return ChaseResult(
+                        status=ChaseFillStatus.FILLED,
+                        filled_quantity=total_filled,
+                        avg_price=weighted_price_sum / total_filled,
+                        order_id=last_order_id,
+                        chase_count=chase_count,
+                        elapsed_seconds=time.monotonic() - start_time,
+                        maker_fill=True,
+                    )
                 return ChaseResult(
                     status=ChaseFillStatus.NO_POSITION,
                     filled_quantity=0.0,
