@@ -19,6 +19,8 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 **v11.0: BTC Directional Alignment** — btc_directional_period=48 (12h BTC momentum).
 **v10.0: Entry Optimization + Symbol Whitelist** — threshold 0.032 (3.2%), min_confidence=1 (MTF as gate), max_hold=20, stoch_k=3. 동적 자본 배분.
 **v9.0: Fibonacci + S+R+M Confluence** — target 0.382, stop 0.786, MACD(12,26,14), Stochastic(3,3).
+**v12.3: T100_S38_PBT + M-2SSTSX** — R8 stress-tested exit + R6 combo sizing. Production safety fixes.
+**v12.4: I-HybTight** — Reversal A/B champion: target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3.0. R:R 1.91, Calmar 834, 6yr return 6,300%.
 **v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
 
 | 구성 요소 | 역할 |
@@ -42,7 +44,7 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
                           FETUSDT, ETHUSDT, ARBUSDT, SHIBUSDT, LINKUSDT,
                           ATOMUSDT, OPUSDT, DOTUSDT, NEARUSDT, AAVEUSDT,
                           BCHUSDT, HBARUSDT, SOLUSDT, ICPUSDT, BNBUSDT)
-파라미터: lookback=8, threshold=0.032 (adaptive fallback), target=0.382, stop=0.786, max_hold=20
+파라미터: lookback=8, threshold=0.032 (adaptive fallback), target=1.5, stop=0.382, max_hold=25
          stop_decay=0.0
          entry_mode='confidence'
          min_confidence=1 (MTF is the real quality gate)
@@ -57,9 +59,11 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
          threshold_cap=0.06 (6% maximum)
          partial_exit_enabled=false
          dynamic_capital_enabled=true (balance / max(1, n_active+1))
-         # v9.0 Fibonacci Exit Levels
-         target_retrace=0.382 (Fibonacci golden ratio, +29% Calmar vs 0.4)
-         stop_mult=0.786 (Fibonacci deep correction, DD -8.5% vs 0.9)
+         # v12.4 I-HybTight Exit (Reversal A/B champion)
+         target_retrace=1.5 (150% move, deeper reversal capture)
+         stop_mult=0.382 (Fibonacci, preserved from v12.3)
+         trail_atr_mult=1.0 (tighter ATR trail locks gains faster)
+         runner_max_hold_mult=3.0 (runner holds 75 bars = 3× max_hold)
          # v8.0 Dynamic Target (DISABLED in v9.0)
          dynamic_target_enabled=false
          target_conf3=0.45, target_conf4=0.50, target_conf5=0.55  # 유지되나 비활성
@@ -178,7 +182,7 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 
 | 조건 | 판정 | 비고 |
 |------|------|------|
-| **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 38.2% 되돌림 기본 (Fibonacci golden ratio, v9.0) |
+| **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 150% 되돌림 (v12.4 I-HybTight) |
 | **Stop Loss** | unrealized PnL < -stop_mult × move_size × time_factor | time_factor = 1 - stop_decay × (bars_held / max_hold) |
 | **Trailing Stop** | best_pnl > 0 && PnL < best_pnl × (1 - trail_pct) | 이익 확보 후 역전 방어 |
 | **Max Hold** | bars_held ≥ max_hold | 타임아웃 강제 청산 (8 bars = 2h) |
@@ -343,7 +347,7 @@ else:
 - [x] **v9.0 MACD/Stochastic**: `compute_signals_v9()` 백테스트 ↔ `on_bar()` 라이브 v9 디스패치 패리티
 - [x] **v9.0 Live Pipeline**: `download_klines(full=True)` 5-tuple (close, high, low, volume, taker_buy) 반환
 - [x] **v11.4 Adaptive Threshold**: `compute_atr_pct()` + per-bar `thr` 백테스트 ↔ `on_bar()` 라이브 ATR 계산 패리티
-- [x] **v11.4 Leverage**: `mtf_leverage_mult=2.5` (실효 3.75×) 백테스트 ↔ 라이브 동일 적용
+- [x] **v12.4 I-HybTight**: target_retrace=1.5, max_hold=25, trail_atr_mult=1.0, runner_max_hold_mult=3.0 백테스트 ↔ 라이브 동일 적용
 
 ---
 
@@ -374,9 +378,11 @@ else:
 |---------|--------|------|------|
 | `lookback` | 8 bars (2h) | `RubberBandConfig` | 급등/급락 측정 기간 |
 | `threshold` | 0.045 (4.5%) | `RubberBandConfig` | 최소 무브 크기 |
-| `target_retrace` | 0.382 (38.2%) | `RubberBandConfig` | 이익 실현 목표 (Fibonacci golden ratio, v9.0) |
-| `stop_mult` | 0.786 | `RubberBandConfig` | 손절 배수 (무브 크기 대비, Fibonacci deep correction, v9.0) |
-| `max_hold` | 10 bars (2.5h) | `RubberBandConfig` | 최대 보유 기간 |
+| `target_retrace` | 1.5 (150%) | `RubberBandConfig` | 이익 실현 목표 (v12.4 I-HybTight, deeper reversal) |
+| `stop_mult` | 0.382 | `RubberBandConfig` | 손절 배수 (무브 크기 대비, v12.3) |
+| `max_hold` | 25 bars (6.25h) | `RubberBandConfig` | 최대 보유 기간 (v12.4 I-HybTight patience) |
+| `trail_atr_mult` | 1.0 | `RubberBandConfig` | 러너 ATR 트레일링 배수 (v12.4 tighter trail) |
+| `runner_max_hold_mult` | 3.0 | `RubberBandConfig` | 러너 최대 보유 배수 (max_hold × 3.0 = 75봉, v12.4) |
 | `stop_decay` | 0.0 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성) |
 | `htf_period` | 0 (비활성) | `RubberBandConfig` | MTF SMA lookback (0=비활성) |
 | `htf_block_threshold` | 0.01 (1%) | `RubberBandConfig` | HTF 트렌드 차단 임계값 |
@@ -464,7 +470,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (30+파일, 540개)
+## 7. 테스트 현황 (30+파일, 680개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
