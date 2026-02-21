@@ -1640,15 +1640,20 @@ class RubberBandScalper:
                 )
                 if new_sl and new_sl != 'WOULD_TRIGGER':
                     pos['server_sl_order_id'] = new_sl
-                new_tp = self._place_server_take_profit(
-                    symbol=symbol, signal=pos['signal'],
-                    quantity=self._round_qty(full_quantity, symbol),
-                    entry_price=pos['entry_price'],
-                    move_size=pos['move_size'],
-                    target_retrace=self.config.target_retrace,
-                )
-                if new_tp and new_tp != 'WOULD_TRIGGER':
-                    pos['server_tp_order_id'] = new_tp
+                # v12.4.2: In PBT mode, do NOT re-place server TP.
+                # Same bug class as v12.4.1 CRITICAL #1: server TP
+                # closes 100% of position, killing the PBT runner.
+                # Non-PBT: restore TP for intra-bar capture.
+                if not self.config.partial_exit_enabled:
+                    new_tp = self._place_server_take_profit(
+                        symbol=symbol, signal=pos['signal'],
+                        quantity=self._round_qty(full_quantity, symbol),
+                        entry_price=pos['entry_price'],
+                        move_size=pos['move_size'],
+                        target_retrace=self.config.target_retrace,
+                    )
+                    if new_tp and new_tp != 'WOULD_TRIGGER':
+                        pos['server_tp_order_id'] = new_tp
                 logger.info(
                     f"[{symbol}] Partial close failed — re-placed server "
                     f"SL={pos.get('server_sl_order_id')} "
