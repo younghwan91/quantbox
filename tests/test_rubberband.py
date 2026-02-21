@@ -228,7 +228,7 @@ class TestRubberBandStrategy:
 
     def test_position_lifecycle(self):
         """Open → update → close position flow."""
-        strat = RubberBandStrategy()
+        strat = RubberBandStrategy(RubberBandConfig(partial_exit_enabled=False))
         strat.open_position(
             symbol="TESTUSDT", signal=1, entry_price=100.0,
             notional=1000.0, leverage=2.0, move_size=0.03,
@@ -238,7 +238,7 @@ class TestRubberBandStrategy:
 
         # Update: price moved favourably
         reason = strat.update_position("TESTUSDT", 101.5)
-        # 1.5% gain on 3% move with 50% target = target hit at 1.5%
+        # 1.5% gain on 3% move with 0.382 target = target hit at 1.146%
         assert reason == "target"
 
         pos = strat.close_position("TESTUSDT")

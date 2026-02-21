@@ -8,7 +8,23 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v11.4 — Adaptive Threshold)
+### 🔥 Rubber Band Scalper (v12.3 — T100_S38_PBT + M-2SSTSX)
+- **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
+- **v12.3 T100_S38_PBT**: R8 Stress-tested champion exit profile
+  - target_retrace=1.0 (100% move), stop_mult=0.382 → R:R 2.62
+  - **PBT Exit**: 50% partial at TP1 → breakeven floor → ATR trailing runner
+  - Runner exits via `trail_runner` (ATR×1.5 trailing) or `time_runner` (2× max_hold)
+  - Server TP as safety net; client-side trailing for precision
+- **v12.3 M-2SSTSX**: R6 champion combo (2slt + SoftTight + SteepX + DirDiversity)
+  - **SteepX Sizing**: conf2→0.3×, conf3→0.5×, conf4→1.5×, conf5+→2.0× — rewards conviction
+  - **SoftTight DD Scaling**: 2%DD→0.8×, 4%DD→0.6×, 6%DD→0.4× — automatic position reduction during drawdowns
+  - **Vol-Adjusted Sizing**: median_atr/current_atr clamped [0.4, 2.0] — normalizes position size by current volatility
+  - **Direction Diversity**: max 2 same-direction positions — prevents cascade losses
+  - min_confidence=3, max_concurrent=2
+- **v12.3 Production Safety** (3 critical bug fixes):
+  - State restore preserves runner `trail_floor` + `highest_since_tp1` across bot restarts
+  - Bracket repair skips server TP for runners (prevents instant kill)
+  - Failed partial close clears stale order IDs to trigger bracket repair
 - **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
 - **v11.4 Adaptive Threshold**: 고정 3.2% → ATR(48)×2.5 적응형 (OOS Sharpe 8.23, OOS/IS 1.09, 제로 과적합)
   - 공식: `threshold = clip(2.5 × ATR%(48), 1%, 6%)` — 변동성 높으면 넓고, 낮으면 타이트
@@ -186,9 +202,13 @@ scripts/                    # 유틸리티 스크립트
 ├── download_extended_data.py # 장기 과거 데이터 다운로드
 ├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
 ├── portfolio_backtest_2slot.py     # 포트폴리오 백테스트 (2-slot)
-├── universe_expansion_sweep_v2.py  # B-50 유니버스 확장 스윉
-└── filter_relaxation_ab.py         # 필터 완화 A/B 테스트 (E-3Slot winner)
-tests/                      # 유닛 테스트 (578개)
+├── universe_expansion_sweep_v2.py  # B-50 유니버스 확장 스윕
+├── filter_relaxation_ab.py         # 필터 완화 A/B 테스트 (E-3Slot winner)
+├── alpha_search_r5.py / r5_6yr.py / r6.py  # Alpha Search R5/R6 (Y-Kitchen → M-2SSTSX)
+├── alpha_search_r7.py              # R7 3D Exit Grid Sweep (TP×SL×ExitMode, 101 variants)
+├── alpha_search_r8.py              # R8 Stress Test (Fee/Regime/WR-Degradation, 5 configs)
+└── alpha_search_r9.py              # R9 MA/TOTAL3 Macro Filters (confirmed no improvement)
+tests/                      # 유닛 테스트 (625개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
@@ -204,6 +224,10 @@ tests/                      # 유닛 테스트 (578개)
 | Profit Factor | N/A | N/A | N/A | N/A | **2.66** |
 
 > **v12.2 핵심**: E-3Slot 필터 완화 — conf≥3→≥2, ATR 2.5×→2.0×, floor 1%→0.8%, 2→3 slots. +138% trades/day, Calmar 795 (+5.8%), Sharpe 6.41. MTF block 유지 (제거 시 Sharpe -3.11 — 비협상).
+>
+> **v12.3 T100_S38_PBT + M-2SSTSX (Production)**: R8 stress-tested exit (T100/S38/PBT) + R6 combo sizing (SteepX/SoftTight/VolAdj/DirDiv). 3 critical production safety fixes: state restore for runners, bracket repair guard, failed-partial recovery. 625 tests, 46 v12.3 parity tests.
+>
+> **v12.3 R7 Exit Sweep**: 101-variant 3D grid (TP×SL×ExitMode) over 6yr crash-era data. Champion **T62_S79_PBT**: R:R 0.60→1.22 (+103%), DD 9.0%, PF 1.33. Partial 50% exit + breakeven stop + ATR trail doubles R:R with only +1.2pp DD cost.
 
 ## 🧪 테스트
 

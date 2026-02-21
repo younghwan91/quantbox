@@ -188,12 +188,44 @@ class RubberBandConfig:
     btc_directional_enabled: bool = True   # Align entry with BTC momentum
     btc_directional_period: int = 48       # v11.0: 12h BTC momentum window (A/B validated)
 
-    # ── Capital Preservation (v4.4: DISABLED — hurts at tighter stop) ──
-    # v4.3 partial exit hurt performance with stop=0.9 target=0.4:
-    # Without partial: Calmar 4.96, With partial: Calmar 3.75 (-24%).
-    # Tighter stop (0.9 vs 1.0) already limits DD to 12.7%.
-    partial_exit_enabled: bool = False     # Disabled: hurts with tighter stop
-    partial_exit_fraction: float = 0.5     # Fraction to close (0.5 = 50%)
+    # ── v12.3 Partial-BE-Trail Exit Mode (PBT, R7/R8 validated) ──
+    # 50% partial at TP1 → breakeven floor → ATR trailing for runner.
+    # R:R structural improvement: 0.49 → 1.66, regime-stable.
+    partial_exit_enabled: bool = True      # v12.3: PBT mode (R7/R8 champion)
+    partial_exit_fraction: float = 0.5     # Fraction to close at TP1 (0.5 = 50%)
+    trail_atr_mult: float = 1.5            # ATR multiplier for runner trailing stop
+    breakeven_after_partial: bool = True    # Move stop to breakeven after TP1
+
+    # ── v12.3 SteepX Confidence Sizing (R6 M-2SSTSX, A/B validated) ──
+    # Scale position size by confidence level. Low conf → tiny, high conf → big.
+    steep_cap_curve: bool = True           # Enable confidence-based sizing
+    cap_mult_conf2: float = 0.3            # conf=2: 30% of base slot
+    cap_mult_conf3: float = 0.5            # conf=3: 50% of base slot
+    cap_mult_conf4: float = 1.5            # conf=4: 150% of base slot
+    cap_mult_conf5: float = 2.0            # conf≥5: 200% of base slot
+
+    # ── v12.3 SoftTight DD Scaling (R6 M-2SSTSX, A/B validated) ──
+    # Scale down position size during drawdowns (double safety with circuit breaker).
+    soft_equity_scale: bool = True         # Enable DD-based size reduction
+    soft_eq_dd1: float = 0.02              # 2% DD → 80% sizing
+    soft_eq_scale1: float = 0.80
+    soft_eq_dd2: float = 0.04              # 4% DD → 60% sizing
+    soft_eq_scale2: float = 0.60
+    soft_eq_dd3: float = 0.06              # 6% DD → 40% sizing
+    soft_eq_scale3: float = 0.40
+
+    # ── v12.3 Vol-Adjusted Sizing (R6 M-2SSTSX, A/B validated) ──
+    # Normalize position size by current volatility vs median.
+    # High vol → smaller position, low vol → bigger position.
+    vol_adjusted_size: bool = True         # Enable vol-adjusted sizing
+    vol_adj_median_atr: float = 0.01       # Assumed median ATR% (1%)
+    vol_adj_min: float = 0.4               # Min vol factor (0.4x)
+    vol_adj_max: float = 2.0               # Max vol factor (2.0x)
+
+    # ── v12.3 Direction Diversity (R6 M-2SSTSX, A/B validated) ──
+    # Prevent concentrated same-direction exposure (13:00 cascade protection).
+    dir_diversity_enabled: bool = True     # Enable direction diversity filter
+    max_same_direction: int = 2            # Max positions in same direction
 
     # ── R:R-Gated Leverage (v4.4, safety gate) ──
     # With stop=0.9, target=0.4: theoretical R:R = 0.44 > 0.30, gate always
@@ -2193,6 +2225,9 @@ class RubberBandStrategy:
         self._htf_close_data: dict[str, np.ndarray] = {}
         # v10.2 PARITY: Track whether last signal per symbol was MTF-confirmed
         self._mtf_confirmed: dict[str, bool] = {}
+        # v12.3: Store last confidence & ATR for sizing in scalper
+        self._last_confidence: dict[str, int] = {}
+        self._last_atr_pct: dict[str, float] = {}
 
     def update_market_data(
         self,
@@ -2469,6 +2504,14 @@ class RubberBandStrategy:
                     mtf_applied = True
 
             self._mtf_confirmed[symbol] = mtf_applied
+
+            # v12.3: Store confidence & ATR for sizing in scalper
+            self._last_confidence[symbol] = confidence if signal != 0 else 0
+            if cfg.atr_period > 0:
+                self._last_atr_pct[symbol] = float(atr_arr[-1]) if not np.isnan(atr_arr[-1]) else 0.02
+            else:
+                self._last_atr_pct[symbol] = 0.02
+
             return signal
 
         # ═══ v5.0 Regime-Switch Dual Entry ═══
@@ -2834,6 +2877,14 @@ class RubberBandStrategy:
         """
         return self._mtf_confirmed.get(symbol, False)
 
+    def get_last_confidence(self, symbol: str) -> int:
+        """Return last computed confidence for a symbol (v12.3 sizing)."""
+        return self._last_confidence.get(symbol, 0)
+
+    def get_last_atr_pct(self, symbol: str) -> float:
+        """Return last computed ATR% for a symbol (v12.3 vol-sizing / PBT trail)."""
+        return self._last_atr_pct.get(symbol, 0.02)
+
     def has_position(self, symbol: str) -> bool:
         return symbol in self._positions
 
@@ -2888,6 +2939,7 @@ class RubberBandStrategy:
         entry_stop_mult: float | None = None,
         server_sl_order_id: str | None = None,
         server_tp_order_id: str | None = None,
+        **kwargs,
     ):
         """Record a new position.
 
@@ -2911,17 +2963,26 @@ class RubberBandStrategy:
             'partial_closed': False,   # v4.3: track partial exit state
             'server_sl_order_id': server_sl_order_id,  # v11.1: server-side stop
             'server_tp_order_id': server_tp_order_id,  # v11.2: server-side TP
+            # v12.3 PBT fields
+            'confidence': kwargs.get('confidence', 0),  # for SteepX logging
+            'highest_since_tp1': 0.0,   # track runner peak after TP1
+            'trail_floor': None,        # breakeven floor after TP1 (None = not set)
         }
 
     def close_position(self, symbol: str) -> dict | None:
         """Remove position and return its info."""
         return self._positions.pop(symbol, None)
 
-    def update_position(self, symbol: str, current_price: float) -> str | None:
+    def update_position(self, symbol: str, current_price: float,
+                        current_atr_pct: float | None = None) -> str | None:
         """Check if position should be closed or partially closed.
 
-        v4.3: When partial_exit_enabled, returns 'partial_close' on first
-        profit, then uses break-even stop for remaining half.
+        v12.3 PBT (Partial-Breakeven-Trail) exit mode:
+          Phase 1 (full position): TP1 hit → partial close 50%, then Phase 2.
+          Phase 2 (runner): breakeven floor + ATR trailing stop.
+
+        Args:
+            current_atr_pct: Current ATR as percentage (for runner trailing).
 
         Returns exit reason string or None.
         """
@@ -2941,38 +3002,75 @@ class RubberBandStrategy:
             pos['best_pnl'] = gain
 
         target = pos['move_size'] * cfg.target_retrace
+        entry_sm = pos.get('entry_stop_mult', cfg.stop_mult)
+        time_factor = 1.0 - cfg.stop_decay * (pos['bars_held'] / cfg.max_hold)
+        if time_factor < 0.1:
+            time_factor = 0.1
+        effective_stop = pos['move_size'] * entry_sm * time_factor
 
         if not pos.get('partial_closed', False):
             # ── Phase 1: Full position ──
-            entry_sm = pos.get('entry_stop_mult', cfg.stop_mult)
-            time_factor = 1.0 - cfg.stop_decay * (pos['bars_held'] / cfg.max_hold)
-            effective_stop = pos['move_size'] * entry_sm * time_factor
+            if cfg.partial_exit_enabled:
+                # PBT mode: wait for TP1 hit to trigger partial close
+                if gain >= target:
+                    pos['partial_closed'] = True
+                    pos['highest_since_tp1'] = gain
+                    if cfg.breakeven_after_partial:
+                        pos['trail_floor'] = 0.0  # breakeven floor
+                    else:
+                        pos['trail_floor'] = -effective_stop
+                    return 'partial_close'
 
-            # Full exit conditions (priority order)
-            if gain >= target:
-                return 'target'
-            if gain < -effective_stop:
-                return 'stop_loss'
-            if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
-                return 'trailing_stop'
-            if pos['bars_held'] >= cfg.max_hold:
-                return 'max_hold'
+                if gain < -effective_stop:
+                    return 'stop_loss'
 
-            # Partial close: any profit triggers 50% exit
-            if cfg.partial_exit_enabled and gain > 0:
-                pos['partial_closed'] = True
-                pos['best_pnl'] = gain
-                return 'partial_close'
+                if pos['bars_held'] >= cfg.max_hold:
+                    return 'max_hold'
+
+                # Pre-TP1 trailing (only if gain exceeds activation threshold)
+                if (pos['best_pnl'] > target * 0.5
+                        and gain < pos['best_pnl'] * 0.3):
+                    return 'trailing_stop'
+
+            else:
+                # Standard mode (no partial exit)
+                if gain >= target:
+                    return 'target'
+                if gain < -effective_stop:
+                    return 'stop_loss'
+                if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
+                    return 'trailing_stop'
+                if pos['bars_held'] >= cfg.max_hold:
+                    return 'max_hold'
+
         else:
-            # ── Phase 2: Half position with break-even stop ──
-            if gain >= target:
-                return 'target'
-            if gain <= 0:
-                return 'breakeven_stop'
-            if pos['best_pnl'] > target * 0.5 and gain < pos['best_pnl'] * 0.3:
-                return 'trailing_stop'
-            if pos['bars_held'] >= cfg.max_hold:
-                return 'max_hold'
+            # ── Phase 2: Runner (after partial close) ──
+            # Track runner peak
+            highest = pos.get('highest_since_tp1', gain)
+            if gain > highest:
+                pos['highest_since_tp1'] = gain
+                highest = gain
+
+            # ATR-based trailing stop for runner
+            atr_val = current_atr_pct if current_atr_pct is not None else 0.02
+            trail_stop = highest - cfg.trail_atr_mult * atr_val
+
+            # Apply breakeven floor
+            floor_val = pos.get('trail_floor')
+            if floor_val is not None and trail_stop < floor_val:
+                trail_stop = floor_val
+
+            if gain <= trail_stop:
+                return 'trail_runner'
+
+            # Extended time exit for runner (2x max_hold)
+            if pos['bars_held'] >= cfg.max_hold * 2:
+                return 'time_runner'
+
+            # NOTE: No fixed TP for runner. The runner rides the trend
+            # and exits ONLY via ATR trailing stop or time limit.
+            # A fixed TP here would fire immediately since partial was
+            # triggered at gain >= target (same level).
 
         return None
 
