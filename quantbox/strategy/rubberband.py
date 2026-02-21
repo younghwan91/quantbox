@@ -74,9 +74,9 @@ class RubberBandConfig:
     # ── Signal parameters (v10.0, 365-day A/B validated) ──
     lookback: int = 8           # Bars to measure move (2h at 15m) — SACRED, never change
     threshold: float = 0.032   # v10.0: Lower threshold (+162% ret, +324% trades vs 0.045)
-    target_retrace: float = 0.382  # Fibonacci golden ratio retracement (v9.0)
-    stop_mult: float = 0.786   # Fibonacci deep correction stop (v9.0)
-    max_hold: int = 20          # v10.0: Extended hold (+24% ret, strictly better vs 10)
+    target_retrace: float = 1.5    # v12.4 HybTight: 1.5× retrace TP1 (was 1.0, AB-test winner)
+    stop_mult: float = 0.382   # v12.3 T100_S38_PBT: Fibonacci stop (regime-stable)
+    max_hold: int = 25          # v12.4 HybTight: 25 bars patience (was 20)
     stop_decay: float = 0.0    # Stop tightening rate (0=off, disabled for robustness)
 
     # ── Entry Mode (v6.0, A/B validated) ──
@@ -193,8 +193,9 @@ class RubberBandConfig:
     # R:R structural improvement: 0.49 → 1.66, regime-stable.
     partial_exit_enabled: bool = True      # v12.3: PBT mode (R7/R8 champion)
     partial_exit_fraction: float = 0.5     # Fraction to close at TP1 (0.5 = 50%)
-    trail_atr_mult: float = 1.5            # ATR multiplier for runner trailing stop
+    trail_atr_mult: float = 1.0            # v12.4 HybTight: 1.0×ATR (tighter trail, was 1.5)
     breakeven_after_partial: bool = True    # Move stop to breakeven after TP1
+    runner_max_hold_mult: float = 3.0      # v12.4 HybTight: runner max_hold = N × max_hold (was hardcoded 2)
 
     # ── v12.3.3 Pre-TP1 Trailing Parameters (R5 A/B validated defaults) ──
     # Controls when the "give-back prevention" trailing kicks in BEFORE TP1.
@@ -1574,6 +1575,7 @@ def compute_signals_with_partial_exit(
     stop_mult: float,
     max_hold: int,
     stop_decay: float = 0.0,
+    runner_max_hold_mult: float = 3.0,
 ) -> np.ndarray:
     """Compute signals with partial exit + break-even stop.
 
@@ -1593,6 +1595,7 @@ def compute_signals_with_partial_exit(
         stop_mult: Stop loss multiple.
         max_hold: Maximum holding period.
         stop_decay: Stop tightening rate.
+        runner_max_hold_mult: Runner max hold = this × max_hold.
 
     Returns:
         Signal array with fractional positions.
@@ -1675,10 +1678,10 @@ def compute_signals_with_partial_exit(
 
             target = move_size * target_retrace
 
-            # v12.3.3: Runner exits when:
+            # v12.4 HybTight: Runner exits when:
             # 1. Breakeven stop hit (gain <= 0)
             # 2. Pre-TP1 trail: gave back too much unrealized profit
-            # 3. Max hold exceeded (2× original max_hold for runner)
+            # 3. Max hold exceeded (runner_max_hold_mult × max_hold)
             if gain <= 0:
                 # Break-even stop: $0 risk on remaining half
                 position = 0
@@ -1686,7 +1689,7 @@ def compute_signals_with_partial_exit(
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
                 phase = 0
-            elif hold_count >= max_hold * 2:
+            elif hold_count >= int(max_hold * runner_max_hold_mult):
                 position = 0
                 phase = 0
 
@@ -1712,6 +1715,7 @@ def compute_signals_partial_exit_btc_directional(
     max_hold: int,
     stop_decay: float,
     btc_mom_period: int,
+    runner_max_hold_mult: float = 3.0,
 ) -> np.ndarray:
     """Partial exit + break-even stop + BTC directional alignment.
 
@@ -1802,7 +1806,7 @@ def compute_signals_partial_exit_btc_directional(
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
                 phase = 0
-            elif hold_count >= max_hold * 2:
+            elif hold_count >= int(max_hold * runner_max_hold_mult):
                 position = 0
                 phase = 0
 
@@ -2567,6 +2571,7 @@ class RubberBandStrategy:
                     cfg.target_retrace, cfg.stop_mult,
                     cfg.max_hold, cfg.stop_decay,
                     cfg.btc_directional_period,
+                    cfg.runner_max_hold_mult,
                 )
             else:
                 sigs = compute_signals_with_btc_directional(
@@ -3085,8 +3090,8 @@ class RubberBandStrategy:
             if gain <= trail_stop:
                 return 'trail_runner'
 
-            # Extended time exit for runner (2x max_hold)
-            if pos['bars_held'] >= cfg.max_hold * 2:
+            # v12.4 HybTight: Extended time exit for runner (configurable mult)
+            if pos['bars_held'] >= cfg.max_hold * cfg.runner_max_hold_mult:
                 return 'time_runner'
 
             # NOTE: No fixed TP for runner. The runner rides the trend

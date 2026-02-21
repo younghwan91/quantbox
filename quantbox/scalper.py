@@ -3291,6 +3291,7 @@ def main():
         partial_exit_fraction=settings.rb_partial_exit_fraction,
         trail_atr_mult=settings.rb_trail_atr_mult,
         breakeven_after_partial=settings.rb_breakeven_after_partial,
+        runner_max_hold_mult=settings.rb_runner_max_hold_mult,
         pre_tp1_trail_activation=settings.rb_pre_tp1_trail_activation,
         pre_tp1_trail_factor=settings.rb_pre_tp1_trail_factor,
         rr_leverage_enabled=settings.rb_rr_leverage_enabled,

@@ -95,7 +95,7 @@ class TestConfigDefaults:
         cfg = RubberBandConfig()
         assert cfg.partial_exit_enabled is True
         assert cfg.breakeven_after_partial is True
-        assert cfg.trail_atr_mult == pytest.approx(1.5)
+        assert cfg.trail_atr_mult == pytest.approx(1.0)  # v12.4 HybTight (was 1.5)
 
 
 # ════════════════════════════════════════════════════════
@@ -207,8 +207,8 @@ class TestPBTPhase2:
         assert reason is None
 
     def test_time_runner_exit(self):
-        """Runner exits at 2x max_hold bars."""
-        strat = _make_strategy(max_hold=5)
+        """Runner exits at runner_max_hold_mult × max_hold bars."""
+        strat = _make_strategy(max_hold=5, runner_max_hold_mult=2.0)
         self._setup_runner(strat)
         # Already been 1 bar. Need 10 total (2×5).
         for _ in range(8):
@@ -497,12 +497,12 @@ class TestSettingsParity:
         """Settings defaults should match T100_S38_PBT champion."""
         from quantbox.core.settings import QuantBoxSettings
         fields = QuantBoxSettings.model_fields
-        assert fields['rb_target_retrace'].default == pytest.approx(1.0)
+        assert fields['rb_target_retrace'].default == pytest.approx(1.5)  # v12.4 HybTight
         assert fields['rb_stop_mult'].default == pytest.approx(0.382)
         assert fields['rb_min_confidence'].default == 3
         assert fields['rb_max_concurrent'].default == 2
         assert fields['rb_partial_exit_enabled'].default is True
-        assert fields['rb_trail_atr_mult'].default == pytest.approx(1.5)
+        assert fields['rb_trail_atr_mult'].default == pytest.approx(1.0)  # v12.4 HybTight
         assert fields['rb_breakeven_after_partial'].default is True
         assert fields['rb_steep_cap_curve'].default is True
         assert fields['rb_soft_equity_scale'].default is True
@@ -632,8 +632,8 @@ class TestProductionSafety:
         assert r2 == 'trail_runner'
 
     def test_pbt_runner_time_runner_exit(self):
-        """Runner exits via time_runner at 2× max_hold bars."""
-        cfg = _make_config(max_hold=8)
+        """Runner exits via time_runner at runner_max_hold_mult × max_hold."""
+        cfg = _make_config(max_hold=8, runner_max_hold_mult=2.0)
         strategy = RubberBandStrategy(cfg)
         strategy.open_position('BTCUSDT', 1, 100.0, 1000.0, 1.0, 0.06)
 
@@ -642,7 +642,7 @@ class TestProductionSafety:
 
         # Runner: advance bars_held past 2× max_hold = 16
         pos = strategy._positions['BTCUSDT']
-        pos['bars_held'] = 17
+        pos['bars_held'] = 15  # update_position increments to 16 = 2×8
 
         result = strategy.update_position('BTCUSDT', 109.0, current_atr_pct=0.01)
         assert result == 'time_runner'
