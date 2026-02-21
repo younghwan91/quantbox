@@ -8,7 +8,7 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v12.4 — I-HybTight + M-2SSTSX)
+### 🔥 Rubber Band Scalper (v12.4.6 — I-HybTight + M-2SSTSX)
 - **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
 - **v12.4 I-HybTight**: Reversal A/B test champion — deeper target + tighter trail + longer runner
   - target_retrace=1.5 (150% move), stop_mult=0.382, max_hold=25 → R:R 1.91
@@ -25,6 +25,13 @@
   - State restore preserves runner `trail_floor` + `highest_since_tp1` across bot restarts
   - Bracket repair skips server TP for runners (prevents instant kill)
   - Failed partial close clears stale order IDs to trigger bracket repair
+- **v12.4.1–v12.4.6 Production Hardening** (6 hotfixes):
+  - v12.4.1: Server TP respects PBT mode — 50% qty at TP1, not 100%
+  - v12.4.2: Runner-phase server TP guard — skip TP placement when trailing
+  - v12.4.3: Remaining 4 call-sites TP qty audit (sync/repair/failover/recovery)
+  - v12.4.4: Stale `_server_sl_pct` reset after runner SL re-placed at breakeven
+  - v12.4.5: Missing `_save_state()` after successful partial close
+  - v12.4.6: HWM + trade history reset on restart with 0 positions (prevents phantom DD halt)
 - **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
 - **v11.4 Adaptive Threshold**: 고정 3.2% → ATR(48)×2.5 적응형 (OOS Sharpe 8.23, OOS/IS 1.09, 제로 과적합)
   - 공식: `threshold = clip(2.5 × ATR%(48), 1%, 6%)` — 변동성 높으면 넓고, 낮으면 타이트
@@ -112,6 +119,7 @@
 - **Market Fallback 검증**: ACK 응답 감지 → 자동 재조회 (유령 체결 방지)
 - **State Persistence**: 포지션 상태 JSON 저장 → 크래시 후 자동 복구 + 거래소 대조
 - **Max Drawdown Breaker**: 세션 HWM 대비 10% 드로다운 시 전체 청산 + 자동 정지
+  - v12.4.6: 0 포지션 재시작 시 HWM을 현재 잔고로 리셋 (확정 손실에 의한 팬텀 DD 방지)
 - **Daily Loss Limit**: 당일 잔고 대비 5% 손실 시 신규 진입 중단
 - **Consecutive Error Guard**: 연속 5회 에러 시에만 전체 청산 (일시적 API 에러에 과민 반응 방지)
 - **Close Failure Retention**: 청산 실패 시 슬롯 유지 → 다음 사이클 재시도 (유령 포지션 방지)
@@ -180,7 +188,8 @@ quantbox/
 │   ├── events.py           # 이벤트 시스템
 │   ├── limit_chaser.py     # 지정가 추격 주문
 │   ├── settings.py         # 환경변수 검증 (pydantic-settings)
-│   └── state_persistence.py # 상태 영속화 (JSON, 크래시 복구)
+│   ├── state_persistence.py # 상태 영속화 (JSON, 크래시 복구)
+│   └── terminal_ui.py      # 터미널 UI (실시간 상태 표시)
 ├── data/                    # 데이터 처리
 │   ├── cache.py            # 2단계 캐싱 (LRU + gzip)
 │   ├── downloader.py       # 바이낸스 데이터 다운로드
@@ -199,16 +208,22 @@ quantbox/
 
 scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
+├── download_6yr_data.py    # 6년 장기 데이터 다운로드
 ├── download_extended_data.py # 장기 과거 데이터 다운로드
 ├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
 ├── portfolio_backtest_2slot.py     # 포트폴리오 백테스트 (2-slot)
 ├── universe_expansion_sweep_v2.py  # B-50 유니버스 확장 스윕
 ├── filter_relaxation_ab.py         # 필터 완화 A/B 테스트 (E-3Slot winner)
+├── hybtight_validation.py          # I-HybTight 파라미터 검증
+├── reversal_ab_test.py             # Reversal A/B 테스트 (I-HybTight winner)
+├── partial_exit_trailing_ab.py     # PBT Exit A/B 테스트
+├── multi_alpha_sweep.py            # 멀티 알파 파라미터 스윕
+├── alpha_search_r2.py / r3.py      # Alpha Search R2/R3
 ├── alpha_search_r5.py / r5_6yr.py / r6.py  # Alpha Search R5/R6 (Y-Kitchen → M-2SSTSX)
 ├── alpha_search_r7.py              # R7 3D Exit Grid Sweep (TP×SL×ExitMode, 101 variants)
 ├── alpha_search_r8.py              # R8 Stress Test (Fee/Regime/WR-Degradation, 5 configs)
 └── alpha_search_r9.py              # R9 MA/TOTAL3 Macro Filters (confirmed no improvement)
-tests/                      # 유닛 테스트 (680개)
+tests/                      # 유닛 테스트 (707개, 34 파일)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
@@ -227,7 +242,9 @@ tests/                      # 유닛 테스트 (680개)
 >
 > **v12.3 T100_S38_PBT + M-2SSTSX**: R8 stress-tested exit (T100/S38/PBT) + R6 combo sizing (SteepX/SoftTight/VolAdj/DirDiv). 3 critical production safety fixes: state restore for runners, bracket repair guard, failed-partial recovery.
 >
-> **v12.4 I-HybTight (Production)**: Reversal A/B test champion. target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3. R:R 1.64→1.91 (+16%), Calmar 792→834, 6yr return 6,300%. 680 tests, 15 HybTight parity tests.
+> **v12.4 I-HybTight (Production)**: Reversal A/B test champion. target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3. R:R 1.64→1.91 (+16%), Calmar 792→834, 6yr return 6,300%. 707 tests, 15 HybTight parity tests.
+>
+> **v12.4.1–v12.4.6 Production Hardening**: 6 hotfixes — server TP PBT qty (3 rounds), stale SL ratchet reset, missing save_state after partial, HWM/history reset on 0-position restart.
 
 ## 🧪 테스트
 
