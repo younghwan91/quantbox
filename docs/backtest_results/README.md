@@ -37,3 +37,4 @@ Example: `5ec5007_20260219_3year_ab_test.md`
 | `614a449` | 2026-02-21 | **Direction Asymmetry Analysis (6yr)** — 2190d, 50 symbols | Longs +25% EV/trade (3.64% vs 2.91%), R:R 2.10 vs 1.75. **But gap erodes: Yr5-6 shorts outperform longs.** |
 | `614a449` | 2026-02-21 | **Direction Asymmetry A/B R1 (6yr)** — 16 variants, 2190d, 50 symbols | Best Sharpe: C-ShortTightT 5.76 (+3.6%). Best Calmar: D-SplitTarget 891.2. **Baseline wins on Return & PF.** |
 | `614a449` | 2026-02-21 | **Direction Asymmetry R2 (6yr)** — 18 variants, 2190d, 50 symbols | Best Sharpe: FS-25 5.73 (+3.1%). H+E SUBADDITIVE. **Baseline beats all on Calmar (833.9) & Return (6,301%).** No production change. |
+| `7f6bd77` | 2026-02-21 | **Adaptive Direction A/B — BTC 4h SMA Regime (6yr)** — 14 variants, 2190d, 50 symbols | Regime signal MODERATE: aligned +0.21% EV. Best Sharpe: C-Stop100 5.67 (+2.0%) but DD 8.1% (+6.6%). **Baseline wins on Return, DD, Calmar. No production change.** |

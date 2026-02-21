@@ -1,0 +1,922 @@
+{
+  "commit": "7f6bd77",
+  "date": "2026-02-21 15:50 UTC",
+  "data_days": 2190,
+  "n_symbols": 50,
+  "diagnostic": {
+    "sma200": {
+      "aligned": {
+        "label": "ALIGNED",
+        "n": 8980,
+        "wr": 56.5,
+        "pf": 1.61,
+        "rr": 1.9,
+        "ev": 3.329,
+        "total": 82211.09
+      },
+      "misaligned": {
+        "label": "MISALIGNED",
+        "n": 8063,
+        "wr": 54.9,
+        "pf": 1.49,
+        "rr": 1.91,
+        "ev": 3.12,
+        "total": 64061.47
+      },
+      "gap_ev": 0.20900000000000007
+    }
+  },
+  "variants": {
+    "A-Baseline": {
+      "total_return_pct": 6300.9,
+      "final_balance": 134099.67,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.56,
+      "calmar": 833.9,
+      "n_trades": 17165,
+      "trades_per_day": 7.83,
+      "win_rate": 55.8,
+      "profit_factor": 1.56,
+      "rr": 1.91,
+      "long": {
+        "count": 8452,
+        "wr": 56.0,
+        "avg_pnl": 3.636,
+        "rr": 2.1,
+        "pf": 1.64,
+        "total_pnl": 80818.06
+      },
+      "short": {
+        "count": 8713,
+        "wr": 55.7,
+        "avg_pnl": 2.908,
+        "rr": 1.75,
+        "pf": 1.48,
+        "total_pnl": 68464.86
+      },
+      "aligned": {
+        "count": 9102,
+        "wr": 56.7,
+        "avg_pnl": 3.397,
+        "rr": 1.91,
+        "pf": 1.63,
+        "total_pnl": 85221.45
+      },
+      "misaligned": {
+        "count": 8063,
+        "wr": 54.9,
+        "avg_pnl": 3.12,
+        "rr": 1.91,
+        "pf": 1.49,
+        "total_pnl": 64061.47
+      },
+      "exit_reasons": {
+        "tp1": 2428,
+        "trail_runner": 2428,
+        "stop": 6744,
+        "time": 4023,
+        "trail": 1542
+      },
+      "elapsed": 2.4,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.382,
+        "mis_stop": 0.382,
+        "al_tgt": 1.5,
+        "mis_tgt": 1.5,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "B-Stop200": {
+      "total_return_pct": 6264.8,
+      "final_balance": 133342.01,
+      "max_dd_pct": 8.1,
+      "sharpe": 5.65,
+      "calmar": 770.8,
+      "n_trades": 17307,
+      "trades_per_day": 7.9,
+      "win_rate": 55.2,
+      "profit_factor": 1.56,
+      "rr": 1.95,
+      "long": {
+        "count": 8515,
+        "wr": 55.6,
+        "avg_pnl": 3.572,
+        "rr": 2.11,
+        "pf": 1.62,
+        "total_pnl": 78932.0
+      },
+      "short": {
+        "count": 8792,
+        "wr": 54.9,
+        "avg_pnl": 2.869,
+        "rr": 1.81,
+        "pf": 1.5,
+        "total_pnl": 69768.58
+      },
+      "aligned": {
+        "count": 8833,
+        "wr": 58.9,
+        "avg_pnl": 3.494,
+        "rr": 1.74,
+        "pf": 1.63,
+        "total_pnl": 85688.62
+      },
+      "misaligned": {
+        "count": 8474,
+        "wr": 51.4,
+        "avg_pnl": 2.924,
+        "rr": 2.19,
+        "pf": 1.48,
+        "total_pnl": 63011.96
+      },
+      "exit_reasons": {
+        "tp1": 2431,
+        "trail_runner": 2431,
+        "stop": 6926,
+        "time": 3985,
+        "trail": 1534
+      },
+      "elapsed": 2.1,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.45,
+        "mis_stop": 0.3,
+        "al_tgt": 1.5,
+        "mis_tgt": 1.5,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "C-Stop100": {
+      "total_return_pct": 6229.1,
+      "final_balance": 132595.35,
+      "max_dd_pct": 8.1,
+      "sharpe": 5.67,
+      "calmar": 766.4,
+      "n_trades": 17314,
+      "trades_per_day": 7.9,
+      "win_rate": 55.2,
+      "profit_factor": 1.55,
+      "rr": 1.96,
+      "long": {
+        "count": 8514,
+        "wr": 55.7,
+        "avg_pnl": 3.601,
+        "rr": 2.11,
+        "pf": 1.62,
+        "total_pnl": 79105.7
+      },
+      "short": {
+        "count": 8800,
+        "wr": 54.8,
+        "avg_pnl": 2.875,
+        "rr": 1.82,
+        "pf": 1.49,
+        "total_pnl": 68843.83
+      },
+      "aligned": {
+        "count": 9004,
+        "wr": 59.3,
+        "avg_pnl": 3.573,
+        "rr": 1.75,
+        "pf": 1.66,
+        "total_pnl": 89861.93
+      },
+      "misaligned": {
+        "count": 8310,
+        "wr": 50.9,
+        "avg_pnl": 2.863,
+        "rr": 2.19,
+        "pf": 1.44,
+        "total_pnl": 58087.6
+      },
+      "exit_reasons": {
+        "tp1": 2439,
+        "trail_runner": 2439,
+        "stop": 6923,
+        "time": 3987,
+        "trail": 1526
+      },
+      "elapsed": 1.9,
+      "config": {
+        "btc_sma": 100,
+        "al_stop": 0.45,
+        "mis_stop": 0.3,
+        "al_tgt": 1.5,
+        "mis_tgt": 1.5,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "D-Stop50": {
+      "total_return_pct": 6253.4,
+      "final_balance": 133102.9,
+      "max_dd_pct": 8.2,
+      "sharpe": 5.6,
+      "calmar": 761.0,
+      "n_trades": 17286,
+      "trades_per_day": 7.89,
+      "win_rate": 55.3,
+      "profit_factor": 1.55,
+      "rr": 1.96,
+      "long": {
+        "count": 8497,
+        "wr": 55.9,
+        "avg_pnl": 3.632,
+        "rr": 2.11,
+        "pf": 1.64,
+        "total_pnl": 80748.92
+      },
+      "short": {
+        "count": 8789,
+        "wr": 54.7,
+        "avg_pnl": 2.866,
+        "rr": 1.82,
+        "pf": 1.48,
+        "total_pnl": 67678.31
+      },
+      "aligned": {
+        "count": 9334,
+        "wr": 59.8,
+        "avg_pnl": 3.622,
+        "rr": 1.75,
+        "pf": 1.71,
+        "total_pnl": 99174.31
+      },
+      "misaligned": {
+        "count": 7952,
+        "wr": 49.9,
+        "avg_pnl": 2.797,
+        "rr": 2.22,
+        "pf": 1.38,
+        "total_pnl": 49252.92
+      },
+      "exit_reasons": {
+        "tp1": 2437,
+        "trail_runner": 2437,
+        "stop": 6888,
+        "time": 3993,
+        "trail": 1531
+      },
+      "elapsed": 2.1,
+      "config": {
+        "btc_sma": 50,
+        "al_stop": 0.45,
+        "mis_stop": 0.3,
+        "al_tgt": 1.5,
+        "mis_tgt": 1.5,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "E-Tgt200": {
+      "total_return_pct": 6190.1,
+      "final_balance": 131778.44,
+      "max_dd_pct": 9.0,
+      "sharpe": 5.31,
+      "calmar": 685.6,
+      "n_trades": 17596,
+      "trades_per_day": 8.03,
+      "win_rate": 56.7,
+      "profit_factor": 1.55,
+      "rr": 1.83,
+      "long": {
+        "count": 8590,
+        "wr": 56.1,
+        "avg_pnl": 3.419,
+        "rr": 2.04,
+        "pf": 1.64,
+        "total_pnl": 80598.99
+      },
+      "short": {
+        "count": 9006,
+        "wr": 57.2,
+        "avg_pnl": 2.847,
+        "rr": 1.66,
+        "pf": 1.47,
+        "total_pnl": 66518.92
+      },
+      "aligned": {
+        "count": 8620,
+        "wr": 52.4,
+        "avg_pnl": 3.067,
+        "rr": 2.02,
+        "pf": 1.63,
+        "total_pnl": 90071.76
+      },
+      "misaligned": {
+        "count": 8976,
+        "wr": 60.8,
+        "avg_pnl": 3.184,
+        "rr": 1.68,
+        "pf": 1.46,
+        "total_pnl": 57046.15
+      },
+      "exit_reasons": {
+        "tp1": 2710,
+        "trail_runner": 2710,
+        "stop": 6694,
+        "time": 3916,
+        "trail": 1566
+      },
+      "elapsed": 2.0,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.382,
+        "mis_stop": 0.382,
+        "al_tgt": 2.0,
+        "mis_tgt": 1.0,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "F-StopTgt200": {
+      "total_return_pct": 6264.8,
+      "final_balance": 133342.6,
+      "max_dd_pct": 8.9,
+      "sharpe": 5.32,
+      "calmar": 704.2,
+      "n_trades": 17703,
+      "trades_per_day": 8.08,
+      "win_rate": 56.2,
+      "profit_factor": 1.56,
+      "rr": 1.88,
+      "long": {
+        "count": 8652,
+        "wr": 55.8,
+        "avg_pnl": 3.399,
+        "rr": 2.06,
+        "pf": 1.64,
+        "total_pnl": 80535.53
+      },
+      "short": {
+        "count": 9051,
+        "wr": 56.5,
+        "avg_pnl": 2.828,
+        "rr": 1.72,
+        "pf": 1.49,
+        "total_pnl": 68318.53
+      },
+      "aligned": {
+        "count": 8324,
+        "wr": 54.9,
+        "avg_pnl": 3.246,
+        "rr": 1.86,
+        "pf": 1.66,
+        "total_pnl": 93097.47
+      },
+      "misaligned": {
+        "count": 9379,
+        "wr": 57.3,
+        "avg_pnl": 2.984,
+        "rr": 1.92,
+        "pf": 1.45,
+        "total_pnl": 55756.59
+      },
+      "exit_reasons": {
+        "tp1": 2691,
+        "trail_runner": 2691,
+        "stop": 6840,
+        "time": 3944,
+        "trail": 1537
+      },
+      "elapsed": 2.0,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.45,
+        "mis_stop": 0.3,
+        "al_tgt": 2.0,
+        "mis_tgt": 1.0,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "G-StopTgt100": {
+      "total_return_pct": 6119.9,
+      "final_balance": 130306.07,
+      "max_dd_pct": 8.7,
+      "sharpe": 5.36,
+      "calmar": 706.0,
+      "n_trades": 17707,
+      "trades_per_day": 8.08,
+      "win_rate": 56.0,
+      "profit_factor": 1.55,
+      "rr": 1.87,
+      "long": {
+        "count": 8617,
+        "wr": 55.6,
+        "avg_pnl": 3.37,
+        "rr": 2.05,
+        "pf": 1.62,
+        "total_pnl": 79020.9
+      },
+      "short": {
+        "count": 9090,
+        "wr": 56.4,
+        "avg_pnl": 2.787,
+        "rr": 1.72,
+        "pf": 1.48,
+        "total_pnl": 66827.85
+      },
+      "aligned": {
+        "count": 8484,
+        "wr": 55.0,
+        "avg_pnl": 3.25,
+        "rr": 1.86,
+        "pf": 1.67,
+        "total_pnl": 94998.78
+      },
+      "misaligned": {
+        "count": 9223,
+        "wr": 56.8,
+        "avg_pnl": 2.906,
+        "rr": 1.91,
+        "pf": 1.41,
+        "total_pnl": 50849.97
+      },
+      "exit_reasons": {
+        "tp1": 2677,
+        "trail_runner": 2677,
+        "stop": 6858,
+        "time": 3959,
+        "trail": 1536
+      },
+      "elapsed": 2.2,
+      "config": {
+        "btc_sma": 100,
+        "al_stop": 0.45,
+        "mis_stop": 0.3,
+        "al_tgt": 2.0,
+        "mis_tgt": 1.0,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "H-MH200": {
+      "total_return_pct": 6247.0,
+      "final_balance": 132970.19,
+      "max_dd_pct": 10.7,
+      "sharpe": 5.49,
+      "calmar": 585.2,
+      "n_trades": 17149,
+      "trades_per_day": 7.83,
+      "win_rate": 55.8,
+      "profit_factor": 1.55,
+      "rr": 1.89,
+      "long": {
+        "count": 8463,
+        "wr": 56.2,
+        "avg_pnl": 3.612,
+        "rr": 2.06,
+        "pf": 1.63,
+        "total_pnl": 79926.93
+      },
+      "short": {
+        "count": 8686,
+        "wr": 55.5,
+        "avg_pnl": 2.849,
+        "rr": 1.75,
+        "pf": 1.49,
+        "total_pnl": 68225.41
+      },
+      "aligned": {
+        "count": 9286,
+        "wr": 56.7,
+        "avg_pnl": 3.556,
+        "rr": 1.93,
+        "pf": 1.61,
+        "total_pnl": 86941.02
+      },
+      "misaligned": {
+        "count": 7863,
+        "wr": 54.8,
+        "avg_pnl": 2.835,
+        "rr": 1.84,
+        "pf": 1.49,
+        "total_pnl": 61211.32
+      },
+      "exit_reasons": {
+        "tp1": 2410,
+        "trail_runner": 2409,
+        "stop": 6710,
+        "time": 4048,
+        "trail": 1571,
+        "time_runner": 1
+      },
+      "elapsed": 1.9,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.382,
+        "mis_stop": 0.382,
+        "al_tgt": 1.5,
+        "mis_tgt": 1.5,
+        "al_mh": 30,
+        "mis_mh": 20,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "I-Full200": {
+      "total_return_pct": 5891.2,
+      "final_balance": 125514.79,
+      "max_dd_pct": 12.1,
+      "sharpe": 5.07,
+      "calmar": 488.5,
+      "n_trades": 17298,
+      "trades_per_day": 7.9,
+      "win_rate": 55.8,
+      "profit_factor": 1.53,
+      "rr": 1.87,
+      "long": {
+        "count": 8435,
+        "wr": 55.5,
+        "avg_pnl": 3.435,
+        "rr": 2.05,
+        "pf": 1.6,
+        "total_pnl": 76176.21
+      },
+      "short": {
+        "count": 8863,
+        "wr": 56.0,
+        "avg_pnl": 2.748,
+        "rr": 1.7,
+        "pf": 1.47,
+        "total_pnl": 64485.37
+      },
+      "aligned": {
+        "count": 8290,
+        "wr": 54.4,
+        "avg_pnl": 3.397,
+        "rr": 1.89,
+        "pf": 1.6,
+        "total_pnl": 88920.15
+      },
+      "misaligned": {
+        "count": 9008,
+        "wr": 57.0,
+        "avg_pnl": 2.794,
+        "rr": 1.88,
+        "pf": 1.44,
+        "total_pnl": 51741.42
+      },
+      "exit_reasons": {
+        "tp1": 2598,
+        "trail_runner": 2598,
+        "stop": 6770,
+        "time": 3821,
+        "trail": 1511
+      },
+      "elapsed": 1.9,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.45,
+        "mis_stop": 0.3,
+        "al_tgt": 2.0,
+        "mis_tgt": 1.0,
+        "al_mh": 30,
+        "mis_mh": 20,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "J-Full100": {
+      "total_return_pct": 5753.9,
+      "final_balance": 122640.25,
+      "max_dd_pct": 12.1,
+      "sharpe": 5.15,
+      "calmar": 477.2,
+      "n_trades": 17283,
+      "trades_per_day": 7.89,
+      "win_rate": 55.6,
+      "profit_factor": 1.52,
+      "rr": 1.86,
+      "long": {
+        "count": 8408,
+        "wr": 55.4,
+        "avg_pnl": 3.404,
+        "rr": 2.04,
+        "pf": 1.58,
+        "total_pnl": 74645.9
+      },
+      "short": {
+        "count": 8875,
+        "wr": 55.9,
+        "avg_pnl": 2.724,
+        "rr": 1.7,
+        "pf": 1.45,
+        "total_pnl": 63158.32
+      },
+      "aligned": {
+        "count": 8448,
+        "wr": 54.4,
+        "avg_pnl": 3.34,
+        "rr": 1.87,
+        "pf": 1.59,
+        "total_pnl": 88013.29
+      },
+      "misaligned": {
+        "count": 8835,
+        "wr": 56.8,
+        "avg_pnl": 2.783,
+        "rr": 1.88,
+        "pf": 1.43,
+        "total_pnl": 49790.93
+      },
+      "exit_reasons": {
+        "tp1": 2581,
+        "trail_runner": 2581,
+        "stop": 6801,
+        "time": 3810,
+        "trail": 1510
+      },
+      "elapsed": 2.1,
+      "config": {
+        "btc_sma": 100,
+        "al_stop": 0.45,
+        "mis_stop": 0.3,
+        "al_tgt": 2.0,
+        "mis_tgt": 1.0,
+        "al_mh": 30,
+        "mis_mh": 20,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "K-ConfGate200": {
+      "total_return_pct": 5379.3,
+      "final_balance": 114792.35,
+      "max_dd_pct": 7.6,
+      "sharpe": 5.19,
+      "calmar": 711.9,
+      "n_trades": 13224,
+      "trades_per_day": 6.04,
+      "win_rate": 56.1,
+      "profit_factor": 1.58,
+      "rr": 1.89,
+      "long": {
+        "count": 6853,
+        "wr": 56.3,
+        "avg_pnl": 3.574,
+        "rr": 2.03,
+        "pf": 1.64,
+        "total_pnl": 70235.2
+      },
+      "short": {
+        "count": 6371,
+        "wr": 55.9,
+        "avg_pnl": 2.95,
+        "rr": 1.75,
+        "pf": 1.51,
+        "total_pnl": 56453.48
+      },
+      "aligned": {
+        "count": 10024,
+        "wr": 56.2,
+        "avg_pnl": 3.269,
+        "rr": 1.87,
+        "pf": 1.58,
+        "total_pnl": 88626.16
+      },
+      "misaligned": {
+        "count": 3200,
+        "wr": 56.0,
+        "avg_pnl": 3.287,
+        "rr": 1.93,
+        "pf": 1.57,
+        "total_pnl": 38062.52
+      },
+      "exit_reasons": {
+        "tp1": 1849,
+        "trail_runner": 1849,
+        "stop": 5140,
+        "time": 3187,
+        "trail": 1199
+      },
+      "elapsed": 2.0,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.382,
+        "mis_stop": 0.382,
+        "al_tgt": 1.5,
+        "mis_tgt": 1.5,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 1,
+        "block_mis": false
+      }
+    },
+    "L-Block200": {
+      "total_return_pct": 3893.6,
+      "final_balance": 83666.18,
+      "max_dd_pct": 7.6,
+      "sharpe": 4.86,
+      "calmar": 515.3,
+      "n_trades": 10562,
+      "trades_per_day": 4.82,
+      "win_rate": 55.9,
+      "profit_factor": 1.57,
+      "rr": 1.88,
+      "long": {
+        "count": 5726,
+        "wr": 56.0,
+        "avg_pnl": 3.555,
+        "rr": 2.05,
+        "pf": 1.64,
+        "total_pnl": 54330.32
+      },
+      "short": {
+        "count": 4836,
+        "wr": 55.7,
+        "avg_pnl": 2.886,
+        "rr": 1.71,
+        "pf": 1.49,
+        "total_pnl": 37711.17
+      },
+      "aligned": {
+        "count": 10562,
+        "wr": 55.9,
+        "avg_pnl": 3.249,
+        "rr": 1.88,
+        "pf": 1.57,
+        "total_pnl": 92041.49
+      },
+      "misaligned": {
+        "count": 0,
+        "wr": 0,
+        "avg_pnl": 0,
+        "rr": 0,
+        "pf": 0,
+        "total_pnl": 0
+      },
+      "exit_reasons": {
+        "tp1": 1441,
+        "trail_runner": 1441,
+        "stop": 4105,
+        "time": 2591,
+        "trail": 984
+      },
+      "elapsed": 2.2,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.382,
+        "mis_stop": 0.382,
+        "al_tgt": 1.5,
+        "mis_tgt": 1.5,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": true
+      }
+    },
+    "M-Mild200": {
+      "total_return_pct": 6226.8,
+      "final_balance": 132546.09,
+      "max_dd_pct": 7.8,
+      "sharpe": 5.53,
+      "calmar": 802.9,
+      "n_trades": 17271,
+      "trades_per_day": 7.88,
+      "win_rate": 55.5,
+      "profit_factor": 1.55,
+      "rr": 1.93,
+      "long": {
+        "count": 8520,
+        "wr": 55.7,
+        "avg_pnl": 3.608,
+        "rr": 2.12,
+        "pf": 1.63,
+        "total_pnl": 79343.31
+      },
+      "short": {
+        "count": 8751,
+        "wr": 55.3,
+        "avg_pnl": 2.877,
+        "rr": 1.77,
+        "pf": 1.48,
+        "total_pnl": 68516.36
+      },
+      "aligned": {
+        "count": 9040,
+        "wr": 57.3,
+        "avg_pnl": 3.421,
+        "rr": 1.85,
+        "pf": 1.62,
+        "total_pnl": 85198.32
+      },
+      "misaligned": {
+        "count": 8231,
+        "wr": 53.5,
+        "avg_pnl": 3.035,
+        "rr": 2.02,
+        "pf": 1.47,
+        "total_pnl": 62661.35
+      },
+      "exit_reasons": {
+        "tp1": 2432,
+        "trail_runner": 2432,
+        "stop": 6866,
+        "time": 3990,
+        "trail": 1551
+      },
+      "elapsed": 2.0,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.4,
+        "mis_stop": 0.35,
+        "al_tgt": 1.5,
+        "mis_tgt": 1.5,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    },
+    "N-MildFull200": {
+      "total_return_pct": 6206.4,
+      "final_balance": 132120.11,
+      "max_dd_pct": 8.7,
+      "sharpe": 5.42,
+      "calmar": 714.9,
+      "n_trades": 17353,
+      "trades_per_day": 7.92,
+      "win_rate": 55.8,
+      "profit_factor": 1.55,
+      "rr": 1.9,
+      "long": {
+        "count": 8523,
+        "wr": 55.4,
+        "avg_pnl": 3.492,
+        "rr": 2.1,
+        "pf": 1.63,
+        "total_pnl": 79486.53
+      },
+      "short": {
+        "count": 8830,
+        "wr": 56.1,
+        "avg_pnl": 2.897,
+        "rr": 1.73,
+        "pf": 1.48,
+        "total_pnl": 67919.13
+      },
+      "aligned": {
+        "count": 8655,
+        "wr": 54.6,
+        "avg_pnl": 3.258,
+        "rr": 1.94,
+        "pf": 1.64,
+        "total_pnl": 88458.95
+      },
+      "misaligned": {
+        "count": 8698,
+        "wr": 56.9,
+        "avg_pnl": 3.121,
+        "rr": 1.87,
+        "pf": 1.46,
+        "total_pnl": 58946.71
+      },
+      "exit_reasons": {
+        "tp1": 2516,
+        "trail_runner": 2516,
+        "stop": 6814,
+        "time": 3995,
+        "trail": 1512
+      },
+      "elapsed": 1.9,
+      "config": {
+        "btc_sma": 200,
+        "al_stop": 0.4,
+        "mis_stop": 0.35,
+        "al_tgt": 1.8,
+        "mis_tgt": 1.2,
+        "al_mh": 25,
+        "mis_mh": 25,
+        "mis_conf_boost": 0,
+        "block_mis": false
+      }
+    }
+  },
+  "best": {
+    "sharpe": "C-Stop100",
+    "dd": "A-Baseline",
+    "calmar": "A-Baseline",
+    "rr": "C-Stop100",
+    "ret": "A-Baseline"
+  },
+  "elapsed": 42.1
+}
