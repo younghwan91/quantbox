@@ -1805,6 +1805,14 @@ class RubberBandScalper:
         }
         self._trade_history.append(trade)
 
+        # v12.4.5: Save state immediately after partial close.
+        # Without this, a crash before end-of-cycle _save_state() leaves
+        # the state file with 100% notional + partial_closed=False.
+        # On restart: bracket repair uses 100% qty, _record_server_fill
+        # records PnL on stale 100% notional, and the partial close
+        # trade is lost from history entirely.
+        self._save_state()
+
         logger.info(
             f"[{symbol}] PARTIAL CLOSE ({fraction*100:.0f}%): "
             f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
