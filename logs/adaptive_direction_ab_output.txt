@@ -1,7 +1,7 @@
 ==============================================================================================================
   ADAPTIVE DIRECTION A/B TEST — BTC 4h SMA Regime-Driven
-  Commit: 7f6bd77
-  Date: 2026-02-21 15:49 UTC
+  Commit: 40a2772
+  Date: 2026-02-21 15:54 UTC
   Baseline: v12.4 I-HybTight (symmetric T150_S38_H25_PBT)
   Regime: BTC 4h close vs SMA(N) — bull=longs aligned, bear=shorts aligned
   Data: 2190d (6yr), 50 symbols
@@ -16,11 +16,13 @@
   BTC SMA(50) regime: 52.6% bull / 47.4% bear
   BTC SMA(100) regime: 53.1% bull / 46.9% bear
   BTC SMA(200) regime: 52.4% bull / 47.6% bear
+  Dual-confirm (>both 50&200): 39.8% bull / 33.7% bear / 26.5% choppy
+  Golden cross (50x200): 52.5% bull / 47.5% bear
 
 🔬 Running baseline simulation for diagnostic...
 
 ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
-  PART A: REGIME DIAGNOSTIC — BTC 4h SMA(200)
+  PART A: REGIME DIAGNOSTIC — BTC 4h 200
 ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
   Time in Bull: 52.4%  |  Bear: 46.1%  |  Undefined: 1.5%
@@ -104,78 +106,179 @@
   Yr6 (2025-2026)      49.2%  854|  55%  732|  50%  613|  47%  846|  59%   2.911%   1.929%
 
 ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
-  PART B: ADAPTIVE A/B TEST — 14 VARIANTS
+  PART A: REGIME DIAGNOSTIC — BTC 4h Dual-Confirm(50+200)
 ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-🔬 [1/14] A-Baseline: Symmetric I-HybTight (prod, no adaptation)
+  Time in Bull: 39.8%  |  Bear: 33.7%  |  Undefined: 26.5%
+
+  Category            #Trades     WR%     PF    R:R      EV%     Total$
+  ────────────────── ──────── ─────── ────── ────── ──────── ──────────
+  Bull-Long              3898   58.5%  1.87  2.14   3.899%   46049.92
+  Bull-Short             3203   54.6%  1.41  1.75   2.677%   22647.56
+  Bear-Long              2417   53.0%  1.41  2.11   3.515%   16883.14
+  Bear-Short             3172   56.6%  1.51  1.65   3.008%   25638.31
+  ────────────────── ──────── ─────── ────── ────── ──────── ──────────
+  ALIGNED                7070   57.7%  1.70  1.88   3.500%   71688.24
+  MISALIGNED             5620   53.9%  1.41  1.90   3.037%   39530.70
+
+  ⚡ Aligned − Misaligned gap: EV +0.463% (+15.2%), WR +3.8pp, PF +0.29, R:R -0.02
+  ⚡ Regime signal strength: MODERATE — ALIGNED WINS
+
+  Year                 Bull%    L(bull)    S(bull)    L(bear)    S(bear)    Al EV   Mis EV
+  ────────────────── ─────── ────────── ────────── ────────── ────────── ──────── ────────
+  Yr1 (2020-2021)      53.0%  656|  68%  601|  66%  153|  67%  166|  64%   5.978%   5.814%
+  Yr2 (2021-2022)      35.2%  589|  60%  418|  52%  465|  53%  592|  58%   4.148%   3.818%
+  Yr3 (2022-2023)      30.2%  509|  60%  388|  51%  612|  51%  709|  54%   3.207%   2.422%
+  Yr4 (2023-2024)      44.2%  739|  55%  667|  51%  312|  55%  510|  56%   2.589%   2.262%
+  Yr5 (2024-2025)      42.6%  797|  55%  662|  54%  371|  54%  495|  57%   3.254%   2.437%
+  Yr6 (2025-2026)      33.7%  608|  54%  467|  51%  504|  49%  695|  57%   2.755%   2.225%
+
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  PART A: REGIME DIAGNOSTIC — BTC 4h Golden-Cross(50x200)
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+  Time in Bull: 52.5%  |  Bear: 46.0%  |  Undefined: 1.5%
+
+  Category            #Trades     WR%     PF    R:R      EV%     Total$
+  ────────────────── ──────── ─────── ────── ────── ──────── ──────────
+  Bull-Long              4508   56.8%  1.69  2.08   3.788%   45573.50
+  Bull-Short             4681   56.4%  1.55  1.82   3.158%   40947.63
+  Bear-Long              3894   54.9%  1.58  2.13   3.420%   34348.24
+  Bear-Short             3960   54.6%  1.38  1.64   2.494%   25403.18
+  ────────────────── ──────── ─────── ────── ────── ──────── ──────────
+  ALIGNED                8468   55.8%  1.54  1.86   3.183%   70976.68
+  MISALIGNED             8575   55.7%  1.56  1.95   3.277%   75295.87
+
+  ⚡ Aligned − Misaligned gap: EV -0.094% (-2.9%), WR +0.1pp, PF -0.02, R:R -0.09
+  ⚡ Regime signal strength: WEAK — MISALIGNED WINS
+
+  Year                 Bull%    L(bull)    S(bull)    L(bear)    S(bear)    Al EV   Mis EV
+  ────────────────── ─────── ────────── ────────── ────────── ────────── ──────── ────────
+  Yr1 (2020-2021)      65.9%  757|  67%  803|  64%  280|  64%  214|  62%   5.957%   5.016%
+  Yr2 (2021-2022)      47.5%  742|  58%  632|  55%  755|  56%  732|  57%   3.972%   4.283%
+  Yr3 (2022-2023)      37.6%  548|  56%  586|  56%  894|  56%  924|  53%   2.721%   3.010%
+  Yr4 (2023-2024)      60.5%  915|  56%  962|  53%  485|  51%  595|  53%   2.453%   2.460%
+  Yr5 (2024-2025)      61.4%  920|  53% 1029|  56%  639|  54%  581|  54%   2.726%   2.808%
+  Yr6 (2025-2026)      42.2%  626|  49%  669|  55%  841|  53%  909|  54%   2.291%   2.666%
+
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  PART B: ADAPTIVE A/B TEST — 23 VARIANTS
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+🔬 [1/23] A-Baseline: Symmetric I-HybTight (prod, no adaptation)
   Ret: 6,300.9%  DD: 7.6%  Sharpe: 5.56  Calmar: 833.9  WR: 55.8%  PF: 1.56  R:R: 1.91
   ALIGNED: 9102 tr, WR 56.7%, EV 3.397%, PF 1.63
   MISALIGNED: 8063 tr, WR 54.9%, EV 3.120%, PF 1.49
 
-🔬 [2/14] B-Stop200: SMA(200) 4h: aligned .45 / misaligned .30 stop
+🔬 [2/23] B-Stop200: SMA(200) 4h: aligned .45 / misaligned .30 stop
   Ret: 6,264.8%  DD: 8.1%  Sharpe: 5.65  Calmar: 770.8  WR: 55.2%  PF: 1.56  R:R: 1.95
   ALIGNED: 8833 tr, WR 58.9%, EV 3.494%, PF 1.63
   MISALIGNED: 8474 tr, WR 51.4%, EV 2.924%, PF 1.48
 
-🔬 [3/14] C-Stop100: SMA(100) 4h: aligned .45 / misaligned .30 stop
+🔬 [3/23] C-Stop100: SMA(100) 4h: aligned .45 / misaligned .30 stop
   Ret: 6,229.1%  DD: 8.1%  Sharpe: 5.67  Calmar: 766.4  WR: 55.2%  PF: 1.55  R:R: 1.96
   ALIGNED: 9004 tr, WR 59.3%, EV 3.573%, PF 1.66
   MISALIGNED: 8310 tr, WR 50.9%, EV 2.863%, PF 1.44
 
-🔬 [4/14] D-Stop50: SMA(50) 4h: aligned .45 / misaligned .30 stop
+🔬 [4/23] D-Stop50: SMA(50) 4h: aligned .45 / misaligned .30 stop
   Ret: 6,253.4%  DD: 8.2%  Sharpe: 5.60  Calmar: 761.0  WR: 55.3%  PF: 1.55  R:R: 1.96
   ALIGNED: 9334 tr, WR 59.8%, EV 3.622%, PF 1.71
   MISALIGNED: 7952 tr, WR 49.9%, EV 2.797%, PF 1.38
 
-🔬 [5/14] E-Tgt200: SMA(200) 4h: aligned 2.0 / misaligned 1.0 target
+🔬 [5/23] E-Tgt200: SMA(200) 4h: aligned 2.0 / misaligned 1.0 target
   Ret: 6,190.1%  DD: 9.0%  Sharpe: 5.31  Calmar: 685.6  WR: 56.7%  PF: 1.55  R:R: 1.83
   ALIGNED: 8620 tr, WR 52.4%, EV 3.067%, PF 1.63
   MISALIGNED: 8976 tr, WR 60.8%, EV 3.184%, PF 1.46
 
-🔬 [6/14] F-StopTgt200: SMA(200) stop(.45/.30) + target(2.0/1.0)
+🔬 [6/23] F-StopTgt200: SMA(200) stop(.45/.30) + target(2.0/1.0)
   Ret: 6,264.8%  DD: 8.9%  Sharpe: 5.32  Calmar: 704.2  WR: 56.2%  PF: 1.56  R:R: 1.88
   ALIGNED: 8324 tr, WR 54.9%, EV 3.246%, PF 1.66
   MISALIGNED: 9379 tr, WR 57.3%, EV 2.984%, PF 1.45
 
-🔬 [7/14] G-StopTgt100: SMA(100) stop(.45/.30) + target(2.0/1.0)
+🔬 [7/23] G-StopTgt100: SMA(100) stop(.45/.30) + target(2.0/1.0)
   Ret: 6,119.9%  DD: 8.7%  Sharpe: 5.36  Calmar: 706.0  WR: 56.0%  PF: 1.55  R:R: 1.87
   ALIGNED: 8484 tr, WR 55.0%, EV 3.250%, PF 1.67
   MISALIGNED: 9223 tr, WR 56.8%, EV 2.906%, PF 1.41
 
-🔬 [8/14] H-MH200: SMA(200) 4h: aligned MH30 / misaligned MH20
+🔬 [8/23] H-MH200: SMA(200) 4h: aligned MH30 / misaligned MH20
   Ret: 6,247.0%  DD: 10.7%  Sharpe: 5.49  Calmar: 585.2  WR: 55.8%  PF: 1.55  R:R: 1.89
   ALIGNED: 9286 tr, WR 56.7%, EV 3.556%, PF 1.61
   MISALIGNED: 7863 tr, WR 54.8%, EV 2.835%, PF 1.49
 
-🔬 [9/14] I-Full200: SMA(200) stop+tgt+MH adaptive
+🔬 [9/23] I-Full200: SMA(200) stop+tgt+MH adaptive
   Ret: 5,891.2%  DD: 12.1%  Sharpe: 5.07  Calmar: 488.5  WR: 55.8%  PF: 1.53  R:R: 1.87
   ALIGNED: 8290 tr, WR 54.4%, EV 3.397%, PF 1.60
   MISALIGNED: 9008 tr, WR 57.0%, EV 2.794%, PF 1.44
 
-🔬 [10/14] J-Full100: SMA(100) stop+tgt+MH adaptive
+🔬 [10/23] J-Full100: SMA(100) stop+tgt+MH adaptive
   Ret: 5,753.9%  DD: 12.1%  Sharpe: 5.15  Calmar: 477.2  WR: 55.6%  PF: 1.52  R:R: 1.86
   ALIGNED: 8448 tr, WR 54.4%, EV 3.340%, PF 1.59
   MISALIGNED: 8835 tr, WR 56.8%, EV 2.783%, PF 1.43
 
-🔬 [11/14] K-ConfGate200: SMA(200) misaligned needs +1 extra conf
+🔬 [11/23] K-ConfGate200: SMA(200) misaligned needs +1 extra conf
   Ret: 5,379.3%  DD: 7.6%  Sharpe: 5.19  Calmar: 711.9  WR: 56.1%  PF: 1.58  R:R: 1.89
   ALIGNED: 10024 tr, WR 56.2%, EV 3.269%, PF 1.58
   MISALIGNED: 3200 tr, WR 56.0%, EV 3.287%, PF 1.57
 
-🔬 [12/14] L-Block200: SMA(200) block misaligned entries entirely
+🔬 [12/23] L-Block200: SMA(200) block misaligned entries entirely
   Ret: 3,893.6%  DD: 7.6%  Sharpe: 4.86  Calmar: 515.3  WR: 55.9%  PF: 1.57  R:R: 1.88
   ALIGNED: 10562 tr, WR 55.9%, EV 3.249%, PF 1.57
   MISALIGNED: 0 tr, WR 0.0%, EV 0.000%, PF 0.00
 
-🔬 [13/14] M-Mild200: SMA(200) mild stop: aligned .40 / misaligned .35
+🔬 [13/23] M-Mild200: SMA(200) mild stop: aligned .40 / misaligned .35
   Ret: 6,226.8%  DD: 7.8%  Sharpe: 5.53  Calmar: 802.9  WR: 55.5%  PF: 1.55  R:R: 1.93
   ALIGNED: 9040 tr, WR 57.3%, EV 3.421%, PF 1.62
   MISALIGNED: 8231 tr, WR 53.5%, EV 3.035%, PF 1.47
 
-🔬 [14/14] N-MildFull200: SMA(200) mild stop(.40/.35) + tgt(1.8/1.2)
+🔬 [14/23] N-MildFull200: SMA(200) mild stop(.40/.35) + tgt(1.8/1.2)
   Ret: 6,206.4%  DD: 8.7%  Sharpe: 5.42  Calmar: 714.9  WR: 55.8%  PF: 1.55  R:R: 1.90
   ALIGNED: 8655 tr, WR 54.6%, EV 3.258%, PF 1.64
   MISALIGNED: 8698 tr, WR 56.9%, EV 3.121%, PF 1.46
+
+🔬 [15/23] O-DualStop: Dual-confirm (>both SMA50&200): stop .45/.30
+  Ret: 6,328.0%  DD: 8.1%  Sharpe: 5.67  Calmar: 778.5  WR: 56.1%  PF: 1.56  R:R: 1.90
+  ALIGNED: 11189 tr, WR 59.1%, EV 3.509%, PF 1.66
+  MISALIGNED: 5889 tr, WR 50.5%, EV 2.846%, PF 1.40
+
+🔬 [16/23] P-DualStopTgt: Dual-confirm: stop(.45/.30) + tgt(2.0/1.0)
+  Ret: 6,358.1%  DD: 8.9%  Sharpe: 5.31  Calmar: 714.7  WR: 55.5%  PF: 1.57  R:R: 1.88
+  ALIGNED: 10419 tr, WR 55.0%, EV 3.221%, PF 1.67
+  MISALIGNED: 6514 tr, WR 56.3%, EV 2.922%, PF 1.36
+
+🔬 [17/23] Q-DualFull: Dual-confirm: stop+tgt+MH full adaptive
+  Ret: 5,930.8%  DD: 12.1%  Sharpe: 5.05  Calmar: 491.8  WR: 55.0%  PF: 1.53  R:R: 1.88
+  ALIGNED: 10252 tr, WR 54.5%, EV 3.373%, PF 1.61
+  MISALIGNED: 6210 tr, WR 55.9%, EV 2.749%, PF 1.36
+
+🔬 [18/23] R-DualConf: Dual-confirm: misaligned +1 conf gate
+  Ret: 5,805.6%  DD: 7.6%  Sharpe: 5.32  Calmar: 768.3  WR: 56.3%  PF: 1.58  R:R: 1.89
+  ALIGNED: 12280 tr, WR 56.5%, EV 3.310%, PF 1.61
+  MISALIGNED: 2247 tr, WR 55.1%, EV 3.147%, PF 1.48
+
+🔬 [19/23] S-DualBlock: Dual-confirm: block misaligned entirely
+  Ret: 4,822.7%  DD: 7.6%  Sharpe: 5.08  Calmar: 638.3  WR: 56.2%  PF: 1.59  R:R: 1.90
+  ALIGNED: 12692 tr, WR 56.2%, EV 3.274%, PF 1.59
+  MISALIGNED: 0 tr, WR 0.0%, EV 0.000%, PF 0.00
+
+🔬 [20/23] T-GCStop: Golden cross (50x200): stop .45/.30
+  Ret: 6,196.8%  DD: 8.1%  Sharpe: 5.63  Calmar: 762.4  WR: 55.0%  PF: 1.55  R:R: 1.97
+  ALIGNED: 8298 tr, WR 58.1%, EV 3.335%, PF 1.55
+  MISALIGNED: 9044 tr, WR 52.1%, EV 3.060%, PF 1.55
+
+🔬 [21/23] U-GCStopTgt: Golden cross: stop(.45/.30) + tgt(2.0/1.0)
+  Ret: 6,156.1%  DD: 8.9%  Sharpe: 5.31  Calmar: 692.0  WR: 56.4%  PF: 1.55  R:R: 1.87
+  ALIGNED: 7819 tr, WR 54.3%, EV 3.087%, PF 1.59
+  MISALIGNED: 10075 tr, WR 58.0%, EV 3.107%, PF 1.52
+
+🔬 [22/23] V-GCFull: Golden cross: stop+tgt+MH full adaptive
+  Ret: 5,927.2%  DD: 12.1%  Sharpe: 5.08  Calmar: 491.5  WR: 56.2%  PF: 1.54  R:R: 1.85
+  ALIGNED: 7820 tr, WR 54.0%, EV 3.270%, PF 1.55
+  MISALIGNED: 9684 tr, WR 58.0%, EV 2.935%, PF 1.52
+
+🔬 [23/23] W-GCMild: Golden cross: mild stop .40/.35
+  Ret: 6,219.9%  DD: 7.8%  Sharpe: 5.52  Calmar: 802.0  WR: 55.4%  PF: 1.55  R:R: 1.94
+  ALIGNED: 8524 tr, WR 56.6%, EV 3.277%, PF 1.55
+  MISALIGNED: 8769 tr, WR 54.2%, EV 3.189%, PF 1.55
 
 ==============================================================================================================
   RESULTS COMPARISON — Adaptive Direction A/B Test
@@ -196,6 +299,15 @@
    L-Block200      SMA(200) block misaligned entries entirely     3,893.6%  7.6%    4.86   515.3 55.9% 1.57 1.88  10562
    M-Mild200       SMA(200) mild stop: aligned .40 / misaligned .35 6,226.8%  7.8%    5.53   802.9 55.5% 1.55 1.93  17271
    N-MildFull200   SMA(200) mild stop(.40/.35) + tgt(1.8/1.2)     6,206.4%  8.7%    5.42   714.9 55.8% 1.55 1.90  17353
+  ★O-DualStop      Dual-confirm (>both SMA50&200): stop .45/.30   6,328.0%  8.1%    5.67   778.5 56.1% 1.56 1.90  17078
+   P-DualStopTgt   Dual-confirm: stop(.45/.30) + tgt(2.0/1.0)     6,358.1%  8.9%    5.31   714.7 55.5% 1.57 1.88  16933
+   Q-DualFull      Dual-confirm: stop+tgt+MH full adaptive        5,930.8% 12.1%    5.05   491.8 55.0% 1.53 1.88  16462
+   R-DualConf      Dual-confirm: misaligned +1 conf gate          5,805.6%  7.6%    5.32   768.3 56.3% 1.58 1.89  14527
+   S-DualBlock     Dual-confirm: block misaligned entirely        4,822.7%  7.6%    5.08   638.3 56.2% 1.59 1.90  12692
+  ★T-GCStop        Golden cross (50x200): stop .45/.30            6,196.8%  8.1%    5.63   762.4 55.0% 1.55 1.97  17342
+   U-GCStopTgt     Golden cross: stop(.45/.30) + tgt(2.0/1.0)     6,156.1%  8.9%    5.31   692.0 56.4% 1.55 1.87  17894
+   V-GCFull        Golden cross: stop+tgt+MH full adaptive        5,927.2% 12.1%    5.08   491.5 56.2% 1.54 1.85  17504
+   W-GCMild        Golden cross: mild stop .40/.35                6,219.9%  7.8%    5.52   802.0 55.4% 1.55 1.94  17293
 
   Variant            Al#  Al_WR   Al_EV  Al_PF  Mis#  Mis_WR   Mis_EV  Mis_PF   Gap_EV
   ──────────────── ───── ────── ─────── ────── ───── ─────── ──────── ─────── ────────
@@ -213,15 +325,24 @@
   L-Block200       10562  55.9%  3.249%  1.57     0    0.0%   0.000%   0.00  +3.249%
   M-Mild200         9040  57.3%  3.421%  1.62  8231   53.5%   3.035%   1.47  +0.386%
   N-MildFull200     8655  54.6%  3.258%  1.64  8698   56.9%   3.121%   1.46  +0.137%
+  O-DualStop       11189  59.1%  3.509%  1.66  5889   50.5%   2.846%   1.40  +0.663%
+  P-DualStopTgt    10419  55.0%  3.221%  1.67  6514   56.3%   2.922%   1.36  +0.299%
+  Q-DualFull       10252  54.5%  3.373%  1.61  6210   55.9%   2.749%   1.36  +0.624%
+  R-DualConf       12280  56.5%  3.310%  1.61  2247   55.1%   3.147%   1.48  +0.163%
+  S-DualBlock      12692  56.2%  3.274%  1.59     0    0.0%   0.000%   0.00  +3.274%
+  T-GCStop          8298  58.1%  3.335%  1.55  9044   52.1%   3.060%   1.55  +0.275%
+  U-GCStopTgt       7819  54.3%  3.087%  1.59 10075   58.0%   3.107%   1.52  -0.020%
+  V-GCFull          7820  54.0%  3.270%  1.55  9684   58.0%   2.935%   1.52  +0.335%
+  W-GCMild          8524  56.6%  3.277%  1.55  8769   54.2%   3.189%   1.55  +0.088%
 
   ★ = better than baseline on that metric
-  Total time: 42.1s
+  Total time: 132.4s
 ==============================================================================================================
 
   🏆 Best Sharpe:  C-Stop100 (5.67)
   🏆 Best DD:      A-Baseline (7.6%)
   🏆 Best Calmar:  A-Baseline (833.9)
-  🏆 Best R:R:     C-Stop100 (1.96)
-  🏆 Best Return:  A-Baseline (6,300.9%)
+  🏆 Best R:R:     T-GCStop (1.97)
+  🏆 Best Return:  P-DualStopTgt (6,358.1%)
 
 💾 Results saved to /home/user/Documents/git/quantbox/logs/adaptive_direction_ab_results.json
