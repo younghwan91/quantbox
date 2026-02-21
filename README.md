@@ -8,12 +8,12 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v12.3 — T100_S38_PBT + M-2SSTSX)
+### 🔥 Rubber Band Scalper (v12.4 — I-HybTight + M-2SSTSX)
 - **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
-- **v12.3 T100_S38_PBT**: R8 Stress-tested champion exit profile
-  - target_retrace=1.0 (100% move), stop_mult=0.382 → R:R 2.62
+- **v12.4 I-HybTight**: Reversal A/B test champion — deeper target + tighter trail + longer runner
+  - target_retrace=1.5 (150% move), stop_mult=0.382, max_hold=25 → R:R 1.91
   - **PBT Exit**: 50% partial at TP1 → breakeven floor → ATR trailing runner
-  - Runner exits via `trail_runner` (ATR×1.5 trailing) or `time_runner` (2× max_hold)
+  - Runner exits via `trail_runner` (ATR×1.0 tighter trailing) or `time_runner` (3× max_hold)
   - Server TP as safety net; client-side trailing for precision
 - **v12.3 M-2SSTSX**: R6 champion combo (2slt + SoftTight + SteepX + DirDiversity)
   - **SteepX Sizing**: conf2→0.3×, conf3→0.5×, conf4→1.5×, conf5+→2.0× — rewards conviction
@@ -59,7 +59,7 @@
 - **Regime-Switch Dual Entry (v5.0 base)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
   - Risk-On (BTC > SMA96): Classic Pullback — 자산 자체 상승추세에서 조정 시 매수
   - Risk-Off (BTC < SMA96): Sympathy Pullback — BTC 하락 시 동반 하락하는 자산 매수
-- **Fibonacci Stop/Target (v9.0)**: stop=0.786x (Fib deep correction), target=38.2% (Fib golden ratio) → R:R 0.486
+- **Fibonacci Stop/Target (v9.0→v12.4)**: stop=0.382× (v12.3), target=1.5× (v12.4 HybTight) → R:R 1.91
 - **Flat 1.5x Leverage**: R:R 1.25로 레버리지 정당화
   - R:R ≥ 0.30 안전 게이트 유지
 - **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (R:R 게이트와 연동)
@@ -208,7 +208,7 @@ scripts/                    # 유틸리티 스크립트
 ├── alpha_search_r7.py              # R7 3D Exit Grid Sweep (TP×SL×ExitMode, 101 variants)
 ├── alpha_search_r8.py              # R8 Stress Test (Fee/Regime/WR-Degradation, 5 configs)
 └── alpha_search_r9.py              # R9 MA/TOTAL3 Macro Filters (confirmed no improvement)
-tests/                      # 유닛 테스트 (637개)
+tests/                      # 유닛 테스트 (680개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
@@ -225,9 +225,9 @@ tests/                      # 유닛 테스트 (637개)
 
 > **v12.2 핵심**: E-3Slot 필터 완화 — conf≥3→≥2, ATR 2.5×→2.0×, floor 1%→0.8%, 2→3 slots. +138% trades/day, Calmar 795 (+5.8%), Sharpe 6.41. MTF block 유지 (제거 시 Sharpe -3.11 — 비협상).
 >
-> **v12.3 T100_S38_PBT + M-2SSTSX (Production)**: R8 stress-tested exit (T100/S38/PBT) + R6 combo sizing (SteepX/SoftTight/VolAdj/DirDiv). 3 critical production safety fixes: state restore for runners, bracket repair guard, failed-partial recovery. 625 tests, 46 v12.3 parity tests.
+> **v12.3 T100_S38_PBT + M-2SSTSX**: R8 stress-tested exit (T100/S38/PBT) + R6 combo sizing (SteepX/SoftTight/VolAdj/DirDiv). 3 critical production safety fixes: state restore for runners, bracket repair guard, failed-partial recovery.
 >
-> **v12.3 R7 Exit Sweep**: 101-variant 3D grid (TP×SL×ExitMode) over 6yr crash-era data. Champion **T62_S79_PBT**: R:R 0.60→1.22 (+103%), DD 9.0%, PF 1.33. Partial 50% exit + breakeven stop + ATR trail doubles R:R with only +1.2pp DD cost.
+> **v12.4 I-HybTight (Production)**: Reversal A/B test champion. target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3. R:R 1.64→1.91 (+16%), Calmar 792→834, 6yr return 6,300%. 680 tests, 15 HybTight parity tests.
 
 ## 🧪 테스트
 
