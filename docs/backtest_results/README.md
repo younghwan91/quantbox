@@ -28,3 +28,9 @@ Example: `5ec5007_20260219_3year_ab_test.md`
 | `dab1f80` | 2026-02-19 | Universe B-30/40/50 Sweep (3 sizes, 3yr portfolio) — 1095d, 50 symbols | **B-50 wins**: Sharpe 7.24, +6812%, DD 9.1%, Calmar 751 |
 | `be25665` | 2026-02-19 | Filter Relaxation A/B (6 variants, 3yr portfolio) — 1095d, 50 symbols | **E-3Slot wins**: Sharpe 6.41, +8785%, DD 11.1%, 26.11 trades/day (+138%) |
 | `5900fa5` | 2026-02-19 | Partial Exit + Trailing Stop A/B (6 variants, 3yr portfolio) — 1095d, 50 symbols | **E-BE15 wins**: R:R 0.98→1.51 (+54%), Sharpe 6.41→6.84, PF 1.76→1.96, DD 10.7% |
+| `27d6339` | 2026-02-19 | Alpha Search R3+R4: Smart Exit + MDD Innovations (25 variants, 3yr portfolio) — 1095d, 50 symbols | **★ Y-Kitchen wins**: WR 67.1%, R:R 1.00, DD 7.2%, Sharpe 8.42, PF 2.07 — TRIPLE WIN vs v12.2 |
+| `0690b0f` | 2026-02-20 | Alpha Search R5: Y-Kitchen Combos (19 variants, 3yr) — 1095d, 50 symbols | **G-YK+PT20**: WR 67.6%, R:R 1.80, DD 6.7%, Sharpe 8.17, PF 2.21 |
+| `0690b0f` | 2026-02-20 | **R5 6yr Crash-Era Validation** (19 variants, 6yr) — 2190d, 50 symbols | **★ J-YK+2Slt wins**: DD 8.2%, Sharpe 5.33 — 3yr dominators (G,O) FAILED. Partial trailing amplifies crash DD. |
+| `3fbf1d6` | 2026-02-20 | **R6 Combo Variants** (24 variants, 6yr) — 2190d, 50 symbols | **★★ M-2SSTSX wins**: DD 8.0%, Sharpe 5.50, PF 1.32 — 2slt+SoftTight+SteepX synergy dominates J. |
+| `bdd85f0` | 2026-02-20 | **R7 3D Exit Grid Sweep** (101 variants, 6yr) — 2190d, 50 symbols | **★★★ T62_S79_PBT wins**: R:R 0.60→1.22 (+103%), DD 9.0%, PF 1.33 — Partial exit doubles R:R. |
+| `3f63b4c` | 2026-02-20 | **R8 Stress Test** (5 configs × 4 tests, 6yr) — 2190d, 50 symbols | All PBT configs Grade A+. TierC-T100S38: R:R 1.66, BE margin +19.2pp, most regime-stable (96.9%). |

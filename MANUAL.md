@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 12.2.0  
-> 최종 업데이트: 2026년 2월 19일
+> 버전: 12.3.0  
+> 최종 업데이트: 2026년 2월 20일
 
 ---
 
@@ -95,16 +95,23 @@ python -m quantbox.scalper
 | **atr_multiplier** | **2.0** | **v12.2: ATR 배수 (threshold = 2.0 × ATR%, E-3Slot A/B validated)** |
 | **threshold_floor** | **0.008** | **v12.2: 최소 임계값 (0.8%, E-3Slot A/B validated)** |
 | **threshold_cap** | **0.06** | **v11.4: 최대 임계값 (6%)** |
-| target_retrace | 0.382 | 이익 실현: 이동 폭의 38.2% 되돌림 (Fibonacci golden ratio, v9.0) |
-| stop_mult | 0.786 | 손절: 이동 폭의 0.786배 (Fibonacci deep correction, v9.0) |
+| target_retrace | 1.0 | v12.3: 이익 실현 — 이동 폭의 100% 되돌림 (T100_S38_PBT champion) |
+| stop_mult | 0.382 | v12.3: 손절 — 이동 폭의 0.382배 (R:R 2.62) |
 | max_hold | 20 | v10.0: 최대 보유 기간 (20봉 = 5시간, +24% ret vs 10) |
 | stop_decay | 0.0 | 시간감쇠 비활성화 (장기 안정성 확보) |
 | htf_period | 0 | MTF SMA 기간 (0=비활성화 — 장기 성능 저하) |
 | htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%, MTF 비활성 시 미사용) |
 | htf_agree_discount | 0.85 | HTF 동의 시 진입 임계값 할인 (MTF 비활성 시 미사용) |
 | htf_agree_stop_mult | 0.95 | HTF 동의 시 스톱 배수 (MTF 비활성 시 미사용) |
-| max_concurrent | 3 | v12.2: E-3Slot 최적 동시 포지션 (RB_MAX_CONCURRENT) |
-| risk_per_trade | 0.01 | 트레이드당 리스크 (자본의 1%) |
+| max_concurrent | 2 | v12.3: M-2SSTSX 2슬롯 집중 |
+| min_confidence | 3 | v12.3: 최소 증거 점수 3 (quality gate) |
+| **partial_exit** | **True** | **v12.3: PBT 50% 부분 익절 활성화** |
+| **trail_atr_mult** | **1.5** | **v12.3: 러너 ATR 트레일링 배수** |
+| **breakeven_after_partial** | **True** | **v12.3: 파셜 후 BE 스톱 + 러너** |
+| **steep_cap_curve** | **True** | **v12.3: SteepX 컨피던스 사이징 (0.3/0.5/1.5/2.0×)** |
+| **soft_equity_scale** | **True** | **v12.3: SoftTight DD 스케일링 (2/4/6%DD)** |
+| **vol_adjusted_size** | **True** | **v12.3: 변동성 조정 사이징** |
+| **dir_diversity** | **True** | **v12.3: 방향 다양성 필터 (max 2 same-dir)** |
 
 ### 3.4 안전장치
 
@@ -113,6 +120,9 @@ python -m quantbox.scalper
 - **Risk-Sized Positions**: 1% risk/trade, 최대 레버리지 20x
 - **LimitOrderChaser**: maker-only 체결로 수수료 0.02% (taker 0.05% 대비 60% 절감)
 - **Atomic State Persistence**: 크래시 후 자동 복구
+- **v12.3 Runner State Restore**: 봇 재시작 시 러너 trail_floor/highest_since_tp1 보존
+- **v12.3 Bracket Repair Guard**: 러너 포지션에 서버 TP 재배치 방지 (즉시 킬 방지)
+- **v12.3 Failed Partial Recovery**: 파셜 클로즈 실패 시 stale order ID 제거 → 브래킷 리페어 강제
 - **Discord 알림**: 진입/청산, 드로다운 경고 전송
 
 ### 3.5 백테스트

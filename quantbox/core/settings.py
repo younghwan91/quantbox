@@ -92,8 +92,8 @@ class QuantBoxSettings(BaseSettings):
     # ── Rubber Band Signal Parameters (v9.0, Fibonacci discipline) ──
     rb_lookback: int = 8               # Bars to measure move (2h at 15m) — SACRED
     rb_threshold: float = 0.032        # v10.0: Lower threshold (3.2%, +162% ret vs 4.5%)
-    rb_target_retrace: float = 0.382   # Fibonacci 0.382 target (v9.0, +29% Calmar vs 0.4)
-    rb_stop_mult: float = 0.786        # Fibonacci 0.786 stop (v9.0, DD -9.5% vs 0.9)
+    rb_target_retrace: float = 1.0     # v12.3 T100_S38_PBT: full retrace target (R7/R8 champion)
+    rb_stop_mult: float = 0.382        # v12.3 T100_S38_PBT: Fibonacci 0.382 stop (regime-stable)
     rb_max_hold: int = 20              # v10.0: Extended hold (20 bars, +24% ret vs 10)
     rb_stop_decay: float = 0.0         # Stop tightening disabled for robustness
 
@@ -114,8 +114,8 @@ class QuantBoxSettings(BaseSettings):
     rb_btc_regime_period: int = 96            # BTC SMA period for regime detection (96봉 = 24시간)
     rb_asset_trend_period: int = 192          # Asset SMA period for classic pullback (192봉 = 48시간)
 
-    # ── Confidence Scoring (v12.2 E-3Slot, filter relaxation A/B validated) ──
-    rb_min_confidence: int = 2                # v12.2: 최소 2 (E-3Slot winner: Sharpe 6.41, Calmar 795, +138% trades/day)
+    # ── Confidence Scoring (v12.3 M-2SSTSX, A/B validated) ──
+    rb_min_confidence: int = 3                # v12.3: 최소 3 (M-2SSTSX: Sharpe 5.50, DD 8.0%)
     rb_confidence_leverage_step: float = 0.0  # 컨피던스당 추가 레버리지 (0=고정)
     rb_rsi_period: int = 14                   # RSI 계산 기간
     rb_vol_period: int = 20                   # 거래량 SMA 기간 (스파이크 감지)
@@ -168,9 +168,11 @@ class QuantBoxSettings(BaseSettings):
     rb_btc_directional_enabled: bool = True   # BTC 방향 정렬 활성화
     rb_btc_directional_period: int = 48       # v11.0: 12h BTC momentum (A/B validated)
 
-    # ── Capital Preservation (v4.4: DISABLED — hurts with tighter stop) ──
-    rb_partial_exit_enabled: bool = False     # Disabled: Calmar 3.75 vs 4.96 without
+    # ── v12.3 PBT Exit Mode (R7/R8 validated, T100_S38_PBT champion) ──
+    rb_partial_exit_enabled: bool = True      # v12.3: PBT mode (R:R 1.22 → 1.66)
     rb_partial_exit_fraction: float = 0.5     # 부분 청산 비율 (0.5 = 50%)
+    rb_trail_atr_mult: float = 1.5            # ATR multiplier for runner trailing
+    rb_breakeven_after_partial: bool = True   # Move stop to breakeven after TP1
 
     # ── R:R-Gated Leverage (v4.3, A/B validated) ──
     rb_rr_leverage_enabled: bool = True       # R:R 기준 레버리지 게이트 활성화
@@ -189,8 +191,34 @@ class QuantBoxSettings(BaseSettings):
         'RUNEUSDT,DYDXUSDT,CRVUSDT,LDOUSDT,COMPUSDT,'
         'MKRUSDT,SNXUSDT,VETUSDT,EOSUSDT,APEUSDT'
     )
-    rb_max_concurrent: int = 3               # v12.2: E-3Slot 최적 (3 slots, Calmar 795, +138% trades/day)
+    rb_max_concurrent: int = 2               # v12.3: M-2SSTSX 최적 (2 slots, DD 8.0%)
     rb_dynamic_capital_enabled: bool = True   # balance / max(1, n_active+1) 동적 자본 배분
+
+    # ── v12.3 SteepX Confidence Sizing (M-2SSTSX, A/B validated) ──
+    rb_steep_cap_curve: bool = True           # Enable confidence-based sizing
+    rb_cap_mult_conf2: float = 0.3            # conf=2: 30% of base slot
+    rb_cap_mult_conf3: float = 0.5            # conf=3: 50% of base slot
+    rb_cap_mult_conf4: float = 1.5            # conf=4: 150% of base slot
+    rb_cap_mult_conf5: float = 2.0            # conf≥5: 200% of base slot
+
+    # ── v12.3 SoftTight DD Scaling (M-2SSTSX, A/B validated) ──
+    rb_soft_equity_scale: bool = True         # Enable DD-based size reduction
+    rb_soft_eq_dd1: float = 0.02              # 2% DD → 80% sizing
+    rb_soft_eq_scale1: float = 0.80
+    rb_soft_eq_dd2: float = 0.04              # 4% DD → 60% sizing
+    rb_soft_eq_scale2: float = 0.60
+    rb_soft_eq_dd3: float = 0.06              # 6% DD → 40% sizing
+    rb_soft_eq_scale3: float = 0.40
+
+    # ── v12.3 Vol-Adjusted Sizing (M-2SSTSX, A/B validated) ──
+    rb_vol_adjusted_size: bool = True         # Normalize sizing by ATR
+    rb_vol_adj_median_atr: float = 0.01       # Assumed median ATR% (1%)
+    rb_vol_adj_min: float = 0.4               # Min vol factor (0.4x)
+    rb_vol_adj_max: float = 2.0               # Max vol factor (2.0x)
+
+    # ── v12.3 Direction Diversity (M-2SSTSX, A/B validated) ──
+    rb_dir_diversity_enabled: bool = True     # Prevent concentrated same-direction
+    rb_max_same_direction: int = 2            # Max positions in same direction
 
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
