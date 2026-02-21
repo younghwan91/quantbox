@@ -100,7 +100,7 @@ def _find_cache(symbol: str, tf: str, days: int) -> Path | None:
     return matches2[-1] if matches2 else None
 
 
-def load_15m(symbol: str, days: int = 1095) -> dict | None:
+def load_15m(symbol: str, days: int = 2190) -> dict | None:
     cache = _find_cache(symbol, '15m', days)
     if cache is None:
         return None
@@ -108,7 +108,7 @@ def load_15m(symbol: str, days: int = 1095) -> dict | None:
     return {k: d[k] for k in ['close', 'high', 'low', 'volume', 'taker_buy']}
 
 
-def load_4h(symbol: str, days: int = 1095) -> np.ndarray | None:
+def load_4h(symbol: str, days: int = 2190) -> np.ndarray | None:
     cache = _find_cache(symbol, '4h', days)
     if cache is None:
         return None
@@ -784,7 +784,7 @@ def main():
     print("=" * 130)
 
     # ── Load data ──
-    print(f"\n📊 Loading 50-symbol data (1095d)...")
+    print(f"\n📊 Loading 50-symbol data (2190d / 6yr)...")
     btc_data = load_15m('BTCUSDT')
     if btc_data is None:
         print("ERROR: BTC 15m data not found")
