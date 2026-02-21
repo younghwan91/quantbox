@@ -1154,6 +1154,13 @@ def compute_signals_v9(
 
     Returns:
         Signal array with leverage encoded.
+
+    WARNING (v12.4.1): This function retains DUAL Risk-On/Risk-Off branching
+    for backward compatibility with research scripts (alpha_search_r2/r3,
+    multi_alpha_sweep, etc.). Live trading (on_bar) uses Risk-Off ONLY —
+    the Risk-On path was NEVER validated in the 6yr backtest (R:R 1.91).
+    Production backtests should use reversal_ab_test.py scan_entries() which
+    is Risk-Off only, matching on_bar() exactly.
     """
     n = len(close)
     sig = np.zeros(n)
@@ -2382,18 +2389,16 @@ class RubberBandStrategy:
                 return 0
 
             # BTC regime
+            # BTC regime NaN guard (btc_sma needed for sanity check only;
+            # v12.4.1 removed Risk-On/Risk-Off branching in favour of
+            # universal Risk-Off logic that uses btc_mom instead)
             btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period:]))
-            is_risk_on = float(btc_close_prices[-1]) > btc_sma_val
             if np.isnan(btc_sma_val):
                 self._mtf_confirmed[symbol] = False
                 return 0
 
             # BTC momentum
             btc_mom = float(btc_close_prices[-1] / btc_close_prices[-cfg.btc_directional_period - 1] - 1.0)
-
-            # Asset trend
-            asset_sma_val = float(np.mean(close_prices[-cfg.asset_trend_period:]))
-            is_uptrend = float(close_prices[-1]) > asset_sma_val
 
             # RSI
             rsi_arr = _compute_rsi_inline(close_prices, cfg.rsi_period)
@@ -2408,9 +2413,6 @@ class RubberBandStrategy:
                 vol_ratio = float(vol_data[-1]) / vol_sma_val
             if float(vol_data[-1]) > 0:
                 taker_ratio_val = float(taker_data[-1]) / float(vol_data[-1])
-
-            # SMA distance
-            sma_dist = abs(float(close_prices[-1]) - asset_sma_val) / asset_sma_val if asset_sma_val > 0 else 999.0
 
             # Stochastic
             stoch_k_val, stoch_d_val = 50.0, 50.0
