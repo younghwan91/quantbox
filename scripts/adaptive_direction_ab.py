@@ -111,6 +111,7 @@ class AdaptiveConfig:
 
     # ── Regime detection ──
     btc_sma_period: int = 200          # SMA period on 4h chart
+    regime_key: str = ''               # cache key override (for dual-SMA regimes)
 
     # ── Exit params by alignment ──
     aligned_target: float = 1.5        # target_retrace for aligned direction
@@ -341,6 +342,76 @@ def compute_btc_regime(btc_4h_close: np.ndarray, sma_period: int, n_15m: int) ->
             regime_4h[j] = -1  # bear
 
     # Expand to 15m resolution
+    regime_15m = np.zeros(n_15m)
+    for i in range(n_15m):
+        j = min(i // 16, n_4h - 1)
+        regime_15m[i] = regime_4h[j]
+    return regime_15m
+
+
+def compute_dual_confirm_regime(btc_4h_close: np.ndarray, n_15m: int) -> np.ndarray:
+    """Dual-confirm regime: bull only when BTC > BOTH SMA(50) and SMA(200) on 4h.
+
+    - BTC > SMA(50) AND BTC > SMA(200) → +1 (strong bull)
+    - BTC < SMA(50) AND BTC < SMA(200) → -1 (strong bear)
+    - Otherwise → 0 (choppy / no signal)
+    """
+    n_4h = len(btc_4h_close)
+    sma50 = np.full(n_4h, np.nan)
+    sma200 = np.full(n_4h, np.nan)
+    s50, s200 = 0.0, 0.0
+    for j in range(n_4h):
+        s50 += btc_4h_close[j]
+        s200 += btc_4h_close[j]
+        if j >= 50: s50 -= btc_4h_close[j - 50]
+        if j >= 200: s200 -= btc_4h_close[j - 200]
+        if j >= 49: sma50[j] = s50 / 50
+        if j >= 199: sma200[j] = s200 / 200
+
+    regime_4h = np.zeros(n_4h)
+    for j in range(n_4h):
+        if np.isnan(sma50[j]) or np.isnan(sma200[j]):
+            regime_4h[j] = 0
+        elif btc_4h_close[j] > sma50[j] and btc_4h_close[j] > sma200[j]:
+            regime_4h[j] = 1
+        elif btc_4h_close[j] < sma50[j] and btc_4h_close[j] < sma200[j]:
+            regime_4h[j] = -1
+        else:
+            regime_4h[j] = 0  # choppy
+
+    regime_15m = np.zeros(n_15m)
+    for i in range(n_15m):
+        j = min(i // 16, n_4h - 1)
+        regime_15m[i] = regime_4h[j]
+    return regime_15m
+
+
+def compute_golden_cross_regime(btc_4h_close: np.ndarray, n_15m: int) -> np.ndarray:
+    """Golden cross regime: SMA(50) > SMA(200) → bull, SMA(50) < SMA(200) → bear.
+
+    Classic trend signal. Slower to switch than price-vs-SMA.
+    """
+    n_4h = len(btc_4h_close)
+    sma50 = np.full(n_4h, np.nan)
+    sma200 = np.full(n_4h, np.nan)
+    s50, s200 = 0.0, 0.0
+    for j in range(n_4h):
+        s50 += btc_4h_close[j]
+        s200 += btc_4h_close[j]
+        if j >= 50: s50 -= btc_4h_close[j - 50]
+        if j >= 200: s200 -= btc_4h_close[j - 200]
+        if j >= 49: sma50[j] = s50 / 50
+        if j >= 199: sma200[j] = s200 / 200
+
+    regime_4h = np.zeros(n_4h)
+    for j in range(n_4h):
+        if np.isnan(sma50[j]) or np.isnan(sma200[j]):
+            regime_4h[j] = 0
+        elif sma50[j] > sma200[j]:
+            regime_4h[j] = 1   # golden cross — bull
+        else:
+            regime_4h[j] = -1  # death cross — bear
+
     regime_15m = np.zeros(n_15m)
     for i in range(n_15m):
         j = min(i // 16, n_4h - 1)
@@ -698,11 +769,12 @@ def _compute_stats(eq, trades, max_dd):
 # ═══════════════════════════════════════════════════════════════════
 # Part A: Regime Diagnostic
 # ═══════════════════════════════════════════════════════════════════
-def regime_diagnostic(trades: list[dict], regime: np.ndarray, n_bars: int, sma_period: int):
+def regime_diagnostic(trades: list[dict], regime: np.ndarray, n_bars: int, sma_period):
     """Analyze baseline trades tagged by BTC regime alignment."""
     w = 110
+    label = str(sma_period)
     print(f"\n{'═' * w}")
-    print(f"  PART A: REGIME DIAGNOSTIC — BTC 4h SMA({sma_period})")
+    print(f"  PART A: REGIME DIAGNOSTIC — BTC 4h {label}")
     print(f"{'═' * w}")
 
     # Time in each regime
@@ -928,6 +1000,79 @@ def build_variants() -> list[AdaptiveConfig]:
         aligned_target=1.8, misaligned_target=1.2,
     ))
 
+    # ═══ GROUP 8: Dual SMA (50+200) — Confirmation Regimes ═══
+
+    v.append(AdaptiveConfig(
+        name='O-DualStop',
+        desc='Dual-confirm (>both SMA50&200): stop .45/.30',
+        regime_key='dual_confirm',
+        aligned_stop=0.45, misaligned_stop=0.30,
+    ))
+
+    v.append(AdaptiveConfig(
+        name='P-DualStopTgt',
+        desc='Dual-confirm: stop(.45/.30) + tgt(2.0/1.0)',
+        regime_key='dual_confirm',
+        aligned_stop=0.45, misaligned_stop=0.30,
+        aligned_target=2.0, misaligned_target=1.0,
+    ))
+
+    v.append(AdaptiveConfig(
+        name='Q-DualFull',
+        desc='Dual-confirm: stop+tgt+MH full adaptive',
+        regime_key='dual_confirm',
+        aligned_stop=0.45, misaligned_stop=0.30,
+        aligned_target=2.0, misaligned_target=1.0,
+        aligned_max_hold=30, misaligned_max_hold=20,
+    ))
+
+    v.append(AdaptiveConfig(
+        name='R-DualConf',
+        desc='Dual-confirm: misaligned +1 conf gate',
+        regime_key='dual_confirm',
+        misaligned_conf_boost=1,
+    ))
+
+    v.append(AdaptiveConfig(
+        name='S-DualBlock',
+        desc='Dual-confirm: block misaligned entirely',
+        regime_key='dual_confirm',
+        block_misaligned=True,
+    ))
+
+    # ═══ GROUP 9: Golden Cross (SMA50 > SMA200) ═══
+
+    v.append(AdaptiveConfig(
+        name='T-GCStop',
+        desc='Golden cross (50x200): stop .45/.30',
+        regime_key='golden_cross',
+        aligned_stop=0.45, misaligned_stop=0.30,
+    ))
+
+    v.append(AdaptiveConfig(
+        name='U-GCStopTgt',
+        desc='Golden cross: stop(.45/.30) + tgt(2.0/1.0)',
+        regime_key='golden_cross',
+        aligned_stop=0.45, misaligned_stop=0.30,
+        aligned_target=2.0, misaligned_target=1.0,
+    ))
+
+    v.append(AdaptiveConfig(
+        name='V-GCFull',
+        desc='Golden cross: stop+tgt+MH full adaptive',
+        regime_key='golden_cross',
+        aligned_stop=0.45, misaligned_stop=0.30,
+        aligned_target=2.0, misaligned_target=1.0,
+        aligned_max_hold=30, misaligned_max_hold=20,
+    ))
+
+    v.append(AdaptiveConfig(
+        name='W-GCMild',
+        desc='Golden cross: mild stop .40/.35',
+        regime_key='golden_cross',
+        aligned_stop=0.40, misaligned_stop=0.35,
+    ))
+
     return v
 
 
@@ -1024,16 +1169,29 @@ def main():
 
     # ── Pre-compute regime arrays for all SMA periods we'll test ──
     sma_periods = sorted(set(v.btc_sma_period for v in build_variants()))
-    regime_cache: dict[int, np.ndarray] = {}
+    regime_cache: dict[str, np.ndarray] = {}
     for sp in sma_periods:
-        regime_cache[sp] = compute_btc_regime(btc_4h_close, sp, max_bars)
-        bull_pct = np.sum(regime_cache[sp][:max_bars] > 0) / max_bars * 100
+        regime_cache[str(sp)] = compute_btc_regime(btc_4h_close, sp, max_bars)
+        bull_pct = np.sum(regime_cache[str(sp)][:max_bars] > 0) / max_bars * 100
         print(f"  BTC SMA({sp}) regime: {bull_pct:.1f}% bull / {100-bull_pct:.1f}% bear")
+
+    # Dual-SMA regimes
+    regime_cache['dual_confirm'] = compute_dual_confirm_regime(btc_4h_close, max_bars)
+    dc = regime_cache['dual_confirm']
+    bull_dc = np.sum(dc > 0) / max_bars * 100
+    bear_dc = np.sum(dc < 0) / max_bars * 100
+    neutral_dc = np.sum(dc == 0) / max_bars * 100
+    print(f"  Dual-confirm (>both 50&200): {bull_dc:.1f}% bull / {bear_dc:.1f}% bear / {neutral_dc:.1f}% choppy")
+
+    regime_cache['golden_cross'] = compute_golden_cross_regime(btc_4h_close, max_bars)
+    gc = regime_cache['golden_cross']
+    bull_gc = np.sum(gc > 0) / max_bars * 100
+    print(f"  Golden cross (50x200): {bull_gc:.1f}% bull / {100-bull_gc:.1f}% bear")
 
     # ═══════════════════ PART A: DIAGNOSTIC ═══════════════════
     print(f"\n🔬 Running baseline simulation for diagnostic...")
     baseline_cfg = AdaptiveConfig(name='A-Baseline', desc='Symmetric I-HybTight (prod)')
-    regime_200 = regime_cache[200]
+    regime_200 = regime_cache['200']
     baseline_res = simulate(
         sym_close_d, sym_high_d, sym_low_d,
         sym_dirs, sym_confs, sym_moves,
@@ -1054,16 +1212,16 @@ def main():
     # Run diagnostic for SMA(200) — the main one
     diag = regime_diagnostic(baseline_trades, regime_200, max_bars, 200)
 
-    # Also show SMA(100) and SMA(50) diagnostic
-    for sp in [100, 50]:
-        if sp in regime_cache:
-            r_sp = regime_cache[sp]
+    # Also show SMA(100), SMA(50), dual-confirm and golden cross diagnostics
+    for sp_key, sp_label in [('100', 'SMA(100)'), ('50', 'SMA(50)'), ('dual_confirm', 'Dual-Confirm(50+200)'), ('golden_cross', 'Golden-Cross(50x200)')]:
+        if sp_key in regime_cache:
+            r_sp = regime_cache[sp_key]
             trades_sp = _get_trades(
                 sym_close_d, sym_high_d, sym_low_d,
                 sym_dirs, sym_confs, sym_moves,
-                AdaptiveConfig(btc_sma_period=sp), r_sp, sym_atr_d,
+                AdaptiveConfig(), r_sp, sym_atr_d,
             )
-            regime_diagnostic(trades_sp, r_sp, max_bars, sp)
+            regime_diagnostic(trades_sp, r_sp, max_bars, sp_label)
 
     # ═══════════════════ PART B: A/B TEST ═══════════════════
     print(f"\n{'═' * w}")
@@ -1077,7 +1235,8 @@ def main():
         t_v = time.time()
         print(f"\n🔬 [{vi+1}/{len(variants)}] {cfg.name}: {cfg.desc}")
 
-        regime = regime_cache[cfg.btc_sma_period]
+        rk = cfg.regime_key if cfg.regime_key else str(cfg.btc_sma_period)
+        regime = regime_cache[rk]
         res = simulate(
             sym_close_d, sym_high_d, sym_low_d,
             sym_dirs, sym_confs, sym_moves,
