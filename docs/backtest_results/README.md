@@ -34,4 +34,6 @@ Example: `5ec5007_20260219_3year_ab_test.md`
 | `3fbf1d6` | 2026-02-20 | **R6 Combo Variants** (24 variants, 6yr) — 2190d, 50 symbols | **★★ M-2SSTSX wins**: DD 8.0%, Sharpe 5.50, PF 1.32 — 2slt+SoftTight+SteepX synergy dominates J. |
 | `bdd85f0` | 2026-02-20 | **R7 3D Exit Grid Sweep** (101 variants, 6yr) — 2190d, 50 symbols | **★★★ T62_S79_PBT wins**: R:R 0.60→1.22 (+103%), DD 9.0%, PF 1.33 — Partial exit doubles R:R. |
 | `3f63b4c` | 2026-02-20 | **R8 Stress Test** (5 configs × 4 tests, 6yr) — 2190d, 50 symbols | All PBT configs Grade A+. TierC-T100S38: R:R 1.66, BE margin +19.2pp, most regime-stable (96.9%). |
-
+| `614a449` | 2026-02-21 | **Direction Asymmetry Analysis (6yr)** — 2190d, 50 symbols | Longs +25% EV/trade (3.64% vs 2.91%), R:R 2.10 vs 1.75. **But gap erodes: Yr5-6 shorts outperform longs.** |
+| `614a449` | 2026-02-21 | **Direction Asymmetry A/B R1 (6yr)** — 16 variants, 2190d, 50 symbols | Best Sharpe: C-ShortTightT 5.76 (+3.6%). Best Calmar: D-SplitTarget 891.2. **Baseline wins on Return & PF.** |
+| `614a449` | 2026-02-21 | **Direction Asymmetry R2 (6yr)** — 18 variants, 2190d, 50 symbols | Best Sharpe: FS-25 5.73 (+3.1%). H+E SUBADDITIVE. **Baseline beats all on Calmar (833.9) & Return (6,301%).** No production change. |
