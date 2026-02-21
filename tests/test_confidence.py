@@ -273,7 +273,7 @@ class TestConfidenceConfig:
         assert cfg.base_leverage == 1.5
         assert cfg.max_leverage == 1.5
         assert cfg.threshold == 0.032  # v10.0
-        assert cfg.max_hold == 20  # v10.0
+        assert cfg.max_hold == 25  # v12.4 HybTight (was 20)
         assert cfg.stoch_k_period == 3  # v10.0
         assert cfg.dynamic_capital_enabled is True  # v10.0
         assert len(cfg.symbol_whitelist) == 20  # v11.1 Top-20

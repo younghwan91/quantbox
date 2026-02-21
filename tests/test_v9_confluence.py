@@ -204,9 +204,10 @@ class TestV9ConfigDefaults:
     """Validate v9.0 config defaults match winning strategy parameters."""
 
     def test_fibonacci_exits(self):
+        """v12.4 HybTight: target_retrace=1.5, stop_mult=0.382."""
         cfg = RubberBandConfig()
-        assert cfg.target_retrace == 0.382, "Golden ratio retracement"
-        assert cfg.stop_mult == 0.786, "Deep correction stop"
+        assert cfg.target_retrace == 1.5, "v12.4 HybTight retrace target"
+        assert cfg.stop_mult == 0.382, "T100_S38 Fibonacci stop"
 
     def test_dynamic_target_disabled(self):
         cfg = RubberBandConfig()
