@@ -1100,7 +1100,11 @@ class RubberBandScalper:
                             f"Could not place SL — position UNPROTECTED"
                         )
 
-                if missing_tp:
+                if missing_tp and not pos.get('partial_closed', False):
+                    # v12.3 PBT: Don't place server TP for runners!
+                    # Runner exits via client-side ATR trailing.
+                    # A server TP at the original target would fire
+                    # immediately (runner entered AT target), killing it.
                     new_tp = self._place_server_take_profit(
                         symbol=sym, signal=signal, quantity=quantity,
                         entry_price=entry_price, move_size=move_size,
@@ -1149,7 +1153,12 @@ class RubberBandScalper:
 
         notional = fill_qty * fill_price
         pnl_usd = pnl_pct * notional
-        cost = notional * self.config.round_trip_cost
+        # v12.3 PBT: Runner positions had entry cost charged at opening.
+        # Use exit-only cost for partial_closed positions.
+        if pos.get('partial_closed'):
+            cost = notional * self.config.cost_per_side
+        else:
+            cost = notional * self.config.round_trip_cost
         net_pnl = pnl_usd - cost
 
         trade = {
@@ -1244,6 +1253,56 @@ class RubberBandScalper:
                 per_slot_capital = min(per_slot_capital, balance * 0.5)
             else:
                 per_slot_capital = balance / cfg.max_concurrent
+
+            # ═══ v12.3 PARITY: SteepX Confidence Sizing ═══
+            conf_level = self.strategy.get_last_confidence(symbol)
+            if cfg.steep_cap_curve and conf_level > 0:
+                if conf_level >= 5:
+                    cap_mult = cfg.cap_mult_conf5
+                elif conf_level == 4:
+                    cap_mult = cfg.cap_mult_conf4
+                elif conf_level == 3:
+                    cap_mult = cfg.cap_mult_conf3
+                elif conf_level == 2:
+                    cap_mult = cfg.cap_mult_conf2
+                else:
+                    cap_mult = cfg.cap_mult_conf2  # conf=1
+                per_slot_capital *= cap_mult
+                logger.debug(
+                    f"[{symbol}] SteepX: conf={conf_level} → {cap_mult:.1f}x "
+                    f"→ slot=${per_slot_capital:.2f}"
+                )
+
+            # ═══ v12.3 PARITY: SoftTight DD Scaling ═══
+            if cfg.soft_equity_scale:
+                hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+                dd_pct = (hwm - balance) / hwm if hwm > 0 else 0.0
+                if dd_pct >= cfg.soft_eq_dd3:
+                    eq_scale = cfg.soft_eq_scale3
+                elif dd_pct >= cfg.soft_eq_dd2:
+                    eq_scale = cfg.soft_eq_scale2
+                elif dd_pct >= cfg.soft_eq_dd1:
+                    eq_scale = cfg.soft_eq_scale1
+                else:
+                    eq_scale = 1.0
+                if eq_scale < 1.0:
+                    per_slot_capital *= eq_scale
+                    logger.debug(
+                        f"[{symbol}] SoftTight: DD={dd_pct*100:.1f}% "
+                        f"→ {eq_scale:.2f}x → slot=${per_slot_capital:.2f}"
+                    )
+
+            # ═══ v12.3 PARITY: Vol-Adjusted Sizing ═══
+            if cfg.vol_adjusted_size:
+                cur_atr = self.strategy.get_last_atr_pct(symbol)
+                if cur_atr > 0:
+                    vol_factor = cfg.vol_adj_median_atr / cur_atr
+                    vol_factor = max(cfg.vol_adj_min, min(cfg.vol_adj_max, vol_factor))
+                    per_slot_capital *= vol_factor
+                    logger.debug(
+                        f"[{symbol}] VolAdj: ATR={cur_atr*100:.2f}% "
+                        f"→ {vol_factor:.2f}x → slot=${per_slot_capital:.2f}"
+                    )
             notional, leverage = calculate_position_size(
                 capital=per_slot_capital,
                 risk_per_trade=cfg.risk_per_trade,
@@ -1366,6 +1425,7 @@ class RubberBandScalper:
             entry_stop_mult=eff_stop,
             server_sl_order_id=sl_order_id,
             server_tp_order_id=tp_order_id,
+            confidence=self.strategy.get_last_confidence(symbol),
         )
 
         # Paper balance adjustment
@@ -1480,8 +1540,13 @@ class RubberBandScalper:
 
         result = self._place_order(symbol, side, close_qty, reduce_only=True)
         if result is None:
-            # Failed: revert partial_closed flag
+            # Failed: revert partial_closed flag & clear stale order IDs.
+            # Without clearing IDs, _sync_server_orders sees the old
+            # (now-cancelled) IDs as valid and skips bracket repair,
+            # leaving the position with ZERO server-side protection.
             pos['partial_closed'] = False
+            pos['server_sl_order_id'] = None
+            pos['server_tp_order_id'] = None
             return False
 
         fill_price = float(result['avgPrice'])
@@ -1515,16 +1580,22 @@ class RubberBandScalper:
             )
             pos['server_sl_order_id'] = new_sl_oid
 
-            # v11.2: Place new TP for remaining half at same target
-            new_tp_oid = self._place_server_take_profit(
-                symbol=symbol,
-                signal=pos['signal'],
-                quantity=remaining_qty,
-                entry_price=pos['entry_price'],
-                move_size=pos['move_size'],
-                target_retrace=self.config.target_retrace,
-            )
-            pos['server_tp_order_id'] = new_tp_oid
+            # v12.3 PBT: No server TP for runner — exits via client-side
+            # ATR trailing (trail_runner / time_runner / target).
+            # Server TP would conflict with the trailing logic.
+            if not self.config.breakeven_after_partial:
+                # Legacy mode: place TP for remaining half
+                new_tp_oid = self._place_server_take_profit(
+                    symbol=symbol,
+                    signal=pos['signal'],
+                    quantity=remaining_qty,
+                    entry_price=pos['entry_price'],
+                    move_size=pos['move_size'],
+                    target_retrace=self.config.target_retrace,
+                )
+                pos['server_tp_order_id'] = new_tp_oid
+            else:
+                pos['server_tp_order_id'] = None
 
         # Paper mode
         if self.paper_mode:
@@ -1791,7 +1862,11 @@ class RubberBandScalper:
                     pnl_pct = (closed_pos['entry_price'] - fill_price) / closed_pos['entry_price']
 
                 pnl_usd = pnl_pct * closed_pos['notional']
-                cost = closed_pos['notional'] * self.config.round_trip_cost
+                # v12.3 PBT: Runner had entry cost already charged
+                if closed_pos.get('partial_closed'):
+                    cost = closed_pos['notional'] * self.config.cost_per_side
+                else:
+                    cost = closed_pos['notional'] * self.config.round_trip_cost
                 net_pnl = pnl_usd - cost
 
                 # Trade record
@@ -1869,23 +1944,38 @@ class RubberBandScalper:
 
         if result is None:
             # Failed to close — position stays in state for retry
-            # SL/TP already cancelled, so re-place them
-            new_sl_oid = self._place_server_stop_loss(
-                symbol=symbol,
-                signal=pos['signal'],
-                quantity=quantity,
-                entry_price=pos['entry_price'],
-                move_size=pos['move_size'],
-                stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
-            )
-            new_tp_oid = self._place_server_take_profit(
-                symbol=symbol,
-                signal=pos['signal'],
-                quantity=quantity,
-                entry_price=pos['entry_price'],
-                move_size=pos['move_size'],
-                target_retrace=self.config.target_retrace,
-            )
+            # SL/TP already cancelled, so re-place them.
+            # v12.3 PBT: Runner positions need BE stop, not original stop/TP.
+            is_runner = pos.get('partial_closed') and self.config.breakeven_after_partial
+            if is_runner:
+                # Runner: use breakeven stop, no server TP
+                new_sl_oid = self._place_server_stop_loss(
+                    symbol=symbol,
+                    signal=pos['signal'],
+                    quantity=quantity,
+                    entry_price=pos['entry_price'],
+                    move_size=pos['move_size'],
+                    stop_mult=0.0001,  # BE stop
+                )
+                new_tp_oid = None
+            else:
+                # Phase 1: use original stop and TP
+                new_sl_oid = self._place_server_stop_loss(
+                    symbol=symbol,
+                    signal=pos['signal'],
+                    quantity=quantity,
+                    entry_price=pos['entry_price'],
+                    move_size=pos['move_size'],
+                    stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
+                )
+                new_tp_oid = self._place_server_take_profit(
+                    symbol=symbol,
+                    signal=pos['signal'],
+                    quantity=quantity,
+                    entry_price=pos['entry_price'],
+                    move_size=pos['move_size'],
+                    target_retrace=self.config.target_retrace,
+                )
             # Update existing position's server order IDs
             # Guard against sentinel values being stored as order IDs
             if new_sl_oid and new_sl_oid != 'WOULD_TRIGGER':
@@ -1910,7 +2000,12 @@ class RubberBandScalper:
             pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
 
         pnl_usd = pnl_pct * pos['notional']
-        cost = pos['notional'] * self.config.round_trip_cost
+        # v12.3 PBT: Runner positions already had entry cost charged at
+        # opening. Use exit-only cost (cost_per_side), not round_trip_cost.
+        if pos.get('partial_closed'):
+            cost = pos['notional'] * self.config.cost_per_side
+        else:
+            cost = pos['notional'] * self.config.round_trip_cost
         net_pnl = pnl_usd - cost
 
         # Paper balance
@@ -2101,7 +2196,13 @@ class RubberBandScalper:
                 continue
 
             current_price = close[-1]
-            exit_reason = self.strategy.update_position(sym, current_price)
+
+            # v12.3: Pass ATR% to update_position for PBT runner trailing
+            current_atr = self.strategy.get_last_atr_pct(sym)
+
+            exit_reason = self.strategy.update_position(
+                sym, current_price, current_atr_pct=current_atr,
+            )
             if exit_reason:
                 logger.info(
                     f"  [{sym}] Exit signal: {exit_reason} @ ${current_price:.4f}"
@@ -2236,6 +2337,21 @@ class RubberBandScalper:
         for sym, signal, move, close in candidates:
             if entries_made >= max_entries:
                 break
+
+            # ═══ v12.3 PARITY: Direction Diversity Filter ═══
+            if self.config.dir_diversity_enabled:
+                same_dir = sum(
+                    1 for p in self.strategy.active_positions.values()
+                    if p.get('signal') == signal
+                )
+                if same_dir >= self.config.max_same_direction:
+                    logger.debug(
+                        f"[{sym}] DirDiversity blocked: "
+                        f"{same_dir} {'LONG' if signal == 1 else 'SHORT'} "
+                        f"already open (max={self.config.max_same_direction})"
+                    )
+                    continue
+
             if self._open_position(sym, signal, close, balance):
                 entries_made += 1
 
@@ -2543,7 +2659,7 @@ class RubberBandScalper:
                 server_sl_order_id=pos.get('server_sl_order_id'),
                 server_tp_order_id=pos.get('server_tp_order_id'),
             )
-            # Restore bars_held
+            # Restore bars_held and PBT runner state
             if sym in self.strategy._positions:
                 self.strategy._positions[sym]['bars_held'] = pos.get(
                     'bars_held', 0
@@ -2553,6 +2669,18 @@ class RubberBandScalper:
                 )
                 self.strategy._positions[sym]['partial_closed'] = pos.get(
                     'partial_closed', False
+                )
+                # v12.3 PBT: Restore runner trailing state
+                # Without these, a restarted runner loses its breakeven
+                # floor and peak tracking — violating PBT safety promise.
+                self.strategy._positions[sym]['highest_since_tp1'] = pos.get(
+                    'highest_since_tp1', 0.0
+                )
+                self.strategy._positions[sym]['trail_floor'] = pos.get(
+                    'trail_floor', None
+                )
+                self.strategy._positions[sym]['confidence'] = pos.get(
+                    'confidence', 0
                 )
 
         logger.info(
@@ -2867,6 +2995,8 @@ def main():
         btc_directional_period=settings.rb_btc_directional_period,
         partial_exit_enabled=settings.rb_partial_exit_enabled,
         partial_exit_fraction=settings.rb_partial_exit_fraction,
+        trail_atr_mult=settings.rb_trail_atr_mult,
+        breakeven_after_partial=settings.rb_breakeven_after_partial,
         rr_leverage_enabled=settings.rb_rr_leverage_enabled,
         min_rr_for_leverage=settings.rb_min_rr_for_leverage,
         max_concurrent=args.max_slots if args.max_slots is not None else settings.rb_max_concurrent,
@@ -2911,6 +3041,28 @@ def main():
         htf_rb_stop_mult=settings.rb_htf_rb_stop_mult,
         htf_rb_max_hold=settings.rb_htf_rb_max_hold,
         htf_rb_btc_sma_period=settings.rb_htf_rb_btc_sma_period,
+        # v12.3: SteepX Confidence Sizing
+        steep_cap_curve=settings.rb_steep_cap_curve,
+        cap_mult_conf2=settings.rb_cap_mult_conf2,
+        cap_mult_conf3=settings.rb_cap_mult_conf3,
+        cap_mult_conf4=settings.rb_cap_mult_conf4,
+        cap_mult_conf5=settings.rb_cap_mult_conf5,
+        # v12.3: SoftTight DD Scaling
+        soft_equity_scale=settings.rb_soft_equity_scale,
+        soft_eq_dd1=settings.rb_soft_eq_dd1,
+        soft_eq_scale1=settings.rb_soft_eq_scale1,
+        soft_eq_dd2=settings.rb_soft_eq_dd2,
+        soft_eq_scale2=settings.rb_soft_eq_scale2,
+        soft_eq_dd3=settings.rb_soft_eq_dd3,
+        soft_eq_scale3=settings.rb_soft_eq_scale3,
+        # v12.3: Vol-Adjusted Sizing
+        vol_adjusted_size=settings.rb_vol_adjusted_size,
+        vol_adj_median_atr=settings.rb_vol_adj_median_atr,
+        vol_adj_min=settings.rb_vol_adj_min,
+        vol_adj_max=settings.rb_vol_adj_max,
+        # v12.3: Direction Diversity
+        dir_diversity_enabled=settings.rb_dir_diversity_enabled,
+        max_same_direction=settings.rb_max_same_direction,
     )
 
     scalper = RubberBandScalper(

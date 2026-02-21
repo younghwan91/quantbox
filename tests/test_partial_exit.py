@@ -239,38 +239,52 @@ class TestBacktestCorePartial:
 # ════════════════════════════════════════════════════════
 
 class TestLiveTradingParity:
-    """Verify update_position returns correct exit reasons."""
+    """Verify update_position returns correct exit reasons.
 
-    def test_partial_close_on_profit(self):
-        """update_position returns 'partial_close' when gain > 0."""
-        cfg = RubberBandConfig(partial_exit_enabled=True)
+    v12.3: PBT mode — partial triggers at TP1 (gain >= target),
+    not on any gain > 0. Runner uses trail_runner/time_runner.
+    """
+
+    def test_partial_close_at_target(self):
+        """update_position returns 'partial_close' when gain >= target (v12.3 PBT)."""
+        cfg = RubberBandConfig(partial_exit_enabled=True, target_retrace=0.3)
         strategy = RubberBandStrategy(cfg)
         strategy.open_position(
             'BTCUSDT', 1, 100.0, 1000.0, 1.0, 0.06,
         )
-        # Price goes up slightly (profit)
-        result = strategy.update_position('BTCUSDT', 100.5)
+        # target = 0.06 * 0.3 = 1.8%. Price at +2% → triggers partial
+        result = strategy.update_position('BTCUSDT', 102.0)
         assert result == 'partial_close'
 
-    def test_breakeven_stop_after_partial(self):
-        """After partial close, gain <= 0 triggers 'breakeven_stop'."""
-        cfg = RubberBandConfig(partial_exit_enabled=True)
+    def test_no_partial_below_target(self):
+        """Small gain below target does NOT trigger partial (v12.3 PBT)."""
+        cfg = RubberBandConfig(partial_exit_enabled=True, target_retrace=0.3)
         strategy = RubberBandStrategy(cfg)
         strategy.open_position(
             'BTCUSDT', 1, 100.0, 1000.0, 1.0, 0.06,
         )
-        # First: partial close (profit)
-        result1 = strategy.update_position('BTCUSDT', 100.5)
+        # +0.5% gain < 1.8% target → no partial
+        result = strategy.update_position('BTCUSDT', 100.5)
+        assert result is None
+
+    def test_breakeven_floor_after_partial(self):
+        """After partial close, price at entry triggers 'trail_runner' (breakeven floor)."""
+        cfg = RubberBandConfig(partial_exit_enabled=True, target_retrace=0.3)
+        strategy = RubberBandStrategy(cfg)
+        strategy.open_position(
+            'BTCUSDT', 1, 100.0, 1000.0, 1.0, 0.06,
+        )
+        # Partial close at target
+        result1 = strategy.update_position('BTCUSDT', 102.0)
         assert result1 == 'partial_close'
-        # Position still exists, partial_closed=True
         assert strategy.has_position('BTCUSDT')
 
-        # Second: price drops to entry → break-even stop
-        result2 = strategy.update_position('BTCUSDT', 99.9)
-        assert result2 == 'breakeven_stop'
+        # Price drops to entry → breakeven floor triggers trail_runner
+        result2 = strategy.update_position('BTCUSDT', 100.0, current_atr_pct=0.02)
+        assert result2 == 'trail_runner'
 
-    def test_target_hit_before_partial(self):
-        """Target hit on full position takes priority over partial close."""
+    def test_target_hit_triggers_partial(self):
+        """Target hit on full position triggers partial_close in PBT mode."""
         cfg = RubberBandConfig(
             partial_exit_enabled=True,
             target_retrace=0.3,
@@ -281,7 +295,7 @@ class TestLiveTradingParity:
         )
         # Price jumps to target (0.06 * 0.3 = 1.8% gain)
         result = strategy.update_position('BTCUSDT', 101.81)
-        assert result == 'target'
+        assert result == 'partial_close'  # PBT: target → partial, not full close
 
     def test_stop_loss_before_partial(self):
         """Stop loss on full position works before partial close."""
@@ -306,18 +320,18 @@ class TestLiveTradingParity:
         assert result is None
 
     def test_short_partial_close(self):
-        """Partial close works for short positions too."""
-        cfg = RubberBandConfig(partial_exit_enabled=True)
+        """Partial close works for short positions at target (v12.3 PBT)."""
+        cfg = RubberBandConfig(partial_exit_enabled=True, target_retrace=0.3)
         strategy = RubberBandStrategy(cfg)
         strategy.open_position(
             'BTCUSDT', -1, 100.0, 1000.0, 1.0, 0.06,
         )
-        # Price drops (profit for short)
-        result = strategy.update_position('BTCUSDT', 99.5)
+        # Short: target = 0.06 * 0.3 = 1.8%. Price at 98 → gain 2% > 1.8%
+        result = strategy.update_position('BTCUSDT', 98.0)
         assert result == 'partial_close'
 
-    def test_target_after_partial_close(self):
-        """Remaining half hits target after partial close."""
+    def test_runner_trail_after_partial(self):
+        """Runner exits via trail_runner after partial close (v12.3 PBT)."""
         cfg = RubberBandConfig(
             partial_exit_enabled=True,
             target_retrace=0.3,
@@ -326,11 +340,13 @@ class TestLiveTradingParity:
         strategy.open_position(
             'BTCUSDT', 1, 100.0, 1000.0, 1.0, 0.06,
         )
-        # Partial close
-        strategy.update_position('BTCUSDT', 100.5)
-        # Target hit (1.8% = 0.06 * 0.3)
-        result = strategy.update_position('BTCUSDT', 101.81)
-        assert result == 'target'
+        # Partial close at target
+        strategy.update_position('BTCUSDT', 102.0)
+        # Runner: price rises to 4% then falls
+        strategy.update_position('BTCUSDT', 104.0, current_atr_pct=0.01)
+        # Trail stop = 4% - 1.5*1% = 2.5%. Gain at 2% < 2.5% → trail_runner
+        result = strategy.update_position('BTCUSDT', 102.0, current_atr_pct=0.01)
+        assert result == 'trail_runner'
 
 
 # ════════════════════════════════════════════════════════
@@ -377,9 +393,9 @@ class TestConfigIntegration:
     """Verify new config fields work correctly."""
 
     def test_default_config_values(self):
-        """Default config has v4.4 settings: partial exit disabled, R:R gate enabled."""
+        """Default config has v12.3 PBT settings: partial exit enabled, R:R gate on."""
         cfg = RubberBandConfig()
-        assert cfg.partial_exit_enabled is False
+        assert cfg.partial_exit_enabled is True  # v12.3: PBT mode on by default
         assert cfg.partial_exit_fraction == 0.5
         assert cfg.rr_leverage_enabled is True
         assert cfg.min_rr_for_leverage == 0.30
