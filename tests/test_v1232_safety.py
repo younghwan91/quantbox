@@ -314,10 +314,14 @@ class TestPartialNoPositionRecording:
 
 class TestPartialCloseFailureProtection:
     """When partial close order fails, server SL/TP must be re-placed
-    immediately, not left empty for 15-minute bracket repair cycle."""
+    immediately, not left empty for 15-minute bracket repair cycle.
+
+    v12.4.2: In PBT mode, server TP must NOT be re-placed (same bug class
+    as v12.4.1 CRITICAL #1 — server TP closes 100%, killing PBT runner).
+    """
 
     def test_failure_replaces_server_orders(self):
-        """Failed partial close re-places server SL and TP."""
+        """Failed partial close re-places server SL; skips TP in PBT mode."""
         scalper = _make_scalper(
             paper=False,
             partial_exit_enabled=True, partial_exit_fraction=0.5,
@@ -348,12 +352,15 @@ class TestPartialCloseFailureProtection:
         result = scalper._partial_close_position('TESTUSDT', 103.0)
         assert result is False
 
-        # Position MUST have new server order IDs (not None)
+        # SL MUST be re-placed to protect the downside
         pos = scalper.strategy._positions['TESTUSDT']
         assert pos['server_sl_order_id'] == 'sl_new', \
             "Failed partial close must re-place server SL"
-        assert pos['server_tp_order_id'] == 'tp_new', \
-            "Failed partial close must re-place server TP"
+        # v12.4.2: In PBT mode, server TP must NOT be re-placed.
+        # Server TP closes 100% position → kills PBT runner.
+        assert pos['server_tp_order_id'] is None, \
+            "PBT mode: failed partial close must NOT re-place server TP"
+        scalper._place_server_take_profit.assert_not_called()
         assert pos['partial_closed'] is False, "Must revert partial_closed flag"
 
 
