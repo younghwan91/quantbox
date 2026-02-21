@@ -99,3 +99,34 @@ Numba: 루프가 10,000회 이상 반복되는 연산(백테스트)에는 반드
 6. develop → main 머지 시에는 **`--no-ff`** 옵션으로 머지 커밋을 남긴다.
 
 **Agent Note:** 사용자는 엄격하며 공격적인 퀀트 트레이더입니다. 코드가 예쁘게 보이는 것보다, **돈을 잃지 않는 안전장치(Safety check)**가 구현되었는지를 가장 중요하게 생각합니다.
+
+## 🩸 실수로부터의 교훈 (Lessons from Live Incidents)
+
+> 아래 원칙들은 실제 자금 손실 또는 수익 기회 상실을 초래한 실전 버그에서 비롯되었다.
+> **절대 반복해서는 안 된다.**
+
+### Incident #1: Partial Close Leverage Crash (2026-02-21, v12.4.6)
+
+**사건:** `_place_order()`가 `reduce_only=True`인 주문에도 `futures_change_leverage()`를 호출했다.
+Cross 4x 포지션에서 leverage를 기본값 1로 변경 시도 → Binance APIError `-2028: insufficient margin balance` → **TP1 partial close 실패**. 가격이 TP1을 크게 넘어 수익 구간까지 갔다가 되돌아왔으나, 50% 이익 확정 기회를 완전히 상실.
+
+**근본 원인:**
+1. `reduce_only` 주문은 마진 요구사항을 변경하지 않으므로 leverage 변경이 불필요하다는 사실을 코드에 반영하지 않았다.
+2. PBT 모드에서 서버 TP를 의도적으로 건너뛰는 로직이 bracket repair에 반영되지 않아, 매 분마다 `TP=MISSING` 로그를 무한 생성하여 진짜 문제를 노이즈 속에 묻어버렸다.
+3. 해당 코드 경로(open position + reduce_only close)에 대한 테스트가 없었다.
+
+**영구 원칙:**
+
+1. **Reduce-Only = No Side Effects (감산 주문은 부작용 금지)**
+   - `reduce_only=True` 주문은 **기존 포지션을 줄이기만** 한다. leverage 변경, margin mode 변경 등 포지션 구조를 바꾸는 API 호출을 절대 포함하지 않는다.
+
+2. **Money-Path Full Coverage (돈이 오가는 경로는 100% 테스트)**
+   - `_place_order()`, `_partial_close_position()`, `_close_position()` 등 실제 주문을 발생시키는 모든 함수는 반드시 `reduce_only=True`와 `reduce_only=False` 양쪽 경로를 테스트해야 한다.
+   - Mock 레벨이 아닌, **실제 API 에러 코드(-2028, -4028, -2022 등)에 대한 대응 테스트**를 포함한다.
+
+3. **Silent Failure = Critical Bug (조용한 실패는 치명적 버그)**
+   - 안전장치(TP1 partial close, SL, bracket repair)가 실패했을 때 **ERROR 로그 + Discord 알림**을 즉시 발송해야 한다. 로그에 묻히는 실패는 없는 것과 같다.
+   - bracket repair가 같은 문제를 반복 로깅할 때, 횟수 제한 없이 매 분 반복하는 것은 노이즈이며 실제 장애를 가린다. **반복 경고는 최대 3회 후 요약으로 전환**한다.
+
+4. **Position-Mutating API Audit (포지션 변경 API 감사)**
+   - `futures_change_leverage()`, `futures_change_margin_type()` 등 포지션 구조를 변경하는 API는 **오직 신규 진입(entry) 시에만 호출**한다. 포지션이 열려 있는 상태에서 호출하면 예측 불가능한 거부가 발생할 수 있다.
