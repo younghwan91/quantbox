@@ -1142,11 +1142,12 @@ class RubberBandScalper:
                             f"Could not place SL — position UNPROTECTED"
                         )
 
-                if missing_tp and not pos.get('partial_closed', False):
-                    # v12.3 PBT: Don't place server TP for runners!
-                    # Runner exits via client-side ATR trailing.
-                    # A server TP at the original target would fire
+                if missing_tp and not self.config.partial_exit_enabled:
+                    # v12.4.1: In PBT mode, NEVER place server TP.
+                    # Pre-partial: server TP would close 100% (kills runner).
+                    # Post-partial: server TP at original target fires
                     # immediately (runner entered AT target), killing it.
+                    # Non-PBT: restore server TP for intra-bar capture.
                     new_tp = self._place_server_take_profit(
                         symbol=sym, signal=signal, quantity=quantity,
                         entry_price=entry_price, move_size=move_size,
@@ -1454,22 +1455,37 @@ class RubberBandScalper:
             )
             sl_order_id = None
 
-        # Captures intra-bar TP hits that 15m polling would miss.
-        tp_order_id = self._place_server_take_profit(
-            symbol=symbol,
-            signal=signal,
-            quantity=fill_qty,
-            entry_price=fill_price,
-            move_size=move_size,
-            target_retrace=cfg.target_retrace,
-        )
-        # v12.3.1: Guard against WOULD_TRIGGER sentinel for TP too
-        if tp_order_id == 'WOULD_TRIGGER':
-            logger.warning(
-                f"[{symbol}] TP WOULD_TRIGGER at entry — "
-                f"will rely on client-side TP"
-            )
+        # v12.4.1: In PBT mode, do NOT place server TP at entry.
+        # Server TP closes 100% of position when triggered, but PBT
+        # requires a 50% partial close at TP1 followed by a runner.
+        # The server TP would fire intra-bar and kill the runner,
+        # collapsing R:R from 1.91 to ~0.8-1.1.
+        # Client-side update_position() handles TP1 at bar close,
+        # matching backtest behavior (which also checks at bar close).
+        # Server SL still protects the downside.
+        if cfg.partial_exit_enabled:
             tp_order_id = None
+            logger.info(
+                f"[{symbol}] PBT mode — skipping server TP "
+                f"(client-side handles partial close at TP1)"
+            )
+        else:
+            # Non-PBT: captures intra-bar TP hits that 15m polling would miss.
+            tp_order_id = self._place_server_take_profit(
+                symbol=symbol,
+                signal=signal,
+                quantity=fill_qty,
+                entry_price=fill_price,
+                move_size=move_size,
+                target_retrace=cfg.target_retrace,
+            )
+            # v12.3.1: Guard against WOULD_TRIGGER sentinel for TP too
+            if tp_order_id == 'WOULD_TRIGGER':
+                logger.warning(
+                    f"[{symbol}] TP WOULD_TRIGGER at entry — "
+                    f"will rely on client-side TP"
+                )
+                tp_order_id = None
 
         sl_status = "OK" if sl_order_id else "FAILED"
         tp_status = "OK" if tp_order_id else "FAILED"

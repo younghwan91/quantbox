@@ -29,7 +29,8 @@ class TestWouldTriggerAtEntry:
     'WOULD_TRIGGER' during _open_position, it must be stored as None."""
 
     def test_sl_would_trigger_stored_as_none(self):
-        scalper = _make_scalper(paper=False)
+        # v12.4.1: Disable PBT to test server TP placement path
+        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper._save_state = MagicMock()
         # _place_order succeeds (position opened)
         scalper._place_order = MagicMock(return_value={
@@ -89,8 +90,9 @@ class TestExternallyCancelledOrders:
         assert result['status'] == 'CANCELLED'
 
     def test_cancelled_tp_triggers_bracket_repair(self):
-        """Externally cancelled TP → ID cleared → bracket repair places new TP."""
-        scalper = _make_scalper(paper=False)
+        """Externally cancelled TP → ID cleared → bracket repair places new TP (non-PBT)."""
+        # v12.4.1: Disable PBT to test server TP bracket repair path
+        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper._save_state = MagicMock()
 
         scalper.strategy.open_position(
