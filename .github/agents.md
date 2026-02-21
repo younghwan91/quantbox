@@ -7,7 +7,7 @@
 
 ## 1. 시스템 개요
 
-QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
+QuantBox v12.4.6는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
 두 가지 전략을 지원한다:
 1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
 2. **Elliott Wave Strategy** (v11.6): ZigZag ABC 패턴 + Fibonacci 검증 + Timing Alpha Filter (4h)
@@ -20,6 +20,7 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 **v10.0: Entry Optimization + Symbol Whitelist** — threshold 0.032 (3.2%), min_confidence=1 (MTF as gate), max_hold=20, stoch_k=3. 동적 자본 배분.
 **v9.0: Fibonacci + S+R+M Confluence** — target 0.382, stop 0.786, MACD(12,26,14), Stochastic(3,3).
 **v12.3: T100_S38_PBT + M-2SSTSX** — R8 stress-tested exit + R6 combo sizing. Production safety fixes.
+**v12.4.6: Production Hardening** — 6 hotfixes: Server TP PBT qty audit (v12.4.1–3), stale SL ratchet reset (v12.4.4), missing save_state after partial (v12.4.5), HWM/history reset on 0-position restart (v12.4.6).
 **v12.4: I-HybTight** — Reversal A/B champion: target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3.0. R:R 1.91, Calmar 834, 6yr return 6,300%.
 **v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
 
@@ -39,25 +40,26 @@ QuantBox v11.4는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 ### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
 
 ```
-전략:     RB_original (러버밴드, Confidence-Scored + MTF Confirmation v7.0 + Fibonacci + S+R+M Confluence v9.0 + Entry Optimization v10.0 + Critical Fixes v11.1 + Adaptive Threshold v11.4)
-심볼선택: Top-20 whitelist (FILUSDT, PEPEUSDT, XRPUSDT, XLMUSDT, ADAUSDT,
-                          FETUSDT, ETHUSDT, ARBUSDT, SHIBUSDT, LINKUSDT,
-                          ATOMUSDT, OPUSDT, DOTUSDT, NEARUSDT, AAVEUSDT,
-                          BCHUSDT, HBARUSDT, SOLUSDT, ICPUSDT, BNBUSDT)
+전략:     RB_original (v12.4.6 I-HybTight + M-2SSTSX: PBT Exit + SteepX/SoftTight/VolAdj/DirDiv)
+심볼선택: Top-50 whitelist (4 tiers, E-3Slot config)
 파라미터: lookback=8, threshold=0.032 (adaptive fallback), target=1.5, stop=0.382, max_hold=25
          stop_decay=0.0
          entry_mode='confidence'
-         min_confidence=1 (MTF is the real quality gate)
+         min_confidence=3 (v12.3 M-2SSTSX quality gate)
+         max_concurrent=2 (v12.3 M-2SSTSX 2-slot)
          btc_regime_period=96 (24h SMA for regime detection)
          asset_trend_period=192 (48h SMA for classic pullback)
          btc_directional_period=48 (12h BTC momentum for sympathy)
          base_leverage=1.5, leverage_scale=0.0, max_leverage=1.5 (flat 1.5x)
          # v11.4 Adaptive Threshold (2.5x_f1 variant, walk-forward validated)
          atr_period=48 (12h ATR lookback)
-         atr_multiplier=2.5 (ATR × 2.5)
-         threshold_floor=0.01 (1% minimum)
+         atr_multiplier=2.0 (ATR × 2.0, v12.2 E-3Slot A/B validated)
+         threshold_floor=0.008 (0.8% minimum, v12.2)
          threshold_cap=0.06 (6% maximum)
-         partial_exit_enabled=false
+         partial_exit_enabled=true (v12.3 PBT: 50% partial → BE → ATR trail)
+         breakeven_after_partial=true
+         trail_atr_mult=1.0 (v12.4 tighter ATR trail)
+         runner_max_hold_mult=3.0 (runner holds 75 bars = 3× max_hold)
          dynamic_capital_enabled=true (balance / max(1, n_active+1))
          # v12.4 I-HybTight Exit (Reversal A/B champion)
          target_retrace=1.5 (150% move, deeper reversal capture)
@@ -310,14 +312,18 @@ else:
 
 ### 4.2 위험 관리
 - [ ] Max Drawdown Breaker — 세션 HWM 대비 10% DD 시 전체 청산 + 정지
+- [ ] **v12.4.6 HWM Reset** — 0 포지션 재시작 시 HWM/initial_balance/trade_history 리셋 (팬텀 DD halt 방지)
 - [ ] Daily Loss Limit — 당일 잔고 대비 5% 손실 시 신규 진입 차단
 - [ ] BTC Crash Gate — regime filter로 극단적 시장 상황 시 진입 차단
-- [ ] Max Concurrent — 동시 포지션 수 제한 (기본 5개)
+- [ ] Max Concurrent — 동시 포지션 수 제한 (기본 2개, M-2SSTSX)
 - [ ] Risk per Trade — 트레이드당 1% 리스크 사이징
 
 ### 4.3 포지션 관리
 - [ ] Target/Stop/Trailing/MaxHold 4중 청산 조건
-- [ ] Partial Close (v4.3, v4.4 비활성) — 부분 청산 기능 존재하나 v4.4에서 비활성화
+- [ ] **PBT Exit (v12.3)**: 50% partial at TP1 → breakeven floor → ATR trailing runner
+- [ ] **v12.4.1–3 Server TP PBT Qty**: 6개 콜사이트 모두 PBT 모드 50% 수량 적용
+- [ ] **v12.4.4 SL Ratchet Reset**: 러너 SL breakeven 재배치 후 `_server_sl_pct = 0.0` 리셋
+- [ ] **v12.4.5 Partial Close Save**: 파셈 클로즈 성공 후 즉시 `_save_state()` 호출
 - [ ] 청산 실패 시 포지션 재등록 → 다음 사이클 재시도
 - [ ] 동일 심볼 중복 진입 방지 (`has_position()`)
 - [ ] max_hold 강제 청산 (타임아웃)
@@ -326,6 +332,7 @@ else:
 - [ ] `_save_scalper_state()` — tmpfile → os.replace 원자적 쓰기
 - [ ] `_load_scalper_state()` — 시작 시 크래시 전 상태 복원
 - [ ] 포지션 + 잔고 + 거래 히스토리 직렬화
+- [ ] **v12.4.6**: 0 포지션 복원 시 HWM/trade_history 리셋 (경과 손실 세션 전이 방지)
 - [ ] 로그 파일 로테이션 — RotatingFileHandler 50MB/5백업
 - [ ] **v11.4.2 Bracket Repair** — 복원된 포지션의 누락 SL/TP 자동 배치 (`_sync_server_orders`)
 
@@ -470,7 +477,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (30+파일, 680개)
+## 7. 테스트 현황 (34파일, 707개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
@@ -490,6 +497,24 @@ else:
 | `test_dynamic_target` | Dynamic Target (v8.0) | 컨피던스별 타겟 스케일링, 파라미터 검증, 기각된 전략 확인 (10개) |
 | `test_v9_confluence` | v9.0 S+R+M Confluence | Fibonacci Exit, MACD Histogram, Stochastic Cross, compute_signals_v9, 라이브 파이프라인 (20개) |
 | `test_partial_exit` | 부분 청산 + R:R 레버리지 | Partial exit 신호, Break-even stop, R:R-gate, delta-based 비용, 라이브 패리티 (23개) |
+| `test_hybtight` | I-HybTight 패리티 | target/stop/trail/runner 파라미터 검증 (15개) |
+| `test_v123_parity` | v12.3 PBT 패리티 | Runner state restore, bracket repair guard, failed partial recovery |
+| `test_v1231_hotfix` | v12.3.1 안전장치 | Cancelled order detection, WOULD_TRIGGER guard, runner BE repair |
+| `test_v1232_safety` | v12.3.2 안전장치 | 추가 엣지케이스 커버 |
+| `test_v1233_fixes` | v12.3.3 수정 | 인터사이클 동기화 수정 |
+| `test_v1241_hotfix` | v12.4.1 Server TP PBT | TP 수량 50% 검증 (PBT mode) |
+| `test_v1244_hotfix` | v12.4.4 SL ratchet | Stale _server_sl_pct 리셋 검증 (6개) |
+| `test_v1245_hotfix` | v12.4.5 save_state | 파셜 클로즈 후 save_state 호출 검증 (3개) |
+| `test_v1246_hotfix` | v12.4.6 HWM reset | 0 포지션 재시작 시 HWM/history 리셋 검증 (3개) |
+| `test_backtest_live_parity` | 백테스트↔라이브 패리티 | 신호/비용/사이징 일치 |
+| `test_btc_directional` | BTC 방향 정렬 | Risk-Off 모드 BTC 모멘텀 |
+| `test_confidence` | 컨피던스 스코어링 | 멀티 증거 필터링 |
+| `test_diagnostics` | 진단 로깅 | JSONL 진단 출력 |
+| `test_dynamic_leverage` | 동적 레버리지 | Move-confidence 기반 |
+| `test_regime_switch` | 레짐 스위치 | Risk-On/Off 전환 |
+| `test_server_oco` | 서버 OCO 주문 | SL/TP 서버 주문 |
+| `test_terminal_ui` | 터미널 UI | 실시간 상태 표시 |
+| `test_elliott` | Elliott Wave | ZigZag, ABC, 품질 스코어 |
 
 ---
 
