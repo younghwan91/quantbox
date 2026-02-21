@@ -2231,7 +2231,7 @@ class RubberBandScalper:
                 )
                 new_tp_oid = None
             else:
-                # Phase 1: use original stop and TP
+                # Phase 1: use original stop
                 new_sl_oid = self._place_server_stop_loss(
                     symbol=symbol,
                     signal=pos['signal'],
@@ -2240,14 +2240,24 @@ class RubberBandScalper:
                     move_size=pos['move_size'],
                     stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
                 )
-                new_tp_oid = self._place_server_take_profit(
-                    symbol=symbol,
-                    signal=pos['signal'],
-                    quantity=quantity,
-                    entry_price=pos['entry_price'],
-                    move_size=pos['move_size'],
-                    target_retrace=self.config.target_retrace,
-                )
+                # v12.4.3: In PBT mode, do NOT re-place server TP.
+                # Same bug class as v12.4.1 CRITICAL #1: server TP fires
+                # for 100% quantity, killing the PBT partial close flow.
+                # Scenario: Phase 1 trailing_stop close fails → server TP
+                # re-placed → price recovers to TP → server TP closes 100%
+                # → PBT runner never created.
+                # Non-PBT: restore TP for intra-bar capture.
+                if self.config.partial_exit_enabled:
+                    new_tp_oid = None
+                else:
+                    new_tp_oid = self._place_server_take_profit(
+                        symbol=symbol,
+                        signal=pos['signal'],
+                        quantity=quantity,
+                        entry_price=pos['entry_price'],
+                        move_size=pos['move_size'],
+                        target_retrace=self.config.target_retrace,
+                    )
             # Update existing position's server order IDs
             # Guard against sentinel values being stored as order IDs
             if new_sl_oid and new_sl_oid != 'WOULD_TRIGGER':
