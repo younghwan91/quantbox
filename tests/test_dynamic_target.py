@@ -126,10 +126,10 @@ class TestDynamicTargetSignals:
         """Verify target scales correctly by checking that conf3 < conf4 < conf5."""
         cfg = RubberBandConfig(
             dynamic_target_enabled=True,
-            target_conf3=0.45, target_conf4=0.50, target_conf5=0.55,
+            target_conf3=1.8, target_conf4=2.0, target_conf5=2.2,
         )
         assert cfg.target_conf3 < cfg.target_conf4 < cfg.target_conf5
-        assert cfg.target_retrace < cfg.target_conf3  # base < conf3
+        assert cfg.target_retrace < cfg.target_conf3  # base (1.5) < conf3 (1.8)
 
     def test_same_targets_as_disabled(self):
         """Dynamic target with all values = target_retrace equals disabled."""
