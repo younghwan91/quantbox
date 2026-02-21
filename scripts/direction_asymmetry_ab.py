@@ -829,6 +829,28 @@ def main():
             sym_close[sym] = cn; sym_high[sym] = hn; sym_low[sym] = ln
             sym_atr_d[sym] = compute_atr_pct(hn, ln, cn, ATR_PERIOD)
 
+        # Left-pad all arrays to same length (shortest symbol e.g. TONUSDT has fewer bars)
+        max_bars = max(len(sym_close[s]) for s in sym_close)
+        all_dicts = [
+            (sym_close, 'first'), (sym_high, 'first'), (sym_low, 'first'),
+            (sym_dirs, 'zero'), (sym_confs, 'zero'), (sym_moves, 'zero'),
+            (sym_atr_d, 'nan'),
+        ]
+        for sym in list(sym_close.keys()):
+            for d_ref, fill in all_dicts:
+                arr = d_ref.get(sym)
+                if arr is None:
+                    continue
+                if len(arr) < max_bars:
+                    pad_n = max_bars - len(arr)
+                    if fill == 'first':
+                        fv = arr[0]
+                    elif fill == 'nan':
+                        fv = np.nan
+                    else:
+                        fv = 0.0
+                    d_ref[sym] = np.concatenate([np.full(pad_n, fv), arr])
+
         # Simulate
         res = simulate(sym_close, sym_high, sym_low, sym_dirs, sym_confs, sym_moves, cfg, sym_atr_d)
         res['config'] = {

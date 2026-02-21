@@ -973,6 +973,29 @@ def main():
         sym_low[sym] = low_n
         sym_atr[sym] = atr_arr
 
+    # Left-pad all arrays to same length (shortest symbol e.g. TONUSDT has fewer bars)
+    max_bars = max(len(sym_close[s]) for s in sym_close)
+    all_dicts = [
+        (sym_close, 'first'), (sym_high, 'first'), (sym_low, 'first'),
+        (sym_dirs, 'zero'), (sym_confs, 'zero'), (sym_moves, 'zero'),
+        (sym_atr, 'nan'),
+    ]
+    for sym in list(sym_close.keys()):
+        for d_ref, fill in all_dicts:
+            arr = d_ref.get(sym)
+            if arr is None:
+                continue
+            if len(arr) < max_bars:
+                pad_n = max_bars - len(arr)
+                if fill == 'first':
+                    fv = arr[0]
+                elif fill == 'nan':
+                    fv = np.nan
+                else:
+                    fv = 0.0
+                d_ref[sym] = np.concatenate([np.full(pad_n, fv), arr])
+    print(f"  Left-padded to {max_bars} bars ({max_bars // 32} days)")
+
     raw_longs = sum(int(np.sum(sym_dirs[s] > 0)) for s in sym_dirs)
     raw_shorts = sum(int(np.sum(sym_dirs[s] < 0)) for s in sym_dirs)
     print(f"  Raw signals: {total_raw_signals} (L:{raw_longs} S:{raw_shorts}, ratio {raw_longs/raw_shorts:.2f}:1)" if raw_shorts > 0 else f"  Raw signals: {total_raw_signals}")
