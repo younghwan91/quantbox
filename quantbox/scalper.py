@@ -541,37 +541,43 @@ class RubberBandScalper:
             }
 
         try:
-            # Set leverage — v11.1: verify it was applied correctly
-            actual_leverage = leverage
-            try:
-                resp = self.client.futures_change_leverage(
-                    symbol=symbol, leverage=leverage,
-                )
-                actual_leverage = int(resp.get('leverage', leverage))
-                if actual_leverage != leverage:
-                    logger.warning(
-                        f"[{symbol}] Leverage mismatch: requested={leverage}x, "
-                        f"actual={actual_leverage}x"
+            # v12.4.7: Skip leverage change for reduce-only orders.
+            # Changing leverage on an open position can fail with
+            # -2028 "insufficient margin balance" if the new leverage
+            # is lower than what the position requires.  reduce_only
+            # orders don't change margin requirements.
+            if not reduce_only:
+                # Set leverage — v11.1: verify it was applied correctly
+                actual_leverage = leverage
+                try:
+                    resp = self.client.futures_change_leverage(
+                        symbol=symbol, leverage=leverage,
                     )
-            except BinanceAPIException as e:
-                if '-4028' in str(e):
-                    # Leverage too high — try lower
-                    try:
-                        resp = self.client.futures_change_leverage(
-                            symbol=symbol, leverage=min(leverage, 20),
+                    actual_leverage = int(resp.get('leverage', leverage))
+                    if actual_leverage != leverage:
+                        logger.warning(
+                            f"[{symbol}] Leverage mismatch: requested={leverage}x, "
+                            f"actual={actual_leverage}x"
                         )
-                        actual_leverage = int(resp.get('leverage', min(leverage, 20)))
-                    except Exception:
+                except BinanceAPIException as e:
+                    if '-4028' in str(e):
+                        # Leverage too high — try lower
+                        try:
+                            resp = self.client.futures_change_leverage(
+                                symbol=symbol, leverage=min(leverage, 20),
+                            )
+                            actual_leverage = int(resp.get('leverage', min(leverage, 20)))
+                        except Exception:
+                            logger.error(
+                                f"[{symbol}] Leverage fallback also failed — "
+                                f"ABORTING order to prevent unknown leverage"
+                            )
+                            return None
+                    else:
                         logger.error(
-                            f"[{symbol}] Leverage fallback also failed — "
-                            f"ABORTING order to prevent unknown leverage"
+                            f"[{symbol}] Leverage set failed: {e} — ABORTING order"
                         )
                         return None
-                else:
-                    logger.error(
-                        f"[{symbol}] Leverage set failed: {e} — ABORTING order"
-                    )
-                    return None
 
             info = self.get_symbol_info(symbol)
             tick_size = info.get('tick_size', 0.01)
@@ -1065,7 +1071,11 @@ class RubberBandScalper:
             # Positions restored from state may have None algoIds (e.g. old session
             # failed to place them). Detect and repair to ensure server-side protection.
             missing_sl = sl_oid is None
-            missing_tp = tp_oid is None
+            # v12.4.7: In PBT mode, server TP is intentionally skipped
+            # (client-side handles partial close at TP1).  Don't treat
+            # the absent TP as "missing" — it avoids 1/min log spam and
+            # pointless bracket-repair attempts.
+            missing_tp = tp_oid is None and not self.config.partial_exit_enabled
 
             if missing_sl or missing_tp:
                 quantity = pos['notional'] / pos['entry_price']
