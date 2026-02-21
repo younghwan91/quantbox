@@ -471,8 +471,8 @@ class TestBracketRepair:
     """v11.4.2: _sync_server_orders repairs missing SL/TP for restored positions."""
 
     def test_repair_both_missing(self):
-        """Positions with None SL and TP get both placed on sync."""
-        scalper = _make_scalper(paper=False)
+        """Positions with None SL and TP get both placed on sync (non-PBT)."""
+        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper.strategy.open_position(
             symbol='FETUSDT', signal=1, entry_price=0.17,
             notional=100.0, leverage=5, move_size=0.04,
@@ -526,8 +526,8 @@ class TestBracketRepair:
         assert pos['server_tp_order_id'] == 'existing_tp_9999'
 
     def test_repair_tp_only(self):
-        """Only TP is missing — only TP gets placed, SL untouched."""
-        scalper = _make_scalper(paper=False)
+        """Only TP is missing — only TP gets placed, SL untouched (non-PBT)."""
+        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper.strategy.open_position(
             symbol='ADAUSDT', signal=1, entry_price=0.50,
             notional=200.0, leverage=4, move_size=0.03,
