@@ -713,10 +713,10 @@ class TestForceCloseOnWouldTrigger:
 
         scalper._sync_server_orders()
 
-        # Discord must fire FORCE CLOSE FAILED alert
+        # Discord must fire FORCE CLOSE FAILED alert (Korean: 강제청산 실패)
         discord_calls = [
             c for c in scalper.discord.send.call_args_list
-            if 'FORCE CLOSE FAILED' in str(c)
+            if '강제청산 실패' in str(c) or 'FORCE CLOSE FAILED' in str(c)
         ]
         assert len(discord_calls) >= 1
 
