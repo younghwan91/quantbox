@@ -174,6 +174,10 @@ class QuantBoxSettings(BaseSettings):
     rb_trail_atr_mult: float = 1.5            # ATR multiplier for runner trailing
     rb_breakeven_after_partial: bool = True   # Move stop to breakeven after TP1
 
+    # ── v12.3.3 Pre-TP1 Trailing Parameters (configurable, R5 defaults) ──
+    rb_pre_tp1_trail_activation: float = 0.5  # Trail after 50% of target reached
+    rb_pre_tp1_trail_factor: float = 0.3      # Exit at 30% of best PnL
+
     # ── R:R-Gated Leverage (v4.3, A/B validated) ──
     rb_rr_leverage_enabled: bool = True       # R:R 기준 레버리지 게이트 활성화
     rb_min_rr_for_leverage: float = 0.30      # 레버리지 허용 최소 R:R 비율
