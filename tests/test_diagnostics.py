@@ -100,7 +100,8 @@ class TestDiagnoseBar:
         assert diag['passed_threshold'] is True
         assert diag['move_8bar'] == pytest.approx(-0.05, abs=0.001)
         assert diag['entry_type'] is not None
-        assert diag['confidence'] >= 1
+        # v12.4.1: confidence base changed from 1 to 0
+        assert diag['confidence'] >= 0
 
     def test_evidence_contains_indicators(self, strategy, btc_prices):
         """Evidence dict has all indicator values."""
