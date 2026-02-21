@@ -208,7 +208,7 @@ scripts/                    # 유틸리티 스크립트
 ├── alpha_search_r7.py              # R7 3D Exit Grid Sweep (TP×SL×ExitMode, 101 variants)
 ├── alpha_search_r8.py              # R8 Stress Test (Fee/Regime/WR-Degradation, 5 configs)
 └── alpha_search_r9.py              # R9 MA/TOTAL3 Macro Filters (confirmed no improvement)
-tests/                      # 유닛 테스트 (625개)
+tests/                      # 유닛 테스트 (637개)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
