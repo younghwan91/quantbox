@@ -188,7 +188,7 @@ class TestBacktestPBTParity:
         """At TP1 hit, signal should transition to ±0.5 (Phase 2), not 0."""
         prices = self._make_tp1_prices()
         sigs = compute_signals_with_partial_exit(
-            prices, 8, 0.045, 1.0, 0.382, 10, 0.0,
+            prices, prices, prices, 8, 0.045, 1.0, 0.382, 10, 0.0,
         )
         # After entry (±1.0), if TP is hit, should see ±0.5 (Phase 2 runner)
         abs_sigs = np.abs(sigs)
@@ -222,7 +222,7 @@ class TestBacktestPBTParity:
 
         max_hold = 10
         sigs = compute_signals_with_partial_exit(
-            prices, 8, 0.045, 1.0, 0.382, max_hold, 0.0,
+            prices, prices, prices, 8, 0.045, 1.0, 0.382, max_hold, 0.0,
         )
         # Check that runner (0.5) can exist beyond original max_hold
         abs_sigs = np.abs(sigs)

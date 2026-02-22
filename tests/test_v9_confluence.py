@@ -194,7 +194,7 @@ class TestComputeSignalsV9:
         dyn = (False, 0.45, 0.5, 0.55)
 
         sigs_v9 = compute_signals_v9(c, h, lo, v, t, b, *params, *dyn, False, 5, 3, False, 12, 26, 14)
-        sigs_v8 = compute_signals_confidence(c, v, t, b, *params, *dyn)
+        sigs_v8 = compute_signals_confidence(c, h, lo, v, t, b, *params, *dyn)
         np.testing.assert_array_equal(sigs_v9, sigs_v8)
 
 

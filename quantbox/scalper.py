@@ -1021,6 +1021,19 @@ class RubberBandScalper:
                 if filled and filled.get('status') == 'FILLED':
                     fill_price = float(filled['avgPrice'])
                     fill_qty = float(filled['executedQty'])
+
+                    # v12.5: PBT partial TP — server closed 50%, transition
+                    # to Phase 2 runner instead of fully closing position.
+                    if pos.get('server_tp_is_partial') and not pos.get('partial_closed'):
+                        logger.info(
+                            f"[{sym}] Server TP (PARTIAL) TRIGGERED intra-bar: "
+                            f"fill=${fill_price:.4f} qty={fill_qty:.6f}"
+                        )
+                        self._handle_server_partial_tp_fill(
+                            sym, pos, fill_price, fill_qty,
+                        )
+                        continue
+
                     logger.info(
                         f"[{sym}] Server TP TRIGGERED intra-bar: "
                         f"fill=${fill_price:.4f} qty={fill_qty:.6f}"
@@ -1071,11 +1084,15 @@ class RubberBandScalper:
             # Positions restored from state may have None algoIds (e.g. old session
             # failed to place them). Detect and repair to ensure server-side protection.
             missing_sl = sl_oid is None
-            # v12.4.7: In PBT mode, server TP is intentionally skipped
-            # (client-side handles partial close at TP1).  Don't treat
-            # the absent TP as "missing" — it avoids 1/min log spam and
-            # pointless bracket-repair attempts.
-            missing_tp = tp_oid is None and not self.config.partial_exit_enabled
+            # v12.5: In PBT mode, server TP is now placed for 50% qty.
+            # After partial close (Phase 2 runner), TP is intentionally None.
+            # Don't treat post-partial absent TP as "missing".
+            if self.config.partial_exit_enabled:
+                # Pre-partial: TP should exist (server 50% TP)
+                # Post-partial: TP intentionally absent (runner uses trailing)
+                missing_tp = tp_oid is None and not pos.get('partial_closed', False)
+            else:
+                missing_tp = tp_oid is None
 
             if missing_sl or missing_tp:
                 quantity = pos['notional'] / pos['entry_price']
@@ -1159,22 +1176,28 @@ class RubberBandScalper:
                             f"Could not place SL — position UNPROTECTED"
                         )
 
-                if missing_tp and not self.config.partial_exit_enabled:
-                    # v12.4.1: In PBT mode, NEVER place server TP.
-                    # Pre-partial: server TP would close 100% (kills runner).
-                    # Post-partial: server TP at original target fires
-                    # immediately (runner entered AT target), killing it.
-                    # Non-PBT: restore server TP for intra-bar capture.
+                if missing_tp:
+                    # v12.5: PBT mode uses 50% qty server TP (pre-partial only).
+                    # Non-PBT: full qty server TP for intra-bar capture.
+                    if self.config.partial_exit_enabled:
+                        tp_qty = self._round_qty(
+                            quantity * self.config.partial_exit_fraction, sym,
+                        )
+                    else:
+                        tp_qty = quantity
                     new_tp = self._place_server_take_profit(
-                        symbol=sym, signal=signal, quantity=quantity,
+                        symbol=sym, signal=signal, quantity=tp_qty,
                         entry_price=entry_price, move_size=move_size,
                         target_retrace=self.config.target_retrace,
                     )
                     if new_tp:
                         pos['server_tp_order_id'] = new_tp
+                        if self.config.partial_exit_enabled:
+                            pos['server_tp_is_partial'] = True
                         logger.info(
                             f"[{sym}] BRACKET REPAIR: TP placed "
-                            f"algoId={new_tp}"
+                            f"algoId={new_tp} "
+                            f"{'(50% partial)' if self.config.partial_exit_enabled else ''}"
                         )
                     else:
                         logger.warning(
@@ -1193,6 +1216,115 @@ class RubberBandScalper:
                         f"TP={'OK' if tp_id else 'MISSING'} "
                         f"(algoId={tp_id})"
                     )
+
+    def _handle_server_partial_tp_fill(
+        self, symbol: str, pos: dict,
+        fill_price: float, fill_qty: float,
+    ) -> None:
+        """Handle server TP fill for 50% qty (PBT mode Phase 1 → Phase 2).
+
+        v12.5: When server TP fires for partial qty, transition the
+        remaining position to runner mode (BE stop + ATR trailing)
+        instead of fully closing.
+
+        Flow:
+          1. Cancel old server SL (was for 100% qty)
+          2. Record PnL on the closed 50%
+          3. Update position: notional, partial_closed, runner state
+          4. Place new BE SL for remaining 50% qty
+          5. Save state immediately
+        """
+        # 1. Cancel old SL (100% qty, no longer valid)
+        sl_oid = pos.get('server_sl_order_id')
+        if sl_oid:
+            self._cancel_server_stop_loss(symbol, sl_oid)
+            pos['server_sl_order_id'] = None
+
+        # 2. PnL on the partial portion
+        if pos['signal'] == 1:
+            pnl_pct = (fill_price - pos['entry_price']) / pos['entry_price']
+        else:
+            pnl_pct = (pos['entry_price'] - fill_price) / pos['entry_price']
+
+        partial_notional = fill_qty * pos['entry_price']
+        pnl_usd = pnl_pct * partial_notional
+        cost = partial_notional * self.config.round_trip_cost
+        net_pnl = pnl_usd - cost
+
+        # 3. Update position for runner mode
+        full_quantity = pos['notional'] / pos['entry_price']
+        remaining_qty_exact = full_quantity - fill_qty
+        pos['notional'] = remaining_qty_exact * pos['entry_price']
+        pos['partial_closed'] = True
+        pos['server_tp_order_id'] = None
+        pos['server_tp_is_partial'] = False
+        pos['highest_since_tp1'] = pnl_pct if pnl_pct > 0 else 0.0
+        pos['trail_floor'] = 0.0  # breakeven floor
+        pos['best_pnl'] = max(pos.get('best_pnl', 0.0), pnl_pct)
+
+        # 4. Place BE SL for remaining qty
+        remaining_qty = self._round_qty(
+            pos['notional'] / pos['entry_price'], symbol,
+        )
+        if remaining_qty > 0 and not self.paper_mode:
+            new_sl_oid = self._place_server_stop_loss(
+                symbol=symbol,
+                signal=pos['signal'],
+                quantity=remaining_qty,
+                entry_price=pos['entry_price'],
+                move_size=pos['move_size'],
+                stop_mult=0.0001,  # Break-even stop
+            )
+            pos['server_sl_order_id'] = new_sl_oid
+            # Reset ratchet state for fresh runner
+            pos['_server_sl_pct'] = 0.0
+
+        # Paper mode cost handling
+        if self.paper_mode:
+            paper_exit_cost = partial_notional * self.config.cost_per_side
+            self._paper_balance += pnl_usd - paper_exit_cost
+
+        # 5. Trade record (partial)
+        trade = {
+            'symbol': symbol,
+            'signal': pos['signal'],
+            'entry_price': pos['entry_price'],
+            'exit_price': fill_price,
+            'pnl_pct': pnl_pct * 100,
+            'pnl_usd': net_pnl,
+            'notional': partial_notional,
+            'bars_held': pos['bars_held'],
+            'reason': 'server_partial_tp',
+            'time': datetime.now(timezone.utc).isoformat(),
+        }
+        self._trade_history.append(trade)
+        self._save_state()
+
+        fraction = self.config.partial_exit_fraction
+        logger.info(
+            f"[{symbol}] SERVER PARTIAL TP ({fraction*100:.0f}%): "
+            f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
+            f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+            f"→ remaining ${pos['notional']:.2f}, BE stop active"
+        )
+        _dir = 'LONG ↑' if pos['signal'] == 1 else 'SHORT ↓'
+        _r_sl = '🟢 서버 (BE)' if pos.get('server_sl_order_id') else '🟡 클라이언트'
+        self.discord.send(embed={
+            'title': f"🔒 {symbol} {_dir} | 서버 TP 부분청산 {fraction*100:.0f}%",
+            'color': 0x4CAF50,
+            'description': (
+                '서버 TP가 인트라바에서 50% 부분청산 완료.\n'
+                '나머지 50%는 손익분기점 스톱 + ATR 트레일링.'
+            ),
+            'fields': [
+                {'name': '진입가', 'value': f'${pos["entry_price"]:.4f}', 'inline': True},
+                {'name': 'TP 체결가', 'value': f'${fill_price:.4f}', 'inline': True},
+                {'name': '수익률', 'value': f'{pnl_pct*100:+.2f}%', 'inline': True},
+                {'name': '확보금액', 'value': f'${net_pnl:+.2f}', 'inline': True},
+                {'name': '남은 포지션', 'value': f'${pos["notional"]:.2f}', 'inline': True},
+                {'name': '남은 SL', 'value': _r_sl, 'inline': True},
+            ],
+        })
 
     def _record_server_fill(
         self, symbol: str, fill_price: float, fill_qty: float, reason: str,
@@ -1472,21 +1604,45 @@ class RubberBandScalper:
             )
             sl_order_id = None
 
-        # v12.4.1: In PBT mode, do NOT place server TP at entry.
-        # Server TP closes 100% of position when triggered, but PBT
-        # requires a 50% partial close at TP1 followed by a runner.
-        # The server TP would fire intra-bar and kill the runner,
-        # collapsing R:R from 1.91 to ~0.8-1.1.
-        # Client-side update_position() handles TP1 at bar close,
-        # matching backtest behavior (which also checks at bar close).
-        # Server SL still protects the downside.
+        # v12.5: In PBT mode, place server TP for PARTIAL qty (50%).
+        # Previously skipped entirely because "server TP closes 100%".
+        # But server TP qty is user-specified — placing 50% qty makes
+        # server handle the partial close intra-bar, fixing the critical
+        # SL-TP asymmetry: SL fires intra-bar (server) but TP only at
+        # bar close (client) → systematic loss bias.
+        # When server TP (50%) fires, _sync_server_orders detects it
+        # and transitions to Phase 2 runner (BE stop + ATR trailing).
         if cfg.partial_exit_enabled:
-            tp_order_id = None
-            logger.info(
-                f"[{symbol}] PBT mode — skipping server TP "
-                f"(client-side handles partial close at TP1)"
+            tp_qty = self._round_qty(
+                fill_qty * cfg.partial_exit_fraction, symbol,
             )
+            tp_order_id = self._place_server_take_profit(
+                symbol=symbol,
+                signal=signal,
+                quantity=tp_qty,
+                entry_price=fill_price,
+                move_size=move_size,
+                target_retrace=cfg.target_retrace,
+            )
+            if tp_order_id == 'WOULD_TRIGGER':
+                logger.warning(
+                    f"[{symbol}] TP WOULD_TRIGGER at entry — "
+                    f"client-side will handle TP1"
+                )
+                tp_order_id = None
+            _tp_is_partial = bool(tp_order_id)
+            if tp_order_id:
+                logger.info(
+                    f"[{symbol}] PBT: server TP for {cfg.partial_exit_fraction*100:.0f}% "
+                    f"qty={tp_qty:.6f} (intra-bar partial close)"
+                )
+            else:
+                logger.info(
+                    f"[{symbol}] PBT: server TP failed — "
+                    f"client-side handles partial close at TP1"
+                )
         else:
+            _tp_is_partial = False
             # Non-PBT: captures intra-bar TP hits that 15m polling would miss.
             tp_order_id = self._place_server_take_profit(
                 symbol=symbol,
@@ -1525,6 +1681,12 @@ class RubberBandScalper:
             server_tp_order_id=tp_order_id,
             confidence=self.strategy.get_last_confidence(symbol),
         )
+
+        # v12.5: Set partial TP flag AFTER open_position() created the dict
+        if cfg.partial_exit_enabled and _tp_is_partial:
+            pos_ref = self.strategy._positions.get(symbol)
+            if pos_ref:
+                pos_ref['server_tp_is_partial'] = True
 
         # Paper balance adjustment
         if self.paper_mode:
@@ -1657,11 +1819,23 @@ class RubberBandScalper:
                 )
                 if new_sl and new_sl != 'WOULD_TRIGGER':
                     pos['server_sl_order_id'] = new_sl
-                # v12.4.2: In PBT mode, do NOT re-place server TP.
-                # Same bug class as v12.4.1 CRITICAL #1: server TP
-                # closes 100% of position, killing the PBT runner.
-                # Non-PBT: restore TP for intra-bar capture.
-                if not self.config.partial_exit_enabled:
+                # v12.5: PBT mode re-places 50% server TP.
+                # Non-PBT: full qty server TP for intra-bar capture.
+                if self.config.partial_exit_enabled:
+                    tp_qty = self._round_qty(
+                        full_quantity * self.config.partial_exit_fraction, symbol,
+                    )
+                    new_tp = self._place_server_take_profit(
+                        symbol=symbol, signal=pos['signal'],
+                        quantity=tp_qty,
+                        entry_price=pos['entry_price'],
+                        move_size=pos['move_size'],
+                        target_retrace=self.config.target_retrace,
+                    )
+                    if new_tp and new_tp != 'WOULD_TRIGGER':
+                        pos['server_tp_order_id'] = new_tp
+                        pos['server_tp_is_partial'] = True
+                else:
                     new_tp = self._place_server_take_profit(
                         symbol=symbol, signal=pos['signal'],
                         quantity=self._round_qty(full_quantity, symbol),
@@ -2543,6 +2717,7 @@ class RubberBandScalper:
 
             exit_reason = self.strategy.update_position(
                 sym, current_price, current_atr_pct=current_atr,
+                current_high=float(high[-1]), current_low=float(low[-1]),
             )
             if exit_reason:
                 logger.info(

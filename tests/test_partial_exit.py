@@ -72,7 +72,7 @@ class TestPartialExitSignals:
         """Partial exit produces ±0.5 signals (half position)."""
         prices = make_drop_recovery()
         sigs = compute_signals_with_partial_exit(
-            prices, 8, 0.045, 0.3, 1.0, 10, 0.0,
+            prices, prices, prices, 8, 0.045, 0.3, 1.0, 10, 0.0,
         )
         unique = np.unique(sigs)
         # Should have 0.0 (flat) and either 0.5 or 1.0
@@ -90,7 +90,7 @@ class TestPartialExitSignals:
         prices = make_drop_recovery(drop_pct=0.08)
         sigs_orig = compute_signals(prices, 8, 0.045, 0.3, 1.0, 10, 0.0)
         sigs_partial = compute_signals_with_partial_exit(
-            prices, 8, 0.045, 0.3, 1.0, 10, 0.0,
+            prices, prices, prices, 8, 0.045, 0.3, 1.0, 10, 0.0,
         )
         # Direction should match (sign)
         for i in range(len(prices)):
@@ -101,7 +101,7 @@ class TestPartialExitSignals:
         """After partial close, signal magnitude should be exactly 0.5."""
         prices = make_drop_recovery(drop_pct=0.08, recovery_pct=0.04)
         sigs = compute_signals_with_partial_exit(
-            prices, 8, 0.045, 0.3, 1.0, 10, 0.0,
+            prices, prices, prices, 8, 0.045, 0.3, 1.0, 10, 0.0,
         )
         half_sigs = sigs[np.abs(sigs) == 0.5]
         if len(half_sigs) > 0:
@@ -111,7 +111,7 @@ class TestPartialExitSignals:
         """Signal transitions from ±1 to ±0.5 (not directly to 0)."""
         prices = make_drop_recovery(drop_pct=0.08, recovery_pct=0.04)
         sigs = compute_signals_with_partial_exit(
-            prices, 8, 0.045, 0.3, 1.0, 10, 0.0,
+            prices, prices, prices, 8, 0.045, 0.3, 1.0, 10, 0.0,
         )
         # Find transitions
         for i in range(1, len(sigs)):

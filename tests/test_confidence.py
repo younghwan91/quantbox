@@ -90,7 +90,7 @@ class TestConfidenceSignals:
         btc = _make_btc_regime(300, 'risk_off')
         vol = _make_volume(300, 200)
         taker = _make_taker_buy(300, 0.4, vol)
-        sigs = compute_signals_confidence(close, vol, taker, btc, **_PARAMS)
+        sigs = compute_signals_confidence(close, close, close, vol, taker, btc, **_PARAMS)
         assert sigs.shape == close.shape
 
     def test_risk_off_with_evidence_enters(self):
@@ -99,7 +99,7 @@ class TestConfidenceSignals:
         btc = _make_btc_regime(300, 'risk_off')
         vol = _make_volume(300, 200, spike_mult=3.0)
         taker = _make_taker_buy(300, 0.35, vol)  # Heavy selling
-        sigs = compute_signals_confidence(close, vol, taker, btc, **_PARAMS)
+        sigs = compute_signals_confidence(close, close, close, vol, taker, btc, **_PARAMS)
         assert np.any(sigs > 0), "Should enter long with high confidence"
 
     def test_min_confidence_filters_weak_signals(self):
@@ -112,8 +112,8 @@ class TestConfidenceSignals:
         params_mc1 = {**_PARAMS, 'min_confidence': 1}
         params_mc3 = {**_PARAMS, 'min_confidence': 3}
 
-        sigs_mc1 = compute_signals_confidence(close, vol, taker, btc, **params_mc1)
-        sigs_mc3 = compute_signals_confidence(close, vol, taker, btc, **params_mc3)
+        sigs_mc1 = compute_signals_confidence(close, close, close, vol, taker, btc, **params_mc1)
+        sigs_mc3 = compute_signals_confidence(close, close, close, vol, taker, btc, **params_mc3)
 
         n_trades_mc1 = np.sum(np.diff(sigs_mc1 != 0).astype(int) > 0)
         n_trades_mc3 = np.sum(np.diff(sigs_mc3 != 0).astype(int) > 0)
@@ -129,7 +129,7 @@ class TestConfidenceSignals:
         taker = _make_taker_buy(300, 0.35, vol)
 
         params = {**_PARAMS, 'base_leverage': 1.5, 'confidence_leverage_step': 0.0}
-        sigs = compute_signals_confidence(close, vol, taker, btc, **params)
+        sigs = compute_signals_confidence(close, close, close, vol, taker, btc, **params)
 
         nonzero = sigs[sigs != 0]
         if len(nonzero) > 0:
@@ -150,7 +150,7 @@ class TestConfidenceSignals:
             'confidence_leverage_step': 0.5,
             'max_leverage': 3.0,
         }
-        sigs = compute_signals_confidence(close, vol, taker, btc, **params)
+        sigs = compute_signals_confidence(close, close, close, vol, taker, btc, **params)
         nonzero = sigs[sigs != 0]
         if len(nonzero) > 0:
             magnitudes = np.abs(nonzero)
@@ -165,7 +165,7 @@ class TestConfidenceSignals:
         vol = _make_volume(300, 200, 3.0)
         taker = _make_taker_buy(300, 0.35, vol)
 
-        sigs = compute_signals_confidence(close, vol, taker, btc, **_PARAMS)
+        sigs = compute_signals_confidence(close, close, close, vol, taker, btc, **_PARAMS)
         in_pos = False
         hold = 0
         for s in sigs:
@@ -185,7 +185,7 @@ class TestConfidenceSignals:
         btc = _make_btc_regime(300, 'risk_off')
         vol = np.ones(300, dtype=np.float64) * 1000.0
         taker = vol * 0.5
-        sigs = compute_signals_confidence(close, vol, taker, btc, **_PARAMS)
+        sigs = compute_signals_confidence(close, close, close, vol, taker, btc, **_PARAMS)
         assert np.all(sigs == 0), "No move → no signal"
 
     def test_mc1_similar_to_regime_switch(self):
@@ -196,7 +196,7 @@ class TestConfidenceSignals:
         taker = vol * 0.5
 
         params_mc1 = {**_PARAMS, 'min_confidence': 1}
-        sigs_conf = compute_signals_confidence(close, vol, taker, btc, **params_mc1)
+        sigs_conf = compute_signals_confidence(close, close, close, vol, taker, btc, **params_mc1)
         sigs_rs = compute_signals_regime_switch(
             close, btc, 8, 0.045, 0.4, 0.9, 10, 0.0, 32, 96, 192,
         )
