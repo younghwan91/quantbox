@@ -271,7 +271,7 @@ class TestConfidenceConfig:
         assert cfg.rsi_period == 14
         assert cfg.vol_period == 20
         assert cfg.base_leverage == 1.5
-        assert cfg.max_leverage == 1.5
+        assert cfg.max_leverage == 20.0  # v12.5.2: final hard cap (after MTF mult)
         assert cfg.threshold == 0.032  # v10.0
         assert cfg.max_hold == 25  # v12.4 HybTight (was 20)
         assert cfg.stoch_k_period == 3  # v10.0

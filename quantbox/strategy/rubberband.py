@@ -55,7 +55,7 @@ Parameters (v6.0, 365-day A/B validated):
   btc_directional_period = 48 bars (12h BTC momentum for Risk-Off)
   base_leverage = 1.5x (conservative, same DD as v5.0)
   confidence_leverage_step = 0.0 (disabled by default for safety)
-  max_leverage = 1.5x (capped at base)
+  max_leverage = 20x (final hard cap after MTF mult)
 """
 
 import numpy as np
@@ -175,7 +175,7 @@ class RubberBandConfig:
     dynamic_leverage_enabled: bool = True  # Enable leverage pipeline
     base_leverage: float = 1.5     # Flat leverage for all trades
     leverage_scale: float = 0.0    # Legacy: No confidence scaling (use confidence_leverage_step)
-    max_leverage: float = 1.5      # Aligned with base (safety cap)
+    max_leverage: float = 20.0    # Final hard cap after MTF mult
 
     # ── BTC Directional Alignment (v4.2, A/B validated) ──
     # Counter-trend entries only when BTC confirms: long when BTC falling,
