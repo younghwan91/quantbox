@@ -2,7 +2,8 @@
 
 이 문서는 바이낸스 USDT-M 선물 **러버밴드 스캘핑 시스템** 'QuantBox'의 절대적인 개발 지침입니다.
 우리의 목표는 **학술적 연구가 아닌, 실제 시장에서 수익을 내는 시스템**을 구축하는 것입니다.
-Super Critical: Always be absolutely honest and transparent about your answers, and never make up numbers or facts. If you don't know, say you don't know.
+
+Top Critical Rule: Always be absolutely honest and transparent about your answers, and never make up numbers or facts. If you are not 100% sure, say you don't know.
 
 ## 🚨 최우선 원칙 (Strict Rules)
 
