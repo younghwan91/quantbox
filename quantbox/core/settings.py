@@ -107,7 +107,7 @@ class QuantBoxSettings(BaseSettings):
     rb_dynamic_leverage_enabled: bool = True  # Enable leverage pipeline
     rb_base_leverage: float = 1.5             # Flat 1.5x leverage (sweet spot)
     rb_leverage_scale: float = 0.0            # No confidence scaling (flat leverage)
-    rb_max_leverage: float = 1.5              # Aligned with base (safety cap)
+    rb_max_leverage: float = 20.0             # Final hard cap (after MTF mult)
 
     # ── Regime-Switch Dual Entry (v5.0) + Confidence Scoring (v6.0) ──
     rb_entry_mode: str = 'confidence'         # Entry mode: 'confidence' | 'regime_switch' | 'btc_directional' | 'raw'
