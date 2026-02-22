@@ -37,7 +37,7 @@ class TestHWMResetOnRestart:
 
     def test_hwm_resets_when_no_positions(self):
         """With 0 positions in state, HWM should match current balance."""
-        from quantbox.scalper import _save_scalper_state
+        from quantbox.scalper import _save_scalper_state, PAPER_STATE_FILE
 
         scalper = _make_scalper(max_drawdown_pct=0.10)
 
@@ -57,7 +57,7 @@ class TestHWMResetOnRestart:
                                'time': '2026-02-21T00:00:00'}],
             'cycle_count': 0,
         }
-        _save_scalper_state(state)
+        _save_scalper_state(state, filepath=PAPER_STATE_FILE)
 
         scalper._load_state()
 
@@ -78,7 +78,7 @@ class TestHWMResetOnRestart:
 
     def test_hwm_preserved_when_positions_exist(self):
         """With active positions in state, HWM should be preserved."""
-        from quantbox.scalper import _save_scalper_state
+        from quantbox.scalper import _save_scalper_state, PAPER_STATE_FILE
 
         scalper = _make_scalper(max_drawdown_pct=0.10)
 
@@ -101,7 +101,7 @@ class TestHWMResetOnRestart:
             'trade_history': [],
             'cycle_count': 0,
         }
-        _save_scalper_state(state)
+        _save_scalper_state(state, filepath=PAPER_STATE_FILE)
 
         scalper._load_state()
 
@@ -112,7 +112,7 @@ class TestHWMResetOnRestart:
 
     def test_trade_history_cleared_when_no_positions(self):
         """Trade history should be cleared when no positions exist."""
-        from quantbox.scalper import _save_scalper_state
+        from quantbox.scalper import _save_scalper_state, PAPER_STATE_FILE
 
         scalper = _make_scalper()
 
@@ -130,7 +130,7 @@ class TestHWMResetOnRestart:
             'initial_balance': 2000.0, 'high_water_mark': 2500.0,
             'positions': {}, 'trade_history': trades, 'cycle_count': 0,
         }
-        _save_scalper_state(state)
+        _save_scalper_state(state, filepath=PAPER_STATE_FILE)
 
         scalper._load_state()
 

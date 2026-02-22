@@ -829,8 +829,11 @@ class RubberBandStrategy:
 
                 # Pre-TP1 trailing (only if gain exceeds activation threshold)
                 # v12.3.3: configurable params (were hardcoded 0.5/0.3)
+                # v12.5.3: Use worst_gain (intra-bar) for parity with Phase 2.
+                # Close-based gain missed intra-bar breach → TONUSDT gave back
+                # 1.10% best_pnl and exited at +0.07% (2026-02-22 incident).
                 if (pos['best_pnl'] > target * cfg.pre_tp1_trail_activation
-                        and gain < pos['best_pnl'] * cfg.pre_tp1_trail_factor):
+                        and worst_gain < pos['best_pnl'] * cfg.pre_tp1_trail_factor):
                     return 'trailing_stop'
 
             else:
@@ -841,8 +844,9 @@ class RubberBandStrategy:
                 if worst_gain < -effective_stop:
                     return 'stop_loss'
                 # v12.3.3: configurable pre-TP1 trail params
+                # v12.5.3: worst_gain for intra-bar parity
                 if (pos['best_pnl'] > target * cfg.pre_tp1_trail_activation
-                        and gain < pos['best_pnl'] * cfg.pre_tp1_trail_factor):
+                        and worst_gain < pos['best_pnl'] * cfg.pre_tp1_trail_factor):
                     return 'trailing_stop'
                 if pos['bars_held'] >= cfg.max_hold:
                     return 'max_hold'

@@ -299,33 +299,37 @@ def compute_alpha_signals(
 
             if position == 1:
                 gain = (close[i] - entry_price) / entry_price
+                worst_gain = (low[i] - entry_price) / entry_price
+                best_gain = (high[i] - entry_price) / entry_price
             else:
                 gain = (entry_price - close[i]) / entry_price
+                worst_gain = (entry_price - high[i]) / entry_price
+                best_gain = (entry_price - low[i]) / entry_price
 
-            if gain > best_pnl:
-                best_pnl = gain
+            if best_gain > best_pnl:
+                best_pnl = best_gain
 
             target = move_size * target_retrace
 
-            # 1. Target hit
-            if gain >= target:
+            # 1. Target hit (intra-bar best)
+            if best_gain >= target:
                 position = 0
-            # 2. Stop loss
-            elif gain < -move_size * stop_mult:
+            # 2. Stop loss (intra-bar worst)
+            elif worst_gain < -move_size * stop_mult:
                 position = 0
-            # 3. Enhanced trailing stop
+            # 3. Enhanced trailing stop (v12.5.3: worst_gain for intra-bar parity)
             elif trailing_stop:
                 if best_pnl >= target * trail_activation:
                     # Trail: exit if we give back too much
                     trail_level = best_pnl * (1.0 - trail_distance)
-                    if gain < trail_level:
+                    if worst_gain < trail_level:
                         position = 0
                 # Fallback: old trailing stop for positions without enough gain
-                elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                elif best_pnl > target * 0.5 and worst_gain < best_pnl * 0.3:
                     position = 0
             else:
                 # Original trailing logic
-                if best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+                if best_pnl > target * 0.5 and worst_gain < best_pnl * 0.3:
                     position = 0
             # 4. Max holding period
             if hold_count >= max_hold and position != 0:
