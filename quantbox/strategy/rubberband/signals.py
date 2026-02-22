@@ -807,7 +807,8 @@ def compute_signals_confidence(
                 position = 0
             elif best_gain >= target:
                 position = 0
-            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+            # v12.5.3: worst_gain for trailing (intra-bar parity)
+            elif best_pnl > target * 0.5 and worst_gain < best_pnl * 0.3:
                 position = 0
             elif hold_count >= max_hold:
                 position = 0
@@ -1122,7 +1123,8 @@ def compute_signals_v9(
                 position = 0
             elif best_gain >= target:
                 position = 0
-            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+            # v12.5.3: worst_gain for trailing (intra-bar parity)
+            elif best_pnl > target * 0.5 and worst_gain < best_pnl * 0.3:
                 position = 0
             elif hold_count >= max_hold:
                 position = 0
@@ -1423,7 +1425,8 @@ def compute_signals_with_partial_exit(
             elif best_gain >= target:
                 phase = 2
                 best_pnl = best_gain
-            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+            # v12.5.3: worst_gain for trailing (intra-bar parity)
+            elif best_pnl > target * 0.5 and worst_gain < best_pnl * 0.3:
                 position = 0
                 phase = 0
             elif hold_count >= max_hold:
@@ -1459,7 +1462,8 @@ def compute_signals_with_partial_exit(
                 # Break-even stop: $0 risk on remaining half
                 position = 0
                 phase = 0
-            elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
+            # v12.5.3: worst_gain for trailing (intra-bar parity)
+            elif best_pnl > target * 0.5 and worst_gain < best_pnl * 0.3:
                 position = 0
                 phase = 0
             elif hold_count >= int(max_hold * runner_max_hold_mult):
