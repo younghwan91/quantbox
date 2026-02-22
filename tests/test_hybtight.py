@@ -98,11 +98,11 @@ class TestRunnerMaxHoldNumba:
         prices = _make_drop_then_run(n=300)
 
         sigs_old = compute_signals_with_partial_exit(
-            prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
+            prices, prices, prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
             runner_max_hold_mult=2.0,
         )
         sigs_new = compute_signals_with_partial_exit(
-            prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
+            prices, prices, prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
             runner_max_hold_mult=3.0,
         )
 
@@ -122,10 +122,10 @@ class TestRunnerMaxHoldNumba:
         prices = _make_drop_then_run(n=300)
 
         sigs_default = compute_signals_with_partial_exit(
-            prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
+            prices, prices, prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
         )
         sigs_explicit = compute_signals_with_partial_exit(
-            prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
+            prices, prices, prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
             runner_max_hold_mult=3.0,
         )
 
@@ -313,7 +313,7 @@ class TestBacktestLiveParity:
             prices[i] = recovered
 
         sigs = compute_signals_with_partial_exit(
-            prices, 8, 0.032, 1.5, 0.382, max_hold, 0.0,
+            prices, prices, prices, 8, 0.032, 1.5, 0.382, max_hold, 0.0,
             runner_max_hold_mult=mult,
         )
 
