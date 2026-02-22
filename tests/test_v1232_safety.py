@@ -356,11 +356,12 @@ class TestPartialCloseFailureProtection:
         pos = scalper.strategy._positions['TESTUSDT']
         assert pos['server_sl_order_id'] == 'sl_new', \
             "Failed partial close must re-place server SL"
-        # v12.4.2: In PBT mode, server TP must NOT be re-placed.
-        # Server TP closes 100% position → kills PBT runner.
-        assert pos['server_tp_order_id'] is None, \
-            "PBT mode: failed partial close must NOT re-place server TP"
-        scalper._place_server_take_profit.assert_not_called()
+        # v12.5: In PBT mode, server TP IS re-placed with 50% qty
+        # (server TP now fires for partial qty only, enabling Phase 2 runner).
+        assert pos['server_tp_order_id'] == 'tp_new', \
+            "PBT mode: failed partial close must re-place 50% server TP"
+        assert pos.get('server_tp_is_partial') is True, \
+            "Re-placed TP must be flagged as partial"
         assert pos['partial_closed'] is False, "Must revert partial_closed flag"
 
 
