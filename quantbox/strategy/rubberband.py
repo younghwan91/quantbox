@@ -840,6 +840,8 @@ def _compute_macd_inline(
 @numba.jit(nopython=True, cache=True)
 def compute_signals_confidence(
     close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
     volume: np.ndarray,
     taker_buy: np.ndarray,
     btc_close: np.ndarray,
@@ -894,6 +896,8 @@ def compute_signals_confidence(
 
     Args:
         close: Alt close prices.
+        high: Alt high prices (for intra-bar TP detection).
+        low: Alt low prices (for intra-bar SL detection).
         volume: Alt volume data.
         taker_buy: Taker buy base volume (buying pressure indicator).
         btc_close: BTCUSDT close prices.
@@ -1048,19 +1052,24 @@ def compute_signals_confidence(
             hold_count += 1
             if position == 1:
                 gain = (close[i] - entry_price) / entry_price
+                worst_gain = (low[i] - entry_price) / entry_price
+                best_gain = (high[i] - entry_price) / entry_price
             else:
                 gain = (entry_price - close[i]) / entry_price
+                worst_gain = (entry_price - high[i]) / entry_price
+                best_gain = (entry_price - low[i]) / entry_price
 
-            if gain > best_pnl:
-                best_pnl = gain
+            if best_gain > best_pnl:
+                best_pnl = best_gain
 
             time_factor = 1.0 - stop_decay * (hold_count / max_hold)
             effective_stop = move_size * stop_mult * time_factor
             target = move_size * trade_target_retrace
 
-            if gain >= target:
+            # v12.5: Intra-bar SL/TP — SL priority on same-bar conflict
+            if worst_gain < -effective_stop:
                 position = 0
-            elif gain < -effective_stop:
+            elif best_gain >= target:
                 position = 0
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
@@ -1358,19 +1367,24 @@ def compute_signals_v9(
             hold_count += 1
             if position == 1:
                 gain = (close[i] - entry_price) / entry_price
+                worst_gain = (low[i] - entry_price) / entry_price
+                best_gain = (high[i] - entry_price) / entry_price
             else:
                 gain = (entry_price - close[i]) / entry_price
+                worst_gain = (entry_price - high[i]) / entry_price
+                best_gain = (entry_price - low[i]) / entry_price
 
-            if gain > best_pnl:
-                best_pnl = gain
+            if best_gain > best_pnl:
+                best_pnl = best_gain
 
             time_factor = 1.0 - stop_decay * (hold_count / max_hold)
             effective_stop = move_size * stop_mult * time_factor
             target = move_size * trade_target_retrace
 
-            if gain >= target:
+            # v12.5: Intra-bar SL/TP — SL priority on same-bar conflict
+            if worst_gain < -effective_stop:
                 position = 0
-            elif gain < -effective_stop:
+            elif best_gain >= target:
                 position = 0
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
@@ -1576,6 +1590,8 @@ def compute_signals_4h_independent(
 @numba.jit(nopython=True, cache=True)
 def compute_signals_with_partial_exit(
     close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
     lookback: int,
     threshold: float,
     target_retrace: float,
@@ -1586,16 +1602,23 @@ def compute_signals_with_partial_exit(
 ) -> np.ndarray:
     """Compute signals with partial exit + break-even stop.
 
+    v12.5: Uses high/low for intra-bar SL/TP detection to match live
+    server-side behavior. SL checks worst-case (low for LONG, high for SHORT).
+    TP checks best-case (high for LONG, low for SHORT).
+    Same-bar conflict: SL takes priority (conservative).
+
     Capital preservation framework:
-      Phase 1 (full position): on ANY profit → close 50%, transition to Phase 2.
+      Phase 1 (full position): TP1 hit → close 50%, transition to Phase 2.
       Phase 2 (half position): break-even stop replaces original stop.
-        Remaining half runs to target or gets stopped at break-even ($0 risk).
+        Remaining half runs with trailing or gets stopped at break-even.
 
     Output: ±1.0 (full position), ±0.5 (half position after partial close), 0.0 (flat).
     The backtest core treats signal magnitude as position size.
 
     Args:
         close: Close price array.
+        high: High price array (for intra-bar TP detection).
+        low: Low price array (for intra-bar SL detection).
         lookback: Bars to measure the move.
         threshold: Minimum move to trigger entry.
         target_retrace: Take profit fraction of move.
@@ -1641,26 +1664,29 @@ def compute_signals_with_partial_exit(
             hold_count += 1
             if position == 1:
                 gain = (close[i] - entry_price) / entry_price
+                worst_gain = (low[i] - entry_price) / entry_price
+                best_gain = (high[i] - entry_price) / entry_price
             else:
                 gain = (entry_price - close[i]) / entry_price
+                worst_gain = (entry_price - high[i]) / entry_price
+                best_gain = (entry_price - low[i]) / entry_price
 
-            if gain > best_pnl:
-                best_pnl = gain
+            # Update best_pnl with intra-bar best (not just close)
+            if best_gain > best_pnl:
+                best_pnl = best_gain
 
             time_factor = 1.0 - stop_decay * (hold_count / max_hold)
             effective_stop = move_size * stop_mult * time_factor
             target = move_size * target_retrace
 
-            # v12.3.3: TP1 hit → partial close 50%, enter Phase 2 runner.
-            # Previously this fully exited (position=0), violating backtest-
-            # live parity: the live system partial closes and runs a trailing
-            # runner at TP1, not a full exit.
-            if gain >= target:
-                phase = 2
-                best_pnl = gain
-            elif gain < -effective_stop:
+            # v12.5: SL/TP use intra-bar extremes for parity with live.
+            # Same-bar conflict: SL takes priority (conservative).
+            if worst_gain < -effective_stop:
                 position = 0
                 phase = 0
+            elif best_gain >= target:
+                phase = 2
+                best_pnl = best_gain
             elif best_pnl > target * 0.5 and gain < best_pnl * 0.3:
                 position = 0
                 phase = 0
@@ -1668,7 +1694,7 @@ def compute_signals_with_partial_exit(
                 position = 0
                 phase = 0
             elif gain > 0:
-                # ANY profit → partial close 50%, enter Phase 2
+                # ANY profit at close → partial close 50%, enter Phase 2
                 phase = 2
                 best_pnl = gain
 
@@ -1677,19 +1703,23 @@ def compute_signals_with_partial_exit(
             hold_count += 1
             if position == 1:
                 gain = (close[i] - entry_price) / entry_price
+                worst_gain = (low[i] - entry_price) / entry_price
+                best_gain = (high[i] - entry_price) / entry_price
             else:
                 gain = (entry_price - close[i]) / entry_price
+                worst_gain = (entry_price - high[i]) / entry_price
+                best_gain = (entry_price - low[i]) / entry_price
 
-            if gain > best_pnl:
-                best_pnl = gain
+            if best_gain > best_pnl:
+                best_pnl = best_gain
 
             target = move_size * target_retrace
 
-            # v12.4 HybTight: Runner exits when:
-            # 1. Breakeven stop hit (gain <= 0)
+            # v12.5: Runner exits using intra-bar worst for BE stop.
+            # 1. Breakeven stop hit (worst_gain <= 0, intra-bar)
             # 2. Pre-TP1 trail: gave back too much unrealized profit
             # 3. Max hold exceeded (runner_max_hold_mult × max_hold)
-            if gain <= 0:
+            if worst_gain <= 0:
                 # Break-even stop: $0 risk on remaining half
                 position = 0
                 phase = 0
@@ -2941,8 +2971,15 @@ class RubberBandStrategy:
         return self._positions.pop(symbol, None)
 
     def update_position(self, symbol: str, current_price: float,
-                        current_atr_pct: float | None = None) -> str | None:
+                        current_atr_pct: float | None = None,
+                        current_high: float | None = None,
+                        current_low: float | None = None) -> str | None:
         """Check if position should be closed or partially closed.
+
+        v12.5: Accepts current_high/current_low for intra-bar SL/TP detection.
+        This serves as backup client-side check — primary TP1 is server-side (50% qty).
+        SL is server-side (handled intra-bar), so client SL check is redundant
+        but kept for safety.
 
         v12.3 PBT (Partial-Breakeven-Trail) exit mode:
           Phase 1 (full position): TP1 hit → partial close 50%, then Phase 2.
@@ -2950,6 +2987,8 @@ class RubberBandStrategy:
 
         Args:
             current_atr_pct: Current ATR as percentage (for runner trailing).
+            current_high: Bar high price (for intra-bar TP1 detection).
+            current_low: Bar low price (for intra-bar SL detection).
 
         Returns exit reason string or None.
         """
@@ -2960,13 +2999,26 @@ class RubberBandStrategy:
         pos['bars_held'] += 1
         cfg = self.config
 
+        # Close-based gain (used for trailing decisions)
         if pos['signal'] == 1:
             gain = (current_price - pos['entry_price']) / pos['entry_price']
         else:
             gain = (pos['entry_price'] - current_price) / pos['entry_price']
 
-        if gain > pos['best_pnl']:
-            pos['best_pnl'] = gain
+        # v12.5: Intra-bar extreme gains for SL/TP detection
+        if current_high is not None and current_low is not None:
+            if pos['signal'] == 1:
+                worst_gain = (current_low - pos['entry_price']) / pos['entry_price']
+                best_gain = (current_high - pos['entry_price']) / pos['entry_price']
+            else:
+                worst_gain = (pos['entry_price'] - current_high) / pos['entry_price']
+                best_gain = (pos['entry_price'] - current_low) / pos['entry_price']
+        else:
+            worst_gain = gain
+            best_gain = gain
+
+        if best_gain > pos['best_pnl']:
+            pos['best_pnl'] = best_gain
 
         target = pos['move_size'] * cfg.target_retrace
         entry_sm = pos.get('entry_stop_mult', cfg.stop_mult)
@@ -2979,16 +3031,18 @@ class RubberBandStrategy:
             # ── Phase 1: Full position ──
             if cfg.partial_exit_enabled:
                 # PBT mode: wait for TP1 hit to trigger partial close
-                if gain >= target:
+                # v12.5: Use best_gain (intra-bar high/low) for TP1 detection
+                # SL handled server-side; worst_gain here is backup
+                if best_gain >= target:
                     pos['partial_closed'] = True
-                    pos['highest_since_tp1'] = gain
+                    pos['highest_since_tp1'] = best_gain
                     if cfg.breakeven_after_partial:
                         pos['trail_floor'] = 0.0  # breakeven floor
                     else:
                         pos['trail_floor'] = -effective_stop
                     return 'partial_close'
 
-                if gain < -effective_stop:
+                if worst_gain < -effective_stop:
                     return 'stop_loss'
 
                 if pos['bars_held'] >= cfg.max_hold:
@@ -3002,9 +3056,10 @@ class RubberBandStrategy:
 
             else:
                 # Standard mode (no partial exit)
-                if gain >= target:
+                # v12.5: best_gain for TP, worst_gain for SL
+                if best_gain >= target:
                     return 'target'
-                if gain < -effective_stop:
+                if worst_gain < -effective_stop:
                     return 'stop_loss'
                 # v12.3.3: configurable pre-TP1 trail params
                 if (pos['best_pnl'] > target * cfg.pre_tp1_trail_activation
@@ -3015,11 +3070,11 @@ class RubberBandStrategy:
 
         else:
             # ── Phase 2: Runner (after partial close) ──
-            # Track runner peak
-            highest = pos.get('highest_since_tp1', gain)
-            if gain > highest:
-                pos['highest_since_tp1'] = gain
-                highest = gain
+            # Track runner peak (use best_gain for peak, worst_gain for stop)
+            highest = pos.get('highest_since_tp1', best_gain)
+            if best_gain > highest:
+                pos['highest_since_tp1'] = best_gain
+                highest = best_gain
 
             # ATR-based trailing stop for runner
             atr_val = current_atr_pct if current_atr_pct is not None else 0.02
@@ -3034,7 +3089,8 @@ class RubberBandStrategy:
             # Scalper reads this after update_position() to sync server SL.
             pos['_computed_trail_stop'] = trail_stop
 
-            if gain <= trail_stop:
+            # v12.5: worst_gain for intra-bar trail stop check
+            if worst_gain <= trail_stop:
                 return 'trail_runner'
 
             # v12.4 HybTight: Extended time exit for runner (configurable mult)
