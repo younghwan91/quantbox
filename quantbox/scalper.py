@@ -1724,7 +1724,7 @@ class RubberBandScalper:
             return False
 
         side = 'BUY' if signal > 0 else 'SELL'
-        lev_int = max(1, min(math.ceil(leverage), 20))
+        lev_int = max(1, min(math.ceil(leverage), int(cfg.max_leverage)))
 
         result = self._place_order(symbol, side, quantity, leverage=lev_int)
         if result is None:
@@ -3122,7 +3122,16 @@ class RubberBandScalper:
         return handler()
 
     def _cmd_status(self) -> str:
-        """!status — Show balance, positions, and active state."""
+        """!status — Show balance, positions, and active state.
+
+        v12.5.2: Reconcile with exchange BEFORE displaying, so ghost
+        positions are cleaned up and the user sees real-time state.
+        """
+        # Real-time reconciliation: sync with exchange before display
+        if not self.paper_mode:
+            self._sync_server_orders()
+            self._reconcile_positions()
+
         balance = self.get_balance()
         positions = self.strategy.active_positions
         n_trades = len(self._trade_history)
@@ -3149,11 +3158,22 @@ class RubberBandScalper:
                 bars = pos.get('bars_held', 0)
                 best = pos.get('best_pnl', 0) * 100
                 notional = pos.get('notional', 0)
+                # v12.5.2: Show real-time mark price uPnL
+                try:
+                    mark = self.client.futures_mark_price(symbol=sym)
+                    cur_px = float(mark['markPrice'])
+                    entry_px = pos['entry_price']
+                    if pos['signal'] == 1:
+                        upnl_pct = (cur_px - entry_px) / entry_px * 100
+                    else:
+                        upnl_pct = (entry_px - cur_px) / entry_px * 100
+                except Exception:
+                    upnl_pct = 0.0
                 lines.append(
                     f"  {direction} {sym}: "
                     f"${pos['entry_price']:.4f} | "
                     f"${notional:.0f} | "
-                    f"{bars}bars | best={best:+.1f}%"
+                    f"{bars}bars | uPnL={upnl_pct:+.1f}%"
                 )
         else:
             lines.append("  No open positions")
