@@ -355,6 +355,14 @@ class RubberBandScalper:
                     return float(b['balance'])
         except Exception as e:
             logger.error(f"Balance fetch failed: {e}")
+        # v12.5.1: Return last known balance instead of 0.0 to prevent
+        # false drawdown halt on transient API failures.
+        if hasattr(self, '_last_known_balance') and self._last_known_balance > 0:
+            logger.warning(
+                f"Using last known balance ${self._last_known_balance:.2f} "
+                f"due to API failure"
+            )
+            return self._last_known_balance
         return 0.0
 
     def _check_risk_limits(self, balance: float) -> bool:
@@ -362,6 +370,10 @@ class RubberBandScalper:
 
         Returns True if trading should be blocked.
         """
+        # v12.5.1: Track last known good balance for API failure fallback
+        if balance > 0:
+            self._last_known_balance = balance
+
         # Update high water mark
         if balance > self._high_water_mark:
             self._high_water_mark = balance
@@ -924,6 +936,55 @@ class RubberBandScalper:
         """Cancel the server-side take-profit."""
         self._cancel_server_order(symbol, order_id, 'take-profit')
 
+    def _lookup_actual_fill(
+        self, symbol: str, expected_qty: str, order_type: str,
+    ) -> dict | None:
+        """Look up actual fill price/qty from recent account trades.
+
+        v12.5.1: Called after algo order TRIGGERED to get real execution
+        data instead of relying on triggerPrice as proxy.
+
+        Args:
+            symbol: Trading pair.
+            expected_qty: Expected fill quantity (from algo order).
+            order_type: 'STOP' or 'TAKE_PROFIT' to determine close side.
+
+        Returns:
+            dict with 'price' and 'qty' if found, None otherwise.
+        """
+        if self.paper_mode:
+            return None
+        try:
+            recent_trades = self.client.futures_account_trades(
+                symbol=symbol, limit=20,
+            )
+            if not recent_trades:
+                return None
+
+            # Find the most recent trade with realized PnL (reduce-only fill)
+            expected_q = float(expected_qty) if expected_qty else 0
+            for t in reversed(recent_trades):
+                rpnl = float(t.get('realizedPnl', '0'))
+                tqty = float(t.get('qty', '0'))
+                if rpnl != 0 and abs(tqty - expected_q) / max(expected_q, 1e-8) < 0.05:
+                    return {
+                        'price': float(t['price']),
+                        'qty': tqty,
+                    }
+            # Broader fallback: any recent trade with realized PnL
+            for t in reversed(recent_trades):
+                rpnl = float(t.get('realizedPnl', '0'))
+                if rpnl != 0:
+                    return {
+                        'price': float(t['price']),
+                        'qty': float(t.get('qty', '0')),
+                    }
+        except Exception as e:
+            logger.warning(
+                f"[{symbol}] Failed to lookup actual fill: {e}"
+            )
+        return None
+
     def _check_order_filled(self, symbol: str, order_id: str) -> dict | None:
         """Check if a server-side algo order has been filled (TRIGGERED).
 
@@ -962,14 +1023,33 @@ class RubberBandScalper:
                     f"actualPrice={actual_price} qty={actual_qty}"
                 )
 
-                # Use triggerPrice as fill proxy if actualPrice is zero
-                fill_price = float(actual_price)
-                if fill_price == 0:
-                    fill_price = float(trigger_price)
+                # v12.5.1: Get ACTUAL fill price/qty from account trades
+                # instead of using triggerPrice as proxy (which can differ
+                # by 0.1-0.5% from real execution during fast moves).
+                real_fill = self._lookup_actual_fill(
+                    symbol, actual_qty, resp.get('orderType', ''),
+                )
+                if real_fill:
+                    fill_price = real_fill['price']
+                    fill_qty = real_fill['qty']
+                    logger.info(
+                        f"[{symbol}] Actual fill from trades: "
+                        f"price=${fill_price:.4f} qty={fill_qty}"
+                    )
+                else:
+                    # Fallback: use actualPrice or triggerPrice
+                    fill_price = float(actual_price)
+                    if fill_price == 0:
+                        fill_price = float(trigger_price)
+                    fill_qty = actual_qty
+                    logger.warning(
+                        f"[{symbol}] Using algo trigger/actual price as "
+                        f"fill proxy: ${fill_price:.4f}"
+                    )
 
                 return {
                     'avgPrice': str(fill_price),
-                    'executedQty': actual_qty,
+                    'executedQty': str(fill_qty),
                     'status': 'FILLED',
                     'algoId': order_id,
                 }
@@ -1216,6 +1296,72 @@ class RubberBandScalper:
                         f"TP={'OK' if tp_id else 'MISSING'} "
                         f"(algoId={tp_id})"
                     )
+
+    def _reconcile_positions(self) -> None:
+        """Reconcile internal position state with exchange reality.
+
+        v12.5.1: Called each cycle AFTER _sync_server_orders.
+        Detects ghost positions (closed on exchange but still in internal
+        state) and quantity mismatches (ADL, manual intervention).
+        """
+        try:
+            exchange_positions = self.client.futures_position_information()
+        except Exception as e:
+            logger.warning(f"Position reconciliation failed: {e}")
+            return
+
+        # Build map of actual exchange positions
+        exchange_map: dict[str, float] = {}
+        for p in exchange_positions:
+            amt = float(p.get('positionAmt', '0'))
+            if amt != 0:
+                exchange_map[p['symbol']] = amt
+
+        # Check each internal position against exchange
+        for sym in list(self.strategy.active_positions):
+            pos = self.strategy._positions.get(sym)
+            if not pos:
+                continue
+
+            if sym not in exchange_map:
+                # Ghost position: we think it's open, exchange says no
+                logger.error(
+                    f"[{sym}] RECONCILIATION: Ghost position detected! "
+                    f"Internal entry=${pos['entry_price']:.4f} but "
+                    f"exchange has NO position. Recording as unknown close."
+                )
+                self.discord.send(content=(
+                    f"⚠️ **[{sym}] Ghost position detected** — "
+                    f"Position missing on exchange. Cleaning up internal state."
+                ))
+                # Try to find actual fill from recent trades
+                fill_price = pos['entry_price']
+                try:
+                    recent = self.client.futures_account_trades(
+                        symbol=sym, limit=20,
+                    )
+                    close_side = 'SELL' if pos['signal'] == 1 else 'BUY'
+                    for t in reversed(recent):
+                        if t.get('side') == close_side and float(t.get('realizedPnl', '0')) != 0:
+                            fill_price = float(t['price'])
+                            break
+                except Exception:
+                    pass
+                self._record_server_fill(sym, fill_price, 0, 'ghost_reconcile')
+                continue
+
+            # Quantity mismatch check
+            exchange_qty = abs(exchange_map[sym])
+            internal_qty = pos['notional'] / pos['entry_price']
+            qty_diff_pct = abs(exchange_qty - internal_qty) / max(internal_qty, 1e-8) * 100
+            if qty_diff_pct > 5:  # More than 5% mismatch
+                logger.warning(
+                    f"[{sym}] RECONCILIATION: Qty mismatch! "
+                    f"Internal={internal_qty:.6f} Exchange={exchange_qty:.6f} "
+                    f"Diff={qty_diff_pct:.1f}%. Correcting internal state."
+                )
+                # Update internal notional to match exchange reality
+                pos['notional'] = exchange_qty * pos['entry_price']
 
     def _handle_server_partial_tp_fill(
         self, symbol: str, pos: dict,
@@ -1578,7 +1724,7 @@ class RubberBandScalper:
             return False
 
         side = 'BUY' if signal > 0 else 'SELL'
-        lev_int = max(1, min(math.ceil(leverage), 20))
+        lev_int = max(1, min(math.ceil(leverage), int(cfg.max_leverage)))
 
         result = self._place_order(symbol, side, quantity, leverage=lev_int)
         if result is None:
@@ -2654,30 +2800,8 @@ class RubberBandScalper:
             f"Trades={n_trades} CumPnL=${cum_pnl:+.2f}"
         )
 
-        # ── Log each active position status ──
-        for sym, pos in self.strategy.active_positions.items():
-            try:
-                book = self.client.futures_orderbook_ticker(symbol=sym)
-                cur_px = float(book['bidPrice']) if pos['signal'] == 1 else float(book['askPrice'])
-            except Exception:
-                cur_px = pos.get('entry_price', 0)
-            entry_px = pos.get('entry_price', 0)
-            if entry_px > 0:
-                if pos['signal'] == 1:
-                    upnl_pct = (cur_px - entry_px) / entry_px * 100
-                else:
-                    upnl_pct = (entry_px - cur_px) / entry_px * 100
-            else:
-                upnl_pct = 0.0
-            sl_id = pos.get('server_sl_order_id')
-            tp_id = pos.get('server_tp_order_id')
-            bars = pos.get('bars_held', 0)
-            direction = 'L' if pos.get('signal') == 1 else 'S'
-            logger.info(
-                f"  [{sym}] {direction} entry=${entry_px:.4f} now=${cur_px:.4f} "
-                f"uPnL={upnl_pct:+.2f}% bars={bars} "
-                f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}"
-            )
+        # ── Position status moved AFTER _sync_server_orders ──
+        # (SL/TP status must be checked after sync, not before)
 
         # 1. Risk check
         risk_blocked = self._check_risk_limits(balance)
@@ -2707,12 +2831,33 @@ class RubberBandScalper:
         # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
         self._sync_server_orders()
 
-        # Log server order sync result
+        # v12.5.1: Reconcile positions with exchange AFTER sync
+        if not self.paper_mode:
+            self._reconcile_positions()
+
+        # v12.5.1: Log position status AFTER sync (SL/TP verified)
         for sym, pos in self.strategy.active_positions.items():
+            try:
+                mark = self.client.futures_mark_price(symbol=sym)
+                cur_px = float(mark['markPrice'])
+            except Exception:
+                cur_px = pos.get('entry_price', 0)
+            entry_px = pos.get('entry_price', 0)
+            if entry_px > 0:
+                if pos['signal'] == 1:
+                    upnl_pct = (cur_px - entry_px) / entry_px * 100
+                else:
+                    upnl_pct = (entry_px - cur_px) / entry_px * 100
+            else:
+                upnl_pct = 0.0
             sl_id = pos.get('server_sl_order_id')
             tp_id = pos.get('server_tp_order_id')
-            logger.debug(
-                f"  [{sym}] Post-sync: SL={sl_id or 'NONE'} TP={tp_id or 'NONE'}"
+            bars = pos.get('bars_held', 0)
+            direction = 'L' if pos.get('signal') == 1 else 'S'
+            logger.info(
+                f"  [{sym}] {direction} entry=${entry_px:.4f} "
+                f"mark=${cur_px:.4f} uPnL={upnl_pct:+.2f}% bars={bars} "
+                f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}"
             )
 
         # 4. Process existing positions (always, even when paused)
@@ -2977,7 +3122,16 @@ class RubberBandScalper:
         return handler()
 
     def _cmd_status(self) -> str:
-        """!status — Show balance, positions, and active state."""
+        """!status — Show balance, positions, and active state.
+
+        v12.5.2: Reconcile with exchange BEFORE displaying, so ghost
+        positions are cleaned up and the user sees real-time state.
+        """
+        # Real-time reconciliation: sync with exchange before display
+        if not self.paper_mode:
+            self._sync_server_orders()
+            self._reconcile_positions()
+
         balance = self.get_balance()
         positions = self.strategy.active_positions
         n_trades = len(self._trade_history)
@@ -3004,11 +3158,22 @@ class RubberBandScalper:
                 bars = pos.get('bars_held', 0)
                 best = pos.get('best_pnl', 0) * 100
                 notional = pos.get('notional', 0)
+                # v12.5.2: Show real-time mark price uPnL
+                try:
+                    mark = self.client.futures_mark_price(symbol=sym)
+                    cur_px = float(mark['markPrice'])
+                    entry_px = pos['entry_price']
+                    if pos['signal'] == 1:
+                        upnl_pct = (cur_px - entry_px) / entry_px * 100
+                    else:
+                        upnl_pct = (entry_px - cur_px) / entry_px * 100
+                except Exception:
+                    upnl_pct = 0.0
                 lines.append(
                     f"  {direction} {sym}: "
                     f"${pos['entry_price']:.4f} | "
                     f"${notional:.0f} | "
-                    f"{bars}bars | best={best:+.1f}%"
+                    f"{bars}bars | uPnL={upnl_pct:+.1f}%"
                 )
         else:
             lines.append("  No open positions")

@@ -95,7 +95,7 @@ class TestComputeConfidenceLeverage:
         assert cfg.dynamic_leverage_enabled is True
         assert cfg.base_leverage == 1.5
         assert cfg.leverage_scale == 0.0
-        assert cfg.max_leverage == 1.5
+        assert cfg.max_leverage == 20.0  # v12.5.2: final hard cap (after MTF mult)
 
 
 class TestApplyConfidenceLeverage:
