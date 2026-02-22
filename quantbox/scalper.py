@@ -157,6 +157,7 @@ from quantbox.utils.diagnostics import DiagnosticLogger, _diag_logger  # noqa: E
 
 STATE_DIR = Path('data/state')
 STATE_FILE = STATE_DIR / 'scalper_state.json'
+PAPER_STATE_FILE = STATE_DIR / 'scalper_state_paper.json'
 
 
 def _save_scalper_state(state: dict, filepath: Path | None = None) -> None:
@@ -932,14 +933,16 @@ class RubberBandScalper(
             'trade_history': self._trade_history[-100:],  # Keep last 100
             'cycle_count': self._cycle_count,
         }
+        filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
         try:
-            _save_scalper_state(state)
+            _save_scalper_state(state, filepath=filepath)
         except Exception as e:
             logger.error(f"State save failed: {e}")
 
     def _load_state(self) -> None:
         """Restore state from disk."""
-        state = _load_scalper_state()
+        filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
+        state = _load_scalper_state(filepath=filepath)
         if state is None:
             return
 
