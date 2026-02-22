@@ -1234,6 +1234,16 @@ class RubberBandScalper:
           4. Place new BE SL for remaining 50% qty
           5. Save state immediately
         """
+        # v12.5 Race guard: skip if client already handled partial close
+        if pos.get('partial_closed'):
+            logger.warning(
+                f"[{symbol}] Server partial TP fill skipped — "
+                f"client already processed partial close"
+            )
+            pos['server_tp_order_id'] = None
+            pos['server_tp_is_partial'] = False
+            return
+
         # 1. Cancel old SL (100% qty, no longer valid)
         sl_oid = pos.get('server_sl_order_id')
         if sl_oid:
@@ -1256,6 +1266,7 @@ class RubberBandScalper:
         remaining_qty_exact = full_quantity - fill_qty
         pos['notional'] = remaining_qty_exact * pos['entry_price']
         pos['partial_closed'] = True
+        pos['_server_partial_tp_filled'] = True  # v12.5 race guard
         pos['server_tp_order_id'] = None
         pos['server_tp_is_partial'] = False
         pos['highest_since_tp1'] = pnl_pct if pnl_pct > 0 else 0.0
@@ -1777,6 +1788,16 @@ class RubberBandScalper:
         """
         pos = self.strategy._positions.get(symbol)
         if pos is None:
+            return False
+
+        # v12.5 Race guard: If server already handled the partial close
+        # intra-bar (_handle_server_partial_tp_fill sets this flag),
+        # skip client-side partial close to avoid double execution.
+        if pos.get('_server_partial_tp_filled'):
+            logger.info(
+                f"[{symbol}] Partial close skipped — "
+                f"server TP already handled partial fill"
+            )
             return False
 
         # v11.1: Cancel old server SL (quantity will change)
