@@ -78,12 +78,12 @@ class TestDynamicTargetSignals:
         """Dynamic target disabled should produce identical signals."""
         close, btc, vol, taker = _make_data()
         sig_base = compute_signals_confidence(
-            close, vol, taker, btc, **BASE_KWARGS,
+            close, close, close, vol, taker, btc, **BASE_KWARGS,
             dynamic_target_enabled=False,
             target_conf3=0.45, target_conf4=0.5, target_conf5=0.55,
         )
         sig_default = compute_signals_confidence(
-            close, vol, taker, btc, **BASE_KWARGS,
+            close, close, close, vol, taker, btc, **BASE_KWARGS,
             dynamic_target_enabled=False,
             target_conf3=0.99, target_conf4=0.99, target_conf5=0.99,
         )
@@ -93,7 +93,7 @@ class TestDynamicTargetSignals:
         """Dynamic target enabled should produce valid signal array."""
         close, btc, vol, taker = _make_data()
         sig = compute_signals_confidence(
-            close, vol, taker, btc, **BASE_KWARGS,
+            close, close, close, vol, taker, btc, **BASE_KWARGS,
             dynamic_target_enabled=True,
             target_conf3=0.45, target_conf4=0.5, target_conf5=0.55,
         )
@@ -106,12 +106,12 @@ class TestDynamicTargetSignals:
         """A wider target may cause trades to hold longer or exit at different bars."""
         close, btc, vol, taker = _make_data(800)
         sig_narrow = compute_signals_confidence(
-            close, vol, taker, btc, **BASE_KWARGS,
+            close, close, close, vol, taker, btc, **BASE_KWARGS,
             dynamic_target_enabled=True,
             target_conf3=0.4, target_conf4=0.4, target_conf5=0.4,  # same as baseline
         )
         sig_wide = compute_signals_confidence(
-            close, vol, taker, btc, **BASE_KWARGS,
+            close, close, close, vol, taker, btc, **BASE_KWARGS,
             dynamic_target_enabled=True,
             target_conf3=0.6, target_conf4=0.7, target_conf5=0.8,
         )
@@ -136,12 +136,12 @@ class TestDynamicTargetSignals:
         close, btc, vol, taker = _make_data()
         base_tr = 0.4
         sig_disabled = compute_signals_confidence(
-            close, vol, taker, btc, **BASE_KWARGS,
+            close, close, close, vol, taker, btc, **BASE_KWARGS,
             dynamic_target_enabled=False,
             target_conf3=0.45, target_conf4=0.5, target_conf5=0.55,
         )
         sig_same = compute_signals_confidence(
-            close, vol, taker, btc, **BASE_KWARGS,
+            close, close, close, vol, taker, btc, **BASE_KWARGS,
             dynamic_target_enabled=True,
             target_conf3=base_tr, target_conf4=base_tr, target_conf5=base_tr,
         )

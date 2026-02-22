@@ -103,11 +103,11 @@ def _make_strategy_with_data(*, btc_declining=True, min_confidence=3,
 # CRITICAL #1: Server TP skipped in PBT mode
 # ═══════════════════════════════════════════════════════════════════
 
-class TestServerTPSkippedInPBT:
-    """v12.4.1: Server TP must NOT be placed when PBT (partial exit) is enabled."""
+class TestServerTPInPBT:
+    """v12.5: PBT mode places server TP with 50% qty for intra-bar TP1."""
 
-    def test_pbt_enabled_skips_server_tp(self):
-        """When partial_exit_enabled=True, _open_position must NOT call _place_server_take_profit."""
+    def test_pbt_enabled_places_partial_server_tp(self):
+        """When partial_exit_enabled=True, _open_position MUST place 50% server TP."""
         scalper = _make_scalper(paper=False, partial_exit_enabled=True)
         scalper._save_state = MagicMock()
         scalper._place_server_stop_loss = MagicMock(return_value='sl_123')
@@ -120,10 +120,10 @@ class TestServerTPSkippedInPBT:
         closes = np.array([95.0] * 20 + [100.0])
         scalper._open_position('BTCUSDT', 1, closes, 1000.0)
 
-        # Server SL must still be placed
+        # Server SL must be placed
         scalper._place_server_stop_loss.assert_called_once()
-        # Server TP must NOT be placed in PBT mode
-        scalper._place_server_take_profit.assert_not_called()
+        # v12.5: Server TP placed with 50% qty in PBT mode
+        scalper._place_server_take_profit.assert_called_once()
 
     def test_pbt_disabled_places_server_tp(self):
         """When partial_exit_enabled=False, server TP is placed normally."""
@@ -142,8 +142,8 @@ class TestServerTPSkippedInPBT:
         scalper._place_server_stop_loss.assert_called_once()
         scalper._place_server_take_profit.assert_called_once()
 
-    def test_pbt_position_records_no_tp_order_id(self):
-        """Position opened in PBT mode must have server_tp_order_id=None."""
+    def test_pbt_position_records_partial_tp(self):
+        """v12.5: Position opened in PBT mode has server_tp_is_partial=True."""
         scalper = _make_scalper(paper=True, partial_exit_enabled=True)
 
         closes = np.array([95.0] * 20 + [100.0])
@@ -151,16 +151,21 @@ class TestServerTPSkippedInPBT:
 
         pos = scalper.strategy._positions.get('BTCUSDT')
         assert pos is not None
-        assert pos['server_tp_order_id'] is None
+        # Paper mode doesn't actually place server orders, but flag should be set
+        assert pos.get('server_tp_is_partial') is True
 
 
 class TestBracketRepairPBT:
-    """v12.4.1: Bracket repair must skip TP when PBT enabled."""
+    """v12.5: Bracket repair places 50% TP in PBT mode (pre-partial only)."""
 
-    def test_bracket_repair_skips_tp_in_pbt_mode(self):
-        """Missing TP should NOT be repaired when partial_exit_enabled=True."""
+    def test_bracket_repair_places_partial_tp_in_pbt_mode(self):
+        """Missing TP should be repaired with 50% qty in PBT mode (pre-partial)."""
         scalper = _make_scalper(paper=False, partial_exit_enabled=True)
         scalper._save_state = MagicMock()
+        scalper.get_symbol_info = MagicMock(return_value={
+            'tick_size': 0.01, 'price_precision': 2,
+            'step_size': 0.001, 'qty_precision': 3,
+        })
 
         scalper.strategy.open_position(
             symbol='BTCUSDT', signal=1, entry_price=100.0,
@@ -179,10 +184,11 @@ class TestBracketRepairPBT:
 
         scalper._sync_server_orders()
 
-        # TP should NOT be placed in PBT mode
-        scalper._place_server_take_profit.assert_not_called()
+        # v12.5: TP should be placed with 50% qty in PBT mode
+        scalper._place_server_take_profit.assert_called_once()
         pos = scalper.strategy._positions.get('BTCUSDT')
-        assert pos['server_tp_order_id'] is None
+        assert pos['server_tp_order_id'] == 'tp_new'
+        assert pos.get('server_tp_is_partial') is True
 
     def test_bracket_repair_places_tp_in_non_pbt_mode(self):
         """Missing TP should be repaired when partial_exit_enabled=False."""
@@ -310,8 +316,8 @@ class TestPartialCloseFailureNoTP:
     """When partial close fails and we restore brackets, server TP must
     be skipped in PBT mode — same bug class as v12.4.1 CRITICAL #1."""
 
-    def test_pbt_failure_path_skips_server_tp(self):
-        """If partial close order fails in PBT mode, only SL is restored (no TP)."""
+    def test_pbt_failure_path_restores_partial_tp(self):
+        """v12.5: If partial close fails in PBT mode, both SL and 50% TP are restored."""
         scalper = _make_scalper(paper=False, partial_exit_enabled=True)
         scalper._save_state = MagicMock()
         scalper._cancel_server_stop_loss = MagicMock()
@@ -333,14 +339,15 @@ class TestPartialCloseFailureNoTP:
 
         # SL should be re-placed to restore protection
         scalper._place_server_stop_loss.assert_called_once()
-        # TP must NOT be re-placed in PBT mode
-        scalper._place_server_take_profit.assert_not_called()
+        # v12.5: TP re-placed with 50% qty in PBT mode
+        scalper._place_server_take_profit.assert_called_once()
 
-        # Verify position still tracked with SL but no TP
+        # Verify position still tracked with both SL and partial TP
         pos = scalper.strategy._positions.get('ETHUSDT')
         assert pos is not None
         assert pos['server_sl_order_id'] == 'sl_new'
-        assert pos['server_tp_order_id'] is None
+        assert pos['server_tp_order_id'] == 'tp_new'
+        assert pos.get('server_tp_is_partial') is True
 
     def test_non_pbt_failure_path_restores_both(self):
         """If partial close fails in non-PBT mode, both SL and TP are restored."""
