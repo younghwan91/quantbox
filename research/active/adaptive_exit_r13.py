@@ -27,12 +27,15 @@ Usage:
     PYTHONUNBUFFERED=1 uv run python research/active/adaptive_exit_r13.py
 """
 
+import os
 import sys
 import time
 import json
+import hashlib
 import subprocess
 import numba
 import numpy as np
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +53,7 @@ from quantbox.strategy.rubberband import (
 )
 
 CACHE_DIR = Path(__file__).parent.parent.parent / 'data' / 'cache_extended'
+VPVR_CACHE_DIR = Path(__file__).parent.parent.parent / 'data' / 'cache' / 'vpvr'
 DATA_DAYS = 2190
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1148,6 +1152,29 @@ def build_variants() -> list[VConfig]:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Multiprocessing helpers (pool initializer pattern)
+# ═══════════════════════════════════════════════════════════════════
+_pool_shared: dict = {}
+
+
+def _pool_init(shared: dict):
+    """Called once per worker process. Store shared data in global."""
+    global _pool_shared
+    _pool_shared = shared
+
+
+def _pool_simulate(cfg: VConfig) -> dict:
+    """Worker function — reads shared data from global, only cfg is pickled."""
+    d = _pool_shared
+    return simulate(
+        d['sym_close'], d['sym_high'], d['sym_low'],
+        d['sym_dirs'], d['sym_confs'], d['sym_moves'],
+        cfg, d['regime'], d['sym_atr'], d['sym_vwma'],
+        d['sym_poc'], d['sym_va_high'], d['sym_va_low'],
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════
 def main():
@@ -1246,21 +1273,44 @@ def main():
     vwma_valid = sum(1 for s in sym_vwma if np.any(~np.isnan(sym_vwma[s])))
     print(f"  VWMA computed for {vwma_valid}/{len(sym_vwma)} symbols")
 
-    # ── Compute VPVR ──
+    # ── Compute VPVR (with disk cache) ──
     print(f"\n📊 Computing VPVR ({VPVR_LOOKBACK}-bar lookback, {VPVR_NBINS} bins)...")
     sym_poc: dict[str, np.ndarray] = {}
     sym_va_high: dict[str, np.ndarray] = {}
     sym_va_low: dict[str, np.ndarray] = {}
     vpvr_t0 = time.time()
+    VPVR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    vpvr_cached = 0
+    vpvr_computed = 0
 
     for idx, sym in enumerate(sorted(sym_close_d.keys())):
-        poc_arr, vah_arr, val_arr = compute_vpvr(
-            sym_close_d[sym], sym_high_d[sym], sym_low_d[sym],
-            sym_volume_d[sym], VPVR_LOOKBACK, VPVR_NBINS, VPVR_VA_PCT,
-        )
-        sym_poc[sym] = poc_arr
-        sym_va_high[sym] = vah_arr
-        sym_va_low[sym] = val_arr
+        # Build cache key from data hash + VPVR params
+        data_hash = hashlib.sha256(
+            sym_close_d[sym].tobytes()
+            + sym_high_d[sym].tobytes()
+            + sym_low_d[sym].tobytes()
+            + sym_volume_d[sym].tobytes()
+        ).hexdigest()[:16]
+        cache_key = f"{sym}_vpvr_{VPVR_LOOKBACK}_{VPVR_NBINS}_{VPVR_VA_PCT}_{data_hash}"
+        cache_path = VPVR_CACHE_DIR / f"{cache_key}.npz"
+
+        if cache_path.exists():
+            cached = np.load(cache_path)
+            sym_poc[sym] = cached['poc']
+            sym_va_high[sym] = cached['va_high']
+            sym_va_low[sym] = cached['va_low']
+            vpvr_cached += 1
+        else:
+            poc_arr, vah_arr, val_arr = compute_vpvr(
+                sym_close_d[sym], sym_high_d[sym], sym_low_d[sym],
+                sym_volume_d[sym], VPVR_LOOKBACK, VPVR_NBINS, VPVR_VA_PCT,
+            )
+            sym_poc[sym] = poc_arr
+            sym_va_high[sym] = vah_arr
+            sym_va_low[sym] = val_arr
+            np.savez_compressed(cache_path, poc=poc_arr, va_high=vah_arr, va_low=val_arr)
+            vpvr_computed += 1
+
         if (idx + 1) % 10 == 0:
             elapsed_vpvr = time.time() - vpvr_t0
             eta = elapsed_vpvr / (idx + 1) * (len(sym_close_d) - idx - 1)
@@ -1269,8 +1319,8 @@ def main():
 
     vpvr_elapsed = time.time() - vpvr_t0
     poc_valid = sum(1 for s in sym_poc if np.any(~np.isnan(sym_poc[s])))
-    print(f"  VPVR computed for {poc_valid}/{len(sym_poc)} symbols "
-          f"in {vpvr_elapsed:.1f}s")
+    print(f"  VPVR: {vpvr_cached} cached + {vpvr_computed} computed "
+          f"for {poc_valid}/{len(sym_poc)} symbols in {vpvr_elapsed:.1f}s")
 
     # ── Compute regime ──
     print(f"\n🌐 Computing regime...")
@@ -1284,34 +1334,73 @@ def main():
     print(f"  Bull: {bull/total_r*100:.1f}%  Choppy: {chop/total_r*100:.1f}%  "
           f"Bear: {bear/total_r*100:.1f}%")
 
-    # ═══════════════════ VARIANT TEST ═══════════════════
+    # ═══════════════════ VARIANT TEST (parallel) ═══════════════════
     variants = build_variants()
     print(f"\n{'═' * w}")
-    print(f"  R13 A/B TEST — {len(variants)} VARIANTS")
+    print(f"  R13 A/B TEST — {len(variants)} VARIANTS (parallel)")
     print(f"{'═' * w}")
 
+    sim_t0 = time.time()
+    n_cores = os.cpu_count() or 1
+    n_workers = min(len(variants), max(1, n_cores))
+
+    # Shared data dict — passed once to pool initializer, not pickled per task
+    shared = {
+        'sym_close': sym_close_d, 'sym_high': sym_high_d, 'sym_low': sym_low_d,
+        'sym_dirs': sym_dirs, 'sym_confs': sym_confs, 'sym_moves': sym_moves,
+        'regime': regime, 'sym_atr': sym_atr_d, 'sym_vwma': sym_vwma,
+        'sym_poc': sym_poc, 'sym_va_high': sym_va_high, 'sym_va_low': sym_va_low,
+    }
+
     results = {}
-    for vi, cfg in enumerate(variants):
-        t_v = time.time()
-        print(f"\n🔬 [{vi+1}/{len(variants)}] {cfg.name}: {cfg.desc}")
+    if n_workers >= 2:
+        print(f"  Workers: {n_workers} (CPU cores: {n_cores})")
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            initializer=_pool_init,
+            initargs=(shared,),
+        ) as executor:
+            future_map = {
+                executor.submit(_pool_simulate, cfg): cfg
+                for cfg in variants
+            }
+            for future in future_map:
+                cfg = future_map[future]
+                results[cfg.name] = future.result()
+    else:
+        print(f"  Serial mode (CPU cores: {n_cores})")
+        for vi, cfg in enumerate(variants):
+            t_v = time.time()
+            res = simulate(
+                sym_close_d, sym_high_d, sym_low_d,
+                sym_dirs, sym_confs, sym_moves,
+                cfg, regime, sym_atr_d, sym_vwma,
+                sym_poc, sym_va_high, sym_va_low,
+            )
+            elapsed_v = time.time() - t_v
+            results[cfg.name] = res
+            tp1r = res.get('tp1_hit_rate', 0)
+            print(f"  [{vi+1}/{len(variants)}] {cfg.name}: "
+                  f"Ret={res['total_return_pct']:,.1f}%  DD={res['max_dd_pct']:.1f}%  "
+                  f"Sharpe={res['sharpe']:.2f}  Calmar={res['calmar']:.1f}  "
+                  f"WR={res['win_rate']:.1f}%  PF={res['profit_factor']:.2f}  "
+                  f"R:R={res['rr']:.2f}  TP1%={tp1r:.0f}%  "
+                  f"#Tr={res['n_trades']}  [{elapsed_v:.1f}s]")
 
-        res = simulate(
-            sym_close_d, sym_high_d, sym_low_d,
-            sym_dirs, sym_confs, sym_moves,
-            cfg, regime, sym_atr_d, sym_vwma,
-            sym_poc, sym_va_high, sym_va_low,
-        )
+    sim_elapsed = time.time() - sim_t0
+    print(f"\n  All {len(variants)} variants completed in {sim_elapsed:.1f}s")
 
-        elapsed_v = time.time() - t_v
-        res['elapsed'] = round(elapsed_v, 1)
-        results[cfg.name] = res
-
-        tp1r = res.get('tp1_hit_rate', 0)
-        print(f"  Ret: {res['total_return_pct']:,.1f}%  DD: {res['max_dd_pct']:.1f}%  "
-              f"Sharpe: {res['sharpe']:.2f}  Calmar: {res['calmar']:.1f}  "
-              f"WR: {res['win_rate']:.1f}%  PF: {res['profit_factor']:.2f}  "
-              f"R:R: {res['rr']:.2f}  TP1%: {tp1r:.0f}%  "
-              f"#Tr: {res['n_trades']}  [{elapsed_v:.1f}s]")
+    # Print summary for parallel mode (serial prints per-variant above)
+    if n_workers >= 2:
+        for vi, cfg in enumerate(variants):
+            res = results[cfg.name]
+            tp1r = res.get('tp1_hit_rate', 0)
+            print(f"  [{vi+1}/{len(variants)}] {cfg.name}: "
+                  f"Ret={res['total_return_pct']:,.1f}%  DD={res['max_dd_pct']:.1f}%  "
+                  f"Sharpe={res['sharpe']:.2f}  Calmar={res['calmar']:.1f}  "
+                  f"WR={res['win_rate']:.1f}%  PF={res['profit_factor']:.2f}  "
+                  f"R:R={res['rr']:.2f}  TP1%={tp1r:.0f}%  "
+                  f"#Tr={res['n_trades']}")
 
     elapsed_total = time.time() - t0
 
