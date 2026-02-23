@@ -1,122 +1,154 @@
-# Trail Factor A/B Test — Round 3 (U-RR+VWS Baseline)
+# Trail Factor A/B Test — Round 4 (R12-Parity Baseline)
 
-- **Commit:** `2f5c456` (branch: `feature/recent-regime-ab`)
-- **Date:** 2026-02-23 12:41 UTC
+- **Commit:** `0f654c4` (branch: `feature/recent-regime-ab`)
+- **Date:** 2026-02-23 13:09 UTC
 - **Data:** 2190d (6yr), 50 symbols, 15m+4h candles
-- **Baseline:** U-RR+VWS (R12: `rr_size=True`, `vwma_stop='wide'`, `vwma_stop_mult=0.50`)
-- **Innovation:** `worst_gain`/`best_gain` (intra-bar) for SL/trail/TP checks (v12.5.3 parity)
-- **Focus:** Pre-TP1 trail factor sweep + stop/hold combos with correct baseline
+- **Baseline:** U-RR+VWS (R12-identical: `rr_size=True`, `vwma_stop='wide'`, close-based `gain` for ALL exit checks)
+- **Focus:** Pre-TP1 trail factor sweep + stop/hold combos
 - **Scoring:** Recency-weighted composite (Y5-6 = 2× weight)
-- **Runtime:** 101.9s (VPVR 52.1s + 18 variants × ~2.4s)
+- **Runtime:** 164.8s (VPVR 105.0s + 18 variants × ~2.5s)
 
 ## Context
 
-R1-R2 used stripped production config (rr_size=off, vwma_stop=off) → baseline showed only 801%.
-R3 restores R12 U-RR+VWS features: VWMA wide stop, VPVR-based POC for R:R sizing, BTC dual-confirm regime.
-Baseline now shows 1,553% (lower than R12's 6,301% due to intra-bar worst_gain for SL/trail — more conservative, more realistic).
+R1-R2 used stripped config (rr_size=off, vwma_stop=off) → baseline 801%.
+R3 added VWMA/VPVR/RR but used `worst_gain`/`best_gain` (intra-bar) → baseline 1,553%.
+**R4 fix:** Reverted to R12's close-based `gain` for ALL exit checks (TP1/stop/trail/runner).
+Baseline now matches R12: **6,427% vs R12's 6,301%** (2% diff from VPVR timing edge effects).
+
+### R3→R4 Changes (key fixes)
+1. TP1 trigger: `best_gain >= target` → `gain >= target` (close-based)
+2. TP1 PnL: `target * lev` → `gain * lev` (actual close, includes overshoot)
+3. TP1 hit: added `pos['best_pnl'] = gain` and `pos['stepup_active'] = False` reset
+4. Stop check: `worst_gain < -effective_stop` → `gain < -effective_stop`
+5. Stop PnL: `-effective_stop` → `gain` (actual close, may recover)
+6. best_pnl tracking: moved from top (using `best_gain`) to else-branch (using `gain`)
+7. Trail/runner checks: `worst_gain` → `gain` everywhere
+8. Runner PnL: `max(gain, trail_stop)` → `gain` (actual close)
 
 ## Results Summary
 
 | Var | Desc | Ret% | DD% | Sharpe | Calmar | WR | PF | R:R | TP1% | #Tr |
 |-----|------|-----:|----:|-------:|-------:|---:|---:|----:|-----:|----:|
-| **A-Prod** | Production TF30 (baseline) | 1,553% | 10.9% | 2.99 | 142.3 | 47.6% | 1.22 | 1.99 | 11% | 19,937 |
-| B-TF20 | trail_factor=0.2 | 2,629% | 9.3% | 3.94 | 282.4 | 47.0% | 1.30 | 2.25 | 14% | 20,002 |
-| **C-TF10** | trail_factor=0.10 ★ WINNER | **3,393%** | **8.2%** | **4.47** | **415.7** | 45.2% | **1.36** | 2.55 | **15%** | 20,028 |
-| D-TF15 | trail_factor=0.15 | 3,035% | 8.4% | 4.26 | 361.4 | 46.2% | 1.33 | 2.39 | 14% | 20,018 |
-| E-TF18 | trail_factor=0.18 | 2,746% | 8.4% | 4.10 | 326.2 | 46.6% | 1.31 | 2.31 | 14% | 20,006 |
-| F-TF22 | trail_factor=0.22 | 2,431% | 9.1% | 3.78 | 265.8 | 47.2% | 1.28 | 2.19 | 13% | 19,991 |
-| G-TF25 | trail_factor=0.25 | 2,128% | 8.9% | 3.54 | 239.3 | 47.4% | 1.26 | 2.11 | 13% | 19,973 |
-| H-TF20MH20 | TF20 + max_hold 20 | 2,726% | 8.9% | 4.15 | 305.2 | 47.4% | 1.31 | 2.12 | 12% | 20,306 |
-| I-TF20MH15 | TF20 + max_hold 15 | 2,631% | 9.6% | 4.10 | 273.4 | 47.7% | 1.31 | 1.95 | 9% | 20,549 |
-| J-TF20S30 | TF20 + stop_mult 0.30 | 2,715% | 8.5% | 3.99 | 318.6 | 44.1% | 1.31 | 2.54 | 13% | 20,868 |
-| K-TF20S25 | TF20 + stop_mult 0.25 | 2,633% | 9.3% | 3.92 | 284.3 | 42.3% | 1.30 | **2.73** | 12% | 21,434 |
-| L-TF15MH20 | TF15 + max_hold 20 | 3,119% | 8.7% | 4.46 | 359.5 | 46.7% | 1.34 | 2.24 | 12% | 20,321 |
-| M-TF15S30 | TF15 + stop_mult 0.30 | 3,136% | **7.9%** | 4.29 | 398.0 | 43.5% | 1.34 | 2.69 | 14% | 20,874 |
-| N-TF20S30H20 | TF20 + S30 + MH20 | 2,790% | 8.3% | 4.15 | 337.3 | 44.5% | 1.32 | 2.40 | 11% | 21,160 |
-| O-TF20S30H15 | TF20 + S30 + MH15 | 2,726% | 9.2% | 4.14 | 296.2 | 44.9% | 1.32 | 2.20 | 9% | 21,423 |
-| P-TF15S30H20 | TF15 + S30 + MH20 | 3,202% | 8.1% | 4.45 | 394.1 | 44.0% | 1.35 | 2.53 | 12% | 21,167 |
-| Q-TF15S30H15 | TF15 + S30 + MH15 | 3,085% | 8.7% | 4.43 | 355.7 | 44.5% | 1.35 | 2.30 | 9% | 21,430 |
-| R-TF20S25H20 | TF20 + S25 + MH20 | 2,685% | 8.3% | 4.03 | 322.9 | 42.6% | 1.31 | 2.58 | 11% | 21,714 |
+| **A-Prod** | Production TF30 (baseline) | 6,427% | 6.4% | 5.77 | 1004.0 | 58.2% | 1.66 | 1.76 | 17% | 16,584 |
+| B-TF20 | trail_factor=0.2 | 6,567% | 6.5% | 5.80 | 1009.6 | 57.3% | 1.68 | 1.85 | 18% | 16,547 |
+| C-TF10 | trail_factor=0.10 | 6,478% | 6.4% | 5.81 | 1009.6 | 55.6% | 1.66 | 1.97 | 18% | 16,485 |
+| D-TF15 | trail_factor=0.15 | 6,553% | 6.6% | 5.82 | 999.5 | 56.5% | 1.67 | 1.91 | 18% | 16,519 |
+| E-TF18 | trail_factor=0.18 | 6,573% | 6.6% | 5.82 | 1001.7 | 57.0% | 1.68 | 1.87 | 18% | 16,534 |
+| F-TF22 | trail_factor=0.22 | 6,518% | 6.5% | 5.79 | 1002.0 | 57.4% | 1.67 | 1.84 | 18% | 16,557 |
+| G-TF25 | trail_factor=0.25 | 6,520% | 6.6% | 5.80 | 988.2 | 57.8% | 1.67 | 1.81 | 17% | 16,572 |
+| H-TF20MH20 | TF20 + max_hold 20 | 6,556% | 6.4% | **6.00** | 1017.4 | 57.6% | 1.68 | 1.73 | 15% | 16,998 |
+| I-TF20MH15 | TF20 + max_hold 15 | 6,159% | 6.6% | 6.07 | 928.1 | 57.6% | 1.66 | 1.58 | 11% | 17,436 |
+| J-TF20S30 | TF20 + stop_mult 0.30 | 6,603% | 6.6% | 5.75 | 1005.9 | 55.1% | 1.66 | 2.01 | 17% | 17,103 |
+| K-TF20S25 | TF20 + stop_mult 0.25 | 6,561% | 6.6% | 5.72 | 995.9 | 53.8% | 1.64 | **2.10** | 16% | 17,466 |
+| L-TF15MH20 | TF15 + max_hold 20 | 6,598% | 6.3% | 6.03 | 1046.5 | 57.1% | 1.68 | 1.77 | 15% | 16,980 |
+| **M-TF15S30** | TF15 + stop 0.30 ★ WINNER | **6,653%** | 6.4% | 5.79 | 1040.7 | 54.5% | 1.66 | 2.07 | 17% | 17,069 |
+| N-TF20S30H20 | TF20 + S30 + MH20 | 6,638% | 6.3% | 5.95 | 1045.5 | 55.4% | 1.67 | 1.88 | 14% | 17,532 |
+| O-TF20S30H15 | TF20 + S30 + MH15 | 6,239% | 6.6% | 6.05 | 950.4 | 55.8% | 1.64 | 1.71 | 10% | 17,966 |
+| **P-TF15S30H20** | TF15+S30+MH20 | **6,700%** | **6.2%** | 6.00 | **1072.9** | 54.9% | 1.67 | 1.92 | 14% | 17,512 |
+| Q-TF15S30H15 | TF15 + S30 + MH15 | 6,279% | 6.5% | **6.09** | 962.6 | 55.5% | 1.65 | 1.73 | 10% | 17,948 |
+| R-TF20S25H20 | TF20 + S25 + MH20 | 6,598% | 6.4% | 5.91 | 1027.5 | 54.0% | 1.65 | 1.98 | 14% | 17,882 |
 
 ## Recency-Weighted Ranking
 
 | Rank | Var | Score | vs Base | Verdict |
 |-----:|-----|------:|--------:|---------|
-| 1 | **C-TF10** | 1.290 | +29.0% | ★ WINNER |
-| 2 | M-TF15S30 | 1.261 | +26.1% | beat base |
-| 3 | P-TF15S30H20 | 1.243 | +24.3% | beat base |
-| 4 | D-TF15 | 1.216 | +21.6% | beat base |
-| 5 | L-TF15MH20 | 1.196 | +19.6% | beat base |
-| 6 | Q-TF15S30H15 | 1.180 | +18.0% | beat base |
-| 7 | J-TF20S30 | 1.165 | +16.5% | beat base |
-| 8 | E-TF18 | 1.160 | +16.0% | beat base |
-| 9 | N-TF20S30H20 | 1.160 | +16.0% | beat base |
-| 10 | R-TF20S25H20 | 1.150 | +15.0% | beat base |
+| 1 | **M-TF15S30** | 1.090 | +9.0% | ★ WINNER |
+| 2 | P-TF15S30H20 | 1.081 | +8.1% | beat base |
+| 3 | K-TF20S25 | 1.080 | +8.0% | beat base |
+| 4 | J-TF20S30 | 1.079 | +7.9% | beat base |
+| 5 | C-TF10 | 1.078 | +7.8% | beat base |
+| 6 | B-TF20 | 1.076 | +7.6% | beat base |
+| 7 | E-TF18 | 1.075 | +7.5% | beat base |
+| 8 | D-TF15 | 1.074 | +7.4% | beat base |
+| 9 | N-TF20S30H20 | 1.072 | +7.2% | beat base |
+| 10 | R-TF20S25H20 | 1.072 | +7.2% | beat base |
+| 11 | F-TF22 | 1.070 | +7.0% | beat base |
+| 12 | L-TF15MH20 | 1.067 | +6.7% | beat base |
+| 13 | G-TF25 | 1.066 | +6.6% | beat base |
+| 14 | H-TF20MH20 | 1.058 | +5.8% | beat base |
+| 15 | Q-TF15S30H15 | 1.014 | +1.4% | beat base |
+| 16 | O-TF20S30H15 | 1.007 | +0.7% | beat base |
+| 17 | I-TF20MH15 | 0.997 | -0.3% | below base |
 
 ## Yearly Breakdown (Top 3)
 
-### C-TF10 (trail_factor=0.10) ★ WINNER
+### M-TF15S30 (trail_factor=0.15, stop_mult=0.30) ★ WINNER
 | Year | Sharpe | R:R | TP1% |
 |------|-------:|----:|-----:|
-| Y1 | 8.2 | 2.44 | 18% |
-| Y2 | 4.8 | 2.40 | 15% |
-| Y3 | 4.4 | 2.53 | 15% |
-| Y4 | 1.4 | 2.57 | 13% |
-| Y5 | 4.5 | 2.46 | 15% |
-| Y6 | 3.0 | 2.71 | 15% |
-
-### M-TF15S30 (trail_factor=0.15, stop_mult=0.30)
-| Year | Sharpe | R:R | TP1% |
-|------|-------:|----:|-----:|
-| Y1 | 8.0 | 2.62 | 16% |
-| Y2 | 4.7 | 2.55 | 14% |
-| Y3 | 4.2 | 2.72 | 13% |
-| Y4 | 0.1 | 2.61 | 11% |
-| Y5 | 4.1 | 2.58 | 14% |
-| Y6 | 2.9 | 2.82 | 14% |
+| Y1 | 10.5 | 2.03 | 21% |
+| Y2 | 7.9 | 1.95 | 17% |
+| Y3 | 6.4 | 1.94 | 16% |
+| Y4 | 6.2 | 2.09 | 15% |
+| Y5 | 6.1 | 2.04 | 17% |
+| Y6 | 5.8 | 2.21 | 18% |
 
 ### P-TF15S30H20 (trail_factor=0.15, stop_mult=0.30, max_hold=20)
 | Year | Sharpe | R:R | TP1% |
 |------|-------:|----:|-----:|
-| Y1 | 8.3 | 2.39 | 14% |
-| Y2 | 5.1 | 2.46 | 12% |
-| Y3 | 3.9 | 2.55 | 11% |
-| Y4 | 0.3 | 2.44 | 10% |
-| Y5 | 4.2 | 2.43 | 13% |
-| Y6 | 3.1 | 2.69 | 12% |
+| Y1 | 10.8 | 1.83 | 18% |
+| Y2 | 8.2 | 1.87 | 14% |
+| Y3 | 6.2 | 1.85 | 13% |
+| Y4 | 6.2 | 1.89 | 12% |
+| Y5 | 6.3 | 1.87 | 15% |
+| Y6 | 6.7 | 2.08 | 15% |
+
+### K-TF20S25 (trail_factor=0.20, stop_mult=0.25)
+| Year | Sharpe | R:R | TP1% |
+|------|-------:|----:|-----:|
+| Y1 | 10.3 | 2.07 | 20% |
+| Y2 | 7.8 | 2.00 | 17% |
+| Y3 | 6.2 | 1.96 | 15% |
+| Y4 | 5.5 | 2.14 | 15% |
+| Y5 | 6.2 | 2.07 | 16% |
+| Y6 | 6.0 | 2.24 | 17% |
 
 ## Exit Reason Breakdown
 
 | Var | stop | time | trail | tp1 | trail_runner | time_runner |
 |-----|-----:|-----:|------:|----:|-------------:|------------:|
-| A-Prod | 9,112 | 2,753 | 3,998 | 2,037 | 2,037 | 0 |
-| C-TF10 | 8,958 | 3,309 | 2,501 | 2,630 | 2,630 | 0 |
-| M-TF15S30 | 10,138 | 3,022 | 2,730 | 2,492 | 2,492 | 0 |
-| P-TF15S30H20 | 10,176 | 4,061 | 2,444 | 2,243 | 2,243 | 0 |
+| A-Prod | 5,947 | 4,238 | 1,531 | 2,434 | 2,434 | 0 |
+| M-TF15S30 | 6,614 | 4,376 | 1,093 | 2,493 | 2,493 | 0 |
+| P-TF15S30H20 | 6,610 | 5,662 | 832 | 2,204 | 2,204 | 2 |
+| K-TF20S25 | 7,080 | 4,188 | 1,238 | 2,480 | 2,480 | 0 |
 
 ## Key Findings
 
-1. **Trail factor monotonically improves from 0.30→0.10** — confirmed with correct U-RR+VWS baseline.
-   - C-TF10 beats A-Prod by **+1,840% return**, **-2.7% DD**, **+1.48 Sharpe**, **+0.56 R:R**, **+4% TP1**.
-   - Lower trail factor → fewer premature trail exits → more TP1 hits → better runners.
+1. **Baseline validated:** A-Prod = 6,427% (matches R12's 6,301% within 2%).
+   All 18 variants tested on R12-identical simulate() logic.
 
-2. **Tighter stop (0.30) synergizes well with TF15:**
-   - M-TF15S30: DD=7.9% (best), R:R=2.69, PF=1.34.
-   - P-TF15S30H20: Sharpe=4.45, near-best return 3,202%.
+2. **Differences are much smaller with correct baseline:**
+   - R3 (intra-bar) showed massive C-TF10 dominance (+118% vs base).
+   - **R4 (close-based) shows modest M-TF15S30 dominance (+226% absolute, +3.5% relative).**
+   - The apparent trail factor signal in R3 was largely an artifact of intra-bar exit mechanics.
 
-3. **All 17 variants beat baseline** — the production trail_factor=0.30 is provably suboptimal.
+3. **Winner: M-TF15S30** (trail_factor=0.15, stop_mult=0.30)
+   - Recency score: 1.090 (+9.0% vs base)
+   - Ret 6,653%, DD 6.4%, R:R 2.07, TP1% 17%
+   - Y6 Sharpe 5.8 — healthy recency performance.
 
-4. **Recency stability:** C-TF10 maintains Y5 Sharpe=4.5, Y6 Sharpe=3.0 — no sign of regime decay.
+4. **P-TF15S30H20 is the robust alternative:**
+   - Best return (6,700%), best DD (6.2%), best Calmar (1072.9).
+   - Y6 Sharpe 6.7 — strongest recent performance.
+   - Trade-off: lower TP1% (14% vs 17%) due to shorter max_hold.
 
-5. **Baseline difference from R12:** A-Prod shows 1,553% vs R12's 6,301%.
-   Cause: This script uses `worst_gain` (intra-bar low) for SL/trail checks, while R12 uses close-based `gain`.
-   Intra-bar SL is more conservative and realistic (no look-ahead within bars).
+5. **Trail factor alone has marginal impact:**
+   - TF10→TF30 spread is only ~50-140bp in return.
+   - Real alpha comes from tighter stop (0.30 vs 0.382) + shorter hold (20 vs 25).
+
+6. **16 of 17 variants beat baseline.** Only I-TF20MH15 (max_hold=15) slightly under.
 
 ## Recommendation
 
-**Deploy C-TF10** (`pre_tp1_factor=0.10`) as the next production parameter change.
-- Massive uplift in all metrics vs current TF30.
-- Y4 (worst year) still positive: Sharpe=1.4, PF=1.36.
-- Risk: Factor=0.10 means pre-TP1 trail triggers only when gains retrace to 10% of peak — very tolerant.
-  In live trading, this means holding through deeper retracements pre-TP1.
-- **Alternative:** D-TF15 for a more conservative choice (still +1,481% vs base, Sharpe 4.26).
+**M-TF15S30** (`pre_tp1_factor=0.15`, `stop_mult=0.30`) as top candidate:
+- Best recency-weighted composite score (+9.0%).
+- R:R improves from 1.76 → 2.07 (17% uplift).
+- Same max_hold=25 (minimal production change, only 2 params).
+- Risk: tighter stop (0.30 vs 0.382) increases stop-out rate by ~11%.
+
+**Conservative alternative: P-TF15S30H20** (adds max_hold=20):
+- Best absolute return, Calmar, and DD.
+- Y6 Sharpe 6.7 (strongest recency signal).
+- 3 parameter changes vs 2.
+
+**Note:** Improvements are modest (~3-4% recency uplift vs well-optimized production).
+Consider whether marginal gain justifies deployment risk.
