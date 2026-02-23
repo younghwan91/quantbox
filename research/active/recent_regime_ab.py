@@ -85,6 +85,11 @@ BARS_PER_DAY = 96
 CAP_MULT = {2: 0.3, 3: 0.5, 4: 1.5, 5: 2.0}
 SOFT_EQ = [(0.08, 0.50), (0.05, 0.70), (0.03, 0.85)]
 
+# VPVR parameters (for POC/VA — needed by U-RR+VWS baseline)
+VPVR_LOOKBACK = 672
+VPVR_NBINS = 50
+VPVR_VA_PCT = 0.70
+
 SYMBOLS_50 = [
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT', 'DOGEUSDT',
     'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'XLMUSDT', 'DOTUSDT', '1000PEPEUSDT',
@@ -129,8 +134,13 @@ class VConfig:
     steep_cap: bool = True
     vol_adj: bool = True
     soft_eq: bool = True
-    rr_size: bool = False            # Disable R:R sizing (not in production)
-    vwma_stop: str = 'off'           # Disable VWMA stop (not in production)
+
+    # U-RR+VWS features (R12 baseline)
+    rr_size: bool = True
+    rr_size_min: float = 0.5
+    rr_size_max: float = 2.0
+    vwma_stop: str = 'wide'
+    vwma_stop_mult: float = 0.50
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -306,20 +316,179 @@ def apply_mtf_filter(dirs, confs, moves, close_4h, sma_period=12, ratio=16):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# VWMA computation
+# ═══════════════════════════════════════════════════════════════════
+@numba.jit(nopython=True, cache=True)
+def compute_vwma(close: np.ndarray, volume: np.ndarray, period: int) -> np.ndarray:
+    """Volume-Weighted Moving Average."""
+    n = len(close)
+    vwma = np.full(n, np.nan)
+    pv_sum = 0.0
+    v_sum = 0.0
+    for i in range(n):
+        pv_sum += close[i] * volume[i]
+        v_sum += volume[i]
+        if i >= period:
+            pv_sum -= close[i - period] * volume[i - period]
+            v_sum -= volume[i - period]
+        if i >= period - 1 and v_sum > 0:
+            vwma[i] = pv_sum / v_sum
+    return vwma
+
+
+# ═══════════════════════════════════════════════════════════════════
+# VPVR: Volume Profile Visible Range — POC + Value Area
+# ═══════════════════════════════════════════════════════════════════
+@numba.jit(nopython=True, cache=True)
+def compute_vpvr(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    volume: np.ndarray,
+    lookback: int,
+    n_bins: int,
+    va_pct: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute rolling Volume Profile: POC, VA High, VA Low."""
+    n = len(close)
+    poc = np.full(n, np.nan)
+    va_high = np.full(n, np.nan)
+    va_low = np.full(n, np.nan)
+
+    for i in range(lookback - 1, n):
+        start = i - lookback + 1
+        p_min = low[start]
+        p_max = high[start]
+        for j in range(start + 1, i + 1):
+            if low[j] < p_min:
+                p_min = low[j]
+            if high[j] > p_max:
+                p_max = high[j]
+
+        price_range = p_max - p_min
+        if price_range < 1e-10:
+            poc[i] = close[i]
+            va_high[i] = close[i]
+            va_low[i] = close[i]
+            continue
+
+        bin_size = price_range / n_bins
+        vol_hist = np.zeros(n_bins)
+        for j in range(start, i + 1):
+            bar_vol = volume[j]
+            if bar_vol <= 0:
+                continue
+            lo_bin = int((low[j] - p_min) / bin_size)
+            hi_bin = int((high[j] - p_min) / bin_size)
+            if lo_bin < 0:
+                lo_bin = 0
+            if hi_bin >= n_bins:
+                hi_bin = n_bins - 1
+            if lo_bin > hi_bin:
+                lo_bin = hi_bin
+            n_covered = hi_bin - lo_bin + 1
+            per_bin_vol = bar_vol / n_covered
+            for b in range(lo_bin, hi_bin + 1):
+                vol_hist[b] += per_bin_vol
+
+        max_vol = -1.0
+        poc_bin = 0
+        for b in range(n_bins):
+            if vol_hist[b] > max_vol:
+                max_vol = vol_hist[b]
+                poc_bin = b
+        poc[i] = p_min + (poc_bin + 0.5) * bin_size
+
+        total_vol = 0.0
+        for b in range(n_bins):
+            total_vol += vol_hist[b]
+
+        if total_vol <= 0:
+            va_high[i] = p_max
+            va_low[i] = p_min
+            continue
+
+        va_vol_target = total_vol * va_pct
+        va_lo_bin = poc_bin
+        va_hi_bin = poc_bin
+        captured = vol_hist[poc_bin]
+
+        while captured < va_vol_target:
+            can_lo = va_lo_bin > 0
+            can_hi = va_hi_bin < n_bins - 1
+            if not can_lo and not can_hi:
+                break
+            lo_vol = vol_hist[va_lo_bin - 1] if can_lo else -1.0
+            hi_vol = vol_hist[va_hi_bin + 1] if can_hi else -1.0
+            if lo_vol >= hi_vol:
+                va_lo_bin -= 1
+                captured += vol_hist[va_lo_bin]
+            else:
+                va_hi_bin += 1
+                captured += vol_hist[va_hi_bin]
+
+        va_low[i] = p_min + va_lo_bin * bin_size
+        va_high[i] = p_min + (va_hi_bin + 1) * bin_size
+
+    return poc, va_high, va_low
+
+
+# ═══════════════════════════════════════════════════════════════════
+# BTC regime
+# ═══════════════════════════════════════════════════════════════════
+def compute_dual_confirm_regime(btc_4h_close: np.ndarray, n_15m: int) -> np.ndarray:
+    """Dual-confirm regime: +1 bull, -1 bear, 0 choppy."""
+    n_4h = len(btc_4h_close)
+    sma50 = np.full(n_4h, np.nan)
+    sma200 = np.full(n_4h, np.nan)
+    s50, s200 = 0.0, 0.0
+    for j in range(n_4h):
+        s50 += btc_4h_close[j]
+        s200 += btc_4h_close[j]
+        if j >= 50: s50 -= btc_4h_close[j - 50]
+        if j >= 200: s200 -= btc_4h_close[j - 200]
+        if j >= 49: sma50[j] = s50 / 50
+        if j >= 199: sma200[j] = s200 / 200
+
+    regime_4h = np.zeros(n_4h)
+    for j in range(n_4h):
+        if np.isnan(sma50[j]) or np.isnan(sma200[j]):
+            regime_4h[j] = 0
+        elif btc_4h_close[j] > sma50[j] and btc_4h_close[j] > sma200[j]:
+            regime_4h[j] = 1
+        elif btc_4h_close[j] < sma50[j] and btc_4h_close[j] < sma200[j]:
+            regime_4h[j] = -1
+        else:
+            regime_4h[j] = 0
+
+    regime_15m = np.zeros(n_15m)
+    for i in range(n_15m):
+        j = min(i // 16, n_4h - 1)
+        regime_15m[i] = regime_4h[j]
+    return regime_15m
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Portfolio Simulation — PBT with configurable target/trail/stop
 # ═══════════════════════════════════════════════════════════════════
 def simulate(
     sym_close, sym_high, sym_low,
     sym_dirs, sym_confs, sym_moves,
     cfg: VConfig,
+    regime: np.ndarray,
     sym_atr=None,
+    sym_vwma=None,
+    sym_poc=None,
+    sym_va_high=None,
+    sym_va_low=None,
 ) -> dict:
-    """Run portfolio sim with PBT and configurable exit params.
+    """Run portfolio sim with U-RR+VWS baseline + configurable exit params.
 
     Returns full stats + yearly breakdown for recency analysis.
     """
     symbols = sorted(sym_close.keys())
     n_bars = min(len(sym_close[s]) for s in symbols)
+    n_bars = min(n_bars, len(regime))
 
     balance = INITIAL_CAPITAL
     equity_curve = np.zeros(n_bars)
@@ -352,6 +521,18 @@ def simulate(
                 best_gain = (ep - l) / ep
 
             effective_stop = pos['move_size'] * cfg.stop_mult
+
+            # ═══ VWMA WIDE STOP (U-RR+VWS baseline) ═══
+            vw_dist = pos.get('vwma_dist', 0.0)
+            if cfg.vwma_stop != 'off' and vw_dist > 0:
+                vw_stop = max(vw_dist * cfg.vwma_stop_mult, 0.003)
+                if cfg.vwma_stop == 'replace':
+                    effective_stop = vw_stop
+                elif cfg.vwma_stop == 'tight':
+                    effective_stop = min(effective_stop, vw_stop)
+                elif cfg.vwma_stop == 'wide':
+                    effective_stop = max(effective_stop, vw_stop)
+
             target = pos['move_size'] * cfg.target_retrace
             max_hold = cfg.max_hold
 
@@ -478,7 +659,7 @@ def simulate(
         for sym in to_close:
             positions.pop(sym, None)
 
-        # ═══ Entry phase ═══
+        # ═══ Entry phase (U-RR+VWS: VWMA dist + POC dist + RR sizing) ═══
         if len(positions) < cfg.max_slots:
             candidates = []
             for sym in symbols:
@@ -491,17 +672,51 @@ def simulate(
                 confidence = int(sym_confs[sym][i])
                 move_size = float(sym_moves[sym][i])
 
+                c_entry = sym_close[sym][i]
+
+                # Read VWMA at entry
+                vwma_val = np.nan
+                vwma_dist_entry = 0.0
+                if sym_vwma is not None:
+                    vwma_arr = sym_vwma.get(sym)
+                    if vwma_arr is not None and i < len(vwma_arr):
+                        vwma_val = vwma_arr[i]
+                if not np.isnan(vwma_val):
+                    if direction == 1:
+                        vwma_dist_entry = (vwma_val - c_entry) / c_entry
+                    else:
+                        vwma_dist_entry = (c_entry - vwma_val) / c_entry
+                    vwma_dist_entry = max(vwma_dist_entry, 0.001)
+
+                # Read POC at entry (for R:R sizing)
+                poc_val = np.nan
+                poc_dist_entry = 0.0
+                if sym_poc is not None:
+                    poc_arr = sym_poc.get(sym)
+                    if poc_arr is not None and i < len(poc_arr):
+                        poc_val = poc_arr[i]
+                if not np.isnan(poc_val) and c_entry > 0:
+                    if direction == 1:
+                        poc_dist_entry = (poc_val - c_entry) / c_entry
+                    else:
+                        poc_dist_entry = (c_entry - poc_val) / c_entry
+                    poc_dist_entry = max(poc_dist_entry, 0.001)
+
                 if cfg.dir_div:
                     same = sum(1 for p in positions.values()
                                if p['direction'] == direction)
                     if same >= 2:
                         continue
 
-                candidates.append((sym, direction, confidence, move_size))
+                candidates.append((
+                    sym, direction, confidence, move_size,
+                    vwma_dist_entry, poc_dist_entry,
+                ))
 
             candidates.sort(key=lambda x: (x[2], x[3]), reverse=True)
 
-            for (sym, direction, confidence, move_size) in candidates:
+            for (sym, direction, confidence, move_size,
+                 vwma_dist_e, poc_dist_e) in candidates:
                 if len(positions) >= cfg.max_slots:
                     break
 
@@ -532,6 +747,17 @@ def simulate(
                             per_slot *= scale
                             break
 
+                # R:R-gated sizing (from U-RR+VWS)
+                if cfg.rr_size and poc_dist_e > 0:
+                    implied_target = poc_dist_e
+                    implied_stop = move_size * cfg.stop_mult
+                    if implied_stop > 0:
+                        implied_rr = implied_target / implied_stop
+                        rr_factor = max(cfg.rr_size_min,
+                                        min(0.5 + 0.5 * implied_rr, cfg.rr_size_max))
+                        per_slot *= rr_factor
+                        per_slot = min(per_slot, INITIAL_CAPITAL * 0.5)
+
                 entry_cost = EFFECTIVE_LEV * COST_PER_SIDE * per_slot
                 balance -= entry_cost
 
@@ -540,6 +766,9 @@ def simulate(
                     'move_size': move_size, 'entry_price': sym_close[sym][i],
                     'entry_bar': i, 'hold_count': 0, 'best_pnl': 0.0,
                     'notional': per_slot, 'leverage': EFFECTIVE_LEV,
+                    'entry_regime': int(regime[i]),
+                    'vwma_dist': vwma_dist_e,
+                    'poc_dist': poc_dist_e,
                 }
 
         # Equity update
@@ -869,12 +1098,11 @@ def main():
     w = 120
 
     print("=" * w)
-    print("  RECENT REGIME A/B TEST — ROUND 2: Trail Factor Fine-Tune")
+    print("  RECENT REGIME A/B TEST — ROUND 3: U-RR+VWS Baseline Fix")
     print(f"  Commit: {commit}")
     print(f"  Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"  Baseline: I-HybTight T150_S38_H25_PBT (production)")
-    print(f"  R1 Winner: G-TF20 (trail_factor=0.2), Ret=1831%, DD=10.5%, Sharpe=3.31")
-    print(f"  Focus: Fine-grained trail_factor sweep + synergy combos (MH/S)")
+    print(f"  Baseline: U-RR+VWS (R12: rr_size=True, vwma_stop='wide')")
+    print(f"  Focus: Trail factor sweep with correct baseline (VWMA+VPVR+RR)")
     print(f"  Data: {DATA_DAYS}d ({DATA_DAYS//365}yr), 50 symbols")
     print(f"  Innovation: Yearly breakdown + recency-weighted scoring (Y5-6 = 2× weight)")
     print("=" * w)
@@ -905,6 +1133,7 @@ def main():
     print(f"\n🔍 Scanning entries (conf≥{MIN_CONFIDENCE})...")
     sym_dirs, sym_confs, sym_moves = {}, {}, {}
     sym_close_d, sym_high_d, sym_low_d, sym_atr_d = {}, {}, {}, {}
+    sym_volume_d: dict[str, np.ndarray] = {}
 
     for sym, d in all_data.items():
         n = min(len(d['close']), len(btc_close))
@@ -926,13 +1155,14 @@ def main():
         sym_dirs[sym] = dirs; sym_confs[sym] = confs; sym_moves[sym] = moves
         sym_close_d[sym] = cn; sym_high_d[sym] = hn; sym_low_d[sym] = ln
         sym_atr_d[sym] = compute_atr_pct(hn, ln, cn, ATR_PERIOD)
+        sym_volume_d[sym] = vn
 
     # Left-pad all arrays to same length
     max_bars = max(len(sym_close_d[s]) for s in sym_close_d)
     all_dicts = [
         (sym_close_d, 'first'), (sym_high_d, 'first'), (sym_low_d, 'first'),
         (sym_dirs, 'zero'), (sym_confs, 'zero'), (sym_moves, 'zero'),
-        (sym_atr_d, 'nan'),
+        (sym_atr_d, 'nan'), (sym_volume_d, 'zero'),
     ]
     for sym in list(sym_close_d.keys()):
         for d_ref, fill in all_dicts:
@@ -953,6 +1183,43 @@ def main():
     print(f"  Left-padded to {max_bars} bars ({max_bars//96} days)")
     print(f"  Raw signals: {raw_signals:,}")
 
+    # ── Compute VWMA(100) per symbol ──
+    print(f"\n📈 Computing VWMA(100) per symbol...")
+    sym_vwma: dict[str, np.ndarray] = {}
+    vwma_period = 100
+    for sym in sym_close_d:
+        sym_vwma[sym] = compute_vwma(sym_close_d[sym], sym_volume_d[sym], vwma_period)
+    vwma_valid = sum(1 for s in sym_vwma if np.any(~np.isnan(sym_vwma[s])))
+    print(f"  VWMA computed for {vwma_valid}/{len(sym_vwma)} symbols")
+
+    # ── Compute VPVR (POC) per symbol — needed for R:R sizing ──
+    print(f"\n📊 Computing VPVR ({VPVR_LOOKBACK}-bar lookback, {VPVR_NBINS} bins)...")
+    sym_poc: dict[str, np.ndarray] = {}
+    sym_va_high: dict[str, np.ndarray] = {}
+    sym_va_low: dict[str, np.ndarray] = {}
+    vpvr_t0 = time.time()
+
+    for idx, sym in enumerate(sorted(sym_close_d.keys())):
+        poc_arr, vah_arr, val_arr = compute_vpvr(
+            sym_close_d[sym], sym_high_d[sym], sym_low_d[sym],
+            sym_volume_d[sym], VPVR_LOOKBACK, VPVR_NBINS, VPVR_VA_PCT,
+        )
+        sym_poc[sym] = poc_arr
+        sym_va_high[sym] = vah_arr
+        sym_va_low[sym] = val_arr
+        if (idx + 1) % 10 == 0:
+            elapsed_vpvr = time.time() - vpvr_t0
+            eta = elapsed_vpvr / (idx + 1) * (len(sym_close_d) - idx - 1)
+            print(f"  [{idx+1}/{len(sym_close_d)}] {sym} done ({elapsed_vpvr:.1f}s, ETA {eta:.0f}s)")
+
+    vpvr_elapsed = time.time() - vpvr_t0
+    poc_valid = sum(1 for s in sym_poc if np.any(~np.isnan(sym_poc[s])))
+    print(f"  VPVR computed for {poc_valid}/{len(sym_poc)} symbols in {vpvr_elapsed:.1f}s")
+
+    # ── Compute BTC regime ──
+    print(f"\n🌐 Computing regime...")
+    regime = compute_dual_confirm_regime(btc_4h_close, max_bars)
+
     # ═══════════════════ VARIANT TEST ═══════════════════
     variants = build_variants()
     print(f"\n{'═' * w}")
@@ -967,7 +1234,8 @@ def main():
         res = simulate(
             sym_close_d, sym_high_d, sym_low_d,
             sym_dirs, sym_confs, sym_moves,
-            cfg, sym_atr_d,
+            cfg, regime, sym_atr_d, sym_vwma,
+            sym_poc, sym_va_high, sym_va_low,
         )
 
         elapsed_v = time.time() - t_v
@@ -1187,7 +1455,7 @@ def main():
         'date': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
         'data_days': DATA_DAYS,
         'n_symbols': len(all_data),
-        'baseline': 'I-HybTight T150_S38_H25_PBT (production)',
+        'baseline': 'U-RR+VWS (R12: rr_size=True, vwma_stop=wide, vwma_stop_mult=0.50)',
         'focus': 'Mean reversion vs reversal, recency-weighted',
         'recency_scores': scores,
         'variants': {},
