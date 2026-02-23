@@ -505,53 +505,40 @@ def simulate(
         for sym, pos in list(positions.items()):
             pos['hold_count'] += 1
             c = sym_close[sym][i]
-            h = sym_high[sym][i]
-            l = sym_low[sym][i]
             ep = pos['entry_price']
             lev = pos['leverage']
             d = pos['direction']
             gain = (c - ep) / ep if d == 1 else (ep - c) / ep
 
-            # Intra-bar extremes (v12.5.3 worst_gain parity)
-            if d == 1:
-                worst_gain = (l - ep) / ep
-                best_gain = (h - ep) / ep
-            else:
-                worst_gain = (ep - h) / ep
-                best_gain = (ep - l) / ep
+            # ═══ STOP COMPUTATION (U-RR+VWS: VWMA wide stop) ═══
+            base_stop = pos['move_size'] * cfg.stop_mult
 
-            effective_stop = pos['move_size'] * cfg.stop_mult
-
-            # ═══ VWMA WIDE STOP (U-RR+VWS baseline) ═══
             vw_dist = pos.get('vwma_dist', 0.0)
             if cfg.vwma_stop != 'off' and vw_dist > 0:
                 vw_stop = max(vw_dist * cfg.vwma_stop_mult, 0.003)
                 if cfg.vwma_stop == 'replace':
-                    effective_stop = vw_stop
+                    base_stop = vw_stop
                 elif cfg.vwma_stop == 'tight':
-                    effective_stop = min(effective_stop, vw_stop)
+                    base_stop = min(base_stop, vw_stop)
                 elif cfg.vwma_stop == 'wide':
-                    effective_stop = max(effective_stop, vw_stop)
+                    base_stop = max(base_stop, vw_stop)
 
+            effective_stop = base_stop
+
+            # ═══ TARGET COMPUTATION ═══
             target = pos['move_size'] * cfg.target_retrace
             max_hold = cfg.max_hold
 
             # ═══ PBT Phase 1: Pre-TP1 ═══
             if cfg.partial_exit and not pos.get('tp1_hit', False):
-                # Update best_pnl with intra-bar best
-                if best_gain > pos['best_pnl']:
-                    pos['best_pnl'] = best_gain
-
-                if best_gain >= target:
-                    # TP1 hit! Partial close 50%
+                if gain >= target:
                     pos['tp1_hit'] = True
                     pos['highest_since_tp1'] = gain
                     tp1_not = pos['notional'] * cfg.partial_frac
                     rem_not = pos['notional'] - tp1_not
                     funding = lev * FUNDING_PER_BAR * tp1_not * pos['hold_count']
                     cost = lev * COST_PER_SIDE * tp1_not
-                    # Use target as TP1 exit gain (limit order at target)
-                    net = target * lev * tp1_not - cost - funding
+                    net = gain * lev * tp1_not - cost - funding
                     balance += net
                     trades.append({
                         'symbol': sym, 'direction': d,
@@ -565,23 +552,25 @@ def simulate(
                     })
                     pos['notional'] = rem_not
                     pos['tp1_bar'] = i
+                    pos['best_pnl'] = gain
                     pos['trail_floor'] = 0.0 if cfg.be_after_tp1 else -effective_stop
-                elif worst_gain < -effective_stop:
-                    # Stop loss hit
-                    _close(balance, trades, pos, sym, -effective_stop, lev,
+                    pos['stepup_active'] = False
+                elif gain < -effective_stop:
+                    _close(balance, trades, pos, sym, gain, lev,
                            'stop', to_close, i, target)
                     balance = trades[-1]['_b']
                 elif pos['hold_count'] >= max_hold:
-                    # Max hold timeout
                     _close(balance, trades, pos, sym, gain, lev,
                            'time', to_close, i, target)
                     balance = trades[-1]['_b']
-                elif (pos['best_pnl'] > target * cfg.pre_tp1_activation
-                      and worst_gain < pos['best_pnl'] * cfg.pre_tp1_factor):
-                    # Pre-TP1 trailing stop
-                    _close(balance, trades, pos, sym, worst_gain, lev,
-                           'trail', to_close, i, target)
-                    balance = trades[-1]['_b']
+                else:
+                    if gain > pos['best_pnl']:
+                        pos['best_pnl'] = gain
+                    if (pos['best_pnl'] > target * cfg.pre_tp1_activation
+                            and gain < pos['best_pnl'] * cfg.pre_tp1_factor):
+                        _close(balance, trades, pos, sym, gain, lev,
+                               'trail', to_close, i, target)
+                        balance = trades[-1]['_b']
 
             # ═══ PBT Phase 2: Runner (post-TP1) ═══
             elif cfg.partial_exit and pos.get('tp1_hit', False):
@@ -595,16 +584,21 @@ def simulate(
                     if aa is not None and i < len(aa) and not np.isnan(aa[i]):
                         atr_val = aa[i]
 
+                bars_since_tp1 = i - pos.get('tp1_bar', pos['entry_bar'])
+                target_val = pos['move_size'] * cfg.target_retrace
+
+                # Compute trail stop from highest peak
                 trail_stop = pos['highest_since_tp1'] - cfg.trail_atr * atr_val
+
+                # Apply floor
                 floor_val = pos.get('trail_floor', 0.0)
                 if trail_stop < floor_val:
                     trail_stop = floor_val
 
+                # ── Check exit ──
                 exit_runner = False
                 exit_reason = None
-                bars_since_tp1 = i - pos.get('tp1_bar', pos['entry_bar'])
-
-                if worst_gain <= trail_stop:
+                if gain <= trail_stop:
                     exit_runner = True; exit_reason = 'trail_runner'
                 elif pos['hold_count'] >= max_hold * cfg.runner_mh_mult:
                     exit_runner = True; exit_reason = 'time_runner'
@@ -613,8 +607,7 @@ def simulate(
                     tp1_bar = pos.get('tp1_bar', pos['entry_bar'])
                     funding = lev * FUNDING_PER_BAR * pos['notional'] * (i - tp1_bar)
                     cost = lev * COST_PER_SIDE * pos['notional']
-                    exit_gain = max(gain, trail_stop) if exit_reason == 'trail_runner' else gain
-                    net = exit_gain * lev * pos['notional'] - cost - funding
+                    net = gain * lev * pos['notional'] - cost - funding
                     balance += net
                     trades.append({
                         'symbol': sym, 'direction': d,
@@ -624,36 +617,30 @@ def simulate(
                         'pnl_pct': (net / pos['notional']) * 100,
                         'bars_held': pos['hold_count'],
                         'entry_bar': pos['entry_bar'],
-                        'target_gain': target,
+                        'target_gain': target_val,
                         'highest_gain': pos.get('highest_since_tp1', gain),
                         'runner_bars': bars_since_tp1,
                         '_b': balance,
                     })
                     to_close.append(sym)
             else:
-                # Non-PBT standard mode (safety fallback)
-                if best_gain > pos['best_pnl']:
-                    pos['best_pnl'] = best_gain
+                # Non-PBT fallback (R12 parity: close-based)
                 exit_reason = None
-                if best_gain >= target:
+                if gain >= target:
                     exit_reason = 'target'
-                elif worst_gain < -effective_stop:
+                elif gain < -effective_stop:
                     exit_reason = 'stop'
-                elif (pos['best_pnl'] > target * cfg.pre_tp1_activation
-                      and worst_gain < pos['best_pnl'] * cfg.pre_tp1_factor):
-                    exit_reason = 'trail'
-                elif pos['hold_count'] >= max_hold:
-                    exit_reason = 'time'
+                else:
+                    if gain > pos['best_pnl']:
+                        pos['best_pnl'] = gain
+                    if (pos['best_pnl'] > target * cfg.pre_tp1_activation
+                            and gain < pos['best_pnl'] * cfg.pre_tp1_factor):
+                        exit_reason = 'trail'
+                    elif pos['hold_count'] >= max_hold:
+                        exit_reason = 'time'
                 if exit_reason:
-                    if exit_reason == 'target':
-                        _close(balance, trades, pos, sym, target, lev,
-                               exit_reason, to_close, i, target)
-                    elif exit_reason == 'stop':
-                        _close(balance, trades, pos, sym, -effective_stop, lev,
-                               exit_reason, to_close, i, target)
-                    else:
-                        _close(balance, trades, pos, sym, gain, lev,
-                               exit_reason, to_close, i, target)
+                    _close(balance, trades, pos, sym, gain, lev,
+                           exit_reason, to_close, i, target)
                     balance = trades[-1]['_b']
 
         for sym in to_close:
