@@ -7,6 +7,7 @@ Tests:
   4. Backtest core partial: delta-based cost model
   5. Live trading parity: update_position returns 'partial_close'
   6. Combined with BTC directional: entry gate + partial exit
+  7. Pre-TP1 trailing uses worst_gain (intra-bar parity, v12.5.3)
 """
 
 import numpy as np
@@ -408,3 +409,131 @@ class TestConfigIntegration:
         )
         assert cfg.partial_exit_enabled is False
         assert cfg.rr_leverage_enabled is False
+
+
+# ════════════════════════════════════════════════════════
+#  TEST 7: Pre-TP1 Trailing Uses worst_gain (v12.5.3)
+# ════════════════════════════════════════════════════════
+
+class TestPreTP1TrailingWorstGain:
+    """Verify trailing stop uses intra-bar worst_gain, not close-based gain.
+
+    Reproduces TONUSDT 2026-02-22 incident: SHORT best_pnl=1.10%, close-based
+    gain barely survived trail level (0.34% vs 0.33%), but intra-bar high
+    already breached it. Old code exited one bar late at +0.07%.
+    """
+
+    def test_trailing_fires_on_intrabar_breach_short(self):
+        """SHORT: close survives trail level but bar high breaches it → trailing_stop.
+
+        Scenario (TONUSDT-like): entry=$100, move=6%, target=9% (1.5×).
+        Trail activation = target × 0.5 = 4.5%. Trail factor = 0.3.
+        best_pnl = 5.5% (>4.5% activation). trail_level = 5.5% × 0.3 = 1.65%.
+        Bar close = $98.20 → gain = +1.80% (survives 1.65%).
+        Bar high = $98.80 → worst_gain = +1.20% (breaches 1.65%).
+        Old code: HOLD. New code: trailing_stop.
+        """
+        cfg = RubberBandConfig(
+            partial_exit_enabled=True,
+            pre_tp1_trail_activation=0.5,
+            pre_tp1_trail_factor=0.3,
+            target_retrace=1.5,
+            max_hold=25,
+        )
+        strategy = RubberBandStrategy(cfg)
+        strategy.open_position('TONUSDT', -1, 100.0, 5000.0, 4.0, 0.06)
+
+        # Simulate bars gaining → build up best_pnl
+        # Bar 1: price drops to $94.50, best = 5.5%
+        r = strategy.update_position(
+            'TONUSDT', 94.50, current_high=95.0, current_low=94.0,
+        )
+        assert r is None  # hold — not at trail level yet
+        pos = strategy._positions['TONUSDT']
+        assert pos['best_pnl'] == pytest.approx(0.06, abs=0.001)  # (100-94)/100 = 6% from low
+
+        # Bar 2: price bounces — close survives but high breaches trail
+        # best_pnl = 6%. trail_level = 6% × 0.3 = 1.8%.
+        # close = $98.20 → gain = 1.80% (equal to trail, NOT breach)
+        # high = $98.80 → worst_gain = 1.20% (< 1.8% trail → BREACH)
+        r = strategy.update_position(
+            'TONUSDT', 98.20, current_high=98.80, current_low=97.50,
+        )
+        assert r == 'trailing_stop', \
+            "Pre-TP1 trail should fire on worst_gain breach (intra-bar high)"
+
+    def test_trailing_fires_on_intrabar_breach_long(self):
+        """LONG: close survives trail level but bar low breaches it → trailing_stop."""
+        cfg = RubberBandConfig(
+            partial_exit_enabled=True,
+            pre_tp1_trail_activation=0.5,
+            pre_tp1_trail_factor=0.3,
+            target_retrace=1.5,
+            max_hold=25,
+        )
+        strategy = RubberBandStrategy(cfg)
+        strategy.open_position('ETHUSDT', 1, 100.0, 5000.0, 4.0, 0.06)
+
+        # Bar 1: price up to $106, best_gain from high = 6%+
+        r = strategy.update_position(
+            'ETHUSDT', 105.50, current_high=106.0, current_low=105.0,
+        )
+        assert r is None
+        pos = strategy._positions['ETHUSDT']
+        assert pos['best_pnl'] == pytest.approx(0.06, abs=0.001)
+
+        # Bar 2: best_pnl=6%, trail_level=1.8%.
+        # close=$101.90 → gain=1.9% (survives).
+        # low=$101.10 → worst_gain=1.1% (< 1.8% → BREACH).
+        r = strategy.update_position(
+            'ETHUSDT', 101.90, current_high=102.50, current_low=101.10,
+        )
+        assert r == 'trailing_stop', \
+            "Pre-TP1 trail should fire on worst_gain breach (intra-bar low)"
+
+    def test_trailing_hold_when_worst_gain_survives(self):
+        """If worst_gain is above trail level, position should HOLD."""
+        cfg = RubberBandConfig(
+            partial_exit_enabled=True,
+            pre_tp1_trail_activation=0.5,
+            pre_tp1_trail_factor=0.3,
+            target_retrace=1.5,
+            max_hold=25,
+        )
+        strategy = RubberBandStrategy(cfg)
+        strategy.open_position('BTCUSDT', -1, 100.0, 5000.0, 4.0, 0.06)
+
+        # Bar 1: build best_pnl = 6%
+        strategy.update_position(
+            'BTCUSDT', 94.50, current_high=95.0, current_low=94.0,
+        )
+        # Bar 2: trail_level = 6% × 0.3 = 1.8%.
+        # close=$97.50 → gain=2.5%. high=$97.80 → worst_gain=2.2%.
+        # Both above 1.8% → HOLD.
+        r = strategy.update_position(
+            'BTCUSDT', 97.50, current_high=97.80, current_low=97.00,
+        )
+        assert r is None, "Should hold when worst_gain > trail_level"
+
+    def test_standard_mode_also_uses_worst_gain(self):
+        """Standard mode (no partial exit) also uses worst_gain for trailing."""
+        cfg = RubberBandConfig(
+            partial_exit_enabled=False,
+            pre_tp1_trail_activation=0.5,
+            pre_tp1_trail_factor=0.3,
+            target_retrace=1.5,
+            max_hold=25,
+        )
+        strategy = RubberBandStrategy(cfg)
+        strategy.open_position('BTCUSDT', -1, 100.0, 5000.0, 4.0, 0.06)
+
+        # Bar 1: best_pnl = 6% from low
+        strategy.update_position(
+            'BTCUSDT', 94.50, current_high=95.0, current_low=94.0,
+        )
+        # Bar 2: close survives, high breaches
+        r = strategy.update_position(
+            'BTCUSDT', 98.20, current_high=98.80, current_low=97.50,
+        )
+        assert r == 'trailing_stop', \
+            "Standard mode should also fire on worst_gain breach"
