@@ -184,18 +184,26 @@ print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
 \`\`\`
 quantbox/
 ├── core/                    # 핵심 컴포넌트
+│   ├── commands.py         # Discord 봇 커맨드 핸들러 (CommandsMixin)
 │   ├── config.py           # 설정 관리
 │   ├── events.py           # 이벤트 시스템
 │   ├── limit_chaser.py     # 지정가 추격 주문
 │   ├── settings.py         # 환경변수 검증 (pydantic-settings)
 │   ├── state_persistence.py # 상태 영속화 (JSON, 크래시 복구)
 │   └── terminal_ui.py      # 터미널 UI (실시간 상태 표시)
+├── execution/               # 주문 실행 및 포지션 관리
+│   ├── brackets.py         # 서버사이드 브라켓 주문 (BracketMixin)
+│   ├── positions.py        # 포지션 라이프사이클 (PositionMixin)
+│   └── reconciliation.py   # 거래소 상태 동기화 (ReconciliationMixin)
 ├── data/                    # 데이터 처리
 │   ├── cache.py            # 2단계 캐싱 (LRU + gzip)
 │   ├── downloader.py       # 바이낸스 데이터 다운로드
 │   └── real_data_loader.py # 실제 데이터 로더
 ├── strategy/               # 전략 컴포넌트
-│   ├── rubberband.py       # Rubber Band Scalper (기본, Numba 가속)
+│   ├── rubberband/         # Rubber Band Scalper 패키지
+│   │   ├── config.py       # RubberBandConfig (전략 파라미터)
+│   │   ├── signals.py      # Numba 시그널 엔진 (23개 함수)
+│   │   └── strategy.py     # RubberBandStrategy 클래스
 │   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
@@ -204,25 +212,18 @@ quantbox/
 ├── notifications/          # 알림 시스템
 │   ├── bot.py              # Discord Bot (양방향)
 │   └── discord.py          # Discord Webhook (단방향)
-└── scalper.py              # 멀티 전략 실거래 트레이더 (--strategy rubberband|elliott)
+├── utils/                   # 유틸리티
+│   └── diagnostics.py      # DiagnosticLogger (진단 로깅)
+└── scalper.py              # 코어 엔진 — init, cycle, scan, state (4개 Mixin 상속)
 
-scripts/                    # 유틸리티 스크립트
+scripts/                    # 리서치 & 유틸리티 스크립트
 ├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
 ├── download_6yr_data.py    # 6년 장기 데이터 다운로드
 ├── download_extended_data.py # 장기 과거 데이터 다운로드
 ├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
 ├── portfolio_backtest_2slot.py     # 포트폴리오 백테스트 (2-slot)
-├── universe_expansion_sweep_v2.py  # B-50 유니버스 확장 스윕
-├── filter_relaxation_ab.py         # 필터 완화 A/B 테스트 (E-3Slot winner)
-├── hybtight_validation.py          # I-HybTight 파라미터 검증
-├── reversal_ab_test.py             # Reversal A/B 테스트 (I-HybTight winner)
-├── partial_exit_trailing_ab.py     # PBT Exit A/B 테스트
-├── multi_alpha_sweep.py            # 멀티 알파 파라미터 스윕
-├── alpha_search_r2.py / r3.py      # Alpha Search R2/R3
-├── alpha_search_r5.py / r5_6yr.py / r6.py  # Alpha Search R5/R6 (Y-Kitchen → M-2SSTSX)
-├── alpha_search_r7.py              # R7 3D Exit Grid Sweep (TP×SL×ExitMode, 101 variants)
-├── alpha_search_r8.py              # R8 Stress Test (Fee/Regime/WR-Degradation, 5 configs)
-└── alpha_search_r9.py              # R9 MA/TOTAL3 Macro Filters (confirmed no improvement)
+├── alpha_search_r10~r12.py         # Alpha Search R10-R12
+└── ...                              # A/B tests, sweeps, validations
 tests/                      # 유닛 테스트 (707개, 34 파일)
 \`\`\`
 
