@@ -15,6 +15,8 @@ from quantbox.scalper import (
     RubberBandScalper,
     _save_scalper_state,
     _load_scalper_state,
+    STATE_FILE,
+    PAPER_STATE_FILE,
 )
 
 
@@ -63,6 +65,13 @@ class TestScalperState:
         with open(fpath) as f:
             data = json.load(f)
         assert data['test'] is True
+
+    def test_paper_and_live_use_different_state_files(self):
+        """Paper and live modes must use separate state files."""
+        assert STATE_FILE != PAPER_STATE_FILE
+        assert STATE_FILE.name == 'scalper_state.json'
+        assert PAPER_STATE_FILE.name == 'scalper_state_paper.json'
+        assert STATE_FILE.parent == PAPER_STATE_FILE.parent
 
 
 # ── Risk Management ──

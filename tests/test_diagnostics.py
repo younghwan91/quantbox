@@ -185,7 +185,7 @@ class TestDiagnosticLogger:
     """JSONL logging correctness."""
 
     def test_scan_writes_valid_jsonl(self):
-        from quantbox.scalper import DiagnosticLogger
+        from quantbox.utils.diagnostics import DiagnosticLogger
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dl = DiagnosticLogger(log_dir=Path(tmpdir))
@@ -210,7 +210,7 @@ class TestDiagnosticLogger:
             assert record['symbols'][0]['symbol'] == 'ETHUSDT'
 
     def test_entry_exit_writes(self):
-        from quantbox.scalper import DiagnosticLogger
+        from quantbox.utils.diagnostics import DiagnosticLogger
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dl = DiagnosticLogger(log_dir=Path(tmpdir))
@@ -235,7 +235,7 @@ class TestDiagnosticLogger:
 
     def test_graceful_failure(self):
         """Logger should not crash if path is invalid."""
-        from quantbox.scalper import DiagnosticLogger
+        from quantbox.utils.diagnostics import DiagnosticLogger
 
         dl = DiagnosticLogger(log_dir=Path('/nonexistent/path/that/wont/work'))
         # Should not raise
