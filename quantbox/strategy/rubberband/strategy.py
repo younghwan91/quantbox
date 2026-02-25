@@ -570,6 +570,12 @@ class RubberBandStrategy:
             'stoch_d': round(stoch_d_val, 2),
             'macd_hist': round(macd_hist_val, 6),
             'macd_hist_prev': round(macd_hist_prev, 6),
+            # v12.6
+            'climax_vol_ratio': round(vol_ratio, 3),
+            'climax_threshold': cfg.climax_vol_mult if cfg.climax_enabled else None,
+            'climax_fired': (cfg.climax_enabled and vol_ratio >= cfg.climax_vol_mult and vol_ratio > 0),
+            'atr_stop_enabled': cfg.atr_stop_enabled,
+            'atr_pct': round(self._last_atr_pct.get(symbol, float('nan')), 5),
         }
 
         # ── Threshold gate ──
@@ -596,6 +602,9 @@ class RubberBandStrategy:
             if cfg.macd_enabled:
                 if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
                     confidence += 1
+            # v12.6: Climax
+            if cfg.climax_enabled and vol_ratio >= cfg.climax_vol_mult and not (vol_ratio == 0):
+                confidence += 1
         elif ret > _diag_thr and btc_mom > 0:
             entry_type = 'sympathy_short'
             if rsi_val > 65: confidence += 1
@@ -610,6 +619,9 @@ class RubberBandStrategy:
             if cfg.macd_enabled:
                 if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
                     confidence += 1
+            # v12.6: Climax
+            if cfg.climax_enabled and vol_ratio >= cfg.climax_vol_mult and not (vol_ratio == 0):
+                confidence += 1
         else:
             entry_type = 'blocked'
 
