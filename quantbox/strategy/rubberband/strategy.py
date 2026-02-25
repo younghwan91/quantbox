@@ -273,6 +273,10 @@ class RubberBandStrategy:
                 if cfg.macd_enabled:
                     if macd_hist_val > macd_hist_prev and macd_hist_prev < 0:
                         confidence += 1
+                # v12.6: Climax volume filter (R21 [E] champion: vol > 3×vol_SMA)
+                if cfg.climax_enabled and vol_sma_val > 0:
+                    if vol_ratio >= cfg.climax_vol_mult:
+                        confidence += 1
                 if confidence >= cfg.min_confidence:
                     signal = 1
 
@@ -287,6 +291,10 @@ class RubberBandStrategy:
                         confidence += 1
                 if cfg.macd_enabled:
                     if macd_hist_val < macd_hist_prev and macd_hist_prev > 0:
+                        confidence += 1
+                # v12.6: Climax volume filter (R21 [E] champion: vol > 3×vol_SMA)
+                if cfg.climax_enabled and vol_sma_val > 0:
+                    if vol_ratio >= cfg.climax_vol_mult:
                         confidence += 1
                 if confidence >= cfg.min_confidence:
                     signal = -1
@@ -662,17 +670,39 @@ class RubberBandStrategy:
 
     def get_effective_stop_mult(
         self, close_prices: np.ndarray,
+        symbol: str | None = None,
+        move_size: float | None = None,
     ) -> float:
         """Compute the effective stop multiplier for the current bar.
 
-        Mirrors the HTF agree logic in compute_signals_mtf to ensure
-        live trading uses the same stop as the backtest.
+        v12.6: When atr_stop_enabled=True, returns an ATR-based dynamic stop
+        expressed as a multiplier on move_size (= atr_stop_mult * ATR% / move_size).
+        This mirrors the R21 backtest logic (champion [E]: Calmar 728→1171).
+
+        Falls back to HTF-agree fixed stop when ATR stop is disabled or
+        move_size/symbol are not provided.
+
+        Args:
+            close_prices: Recent close prices for HTF-agree computation.
+            symbol: Symbol name for ATR lookup (v12.6 ATR stop path).
+            move_size: Magnitude of the rubber-band move (v12.6 ATR stop path).
 
         Returns:
-            Effective stop multiplier (cfg.stop_mult * htf_agree_stop_mult
-            when HTF agrees, else cfg.stop_mult).
+            Effective stop multiplier. Multiplied by move_size gives SL distance.
         """
         cfg = self.config
+
+        # ── v12.6 ATR-based dynamic stop ──────────────────────────────────
+        if cfg.atr_stop_enabled and symbol is not None and move_size is not None and move_size > 0:
+            atr_pct = self._last_atr_pct.get(symbol, 0.02)
+            # Clamp the absolute SL distance
+            sl_dist = cfg.atr_stop_mult * atr_pct
+            sl_dist = max(cfg.atr_stop_floor, min(cfg.atr_stop_cap, sl_dist))
+            # Return as multiplier on move_size (parity with existing SL math:
+            # sl_distance = move_size * eff_stop → eff_stop = sl_dist / move_size)
+            return sl_dist / move_size
+
+        # ── Legacy fixed stop (HTF-agree) ─────────────────────────────────
         if cfg.htf_period <= 0 or cfg.htf_agree_stop_mult >= 1.0:
             return cfg.stop_mult
 
