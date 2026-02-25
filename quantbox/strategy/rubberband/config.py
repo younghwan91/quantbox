@@ -68,13 +68,31 @@ class RubberBandConfig:
     # MACD histogram reversal as confidence evidence (+7.6% Calmar).
     # Stochastic %K/%D cross as confidence evidence (+3.7% Calmar).
     # Combined with Fib exits: +33.6% Calmar, -8.5% DD.
-    macd_enabled: bool = True               # MACD histogram slope as evidence
+    # v12.6: DISABLED — R21 (6yr×50sym backtest) shows Stoch/MACD = noise.
+    # Removing both boosted WR 51%→62%, Calmar 728→1171.
+    macd_enabled: bool = False              # v12.6: DISABLED (WR +11pp without)
     macd_fast: int = 12                     # MACD fast EMA period
     macd_slow: int = 26                     # MACD slow EMA period
     macd_signal_period: int = 14            # MACD signal EMA period
-    stoch_enabled: bool = True              # Stochastic cross as evidence
+    stoch_enabled: bool = False             # v12.6: DISABLED (WR +11pp without)
     stoch_k_period: int = 3                 # v10.0: Faster stochastic (+5% Calmar vs 5)
     stoch_d_period: int = 3                 # Stochastic %D period
+
+    # ── v12.6 Climax Volume Filter (R21 champion [E]: Calmar 728→1171) ──
+    # Climax = extreme volume spike >N× 20-bar SMA.  Signals exhaustion at
+    # the rubber-band extreme → high-conviction mean-reversion entry.
+    # R21: Clmx×3.0 + ATR2×stop = WR 62.2%, DD 5.8%, Calmar 1171.
+    climax_enabled: bool = True             # vol spike as confidence evidence
+    climax_vol_mult: float = 3.0            # vol > 3.0×vol_SMA(20) = climax (R21 best)
+
+    # ── v12.6 ATR-Based Dynamic Stop (R21 champion [E]) ──
+    # Replaces fixed 0.382×move stop with dynamic 2×ATR%.
+    # Wider on noisy small moves (fewer ghost SLs), tighter on big moves
+    # (faster profit lock-in). R21: WR 51%→62%, Max DD 7.7%→5.8%.
+    atr_stop_enabled: bool = True           # ATR-based SL replaces fixed ×move stop
+    atr_stop_mult: float = 2.0             # SL = 2.0×ATR% (R21 best)
+    atr_stop_floor: float = 0.005          # Min SL distance 0.5% (prevent noise SL)
+    atr_stop_cap: float = 0.04             # Max SL distance 4.0% (risk control)
 
     # ── v11.4 Adaptive Threshold (Walk-Forward Validated) ──
     # Per-bar threshold = clip(atr_multiplier × ATR%(atr_period), floor, cap)

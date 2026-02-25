@@ -188,8 +188,10 @@ class PositionMixin:
         fill_price = float(result['avgPrice'])
         fill_qty = float(result['executedQty'])
 
-        # Compute effective stop (HTF agree parity)
-        eff_stop = self.strategy.get_effective_stop_mult(close_prices)
+        # Compute effective stop (v12.6: ATR-based if enabled, else HTF-agree fixed)
+        eff_stop = self.strategy.get_effective_stop_mult(
+            close_prices, symbol=symbol, move_size=move_size,
+        )
 
         notional = fill_qty * fill_price
         direction = 'LONG' if signal > 0 else 'SHORT'
