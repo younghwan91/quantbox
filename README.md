@@ -8,8 +8,13 @@
 
 ## 🌟 주요 기능
 
-### 🔥 Rubber Band Scalper (v12.4.6 — I-HybTight + M-2SSTSX)
-- **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
+### 🔥 Rubber Band Scalper (v12.6 — ATR Stop + Climax Filter)
+- **v12.6 Climax Volume Filter + ATR Stop (R21, 2026-02-24)**:
+  - **ATR-Based Stop**: `SL = clamp(2.0 × ATR_pct, 0.5%, 4.0%)` — 고정 0.382×에서 적응형 스탑으로 전환, Ghost-SL 문제 해결
+  - **Climax Volume Filter**: `vol > 3.0 × vol_SMA(20)` = +1 confidence — 극단적 거래량 폭발 시에만 진입 바이어스
+  - Stoch/MACD 비활성화 (노이즈 제거), 전체 컨피던스 체계 단순화
+  - 결과: Calmar **1,171** (+60.8% vs v12.5.3), DD **5.8%** (−24.7%), WR **62.2%** (+11.1pp), Sharpe **6.37**
+  - commit `15b94d9` (feature) + `14feeeb` (fixes: param wiring + diagnose_bar parity)
 - **v12.4 I-HybTight**: Reversal A/B test champion — deeper target + tighter trail + longer runner
   - target_retrace=1.5 (150% move), stop_mult=0.382, max_hold=25 → R:R 1.91
   - **PBT Exit**: 50% partial at TP1 → breakeven floor → ATR trailing runner
@@ -224,7 +229,7 @@ scripts/                    # 리서치 & 유틸리티 스크립트
 ├── portfolio_backtest_2slot.py     # 포트폴리오 백테스트 (2-slot)
 ├── alpha_search_r10~r12.py         # Alpha Search R10-R12
 └── ...                              # A/B tests, sweeps, validations
-tests/                      # 유닛 테스트 (707개, 34 파일)
+tests/                      # 유닛 테스트 (734개, 35 파일)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
@@ -243,9 +248,11 @@ tests/                      # 유닛 테스트 (707개, 34 파일)
 >
 > **v12.3 T100_S38_PBT + M-2SSTSX**: R8 stress-tested exit (T100/S38/PBT) + R6 combo sizing (SteepX/SoftTight/VolAdj/DirDiv). 3 critical production safety fixes: state restore for runners, bracket repair guard, failed-partial recovery.
 >
-> **v12.4 I-HybTight (Production)**: Reversal A/B test champion. target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3. R:R 1.64→1.91 (+16%), Calmar 792→834, 6yr return 6,300%. 707 tests, 15 HybTight parity tests.
+> **v12.4 I-HybTight (Production)**: Reversal A/B test champion. target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3. R:R 1.64→1.91 (+16%), Calmar 792→834, 6yr return 6,300%.
 >
 > **v12.4.1–v12.4.6 Production Hardening**: 6 hotfixes — server TP PBT qty (3 rounds), stale SL ratchet reset, missing save_state after partial, HWM/history reset on 0-position restart.
+>
+> **v12.6 Climax+ATR (Current)**: Ghost-SL 제거 (ATR 적응형 스탑). Climax filter vol×3.0으로 trade quality 극대화 (trade 수 −20%, WR +11.1pp). Calmar **1,171** (+60.8%), DD **5.8%** (6yr, 50 symbols). 734 tests.
 
 ## 🧪 테스트
 
