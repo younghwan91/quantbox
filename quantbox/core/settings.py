@@ -137,13 +137,27 @@ class QuantBoxSettings(BaseSettings):
     # ── v9.0 S+R+M Confluence Pipeline (A/B validated, winning strategy) ──
     # MACD 히스토그램 반전 + 스토캐스틱 %K/%D 크로스 = 추가 컨피던스 증거
     # Combined with Fib exits: Calmar +33.6%, DD -8.5%
-    rb_macd_enabled: bool = True              # MACD 히스토그램 기울기 컨피던스 증거
+    # v12.6: DISABLED — R21 backtest shows Stoch/MACD = noise (WR 51%→62% after removal)
+    rb_macd_enabled: bool = False             # v12.6: DISABLED (R21: noise, WR +11pp without)
     rb_macd_fast: int = 12                    # MACD fast EMA 기간
     rb_macd_slow: int = 26                    # MACD slow EMA 기간
     rb_macd_signal_period: int = 14           # MACD signal EMA 기간 (14=최적)
-    rb_stoch_enabled: bool = True             # 스토캐스틱 크로스 컨피던스 증거
+    rb_stoch_enabled: bool = False            # v12.6: DISABLED (R21: noise, WR +11pp without)
     rb_stoch_k_period: int = 3                # v10.0: 더 빠른 스토캐스틱 (+5% Calmar vs 5)
     rb_stoch_d_period: int = 3                # 스토캐스틱 %D 기간
+
+    # ── v12.6 Climax Volume Filter (R21 champion: Calmar 728→1171, DD 7.7%→5.8%) ──
+    # Climax = vol spike > N×vol_SMA(20); signals exhaustion + high conviction entry
+    rb_climax_enabled: bool = True            # 극단 거래량 스파이크 컨피던스 증거
+    rb_climax_vol_mult: float = 3.0           # vol > 3.0×vol_SMA(20) = climax 정의 (R21 best)
+
+    # ── v12.6 ATR-Based Stop (R21 champion: replaces fixed 0.382×move stop) ──
+    # Dynamic stop = atr_stop_mult × ATR%; wider on noisy small moves, tighter on big moves
+    # R21 [E] Clmx×3.0+ATR2: WR 51%→62%, Calmar 728→1171, Max DD 7.7%→5.8%
+    rb_atr_stop_enabled: bool = True          # ATR 기반 동적 손절 활성화
+    rb_atr_stop_mult: float = 2.0             # SL = 2.0×ATR% (R21 최적)
+    rb_atr_stop_floor: float = 0.005          # SL 최소 0.5% (노이즈 SL 방지)
+    rb_atr_stop_cap: float = 0.04             # SL 최대 4.0% (리스크 제한)
 
     # ── v11.4 Adaptive Threshold (Walk-Forward Validated) ──
     # Per-bar threshold = clip(atr_multiplier × ATR%(atr_period), floor, cap)
@@ -356,7 +370,7 @@ class QuantBoxSettings(BaseSettings):
             'target_conf3': self.rb_target_conf3,
             'target_conf4': self.rb_target_conf4,
             'target_conf5': self.rb_target_conf5,
-            # v9.0 S+R+M Confluence
+            # v9.0 S+R+M Confluence (v12.6: both disabled by default)
             'macd_enabled': self.rb_macd_enabled,
             'macd_fast': self.rb_macd_fast,
             'macd_slow': self.rb_macd_slow,
@@ -364,6 +378,14 @@ class QuantBoxSettings(BaseSettings):
             'stoch_enabled': self.rb_stoch_enabled,
             'stoch_k_period': self.rb_stoch_k_period,
             'stoch_d_period': self.rb_stoch_d_period,
+            # v12.6 Climax Volume Filter
+            'climax_enabled': self.rb_climax_enabled,
+            'climax_vol_mult': self.rb_climax_vol_mult,
+            # v12.6 ATR-based Stop
+            'atr_stop_enabled': self.rb_atr_stop_enabled,
+            'atr_stop_mult': self.rb_atr_stop_mult,
+            'atr_stop_floor': self.rb_atr_stop_floor,
+            'atr_stop_cap': self.rb_atr_stop_cap,
             # v7.0 Independent 4H Rubber Band
             'htf_independent_enabled': self.rb_htf_independent_enabled,
             'htf_rb_lookback': self.rb_htf_rb_lookback,
