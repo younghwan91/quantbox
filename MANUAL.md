@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
 
-> 버전: 12.4.6  
-> 최종 업데이트: 2026년 2월 21일
+> 버전: 12.6  
+> 최종 업데이트: 2026년 2월 25일
 
 ---
 
@@ -11,7 +11,7 @@
 
 1. [개요](#1-개요)
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
-3. [🔥 Rubber Band Scalper (v12.4.6)](#3-rubber-band-scalper)
+3. [🔥 Rubber Band Scalper (v12.6)](#3-rubber-band-scalper)
 3.5. [🌊 Elliott Wave Strategy (v11.6)](#35-elliott-wave-strategy)
 4. [아키텍처 이해](#4-아키텍처-이해)
 5. [핵심 모듈 상세](#5-핵심-모듈-상세)
@@ -38,19 +38,28 @@ QuantBox는 암호화폐 트레이딩을 위한 종합 퀀트 프레임워크입
 
 ---
 
-## 3. 🔥 Rubber Band Scalper (v12.4.6 — I-HybTight + Adaptive Threshold)
+## 3. 🔥 Rubber Band Scalper (v12.6 — ATR Stop + Climax Filter)
 
 ### 3.1 전략 개요
 
 Rubber Band Scalper는 **단일 자산 평균회귀** 전략입니다. ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응합니다.
 
-**v11.4 핵심 개선:**
+**v12.6 핵심 개선 (R21, 2026-02-24):**
+- **ATR-Based Stop**: `SL = clamp(2.0 × ATR_pct, 0.5%, 4.0%)` — 고정 0.382× 대신 적응형 스탑. Ghost-SL (노이즈 정도 파동에 의한 조기 스탑아웃) 해결.
+- **Climax Volume Filter**: `vol > 3.0 × vol_SMA(20)` = +1 confidence. 극단적 거래량 폭발 시에만 진입 바이어스.
+- **Stoch/MACD 비활성화**: 노이즈 필터 제거, 컨피던스 체계 단순화.
+- **결과 (6yr, 50 심볼)**: Calmar **1,171** (+60.8%), DD **5.8%** (−24.7%), WR **62.2%** (+11.1pp), Sharpe **6.37**.
+
+**v12.4 핵심 개선:**
 - **Adaptive Threshold**: 고정 3.2% → `clip(2.5 × ATR%(48), 1%, 6%)` 적응형 (OOS Sharpe 8.23, OOS/IS 1.09)
   - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
   - 변동성 높은 시장에서는 임계값 자동 확대, 낮은 시장에서는 타이트하게 조정
   - 레버리지 최적화: 1×~5× 그리드 → 현행 3.75× 유지 결정
 - **Server-Side Stop-Loss**: 바이낸스 Algo Order API로 클라이언트 크래시 방어
   - **v11.4.2 Bracket Repair**: 복원된 포지션의 누락된 SL/TP를 자동 복구
+- **v12.6 ATR-Based Stop**: `SL = clamp(2.0 × ATR_pct, 0.5%, 4.0%)` — Ghost-SL 제거
+- **v12.6 Climax Volume Filter**: vol > 3.0× vol_SMA(20) = +1 conf (R21 champion: Calmar 1171, DD 5.8%)
+- **v12.6**: Stoch/MACD 비활성화 (RB_MACD_ENABLED=false, RB_STOCH_ENABLED=false)
 - **v12.4 I-HybTight Exit**: target 1.5, stop 0.382, trail ATR×1.0, runner 3× max_hold (R:R 1.91, Calmar 834)
 - **v12.4.1–v12.4.3 Server TP PBT audit**: 6 call-sites corrected to use 50% qty in PBT mode
 - **v12.4.4**: Stale `_server_sl_pct` reset after runner SL re-placed at breakeven
@@ -100,8 +109,14 @@ python -m quantbox.scalper
 | **threshold_floor** | **0.008** | **v12.2: 최소 임계값 (0.8%, E-3Slot A/B validated)** |
 | **threshold_cap** | **0.06** | **v11.4: 최대 임계값 (6%)** |
 | target_retrace | 1.5 | v12.4: 이익 실현 — 이동 폭의 150% 되돌림 (I-HybTight champion) |
-| stop_mult | 0.382 | v12.3: 손절 — 이동 폭의 0.382배 (R:R 2.62) |
+| stop_mult | 0.382 | v12.3: 손절 기본값 (포지션 없을 때 폴백). **v12.6 ATR Stop 활성화 시 이 값은 무시됨.** |
 | max_hold | 25 | v12.4: 최대 보유 기간 (25봉 = 6.25시간, I-HybTight patience) |
+| **atr_stop_enabled** | **True** | **v12.6: ATR 기반 적응형 스탑 활성화** |
+| **atr_stop_mult** | **2.0** | **v12.6: ATR 배수 (SL = 2.0 × ATR_pct)** |
+| **atr_stop_floor** | **0.005** | **v12.6: 최소 스탑 거리 0.5%** |
+| **atr_stop_cap** | **0.04** | **v12.6: 최대 스탑 거리 4.0%** |
+| **climax_enabled** | **True** | **v12.6: Climax 거래량 필터 활성화** |
+| **climax_vol_mult** | **3.0** | **v12.6: Climax 임계값 (vol > 3.0 × vol_SMA20 = +1 conf)** |
 | stop_decay | 0.0 | 시간감쇠 비활성화 (장기 안정성 확보) |
 | htf_period | 0 | MTF SMA 기간 (0=비활성화 — 장기 성능 저하) |
 | htf_block_threshold | 0.01 | HTF 트렌드 차단 임계값 (1%, MTF 비활성 시 미사용) |
@@ -330,26 +345,36 @@ v9.0은 피보나치 기반 정밀 Exit Level과 MACD/Stochastic 컨플루언스
 | stop_mult | 0.9 | **0.786** (Fibonacci deep correction) | DD -8.5%, 타이트 스탑 |
 | R:R | 0.444 | **0.486** | +9.5% |
 
-#### 3.8.2 MACD Histogram Evidence (NEW)
+#### 3.8.2 MACD Histogram Evidence
+
+> ⚠️ **v12.6에서 비활성화** (`RB_MACD_ENABLED=false`). 노이즈 제거 — R21 검증에서 Stoch/MACD 제거 후 WR +11.1pp, Calmar +60.8%.
 
 MACD 히스토그램 기울기가 트레이드 방향과 일치하면 +1 컨피던스를 추가합니다. 단독으로 +7.6% Calmar 개선.
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| RB_MACD_ENABLED | true | MACD 히스토그램 컨피던스 증거 활성화 |
+| RB_MACD_ENABLED | **false** | **v12.6: 비활성화** (노이즈 제거) |
 | RB_MACD_FAST | 12 | MACD fast EMA 기간 |
 | RB_MACD_SLOW | 26 | MACD slow EMA 기간 |
 | RB_MACD_SIGNAL_PERIOD | 14 | MACD signal EMA 기간 (14=최적) |
 
-#### 3.8.3 Stochastic Cross Evidence (NEW)
+#### 3.8.3 Stochastic Cross Evidence
+
+> ⚠️ **v12.6에서 비활성화** (`RB_STOCH_ENABLED=false`). R21 검증에서 MACD와 함께 제거 후 성능 대폭 개선.
 
 스토캐스틱 %K가 %D를 트레이드 방향으로 크로스하면 +1 컨피던스를 추가합니다. Very fast 설정(3,3)은 스캘핑에 최적화 (v10.0: 5→3, +5% Calmar). high/low 캔들 데이터를 요구하며 라이브 파이프라인에 추가됨.
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| RB_STOCH_ENABLED | true | 스토캐스틱 크로스 컨피던스 증거 활성화 |
+| RB_STOCH_ENABLED | **false** | **v12.6: 비활성화** (노이즈 제거) |
 | RB_STOCH_K_PERIOD | 3 | v10.0: 스토캐스틱 %K 기간 (3=ultra fast, +5% Calmar vs 5) |
 | RB_STOCH_D_PERIOD | 3 | 스토캐스틱 %D 기간 |
+| **RB_CLIMAX_ENABLED** | **true** | **v12.6: Climax 거래량 필터 (vol > N× vol_SMA20 = +1 conf)** |
+| **RB_CLIMAX_VOL_MULT** | **3.0** | **v12.6: Climax 임계값 (3.0 = R21 최적, Calmar 1171)** |
+| **RB_ATR_STOP_ENABLED** | **true** | **v12.6: ATR 기반 적응형 스탑 활성화** |
+| **RB_ATR_STOP_MULT** | **2.0** | **v12.6: ATR 배수 (SL = 2.0 × ATR_pct)** |
+| **RB_ATR_STOP_FLOOR** | **0.005** | **v12.6: 최소 SL 거리 0.5% (소진 노이즈 Ghost-SL 방지)** |
+| **RB_ATR_STOP_CAP** | **0.04** | **v12.6: 최대 SL 거리 4.0% (고변동성 기에서 과다한 노숨 방지)** |
 | **RB_ATR_PERIOD** | **48** | **v11.4: ATR EMA 기간 (48 × 15분 = 12시간)** |
 | **RB_ATR_MULTIPLIER** | **2.0** | **v12.2: ATR 배수 (threshold = 2.0 × ATR%, E-3Slot A/B)** |
 | **RB_THRESHOLD_FLOOR** | **0.008** | **v12.2: 최소 임계값 (0.8%)** |
