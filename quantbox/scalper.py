@@ -280,11 +280,13 @@ class RubberBandScalper(
 
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"RubberBandScalper initialized ({mode_str})")
+        _sl_str = (f"ATR×{self.config.atr_stop_mult}[{self.config.atr_stop_floor*100:.1f}%-{self.config.atr_stop_cap*100:.0f}%]"
+                   if self.config.atr_stop_enabled else f"{self.config.stop_mult}×move")
         logger.info(
             f"Config: lookback={self.config.lookback}, "
             f"threshold={self.config.threshold}, "
             f"target={self.config.target_retrace}, "
-            f"stop={self.config.stop_mult}x, "
+            f"stop={_sl_str}, "
             f"max_hold={self.config.max_hold}"
         )
 
@@ -1094,7 +1096,7 @@ class RubberBandScalper(
                 {'name': '── 전략 설정 ──', 'value': (
                     f"진입: {_adaptive_str}\n"
                     f"TP={self.config.target_retrace} | "
-                    f"SL={self.config.stop_mult}x | "
+                    f"SL={'ATR×'+str(self.config.atr_stop_mult)+'['+str(round(self.config.atr_stop_floor*100,1))+'%-'+str(round(self.config.atr_stop_cap*100))+'%]' if self.config.atr_stop_enabled else str(self.config.stop_mult)+'×move'} | "
                     f"MaxHold={self.config.max_hold}바"
                 ), 'inline': False},
                 {'name': 'MTF', 'value': _mtf_str, 'inline': True},
@@ -1405,6 +1407,13 @@ def main():
         # v12.3: Direction Diversity
         dir_diversity_enabled=settings.rb_dir_diversity_enabled,
         max_same_direction=settings.rb_max_same_direction,
+        # v12.6: Climax Volume Filter + ATR-Based Stop
+        climax_enabled=settings.rb_climax_enabled,
+        climax_vol_mult=settings.rb_climax_vol_mult,
+        atr_stop_enabled=settings.rb_atr_stop_enabled,
+        atr_stop_mult=settings.rb_atr_stop_mult,
+        atr_stop_floor=settings.rb_atr_stop_floor,
+        atr_stop_cap=settings.rb_atr_stop_cap,
     )
 
     scalper = RubberBandScalper(
