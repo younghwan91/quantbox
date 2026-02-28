@@ -1,7 +1,9 @@
 # QuantBox Copilot Instructions (Strict Profitable Mode)
 
-이 문서는 바이낸스 USDT-M 선물 **러버밴드 스캘핑 시스템** 'QuantBox'의 절대적인 개발 지침입니다.
-우리의 목표는 **학술적 연구가 아닌, 실제 시장에서 수익을 내는 시스템**을 구축하는 것입니다.
+너의 목표는 나를 100% 전적으로 지지하기 위해 만들어졌다. 
+바이낸스 USDT-M 선물 **러버밴드 스캘핑 시스템** 'QuantBox'의 절대적인 개발 지침입니다.
+우리의 목표는 **학술적 연구가 아닌, 실제 시장에서 수익을 내는 시스템**을 구축하는 것입니다. 
+나는 항상 세력의 관점에서만 생각한다.
 
 Top Critical Rule: Always be absolutely honest and transparent about your answers, and never make up numbers or facts. If you are not 100% sure, say you don't know.
 
@@ -27,6 +29,7 @@ Top Critical Rule: Always be absolutely honest and transparent about your answer
     - 백테스트에서만 특별히 유리한 조건을 부여하는 코드는 허용되지 않는다.
     - 백테스팅은 창의적이면서, 단순히 시간이 긴 것이 중요한 것이 아니라 효율적인 탐색이 중요하다.
     - 모델을 고도화시켜 알파를 찾기를 두려워하지 말라. 하지만 하이퍼파라미터를 과최적화해선 안된다.
+    - 룩어헤드(lookahead)나 미래 데이터 누수는 절대 허용되지 않는다. 모든 시점에서 과거 데이터만 사용해야 한다.
 
 5. **모든 권한을 에이전트에게 위임**
     - 에이전트가 스스로 학습하고 개선할 수 있도록, 가능한 한 많은 권한과 자율성을 부여한다.
@@ -129,3 +132,34 @@ Cross 4x 포지션에서 leverage를 기본값 1로 변경 시도 → Binance AP
 
 4. **Position-Mutating API Audit (포지션 변경 API 감사)**
    - `futures_change_leverage()`, `futures_change_margin_type()` 등 포지션 구조를 변경하는 API는 **오직 신규 진입(entry) 시에만 호출**한다. 포지션이 열려 있는 상태에서 호출하면 예측 불가능한 거부가 발생할 수 있다.
+
+### Incident #2: 4h MTF Lookahead Bias (2026-02-26, v12.6.1 발견)
+
+**사건:** `apply_mtf_confirmation()`이 15m 바를 4h 바로 매핑할 때 `j = i // ratio`를 사용했다.
+이 인덱스 `j`는 **현재 진행 중인** 4h 바를 가리키며, `close_4h[j]`는 해당 바의 **최종 종가** (미래 데이터)이다.
+라이브에서는 Binance가 developing bar의 **현재 시점 가격**을 반환하므로 lookahead가 없지만, 백테스트에서는 bar-end close를 사용 → **체계적 미래 정보 유출**.
+
+**영향:**
+- 패리티 백테스트: 12 trades / 83.3% WR (lookahead) → 28 trades / 42.9% WR (fix) → 라이브 25 trades / 36% WR와 근접
+- 6년 전체 백테스트(`r15`, `r16`, `signals.py`): 모든 MTF 필터 결과가 부풀려짐 → 재실행 필요
+- BTC crash 구간에서 4h bar가 최종적으로 하락 마감 → LONG 차단. 하지만 bar 초반에는 가격이 SMA 위 → 라이브는 LONG 허용
+
+**근본 원인:**
+1. 멀티 타임프레임 데이터를 cross-reference할 때 "완성된 바만 참조" 원칙이 없었다.
+2. `i // ratio`가 직관적으로 올바르게 보이지만, 실제로는 developing bar의 final close를 사용하는 lookahead.
+3. 백테스트 결과가 비정상적으로 높은 WR을 보여도, 전략이 원래 좋다고 믿고 검증하지 않았다.
+
+**영구 원칙:**
+
+1. **Completed Bars Only (완성된 바만 참조)**
+   - 타임프레임 간 참조(15m → 4h, 15m → 1d 등)에서는 반드시 **마지막으로 완성된** 상위 타임프레임 바만 사용한다.
+   - `j = i // ratio` (현재 developing bar) 대신 `j = (i // ratio) - 1` (마지막 완성된 bar)을 사용한다.
+   - 예외: 동일 타임프레임 내에서 SMA 등 후행 지표 계산은 현재 바 포함 가능 (이미 close가 확정).
+
+2. **Cross-Timeframe Audit (교차 타임프레임 감사)**
+   - 새로운 상위 타임프레임 데이터를 참조하는 로직 추가 시, 반드시 "이 바가 아직 진행 중일 때 이 값을 알 수 있는가?" 질문을 던진다.
+   - `test_mtf_lookahead.py`의 3가지 시나리오(mid-bar, boundary, reversal)로 회귀 테스트한다.
+
+3. **Backtest WR Sanity Check (백테스트 WR 정상성 검증)**
+   - 백테스트 WR이 라이브 WR보다 2배 이상 높으면 **lookahead bias**를 즉시 의심한다.
+   - 특히 MTF 필터, 상위 타임프레임 참조, 미래 데이터 참조 가능한 모든 지점을 점검한다.
