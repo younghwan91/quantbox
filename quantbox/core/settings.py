@@ -239,6 +239,47 @@ class QuantBoxSettings(BaseSettings):
     rb_dir_diversity_enabled: bool = True     # Prevent concentrated same-direction
     rb_max_same_direction: int = 2            # Max positions in same direction
 
+    # ══════════════════════════════════════════════════════════════════
+    #  VolStraddle Strategy Parameters (R35 A1-D50)
+    # ══════════════════════════════════════════════════════════════════
+    # VR compression detector with multi-TF (15m/1h/4h) signals.
+    # OOS validated: N=799 (D_mom8), EV=+29.3bp, PF=1.376, t=3.48.
+
+    # ── VR Computation ──
+    vs_vr_short: int = 7                     # Short ATR period for VR
+    vs_vr_long: int = 50                     # Long ATR period for VR
+
+    # ── D_mom8 Parameters ──
+    vs_d_vr_threshold: float = 0.50          # A1-D50: VR entry threshold (was 0.45)
+    vs_d_sl: float = 0.01                    # 1% stop loss
+    vs_d_tp: float = 0.05                    # 5% take profit
+    vs_momentum_period: int = 8              # Momentum lookback for direction
+
+    # ── S_d8 Parameters (Phase 2 — requires Binance Hedge Mode) ──
+    vs_s_vr_threshold: float = 0.55          # S VR entry threshold
+    vs_s_squeeze_dur: int = 8                # Min squeeze duration
+    vs_s_sl: float = 0.015                   # 1.5% SL per straddle leg
+    vs_s_tp: float = 0.05                    # 5% TP per straddle leg
+    vs_straddle_enabled: bool = False        # Disabled until hedge mode
+
+    # ── Max Hold (bars at each TF, ≈ 48h real-time) ──
+    vs_max_hold_15m: int = 192               # 192 × 15m = 48h
+    vs_max_hold_1h: int = 48                 # 48 × 1h = 48h
+    vs_max_hold_4h: int = 12                 # 12 × 4h = 48h
+
+    # ── Multi-TF Control ──
+    vs_enable_15m: bool = True
+    vs_enable_1h: bool = True
+    vs_enable_4h: bool = True
+
+    # ── Position Sizing ──
+    vs_base_leverage: float = 1.5            # Flat leverage
+    vs_max_leverage: float = 20.0            # Hard cap
+    vs_max_concurrent: int = 2               # Max simultaneous positions
+
+    # ── Symbol Whitelist (shared with RB by default) ──
+    vs_symbol_whitelist: str = ''             # Empty = use RB whitelist
+
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부
