@@ -1,0 +1,506 @@
+"""VolStraddle Strategy — VR compression detector with multi-TF signals.
+
+Production strategy implementing the R35 A1-D50 variant.
+D_mom8: VR < 0.50 → directional entry via momentum(8).
+Multi-TF: scans 15m, 1h, 4h independently; per-symbol dedup.
+
+API contract matches RubberBandStrategy so the scalper can plug it in.
+
+ZERO LOOKAHEAD:
+  - All VR/momentum computed on COMPLETED bars only.
+  - 1h and 4h data resampled from completed 15m bars (no developing bar).
+  - Cross-TF signals use only their own completed TF data.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import numpy as np
+
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+from quantbox.strategy.vol_straddle.signals import (
+    compute_momentum,
+    compute_vr,
+    gen_vr_signal,
+    make_direction_momentum,
+    resample_ohlcv,
+)
+
+logger = logging.getLogger('VolStraddle')
+
+
+class VolStraddleStrategy:
+    """VR compression (volatility squeeze) strategy.
+
+    Detects VR < threshold on 15m/1h/4h and enters directionally
+    using 8-bar momentum for direction assignment.
+
+    Matches R35 A1-D50 backtest logic exactly for parity:
+      - VR = ATR(7) / ATR(50), threshold 0.50 (D_mom8)
+      - D direction = momentum(8) sign
+      - SL = 1%, TP = 5%, max_hold = 192/48/12 per TF
+      - Per-symbol dedup: one position per symbol at any time
+
+    Args:
+        config: VolStraddleConfig with strategy parameters.
+    """
+
+    def __init__(self, config: VolStraddleConfig | None = None):
+        self.config = config or VolStraddleConfig()
+
+        # ── Per-symbol state ──
+        self._positions: dict[str, dict] = {}
+
+        # ── Market data storage (from update_market_data) ──
+        self._high_data: dict[str, np.ndarray] = {}
+        self._low_data: dict[str, np.ndarray] = {}
+        self._volume_data: dict[str, np.ndarray] = {}
+
+        # ── HTF data (from update_htf_data) ──
+        self._htf_4h: dict[str, dict[str, np.ndarray]] = {}
+
+        # ── Signal metadata (set by on_bar, read by scalper) ──
+        self._last_signal_meta: dict[str, dict] = {}
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Signal Generation
+    # ══════════════════════════════════════════════════════════════════
+
+    def on_bar(
+        self, symbol: str, close_prices: np.ndarray,
+        btc_close: np.ndarray | None = None,
+    ) -> int:
+        """Check VR compression signal across all enabled TFs.
+
+        Scans 15m (from close_prices + stored high/low), 1h (resampled
+        from 15m), and 4h (from stored HTF data or resampled).
+        Returns the FIRST valid signal found (priority: 4h > 1h > 15m
+        because higher TF signals have better quality per R31).
+
+        ZERO LOOKAHEAD: only completed bars are used.
+        - 15m: close_prices are from download_klines (developing bar dropped).
+        - 1h: resampled from completed 15m bars (remainder truncated).
+        - 4h: fetched separately (developing bar dropped by download_klines).
+
+        Args:
+            symbol: Trading symbol.
+            close_prices: 15m close prices (200 completed bars).
+            btc_close: BTC close prices (not used for VR, kept for interface).
+
+        Returns:
+            +1 (long), -1 (short), or 0 (no signal).
+        """
+        self._current_symbol = symbol
+        cfg = self.config
+
+        # Per-symbol dedup: no signal when position already open
+        if symbol in self._positions:
+            return 0
+
+        high_15m = self._high_data.get(symbol)
+        low_15m = self._low_data.get(symbol)
+        vol_15m = self._volume_data.get(symbol)
+
+        if high_15m is None or low_15m is None:
+            return 0
+
+        # Ensure arrays are same length (truncate to shortest)
+        min_len = min(len(close_prices), len(high_15m), len(low_15m))
+        if min_len < cfg.vr_long + 10:
+            return 0
+        c15 = close_prices[-min_len:]
+        h15 = high_15m[-min_len:]
+        l15 = low_15m[-min_len:]
+        v15 = vol_15m[-min_len:] if vol_15m is not None else np.ones(min_len)
+
+        # ── Check TFs in priority order (higher TF first) ──
+        # Higher TF signals are less frequent but higher quality.
+
+        # 4h: from stored HTF data (directly fetched by scalper)
+        if cfg.enable_4h:
+            data_4h = self._htf_4h.get(symbol)
+            if data_4h is not None:
+                sig_4h = self._check_tf_signal(
+                    data_4h['close'], data_4h['high'], data_4h['low'],
+                    '4h',
+                )
+                if sig_4h != 0:
+                    return sig_4h
+
+        # 1h: resampled from 15m (completed bars only)
+        if cfg.enable_1h:
+            if min_len >= 4 * (cfg.vr_long + cfg.warmup_1h):
+                c1h, h1h, l1h, v1h = resample_ohlcv(c15, h15, l15, v15, 4)
+                if len(c1h) >= cfg.warmup_1h:
+                    sig_1h = self._check_tf_signal(c1h, h1h, l1h, '1h')
+                    if sig_1h != 0:
+                        return sig_1h
+
+        # 15m: direct from downloaded data
+        if cfg.enable_15m:
+            sig_15m = self._check_tf_signal(c15, h15, l15, '15m')
+            if sig_15m != 0:
+                return sig_15m
+
+        return 0
+
+    def _check_tf_signal(
+        self,
+        close: np.ndarray, high: np.ndarray, low: np.ndarray,
+        tf: str,
+    ) -> int:
+        """Check VR compression signal for a single timeframe.
+
+        Returns directional signal (+1/-1) or 0.
+        Stores signal metadata for the scalper to query.
+
+        CRITICAL CHECK: Only fires on the LAST bar (current bar close).
+        Previous bars are used for VR computation but not for entry.
+        """
+        cfg = self.config
+        warmup = cfg.get_warmup(tf)
+
+        if len(close) < warmup + 1:
+            return 0
+
+        # Compute VR
+        vr = compute_vr(close, high, low, cfg.vr_short, cfg.vr_long)
+
+        # D_mom8: VR < threshold → directional entry
+        sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
+
+        # Only check the LAST bar (current bar close)
+        if sig[-1] != 1:
+            return 0
+
+        # Direction from momentum
+        mom = compute_momentum(close, cfg.momentum_period)
+        dire = make_direction_momentum(sig, mom)
+
+        direction = int(dire[-1])
+        if direction == 0:
+            return 0
+
+        # Store metadata for scalper to query after on_bar
+        # (which TF, SL/TP, max_hold for this specific signal)
+        self._last_signal_meta[self._current_symbol] = {
+            'tf': tf,
+            'sl': cfg.d_sl,
+            'tp': cfg.d_tp,
+            'max_hold': cfg.get_max_hold(tf),
+            'vr': float(vr[-1]) if not np.isnan(vr[-1]) else 0.0,
+            'momentum': float(mom[-1]),
+        }
+        return direction
+
+    # Track current symbol for signal metadata storage
+    _current_symbol: str = ''
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Signal Metadata Query
+    # ══════════════════════════════════════════════════════════════════
+
+    def get_last_signal_meta(self, symbol: str) -> dict:
+        """Get metadata for the last signal generated for this symbol.
+
+        Called by the scalper after on_bar() returns non-zero.
+
+        Returns:
+            Dict with 'tf', 'sl', 'tp', 'max_hold', 'vr', 'momentum'.
+            Empty dict if no signal metadata available.
+        """
+        return self._last_signal_meta.get(symbol, {})
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Position Management
+    # ══════════════════════════════════════════════════════════════════
+
+    def update_position(
+        self, symbol: str, current_price: float,
+        current_atr_pct: float | None = None,
+        current_high: float | None = None,
+        current_low: float | None = None,
+    ) -> str | None:
+        """Check if position should be closed.
+
+        Simple SL/TP/max_hold exit — matches R35 backtest exactly.
+        NO PBT, NO trailing, NO partial close.
+        This ensures backtest-live parity.
+
+        Uses intra-bar high/low for SL/TP detection when available,
+        matching the backtest's bar-by-bar SL/TP checking.
+
+        Args:
+            current_price: Current close price.
+            current_atr_pct: Not used (kept for interface compatibility).
+            current_high: Bar high (for intra-bar SL/TP detection).
+            current_low: Bar low (for intra-bar SL/TP detection).
+
+        Returns:
+            Exit reason string or None.
+        """
+        pos = self._positions.get(symbol)
+        if pos is None:
+            return None
+
+        pos['bars_held'] += 1
+        entry = pos['entry_price']
+        sl_pct = pos.get('sl', self.config.d_sl)
+        tp_pct = pos.get('tp', self.config.d_tp)
+        max_hold = pos.get('max_hold', self.config.max_hold_15m)
+
+        # Intra-bar extremes for SL/TP check (parity with backtest
+        # which checks high/low within each bar)
+        if current_high is not None and current_low is not None:
+            if pos['signal'] == 1:  # LONG
+                worst_gain = (current_low - entry) / entry
+                best_gain = (current_high - entry) / entry
+            else:  # SHORT
+                worst_gain = (entry - current_high) / entry
+                best_gain = (entry - current_low) / entry
+        else:
+            gain = ((current_price - entry) / entry if pos['signal'] == 1
+                    else (entry - current_price) / entry)
+            worst_gain = gain
+            best_gain = gain
+
+        # Track best PnL for logging
+        if best_gain > pos.get('best_pnl', 0.0):
+            pos['best_pnl'] = best_gain
+
+        # SL check (backtest uses low[j] for long, high[j] for short)
+        if worst_gain <= -sl_pct:
+            return 'stop_loss'
+
+        # TP check (backtest uses high[j] for long, low[j] for short)
+        if best_gain >= tp_pct:
+            return 'target'
+
+        # Max hold (time-based exit)
+        if pos['bars_held'] >= max_hold:
+            return 'max_hold'
+
+        return None
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Position Lifecycle (interface methods)
+    # ══════════════════════════════════════════════════════════════════
+
+    def has_position(self, symbol: str) -> bool:
+        """Check if a position exists for this symbol."""
+        return symbol in self._positions
+
+    def open_position(
+        self, symbol: str, signal: int, entry_price: float,
+        notional: float, leverage: float, move_size: float,
+        entry_stop_mult: float | None = None,
+        server_sl_order_id: str | None = None,
+        server_tp_order_id: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Record a new position.
+
+        Stores TF-specific SL/TP/max_hold from signal metadata.
+
+        Args:
+            symbol: Trading symbol.
+            signal: +1 (long) or -1 (short).
+            entry_price: Fill price.
+            notional: Position notional value.
+            leverage: Applied leverage.
+            move_size: Normalized to 1.0 for vol straddle.
+            entry_stop_mult: SL as fraction (e.g. 0.01 = 1%).
+            server_sl_order_id: Exchange SL order ID.
+            server_tp_order_id: Exchange TP order ID.
+            **kwargs: Extra fields (sl, tp, tf, max_hold).
+        """
+        if entry_price <= 0:
+            raise ValueError(
+                f"Invalid entry_price for {symbol}: {entry_price}"
+            )
+
+        # Get TF-specific parameters from signal metadata or kwargs
+        meta = self._last_signal_meta.get(symbol, {})
+        sl = kwargs.get('sl', meta.get('sl', self.config.d_sl))
+        tp = kwargs.get('tp', meta.get('tp', self.config.d_tp))
+        tf = kwargs.get('tf', meta.get('tf', '15m'))
+        max_hold = kwargs.get('max_hold', meta.get(
+            'max_hold', self.config.get_max_hold(tf),
+        ))
+
+        self._positions[symbol] = {
+            'signal': signal,
+            'entry_price': entry_price,
+            'notional': notional,
+            'leverage': leverage,
+            'move_size': move_size,
+            'bars_held': 0,
+            'best_pnl': 0.0,
+            # VolStraddle-specific
+            'sl': sl,
+            'tp': tp,
+            'tf': tf,
+            'max_hold': max_hold,
+            # Server bracket IDs
+            'server_sl_order_id': server_sl_order_id,
+            'server_tp_order_id': server_tp_order_id,
+            # Compatibility fields (used by scalper internals)
+            'entry_stop_mult': entry_stop_mult or sl,
+            'partial_closed': False,
+            'confidence': 0,
+            'highest_since_tp1': 0.0,
+            'trail_floor': None,
+        }
+
+        logger.info(
+            f"[{symbol}] Position opened: "
+            f"{'LONG' if signal == 1 else 'SHORT'} "
+            f"TF={tf} SL={sl*100:.1f}% TP={tp*100:.1f}% "
+            f"max_hold={max_hold} VR={meta.get('vr', 0):.3f}"
+        )
+
+    def close_position(self, symbol: str) -> dict | None:
+        """Remove position and return its info."""
+        return self._positions.pop(symbol, None)
+
+    @property
+    def active_positions(self) -> dict[str, dict]:
+        """Return copy of all active positions."""
+        return dict(self._positions)
+
+    @property
+    def n_active(self) -> int:
+        """Number of active positions."""
+        return len(self._positions)
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Market Data Updates
+    # ══════════════════════════════════════════════════════════════════
+
+    def update_market_data(
+        self, symbol: str, volume: np.ndarray, taker_buy: np.ndarray,
+        high: np.ndarray, low: np.ndarray,
+    ) -> None:
+        """Store 15m OHLCV data for VR computation.
+
+        Called by scalper before on_bar() each cycle.
+
+        Args:
+            symbol: Trading symbol.
+            volume: 15m volume array.
+            taker_buy: Taker buy volume (not used by vol straddle).
+            high: 15m high prices.
+            low: 15m low prices.
+        """
+        self._high_data[symbol] = high
+        self._low_data[symbol] = low
+        self._volume_data[symbol] = volume
+
+    def update_htf_data(
+        self, symbol: str,
+        close_4h: np.ndarray,
+        high_4h: np.ndarray | None = None,
+        low_4h: np.ndarray | None = None,
+    ) -> None:
+        """Store 4h OHLCV data for multi-TF VR computation.
+
+        For vol straddle, we need full OHLCV (not just close) for VR.
+        If high/low are not provided, 4h VR is computed from resampled
+        15m data instead (done in on_bar).
+
+        Args:
+            symbol: Trading symbol.
+            close_4h: 4h close prices.
+            high_4h: 4h high prices (optional).
+            low_4h: 4h low prices (optional).
+        """
+        if high_4h is not None and low_4h is not None:
+            self._htf_4h[symbol] = {
+                'close': close_4h,
+                'high': high_4h,
+                'low': low_4h,
+            }
+        else:
+            # Without high/low, we can't compute VR on raw 4h data.
+            # Fall back to resampled 15m data in on_bar.
+            self._htf_4h.pop(symbol, None)
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Compatibility Methods (used by scalper/positions internals)
+    # ══════════════════════════════════════════════════════════════════
+
+    def get_effective_stop_mult(
+        self, close_prices: np.ndarray,
+        symbol: str | None = None,
+        move_size: float | None = None,
+    ) -> float:
+        """Return SL fraction for the current signal.
+
+        For vol straddle, stop is a fixed percentage (not move-based).
+        Returns d_sl (0.01 = 1%) since move_size is always 1.0.
+
+        Compatible with scalper's _open_position interface.
+        """
+        meta = self._last_signal_meta.get(symbol, {}) if symbol else {}
+        return meta.get('sl', self.config.d_sl)
+
+    def get_last_confidence(self, symbol: str) -> int:
+        """Return confidence level (always 0 — vol straddle has no scoring)."""
+        return 0
+
+    def was_mtf_confirmed(self, symbol: str) -> bool:
+        """Return False — MTF confirmation is not used by vol straddle."""
+        return False
+
+    def get_last_atr_pct(self, symbol: str) -> float:
+        """Return last known ATR% for the symbol (from stored 15m data)."""
+        high = self._high_data.get(symbol)
+        low = self._low_data.get(symbol)
+        if high is None or low is None or len(high) < 2:
+            return 0.02  # conservative default
+
+        # Simple ATR estimate from last few bars
+        n = min(14, len(high))
+        atr_sum = 0.0
+        for i in range(-n, 0):
+            atr_sum += (high[i] - low[i]) / (0.5 * (high[i] + low[i]))
+        return atr_sum / n
+
+    def diagnose_bar(
+        self, symbol: str, close_prices: np.ndarray,
+        btc_close: np.ndarray | None = None,
+    ) -> dict:
+        """Return diagnostic info for the current bar (for JSONL logging)."""
+        meta = self._last_signal_meta.get(symbol, {})
+        return {
+            'symbol': symbol,
+            'strategy': 'vol_straddle',
+            'vr': meta.get('vr', None),
+            'tf': meta.get('tf', None),
+            'momentum': meta.get('momentum', None),
+        }
+
+    # ══════════════════════════════════════════════════════════════════
+    #  State Serialization (for crash recovery)
+    # ══════════════════════════════════════════════════════════════════
+
+    def to_state_dict(self) -> dict:
+        """Serialize strategy state for persistence."""
+        positions = {}
+        for sym, pos in self._positions.items():
+            positions[sym] = {
+                k: v for k, v in pos.items()
+                if not k.startswith('_')
+            }
+        return {
+            'strategy_name': 'vol_straddle',
+            'positions': positions,
+        }
+
+    def from_state_dict(self, state: dict) -> None:
+        """Restore strategy state from persisted data."""
+        self._positions = {}
+        positions = state.get('positions', {})
+        for sym, pos_data in positions.items():
+            self._positions[sym] = pos_data

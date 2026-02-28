@@ -1,12 +1,21 @@
 # QuantBox 📈
 
-**암호화폐 Rubber Band Scalper + Elliott Wave — Binance USDT-M Futures**
+**암호화폐 Rubber Band Scalper + Elliott Wave + VolStraddle — Binance USDT-M Futures**
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 
-멀티 전략 스캘핑 프레임워크 (Rubber Band 15분봉 + Elliott Wave 4h봉, Numba 가속)
+멀티 전략 스켈링 프레임워크 (Rubber Band 15분봉 + Elliott Wave 4h봉 + VolStraddle VR 압축 감지, Numba 가속)
 
 ## 🌟 주요 기능
+
+### 🎯 VolStraddle — VR Compression Detector (A1-D50)
+- **Volatility Ratio (VR) 압축 감지**: `VR = ATR(7)/ATR(50) < 0.50` — 변동성 압축 후 폭발 포착
+- **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
+- **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정
+- **백테스트 파리티**: SL=1%, TP=5%, MaxHold=48h (타임프레임별 192/48/12바)
+- **R35 OOS 결과**: N=799, EV=+29.3bp, PF=1.376, t=3.48
+- **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
+- **Phase 2 예정**: S_d8 스트래들 (양방향 동시 진입, Binance Hedge Mode 필요)
 
 ### 🔥 Rubber Band Scalper (v12.6 — ATR Stop + Climax Filter)
 - **v12.6 Climax Volume Filter + ATR Stop (R21, 2026-02-24)**:
@@ -209,6 +218,10 @@ quantbox/
 │   │   ├── config.py       # RubberBandConfig (전략 파라미터)
 │   │   ├── signals.py      # Numba 시그널 엔진 (23개 함수)
 │   │   └── strategy.py     # RubberBandStrategy 클래스
+│   ├── vol_straddle/       # VolStraddle VR 압축 감지기 (A1-D50)
+│   │   ├── config.py       # VolStraddleConfig (R35 락 파라미터)
+│   │   ├── signals.py      # Numba VR/모멘텀/리샘플링 (8개 함수)
+│   │   └── strategy.py     # VolStraddleStrategy 클래스
 │   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
@@ -229,7 +242,7 @@ scripts/                    # 리서치 & 유틸리티 스크립트
 ├── portfolio_backtest_2slot.py     # 포트폴리오 백테스트 (2-slot)
 ├── alpha_search_r10~r12.py         # Alpha Search R10-R12
 └── ...                              # A/B tests, sweeps, validations
-tests/                      # 유닛 테스트 (734개, 35 파일)
+tests/                      # 유닛 테스트 (775개, 36 파일)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
@@ -252,7 +265,7 @@ tests/                      # 유닛 테스트 (734개, 35 파일)
 >
 > **v12.4.1–v12.4.6 Production Hardening**: 6 hotfixes — server TP PBT qty (3 rounds), stale SL ratchet reset, missing save_state after partial, HWM/history reset on 0-position restart.
 >
-> **v12.6 Climax+ATR (Current)**: Ghost-SL 제거 (ATR 적응형 스탑). Climax filter vol×3.0으로 trade quality 극대화 (trade 수 −20%, WR +11.1pp). Calmar **1,171** (+60.8%), DD **5.8%** (6yr, 50 symbols). 734 tests.
+> **v12.6 Climax+ATR (Current)**: Ghost-SL 제거 (ATR 적응형 스탑). Climax filter vol×3.0으로 trade quality 극대화 (trade 수 −20%, WR +11.1pp). Calmar **1,171** (+60.8%), DD **5.8%** (6yr, 50 symbols). 775 tests.
 
 ## 🧪 테스트
 
