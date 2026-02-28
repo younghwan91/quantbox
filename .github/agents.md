@@ -21,6 +21,8 @@ QuantBox v12.4.6는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀�
 **v9.0: Fibonacci + S+R+M Confluence** — target 0.382, stop 0.786, MACD(12,26,14), Stochastic(3,3).
 **v12.3: T100_S38_PBT + M-2SSTSX** — R8 stress-tested exit + R6 combo sizing. Production safety fixes.
 **v12.4.6: Production Hardening** — 6 hotfixes: Server TP PBT qty audit (v12.4.1–3), stale SL ratchet reset (v12.4.4), missing save_state after partial (v12.4.5), HWM/history reset on 0-position restart (v12.4.6).
+**v12.6: Climax Volume Filter + ATR Dynamic Stop** — climax_ratio≥3.0 진입 차단, ATR 기반 동적 손절.
+**v12.6.1: 4h MTF Lookahead Fix** — `apply_mtf_confirmation()`이 진행 중인 4h 바의 최종 종가(미래 데이터)를 사용하던 버그 수정. 마지막 완성된 4h 바만 참조하도록 변경. 백테스트 WR 83%→43%로 정상화, 라이브(36%)와 근접. **R22 결과: lookahead가 전체 알파의 원천이었음. 수정 후 PF=0.877 (zero cost, 6yr, 436K trades). 15m 러버밴드 평균회귀 시그널에 이론적 엣지 없음.**
 **v12.4: I-HybTight** — Reversal A/B champion: target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3.0. R:R 1.91, Calmar 834, 6yr return 6,300%.
 **v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
 
@@ -335,6 +337,7 @@ else:
 - [ ] **v12.4.6**: 0 포지션 복원 시 HWM/trade_history 리셋 (경과 손실 세션 전이 방지)
 - [ ] 로그 파일 로테이션 — RotatingFileHandler 50MB/5백업
 - [ ] **v11.4.2 Bracket Repair** — 복원된 포지션의 누락 SL/TP 자동 배치 (`_sync_server_orders`)
+- [ ] **Ghost Fill Audit (P1)** — ghost reconcile 발생 시 fill time/qty/realizedPnl/commission/orderId + 트리거 주문 정보 전체 로깅 (`_reconcile_positions`)
 
 ### 4.5 실거래-백테스트 패리티
 - [x] 동일 신호 로직 (`compute_signals_mtf`)
@@ -347,6 +350,7 @@ else:
 - [x] Partial exit: `_partial_close_position()` 라이브 부분 청산 ↔ `_backtest_core_partial()` 백테스트 부분 청산 패리티
 - [x] R:R-gated leverage: `compute_rr_gated_leverage()` 라이브 ↔ `apply_rr_gated_leverage()` 백테스트 패리티
 - [x] **v7.0 MTF Confirmation**: `apply_mtf_confirmation()` 백테스트 ↔ `_scan_entries()` 라이브 4h SMA 필터 패리티
+- [x] **v7.0 MTF 4h Lookahead Fix (v12.6.1)**: `apply_mtf_confirmation()`에서 `j = i // ratio`가 현재 진행 중인 4h 바의 **최종 종가**를 사용 → 라이브는 developing price 사용 → 괴리 발생. Fix: `j = j_raw - 1` (마지막 **완성된** 4h 바 사용). `signals.py`, `backtest_live_period.py`, `r15`, `r16` 4곳 수정 완료. `test_mtf_lookahead.py` 3개 회귀 테스트.
 - [x] **v7.0 MTF Leverage**: `apply_mtf_leverage()` 백테스트 ↔ 라이브 MTF 확인 시 2.0x 레버리지 부스트 패리티
 - [x] **v7.0 Independent 4H**: `compute_signals_4h_independent()` 백테스트 ↔ `on_bar_4h()` 라이브 4h 신호 패리티
 - [x] **v7.0 Live Fix**: volume/taker 데이터 `_scan_entries()` 연결, 4h kline 다운로드, `main()` v7.0 설정 전달
@@ -513,6 +517,8 @@ else:
 | `test_dynamic_leverage` | 동적 레버리지 | Move-confidence 기반 |
 | `test_regime_switch` | 레짐 스위치 | Risk-On/Off 전환 |
 | `test_server_oco` | 서버 OCO 주문 | SL/TP 서버 주문 |
+| `test_ghost_audit` | Ghost Fill 감사 | 고스트 포지션 감지 시 체결 상세 로깅 (4개) |
+| `test_mtf_lookahead` | MTF 4h Lookahead 방지 | mid-bar/boundary/reversal 3가지 시나리오에서 완성된 바만 사용하는지 검증 (3개) |
 | `test_terminal_ui` | 터미널 UI | 실시간 상태 표시 |
 | `test_elliott` | Elliott Wave | ZigZag, ABC, 품질 스코어 |
 
