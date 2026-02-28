@@ -1,9 +1,9 @@
 # QuantBox 실행 매뉴얼 📈
 
-**암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + Alpha Engine**
+**암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + VolStraddle**
 
-> 버전: 12.6  
-> 최종 업데이트: 2026년 2월 25일
+> 버전: 12.7  
+> 최종 업데이트: 2026년 2월 27일
 
 ---
 
@@ -13,6 +13,7 @@
 2. [설치 및 환경 설정](#2-설치-및-환경-설정)
 3. [🔥 Rubber Band Scalper (v12.6)](#3-rubber-band-scalper)
 3.5. [🌊 Elliott Wave Strategy (v11.6)](#35-elliott-wave-strategy)
+3.6. [🎯 VolStraddle (A1-D50)](#36-volstraddle)
 4. [아키텍처 이해](#4-아키텍처-이해)
 5. [핵심 모듈 상세](#5-핵심-모듈-상세)
 6. [데이터 관리](#6-데이터-관리)
@@ -667,6 +668,66 @@ DISCORD_CHANNEL_ID=            # 명령 수신 채널 ID (숫자)
 ```
 
 > **팁**: `.env.example` 파일을 복사하여 시작하세요: `cp .env.example .env`
+
+---
+
+## 3.6 🎯 VolStraddle — VR Compression Detector (A1-D50)
+
+### 3.6.1 전략 개요
+
+VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발적 움직임의 방향을 포착하는 전략입니다.
+
+**핵심 원리:**
+- **VR (Volatility Ratio)** = ATR(7) / ATR(50) — 단기 변동성 / 장기 변동성
+- VR < 0.50 = 변동성 압축 감지 → 폭발 임박
+- **Momentum(8)** 방향으로 진입 (양수 → LONG, 음수 → SHORT)
+- **멀티 타임프레임**: 15m / 1h / 4h 독립 스캔, 높은 TF 우선
+
+### 3.6.2 파라미터 (A1-D50, R35 검증)
+
+| 파라미터 | 값 | 설명 |
+|---------|-----|------|
+| `VS_VR_SHORT` | 7 | 단기 ATR 기간 |
+| `VS_VR_LONG` | 50 | 장기 ATR 기간 |
+| `VS_D_VR_THRESHOLD` | 0.50 | D_mom8 VR 진입 임계값 |
+| `VS_D_SL` | 0.01 | 1% 손절 |
+| `VS_D_TP` | 0.05 | 5% 익절 |
+| `VS_MOMENTUM_PERIOD` | 8 | 방향 결정 모멘텀 기간 |
+| `VS_MAX_HOLD_15M` | 192 | 15m TF 최대 보유 (=48h) |
+| `VS_MAX_HOLD_1H` | 48 | 1h TF 최대 보유 (=48h) |
+| `VS_MAX_HOLD_4H` | 12 | 4h TF 최대 보유 (=48h) |
+| `VS_BASE_LEVERAGE` | 1.5 | 기본 레버리지 |
+| `VS_MAX_CONCURRENT` | 2 | 최대 동시 포지션 |
+
+### 3.6.3 실행
+
+```bash
+# VolStraddle 전략으로 실행
+uv run python -m quantbox.scalper --strategy vol_straddle
+
+# Paper 모드
+uv run python -m quantbox.scalper --strategy vol_straddle --paper
+```
+
+### 3.6.4 백테스트 결과 (R35 OOS)
+
+| D_mom8 (A1-D50) | 15m | 1h | 4h | 합계 |
+|------------------|-----|-----|-----|------|
+| N (트레이드 수) | 542 | 201 | 56 | 799 |
+| EV (기대치) | +29.3bp | — | — | +29.3bp |
+| PF (수익 팩터) | — | — | — | 1.376 |
+| t-stat | — | — | — | 3.48 |
+
+### 3.6.5 제로 룩어헤드 설계
+
+- **15m**: `download_klines`가 개발 중인 바 제거 (`klines[:-1]`)
+- **1h**: 15m 완성된 바만으로 리샘플링 (나머지 절삭)
+- **4h**: 개별 다운로드, 개발 중 바 제거됨
+- **교차 TF**: VR/모멘텀은 동일 TF 내 데이터만 사용
+
+### 3.6.6 Phase 2 로드맵
+
+S_d8 스트래들 (양방향 동시 진입)은 Binance Hedge Mode 필요. 현재 원-웨이 모드 사용 중이므로 별도 업그레이드 예정.
 
 ---
 

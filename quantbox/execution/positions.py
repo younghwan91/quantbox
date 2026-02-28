@@ -48,8 +48,43 @@ class PositionMixin:
         lookback_price = close_prices[-cfg.lookback - 1]
         move_size = abs(entry_price / lookback_price - 1.0)
 
+        # ── VolStraddle: simple flat sizing (R35 parity) ──
+        if self.strategy_name == 'vol_straddle':
+            vs = self.vs_config
+            # move_size = 1.0 convention: SL/TP are absolute fractions
+            move_size = 1.0
+
+            # Dynamic capital allocation
+            if vs.dynamic_capital_enabled:
+                n_active = self.strategy.n_active
+                per_slot_capital = balance / max(1, n_active + 1)
+                per_slot_capital = min(per_slot_capital, balance * 0.5)
+            else:
+                per_slot_capital = balance / vs.max_concurrent
+
+            # SoftTight DD Scaling (safety mechanism)
+            if vs.soft_equity_scale:
+                hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+                dd_pct = (hwm - balance) / hwm if hwm > 0 else 0.0
+                if dd_pct >= vs.soft_eq_dd3:
+                    per_slot_capital *= vs.soft_eq_scale3
+                elif dd_pct >= vs.soft_eq_dd2:
+                    per_slot_capital *= vs.soft_eq_scale2
+                elif dd_pct >= vs.soft_eq_dd1:
+                    per_slot_capital *= vs.soft_eq_scale1
+
+            leverage = vs.base_leverage
+            notional = per_slot_capital * leverage
+
+            # Get signal metadata (SL/TP/TF from on_bar)
+            sig_meta = self.strategy.get_last_signal_meta(symbol)
+            sl_pct = sig_meta.get('sl', vs.d_sl)
+            tp_pct = sig_meta.get('tp', vs.d_tp)
+            tf_label = sig_meta.get('tf', '15m')
+            max_hold = sig_meta.get('max_hold', vs.get_max_hold(tf_label))
+
         # ── Elliott: 2% exploratory sizing (winning_strategy §4.2) ──
-        if self.strategy_name == 'elliott':
+        elif self.strategy_name == 'elliott':
             ecfg = getattr(self, 'elliott_config', ElliottConfig())
             margin = balance * ecfg.exploratory_pct
             leverage = ecfg.nominal_leverage
@@ -179,7 +214,10 @@ class PositionMixin:
             return False
 
         side = 'BUY' if signal > 0 else 'SELL'
-        lev_int = max(1, min(math.ceil(leverage), int(cfg.max_leverage)))
+        if self.strategy_name == 'vol_straddle':
+            lev_int = max(1, min(math.ceil(leverage), int(self.vs_config.max_leverage)))
+        else:
+            lev_int = max(1, min(math.ceil(leverage), int(cfg.max_leverage)))
 
         result = self._place_order(symbol, side, quantity, leverage=lev_int)
         if result is None:
@@ -195,11 +233,122 @@ class PositionMixin:
 
         notional = fill_qty * fill_price
         direction = 'LONG' if signal > 0 else 'SHORT'
-        logger.info(
-            f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
-            f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
-            f"move={move_size*100:.2f}%, eff_stop={eff_stop:.4f})"
-        )
+
+        if self.strategy_name == 'vol_straddle':
+            # ── VolStraddle brackets: fixed SL/TP (no PBT) ──
+            # move_size=1.0, so SL distance = sl_pct, TP distance = tp_pct
+            logger.info(
+                f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
+                f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
+                f"TF={tf_label}, SL={sl_pct*100:.1f}%, TP={tp_pct*100:.1f}%)"
+            )
+
+            sl_order_id = self._place_server_stop_loss(
+                symbol=symbol, signal=signal, quantity=fill_qty,
+                entry_price=fill_price, move_size=move_size,
+                stop_mult=sl_pct,
+            )
+            if sl_order_id == 'WOULD_TRIGGER':
+                logger.warning(
+                    f"[{symbol}] SL WOULD_TRIGGER at entry — "
+                    f"bracket repair next cycle"
+                )
+                sl_order_id = None
+
+            # Full-qty TP (no partial — matches backtest SL/TP/max_hold exit)
+            tp_order_id = self._place_server_take_profit(
+                symbol=symbol, signal=signal, quantity=fill_qty,
+                entry_price=fill_price, move_size=move_size,
+                target_retrace=tp_pct,
+            )
+            if tp_order_id == 'WOULD_TRIGGER':
+                logger.warning(
+                    f"[{symbol}] TP WOULD_TRIGGER at entry — "
+                    f"client-side will handle TP"
+                )
+                tp_order_id = None
+
+            sl_status = "OK" if sl_order_id else "FAILED"
+            tp_status = "OK" if tp_order_id else "FAILED"
+            logger.info(
+                f"[{symbol}] Server bracket: SL={sl_status} "
+                f"(algoId={sl_order_id}) TP={tp_status} "
+                f"(algoId={tp_order_id})"
+            )
+
+            # Record in strategy with TF-specific metadata
+            self.strategy.open_position(
+                symbol=symbol, signal=signal,
+                entry_price=fill_price,
+                notional=fill_qty * fill_price,
+                leverage=lev_int,
+                move_size=move_size,
+                entry_stop_mult=sl_pct,
+                server_sl_order_id=sl_order_id,
+                server_tp_order_id=tp_order_id,
+                sl=sl_pct, tp=tp_pct, tf=tf_label,
+                max_hold=max_hold,
+            )
+
+            # Paper balance cost
+            if self.paper_mode:
+                cost = fill_qty * fill_price * self.vs_config.cost_per_side
+                self._paper_balance -= cost
+
+            # Print + log entry
+            _side_str = 'LONG' if signal == 1 else 'SHORT'
+            print(format_entry(
+                symbol=symbol, side=_side_str,
+                price=fill_price, leverage=lev_int,
+                size_usd=fill_qty * fill_price,
+            ))
+
+            # Compute TP/SL prices for notification
+            if signal == 1:
+                tp_price = fill_price * (1.0 + tp_pct)
+                sl_price = fill_price * (1.0 - sl_pct)
+            else:
+                tp_price = fill_price * (1.0 - tp_pct)
+                sl_price = fill_price * (1.0 + sl_pct)
+
+            balance_after = self.get_balance()
+            n_active = self.strategy.n_active
+            _dir = 'LONG ↑' if signal == 1 else 'SHORT ↓'
+            _sl_tag = '🟢 서버' if sl_order_id else '🟡 클라이언트'
+            _tp_tag = '🟢 서버' if tp_order_id else '🟡 클라이언트'
+            _pos_lines = []
+            for _sym, _p in self.strategy.active_positions.items():
+                _pd = 'L' if _p['signal'] == 1 else 'S'
+                _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
+            _pos_summary = '\n'.join(_pos_lines) if _pos_lines else '없음'
+
+            self.discord.send(embed={
+                'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} {_dir} | VS 진입",
+                'color': 0x00C853 if signal == 1 else 0xFF1744,
+                'fields': [
+                    {'name': '전략', 'value': f'VolStraddle D ({tf_label})', 'inline': True},
+                    {'name': '진입가', 'value': f'${fill_price:.4f}', 'inline': True},
+                    {'name': '포지션', 'value': f'${fill_qty * fill_price:,.2f}', 'inline': True},
+                    {'name': '레버리지', 'value': f'{lev_int}x', 'inline': True},
+                    {'name': '🎯 TP', 'value': f'${tp_price:.4f} ({tp_pct*100:.1f}%)', 'inline': True},
+                    {'name': '🛑 SL', 'value': f'${sl_price:.4f} ({sl_pct*100:.1f}%)', 'inline': True},
+                    {'name': 'TP 방식', 'value': _tp_tag, 'inline': True},
+                    {'name': 'SL 방식', 'value': _sl_tag, 'inline': True},
+                    {'name': '슬롯', 'value': f'{n_active}/{self.vs_config.max_concurrent}', 'inline': True},
+                    {'name': '── 활성 포지션 ──', 'value': f'```\n{_pos_summary}\n```', 'inline': False},
+                    {'name': '잔고', 'value': f'${balance_after:,.2f}', 'inline': True},
+                ],
+                'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+            })
+            return True
+
+        else:
+            # ── Rubber Band / Elliott brackets ──
+            logger.info(
+                f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
+                f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
+                f"move={move_size*100:.2f}%, eff_stop={eff_stop:.4f})"
+            )
 
         # ═══ Place server-side bracket orders via Algo API ═══
         sl_order_id = self._place_server_stop_loss(
