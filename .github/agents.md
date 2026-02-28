@@ -7,10 +7,11 @@
 
 ## 1. 시스템 개요
 
-QuantBox v12.4.6는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
-두 가지 전략을 지원한다:
+QuantBox v12.7는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
+세 가지 전략을 지원한다:
 1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
 2. **Elliott Wave Strategy** (v11.6): ZigZag ABC 패턴 + Fibonacci 검증 + Timing Alpha Filter (4h)
+3. **VolStraddle** (A1-D50): VR 압축 감지 → 모멘텀 방향 진입 (15m/1h/4h 멀티TF)
 **v11.4: Adaptive Threshold + Leverage Optimization** — ATR 기반 적응형 임계값 (`clip(2.5 × ATR%(48), 1%, 6%)`). 18-variant walk-forward sweep + 14-variant leverage grid → 2.5x_f1 선택. OOS Return +5069%, MDD 19.0%, Calmar 266.6. MTF 레버리지 2.0→2.5× (실효 3.75×).
 **v11.6: Elliott Wave Timing Alpha** — 97패턴 리서치 기반 3중 타이밍 필터 (impulse_accel≥0, corr_ratio≥0.20, w3w1≤2.5). Calmar 1.51→5.10, Sharpe 1.07→1.69. 파라미터 비감응 (-0.3~+0.3 동일 결과).
 **v11.4: Elliott Wave Strategy** — ZigZag ABC 패턴 인식, 2단계 포지셔닝 (2% 탐색적 → 8% 확인), 50% 부분 익절 + 브레이크이븐 스탑, BTC 매크로 바이어스, Numba 가속 지표.
@@ -28,9 +29,10 @@ QuantBox v12.4.6는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀�
 
 | 구성 요소 | 역할 |
 |-----------|------|
-| **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산. `--strategy` CLI로 전략 선택 (rubberband/elliott). v11.1: 서버사이드 STOP 손절 + 레버리지 검증 |
+| **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산. `--strategy` CLI로 전략 선택 (rubberband/elliott/vol_straddle). v11.1: 서버사이드 STOP 손절 + 레버리지 검증 |
 | **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 3.2%+ 급등/급락 포착) + Fibonacci Exit (v9.0) + MACD/Stochastic Confluence (v9.0) + MTF 확인 + 독립 4H 트레이딩 + Symbol Whitelist (v10.0) |
 | **ElliottStrategy** (`elliott.py`) | Elliott Wave ABC 패턴 전략 (Numba 가속). ZigZag 피봇 → ABC Fibonacci 검증 → 탐색적/확인 2단계 포지셔닝 → 50% 부분 익절 → 브레이크이븐 → 트레일링 (3×ATR). BTC 매크로 바이어스 (200/500 EMA) |
+| **VolStraddleStrategy** (`vol_straddle/`) | VR 압축 감지 (ATR7/ATR50 < 0.50) + momentum(8) 방향 진입. 15m/1h/4h 멀티TF. SL=1%, TP=5%, MaxHold=48h. R35 OOS: N=799, EV=+29.3bp, PF=1.376 |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -268,6 +270,7 @@ else:
 |------|------------------|------|
 | `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage`, `apply_mtf_confirmation`, `apply_mtf_leverage`, `compute_signals_4h_independent`, `_compute_ema_inline`, `_compute_stochastic_inline`, `_compute_macd_inline`, `compute_signals_v9`, `compute_atr_pct` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 + **MTF 확인 (v7.0)** + **독립 4H 트레이딩 (v7.0)** + **Fibonacci Exit + MACD/Stochastic Confluence (v9.0)** + **Adaptive Threshold (v11.4)** (Numba 컴파일) |
 | `elliott.py` | `ElliottConfig`, `ElliottStrategy`, `compute_elliott_signals`, `compute_ema`, `compute_rsi`, `compute_macd`, `compute_stochastic`, `compute_atr`, `zigzag_pivots`, `detect_abc_patterns`, `detect_bullish_divergence`, `detect_bearish_divergence`, `check_macd_reversal`, `check_stoch_cross`, `detect_ending_diagonal`, `detect_triangle` | Elliott Wave ABC 패턴 전략 (Numba 가속). ZigZag + Fibonacci + 다이버전스/MACD/스토캐스틱 확인 + 웨지/삼각 감지 + 2단계 포지셔닝 + 자본 보존 익절 |
+| `vol_straddle/` | `VolStraddleConfig`, `VolStraddleStrategy`, `compute_vr`, `compute_momentum`, `gen_vr_signal`, `make_direction_momentum`, `resample_ohlcv`, `_atr_pct` | VR 압축 감지 (ATR7/ATR50 < 0.50) + momentum(8) 방향 진입. 15m/1h/4h 멀티TF. SL=1%, TP=5%, MaxHold=48h. R35 A1-D50 검증. 완성된 바만 참조 (zero lookahead) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 
@@ -481,7 +484,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (34파일, 707개)
+## 7. 테스트 현황 (36파일, 775개)
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|
@@ -519,6 +522,7 @@ else:
 | `test_server_oco` | 서버 OCO 주문 | SL/TP 서버 주문 |
 | `test_ghost_audit` | Ghost Fill 감사 | 고스트 포지션 감지 시 체결 상세 로깅 (4개) |
 | `test_mtf_lookahead` | MTF 4h Lookahead 방지 | mid-bar/boundary/reversal 3가지 시나리오에서 완성된 바만 사용하는지 검증 (3개) |
+| `test_vol_straddle` | VolStraddle 전략 전체 | Config A1-D50 파라미터, VR/모멘텀/방향 신호, 리샘플링 lookahead 방지, on_bar 시그널, per-symbol dedup, SL/TP/max_hold 포지션 관리, 멀티TF 우선순위, 스칼퍼 인터페이스, 상태 직렬화 (34개) |
 | `test_terminal_ui` | 터미널 UI | 실시간 상태 표시 |
 | `test_elliott` | Elliott Wave | ZigZag, ABC, 품질 스코어 |
 
