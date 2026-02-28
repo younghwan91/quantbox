@@ -415,7 +415,9 @@ def apply_mtf_filter(dirs, confs, moves, close_4h, sma_period=12, ratio=16):
     for i in range(len(dirs)):
         if dirs[i] == 0.0:
             continue
-        j = min(i // ratio, n_4h - 1)
+        # Fix: use last COMPLETED 4h bar to avoid lookahead bias
+        j_raw = min(i // ratio, n_4h - 1)
+        j = j_raw - 1 if j_raw > 0 else 0
         if j < sma_period or np.isnan(sma_4h[j]):
             continue
         trend_up = close_4h[j] > sma_4h[j]
