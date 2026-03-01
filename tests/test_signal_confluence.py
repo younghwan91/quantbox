@@ -214,15 +214,17 @@ class TestV9ConfigDefaults:
         assert cfg.dynamic_target_enabled is False
 
     def test_macd_defaults(self):
+        """v12.6: MACD disabled by default (R21 backtest: noise, WR +11pp without)."""
         cfg = RubberBandConfig()
-        assert cfg.macd_enabled is True
+        assert cfg.macd_enabled is False
         assert cfg.macd_fast == 12
         assert cfg.macd_slow == 26
         assert cfg.macd_signal_period == 14
 
     def test_stoch_defaults(self):
+        """v12.6: Stochastic disabled by default (R21 backtest: noise, WR +11pp without)."""
         cfg = RubberBandConfig()
-        assert cfg.stoch_enabled is True
+        assert cfg.stoch_enabled is False
         assert cfg.stoch_k_period == 3  # v10.0: faster stochastic
         assert cfg.stoch_d_period == 3
 

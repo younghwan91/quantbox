@@ -71,6 +71,7 @@ from quantbox.strategy.rubberband import (
     compute_atr_pct, compute_confidence_leverage,
 )
 from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
+from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.commands import CommandsMixin
 from quantbox.execution.brackets import BracketMixin
 from quantbox.execution.positions import PositionMixin
@@ -216,6 +217,7 @@ class RubberBandScalper(
         config: RubberBandConfig | None = None,
         strategy_name: str = 'rubberband',
         elliott_config: ElliottConfig | None = None,
+        vs_config: VolStraddleConfig | None = None,
     ):
         self.paper_mode = paper_mode
         self.config = config or RubberBandConfig()
@@ -224,6 +226,9 @@ class RubberBandScalper(
         if strategy_name == 'elliott':
             self.elliott_config = elliott_config or ElliottConfig()
             self.strategy = ElliottStrategy(self.elliott_config)
+        elif strategy_name == 'vol_straddle':
+            self.vs_config = vs_config or VolStraddleConfig()
+            self.strategy = VolStraddleStrategy(self.vs_config)
         else:
             self.strategy = RubberBandStrategy(self.config)
 
@@ -279,16 +284,36 @@ class RubberBandScalper(
         self._paused: bool = False
 
         mode_str = "PAPER" if paper_mode else "LIVE"
-        logger.info(f"RubberBandScalper initialized ({mode_str})")
-        logger.info(
-            f"Config: lookback={self.config.lookback}, "
-            f"threshold={self.config.threshold}, "
-            f"target={self.config.target_retrace}, "
-            f"stop={self.config.stop_mult}x, "
-            f"max_hold={self.config.max_hold}"
-        )
+        logger.info(f"RubberBandScalper initialized ({mode_str}) strategy={strategy_name}")
+        if strategy_name == 'vol_straddle':
+            vs = self.vs_config
+            logger.info(
+                f"Config: VR({vs.vr_short}/{vs.vr_long}) "
+                f"D_threshold={vs.d_vr_threshold}, "
+                f"SL={vs.d_sl*100:.1f}%, TP={vs.d_tp*100:.1f}%, "
+                f"TF={'15m' if vs.enable_15m else ''}"
+                f"{'|1h' if vs.enable_1h else ''}"
+                f"{'|4h' if vs.enable_4h else ''}"
+            )
+        else:
+            _sl_str = (f"ATR×{self.config.atr_stop_mult}[{self.config.atr_stop_floor*100:.1f}%-{self.config.atr_stop_cap*100:.0f}%]"
+                       if self.config.atr_stop_enabled else f"{self.config.stop_mult}×move")
+            logger.info(
+                f"Config: lookback={self.config.lookback}, "
+                f"threshold={self.config.threshold}, "
+                f"target={self.config.target_retrace}, "
+                f"stop={_sl_str}, "
+                f"max_hold={self.config.max_hold}"
+            )
 
     # ==================== Balance & Risk ====================
+
+    @property
+    def _cfg(self):
+        """Active strategy config for shared fields."""
+        if self.strategy_name == 'vol_straddle':
+            return self.vs_config
+        return self.config
 
     def get_balance(self) -> float:
         """Get current USDT balance."""
@@ -327,7 +352,7 @@ class RubberBandScalper(
         # Session drawdown check
         if self._high_water_mark > 0:
             dd = (self._high_water_mark - balance) / self._high_water_mark
-            if dd >= self.config.max_drawdown_pct:
+            if dd >= self._cfg.max_drawdown_pct:
                 if not self._drawdown_halt:
                     logger.critical(
                         f"DRAWDOWN HALT: {dd*100:.1f}% DD "
@@ -365,9 +390,9 @@ class RubberBandScalper(
             # v11.1 fix: When whitelist is set, use whitelist directly
             # (only filter to actively trading symbols). Volume rank
             # is irrelevant when we have a curated, A/B-validated list.
-            if self.config.symbol_whitelist:
-                whitelist_set = set(self.config.symbol_whitelist)
-                exclude_set = set(self.config.exclude_symbols)
+            if self._cfg.symbol_whitelist:
+                whitelist_set = set(self._cfg.symbol_whitelist)
+                exclude_set = set(self._cfg.exclude_symbols)
                 tradable = set(volumes.keys())  # actively trading symbols
                 result = [
                     s for s in sorted_syms
@@ -380,8 +405,8 @@ class RubberBandScalper(
             else:
                 # No whitelist: fall back to top-N by volume
                 result = [
-                    s for s in sorted_syms[:self.config.min_volume_rank]
-                    if s not in self.config.exclude_symbols
+                    s for s in sorted_syms[:self._cfg.min_volume_rank]
+                    if s not in self._cfg.exclude_symbols
                 ]
                 logger.info(f"Universe: {len(result)} symbols")
             return result
@@ -623,7 +648,7 @@ class RubberBandScalper(
             cycle=self._cycle_count,
             balance=balance,
             n_active=self.strategy.n_active,
-            max_slots=self.config.max_concurrent,
+            max_slots=self._cfg.max_concurrent,
         )
         print(header)
 
@@ -636,7 +661,7 @@ class RubberBandScalper(
             f"Cycle #{self._cycle_count} | "
             f"Balance=${balance:.2f} | "
             f"HWM=${hwm:.2f} | DD={dd_pct:.1f}% | "
-            f"Positions={self.strategy.n_active}/{self.config.max_concurrent} | "
+            f"Positions={self.strategy.n_active}/{self._cfg.max_concurrent} | "
             f"Trades={n_trades} CumPnL=${cum_pnl:+.2f}"
         )
 
@@ -665,6 +690,9 @@ class RubberBandScalper(
             btc_close_4h = self.download_klines('BTCUSDT', 600, interval='4h')
             if btc_close_4h is not None:
                 self.strategy.update_btc_data(btc_close_4h)
+        elif self.strategy_name == 'vol_straddle':
+            # VolStraddle doesn't use BTC as filter — skip 4h BTC fetch
+            pass
         elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
             btc_close_4h = self.download_klines('BTCUSDT', 100, interval='4h')
 
@@ -714,7 +742,10 @@ class RubberBandScalper(
             current_price = close[-1]
 
             # v12.3.2: Compute FRESH ATR for PBT runner trailing
-            if self.config.atr_period > 0 and len(close) >= self.config.atr_period:
+            # VolStraddle doesn't use ATR-based trailing; pass default.
+            if self.strategy_name == 'vol_straddle':
+                current_atr = 0.02
+            elif self.config.atr_period > 0 and len(close) >= self.config.atr_period:
                 atr_arr = compute_atr_pct(high, low, close, self.config.atr_period)
                 atr_val = float(atr_arr[-1])
                 current_atr = atr_val if not np.isnan(atr_val) else 0.02
@@ -745,8 +776,9 @@ class RubberBandScalper(
             else:
                 pos = self.strategy._positions.get(sym)
                 if pos:
+                    _mh = pos.get('max_hold', self.config.max_hold)
                     logger.debug(
-                        f"  [{sym}] HOLD: bars={pos.get('bars_held', 0)}/{self.config.max_hold} "
+                        f"  [{sym}] HOLD: bars={pos.get('bars_held', 0)}/{_mh} "
                         f"best_pnl={pos.get('best_pnl', 0)*100:.2f}%"
                     )
                     # v12.3.3: Ratchet server SL for runners to protect profits
@@ -760,7 +792,7 @@ class RubberBandScalper(
             logger.info("⏸️ Paused — skipping new entries")
         elif not risk_blocked:
             available_slots = (
-                self.config.max_concurrent - self.strategy.n_active
+                self._cfg.max_concurrent - self.strategy.n_active
             )
             if available_slots > 0:
                 self._scan_entries(symbols, btc_close, balance, available_slots,
@@ -797,11 +829,14 @@ class RubberBandScalper(
                 continue
 
             # v9.0: Download full klines (close + high + low + volume + taker)
-            result = self.download_klines(sym, 200, full=True)
+            # VolStraddle needs 500 bars: 15m warmup=200 needs ≥201 bars,
+            # 1h resampling needs ≥4×(warmup_1h+1)=204 bars. 500 covers both.
+            n_bars = 500 if self.strategy_name == 'vol_straddle' else 200
+            result = self.download_klines(sym, n_bars, full=True)
             if result is None:
                 continue
             close, high, low, volume, taker_buy = result
-            if len(close) < self.config.lookback + 1:
+            if len(close) < self._cfg.lookback + 1:
                 continue
 
             # Wire up volume/taker/high/low data for v9 confluence scoring
@@ -811,6 +846,12 @@ class RubberBandScalper(
             if self.strategy_name == 'elliott':
                 # Elliott needs 600+ bars of 4h OHLC for 500 EMA + ZigZag
                 result_4h = self.download_klines(sym, 600, interval='4h', full=True)
+                if result_4h is not None:
+                    c4h, h4h, l4h, _, _ = result_4h
+                    self.strategy.update_htf_data(sym, c4h, h4h, l4h)
+            elif self.strategy_name == 'vol_straddle':
+                # VolStraddle needs full 4h OHLCV for VR computation
+                result_4h = self.download_klines(sym, 100, interval='4h', full=True)
                 if result_4h is not None:
                     c4h, h4h, l4h, _, _ = result_4h
                     self.strategy.update_htf_data(sym, c4h, h4h, l4h)
@@ -828,13 +869,14 @@ class RubberBandScalper(
                 scan_diags.append(diag)
 
             # Track 8-bar move for diagnostics
-            abs_move = abs(close[-1] / close[-self.config.lookback - 1] - 1.0)
+            _lb = self._cfg.lookback
+            abs_move = abs(close[-1] / close[-_lb - 1] - 1.0)
             moves_seen.append((sym, abs_move))
 
             if signal != 0:
                 # Measure move strength for prioritization
                 move = abs(
-                    close[-1] / close[-self.config.lookback - 1] - 1.0
+                    close[-1] / close[-_lb - 1] - 1.0
                 )
                 candidates.append((sym, signal, move, close))
 
@@ -843,17 +885,31 @@ class RubberBandScalper(
 
         # ── Diagnostic: log scan summary every cycle ──
         top_movers = sorted(moves_seen, key=lambda x: x[1], reverse=True)[:3]
-        print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
-        if candidates:
-            cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
-            logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
+        if self.strategy_name == 'vol_straddle':
+            # VR strategy: show VR threshold, not move threshold
+            print(format_scan_summary(len(candidates), top_movers, 0.0))
+            if candidates:
+                cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
+            else:
+                if moves_seen:
+                    top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
+                    logger.info(
+                        f"No candidates — top moves: {', '.join(top3)} "
+                        f"(VR<{self.vs_config.d_vr_threshold}, signal=VR compression)"
+                    )
         else:
-            if moves_seen:
-                top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
-                logger.info(
-                    f"No candidates — top moves: {', '.join(top3)} "
-                    f"(base >{self.config.threshold*100:.1f}%, adaptive per-symbol)"
-                )
+            print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
+            if candidates:
+                cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
+            else:
+                if moves_seen:
+                    top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
+                    logger.info(
+                        f"No candidates — top moves: {', '.join(top3)} "
+                        f"(base >{self.config.threshold*100:.1f}%, adaptive per-symbol)"
+                    )
 
         # v12.0: Write structured diagnostics to JSONL
         if scan_diags:
@@ -866,16 +922,16 @@ class RubberBandScalper(
                 break
 
             # ═══ v12.3 PARITY: Direction Diversity Filter ═══
-            if self.config.dir_diversity_enabled:
+            if self._cfg.dir_diversity_enabled:
                 same_dir = sum(
                     1 for p in self.strategy.active_positions.values()
                     if p.get('signal') == signal
                 )
-                if same_dir >= self.config.max_same_direction:
+                if same_dir >= self._cfg.max_same_direction:
                     logger.debug(
                         f"[{sym}] DirDiversity blocked: "
                         f"{same_dir} {'LONG' if signal == 1 else 'SHORT'} "
-                        f"already open (max={self.config.max_same_direction})"
+                        f"already open (max={self._cfg.max_same_direction})"
                     )
                     continue
 
@@ -911,7 +967,7 @@ class RubberBandScalper(
             logger.info(
                 f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
                 f"entry=${pos['entry_price']:.4f} "
-                f"bars={pos['bars_held']}/{self.config.max_hold} "
+                f"bars={pos['bars_held']}/{pos.get('max_hold', self.config.max_hold)} "
                 f"best_pnl={pos.get('best_pnl', 0)*100:.2f}% "
                 f"SL={pos.get('server_sl_order_id') or 'NONE'} "
                 f"TP={pos.get('server_tp_order_id') or 'NONE'}"
@@ -1058,7 +1114,7 @@ class RubberBandScalper(
         self._load_state()
 
         mode_str = "PAPER" if self.paper_mode else "LIVE"
-        n_symbols = len(self.config.symbol_whitelist) if self.config.symbol_whitelist else 0
+        n_symbols = len(self._cfg.symbol_whitelist) if self._cfg.symbol_whitelist else 0
         self._print_startup_banner(balance, n_symbols)
         logger.info(f"Starting continuous trading ({mode_str})")
         logger.info(f"Initial balance: ${balance:.2f}")
@@ -1068,46 +1124,76 @@ class RubberBandScalper(
             self._bot_runner.start()
             logger.info("Discord Bot started for interactive commands")
 
-        n_symbols = len(self.config.symbol_whitelist) if self.config.symbol_whitelist else 0
+        n_symbols = len(self._cfg.symbol_whitelist) if self._cfg.symbol_whitelist else 0
         commit_str = f"`{GIT_COMMIT['short']}`" if GIT_COMMIT['short'] else 'unknown'
-        eff_lev = self.config.base_leverage * self.config.mtf_leverage_mult
-        _mtf_str = f"ON (SMA {self.config.mtf_sma_period})" if self.config.mtf_confirmation_enabled else "OFF"
-        _adaptive_str = (
-            f"적응형 {self.config.atr_multiplier}x "
-            f"(floor {self.config.threshold_floor*100:.1f}%, cap {self.config.threshold_cap*100:.1f}%)"
-            if self.config.atr_period > 0
-            else f"고정 {self.config.threshold*100:.1f}%"
-        )
-        # Recovered positions from state
         n_recovered = self.strategy.n_active
-        self.discord.send(embed={
-            'title': '🚀 QuantBox 스캘퍼 시작',
-            'color': 0x2979FF,
-            'description': (
-                f"러버밴드 평균회귀 스캘퍼 초기화 완료.\n"
-                f"`!help`로 명령어 확인."
-            ),
-            'fields': [
-                {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},
-                {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
-                {'name': '슬롯', 'value': f'{n_recovered}/{self.config.max_concurrent}', 'inline': True},
-                {'name': '── 전략 설정 ──', 'value': (
-                    f"진입: {_adaptive_str}\n"
-                    f"TP={self.config.target_retrace} | "
-                    f"SL={self.config.stop_mult}x | "
-                    f"MaxHold={self.config.max_hold}바"
-                ), 'inline': False},
-                {'name': 'MTF', 'value': _mtf_str, 'inline': True},
-                {'name': '레버리지', 'value': (
-                    f'Base {self.config.base_leverage}x × '
-                    f'MTF {self.config.mtf_leverage_mult}x = '
-                    f'{eff_lev:.1f}x'
-                ), 'inline': True},
-                {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
-                {'name': '커밋', 'value': commit_str, 'inline': True},
-            ],
-            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
-        })
+
+        if self.strategy_name == 'vol_straddle':
+            vc = self.vs_config
+            self.discord.send(embed={
+                'title': '🚀 QuantBox VolStraddle 시작',
+                'color': 0x2979FF,
+                'description': (
+                    f"VolStraddle D_mom8 (A1-D50) 초기화 완료.\n"
+                    f"`!help`로 명령어 확인."
+                ),
+                'fields': [
+                    {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},
+                    {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
+                    {'name': '슬롯', 'value': f'{n_recovered}/{vc.max_concurrent}', 'inline': True},
+                    {'name': '── 전략 설정 ──', 'value': (
+                        f"VR({vc.vr_short}/{vc.vr_long}) < {vc.d_vr_threshold:.2f}\n"
+                        f"TP={vc.d_tp*100:.0f}% | SL={vc.d_sl*100:.0f}% | "
+                        f"Mom={vc.momentum_period}bar"
+                    ), 'inline': False},
+                    {'name': 'TF', 'value': (
+                        f"{'15m ' if vc.enable_15m else ''}"
+                        f"{'1h ' if vc.enable_1h else ''}"
+                        f"{'4h' if vc.enable_4h else ''}"
+                    ).strip(), 'inline': True},
+                    {'name': '레버리지', 'value': f'{vc.base_leverage}x', 'inline': True},
+                    {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
+                    {'name': '커밋', 'value': commit_str, 'inline': True},
+                ],
+                'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+            })
+        else:
+            eff_lev = self.config.base_leverage * self.config.mtf_leverage_mult
+            _mtf_str = f"ON (SMA {self.config.mtf_sma_period})" if self.config.mtf_confirmation_enabled else "OFF"
+            _adaptive_str = (
+                f"적응형 {self.config.atr_multiplier}x "
+                f"(floor {self.config.threshold_floor*100:.1f}%, cap {self.config.threshold_cap*100:.1f}%)"
+                if self.config.atr_period > 0
+                else f"고정 {self.config.threshold*100:.1f}%"
+            )
+            self.discord.send(embed={
+                'title': '🚀 QuantBox 스캘퍼 시작',
+                'color': 0x2979FF,
+                'description': (
+                    f"러버밴드 평균회귀 스캘퍼 초기화 완료.\n"
+                    f"`!help`로 명령어 확인."
+                ),
+                'fields': [
+                    {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},
+                    {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
+                    {'name': '슬롯', 'value': f'{n_recovered}/{self.config.max_concurrent}', 'inline': True},
+                    {'name': '── 전략 설정 ──', 'value': (
+                        f"진입: {_adaptive_str}\n"
+                        f"TP={self.config.target_retrace} | "
+                        f"SL={'ATR×'+str(self.config.atr_stop_mult)+'['+str(round(self.config.atr_stop_floor*100,1))+'%-'+str(round(self.config.atr_stop_cap*100))+'%]' if self.config.atr_stop_enabled else str(self.config.stop_mult)+'×move'} | "
+                        f"MaxHold={self.config.max_hold}바"
+                    ), 'inline': False},
+                    {'name': 'MTF', 'value': _mtf_str, 'inline': True},
+                    {'name': '레버리지', 'value': (
+                        f'Base {self.config.base_leverage}x × '
+                        f'MTF {self.config.mtf_leverage_mult}x = '
+                        f'{eff_lev:.1f}x'
+                    ), 'inline': True},
+                    {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
+                    {'name': '커밋', 'value': commit_str, 'inline': True},
+                ],
+                'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
+            })
 
         # Pre-fetch exchange info
         self.get_symbol_info('BTCUSDT')
@@ -1208,23 +1294,43 @@ class RubberBandScalper(
             logger.info(
                 f"Git: {GIT_COMMIT['short']} — {GIT_COMMIT['message']}"
             )
-        print_system_info(
-            mode=mode_str,
-            strategy=self.strategy_name,
-            balance=balance,
-            n_symbols=n_symbols,
-            max_slots=self.config.max_concurrent,
-            leverage_base=self.config.base_leverage,
-            leverage_max=self.config.max_leverage,
-            lookback=self.config.lookback,
-            threshold=self.config.threshold,
-            target=self.config.target_retrace,
-            stop_mult=self.config.stop_mult,
-            max_hold=self.config.max_hold,
-            entry_mode=self.config.entry_mode,
-            min_confidence=self.config.min_confidence,
-            testnet=settings.binance_testnet,
-        )
+        if self.strategy_name == 'vol_straddle':
+            vc = self.vs_config
+            print_system_info(
+                mode=mode_str,
+                strategy='vol_straddle',
+                balance=balance,
+                n_symbols=n_symbols,
+                max_slots=vc.max_concurrent,
+                leverage_base=vc.base_leverage,
+                leverage_max=vc.max_leverage,
+                lookback=vc.momentum_period,
+                threshold=vc.d_vr_threshold,
+                target=vc.d_tp,
+                stop_mult=vc.d_sl,
+                max_hold=vc.max_hold_15m,
+                entry_mode='vr_compression',
+                min_confidence=0.0,
+                testnet=settings.binance_testnet,
+            )
+        else:
+            print_system_info(
+                mode=mode_str,
+                strategy=self.strategy_name,
+                balance=balance,
+                n_symbols=n_symbols,
+                max_slots=self.config.max_concurrent,
+                leverage_base=self.config.base_leverage,
+                leverage_max=self.config.max_leverage,
+                lookback=self.config.lookback,
+                threshold=self.config.threshold,
+                target=self.config.target_retrace,
+                stop_mult=self.config.stop_mult,
+                max_hold=self.config.max_hold,
+                entry_mode=self.config.entry_mode,
+                min_confidence=self.config.min_confidence,
+                testnet=settings.binance_testnet,
+            )
         print_startup_complete(mode_str)
 
     def _next_bar_time(self) -> datetime:
@@ -1285,7 +1391,7 @@ class RubberBandScalper(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='QuantBox Scalper — Rubber Band / Elliott Wave'
+        description='QuantBox Scalper — Rubber Band / Elliott Wave / VolStraddle'
     )
     parser.add_argument(
         '--paper', action='store_true',
@@ -1308,8 +1414,9 @@ def main():
         help='Max concurrent positions (default: from .env/config)'
     )
     parser.add_argument(
-        '--strategy', choices=['rubberband', 'elliott'], default='rubberband',
-        help='Trading strategy: rubberband (default) or elliott (wave ABC)'
+        '--strategy', choices=['rubberband', 'elliott', 'vol_straddle'],
+        default='vol_straddle',
+        help='Trading strategy: vol_straddle (default), rubberband, or elliott'
     )
     args = parser.parse_args()
 
@@ -1405,12 +1512,52 @@ def main():
         # v12.3: Direction Diversity
         dir_diversity_enabled=settings.rb_dir_diversity_enabled,
         max_same_direction=settings.rb_max_same_direction,
+        # v12.6: Climax Volume Filter + ATR-Based Stop
+        climax_enabled=settings.rb_climax_enabled,
+        climax_vol_mult=settings.rb_climax_vol_mult,
+        atr_stop_enabled=settings.rb_atr_stop_enabled,
+        atr_stop_mult=settings.rb_atr_stop_mult,
+        atr_stop_floor=settings.rb_atr_stop_floor,
+        atr_stop_cap=settings.rb_atr_stop_cap,
     )
 
     scalper = RubberBandScalper(
         paper_mode=args.paper,
         config=config,
         strategy_name=args.strategy,
+        vs_config=VolStraddleConfig(
+            vr_short=settings.vs_vr_short,
+            vr_long=settings.vs_vr_long,
+            d_vr_threshold=settings.vs_d_vr_threshold,
+            d_sl=settings.vs_d_sl,
+            d_tp=settings.vs_d_tp,
+            momentum_period=settings.vs_momentum_period,
+            s_vr_threshold=settings.vs_s_vr_threshold,
+            s_squeeze_dur=settings.vs_s_squeeze_dur,
+            s_sl=settings.vs_s_sl,
+            s_tp=settings.vs_s_tp,
+            straddle_enabled=settings.vs_straddle_enabled,
+            max_hold_15m=settings.vs_max_hold_15m,
+            max_hold_1h=settings.vs_max_hold_1h,
+            max_hold_4h=settings.vs_max_hold_4h,
+            enable_15m=settings.vs_enable_15m,
+            enable_1h=settings.vs_enable_1h,
+            enable_4h=settings.vs_enable_4h,
+            base_leverage=settings.vs_base_leverage,
+            max_leverage=settings.vs_max_leverage,
+            max_concurrent=args.max_slots if args.max_slots is not None else settings.vs_max_concurrent,
+            symbol_whitelist=[s.strip() for s in (
+                settings.vs_symbol_whitelist or settings.rb_symbol_whitelist
+            ).split(',') if s.strip()],
+            max_drawdown_pct=settings.max_drawdown_pct,
+            soft_equity_scale=settings.rb_soft_equity_scale,
+            soft_eq_dd1=settings.rb_soft_eq_dd1,
+            soft_eq_scale1=settings.rb_soft_eq_scale1,
+            soft_eq_dd2=settings.rb_soft_eq_dd2,
+            soft_eq_scale2=settings.rb_soft_eq_scale2,
+            soft_eq_dd3=settings.rb_soft_eq_dd3,
+            soft_eq_scale3=settings.rb_soft_eq_scale3,
+        ) if args.strategy == 'vol_straddle' else None,
     )
 
     # ── Live trading confirmation gate ──
