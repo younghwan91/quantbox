@@ -83,6 +83,18 @@ class PositionMixin:
             tf_label = sig_meta.get('tf', '15m')
             max_hold = sig_meta.get('max_hold', vs.get_max_hold(tf_label))
 
+            # ── R34 CW-Tier Conviction Sizing ──
+            conviction_score = sig_meta.get('conviction_score', 0)
+            if vs.cw_enabled and vs.cw_multipliers:
+                idx = min(conviction_score, len(vs.cw_multipliers) - 1)
+                cw_mult = vs.cw_multipliers[idx]
+                notional *= cw_mult
+                logger.info(
+                    f"[{symbol}] CW-Tier: score={conviction_score}/4 → "
+                    f"{cw_mult:.1f}x → notional=${notional:.2f} "
+                    f"({sig_meta.get('conviction_cond', {})})"
+                )
+
         # ── Elliott: 2% exploratory sizing (winning_strategy §4.2) ──
         elif self.strategy_name == 'elliott':
             ecfg = getattr(self, 'elliott_config', ElliottConfig())
@@ -219,7 +231,15 @@ class PositionMixin:
         else:
             lev_int = max(1, min(math.ceil(leverage), int(cfg.max_leverage)))
 
-        result = self._place_order(symbol, side, quantity, leverage=lev_int)
+        # Hedge Mode: derive positionSide from signal
+        pos_side = None
+        if self.strategy_name == 'vol_straddle' and self.vs_config.hedge_mode:
+            pos_side = 'LONG' if signal > 0 else 'SHORT'
+
+        result = self._place_order(
+            symbol, side, quantity, leverage=lev_int,
+            position_side=pos_side,
+        )
         if result is None:
             return False
 
@@ -240,13 +260,15 @@ class PositionMixin:
             logger.info(
                 f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
                 f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
-                f"TF={tf_label}, SL={sl_pct*100:.1f}%, TP={tp_pct*100:.1f}%)"
+                f"TF={tf_label}, SL={sl_pct*100:.1f}%, TP={tp_pct*100:.1f}%, "
+                f"conviction={conviction_score}/4)"
             )
 
             sl_order_id = self._place_server_stop_loss(
                 symbol=symbol, signal=signal, quantity=fill_qty,
                 entry_price=fill_price, move_size=move_size,
                 stop_mult=sl_pct,
+                position_side=pos_side,
             )
             if sl_order_id == 'WOULD_TRIGGER':
                 logger.warning(
@@ -260,6 +282,7 @@ class PositionMixin:
                 symbol=symbol, signal=signal, quantity=fill_qty,
                 entry_price=fill_price, move_size=move_size,
                 target_retrace=tp_pct,
+                position_side=pos_side,
             )
             if tp_order_id == 'WOULD_TRIGGER':
                 logger.warning(
@@ -288,6 +311,7 @@ class PositionMixin:
                 server_tp_order_id=tp_order_id,
                 sl=sl_pct, tp=tp_pct, tf=tf_label,
                 max_hold=max_hold,
+                position_side=pos_side,
             )
 
             # Paper balance cost
@@ -334,6 +358,7 @@ class PositionMixin:
                     {'name': '🛑 SL', 'value': f'${sl_price:.4f} ({sl_pct*100:.1f}%)', 'inline': True},
                     {'name': 'TP 방식', 'value': _tp_tag, 'inline': True},
                     {'name': 'SL 방식', 'value': _sl_tag, 'inline': True},
+                    {'name': '확신도', 'value': f'{conviction_score}/4', 'inline': True},
                     {'name': '슬롯', 'value': f'{n_active}/{self.vs_config.max_concurrent}', 'inline': True},
                     {'name': '── 활성 포지션 ──', 'value': f'```\n{_pos_summary}\n```', 'inline': False},
                     {'name': '잔고', 'value': f'${balance_after:,.2f}', 'inline': True},
@@ -358,6 +383,7 @@ class PositionMixin:
             entry_price=fill_price,
             move_size=move_size,
             stop_mult=eff_stop,
+            position_side=pos_side,
         )
         # v12.3.1: Guard against WOULD_TRIGGER sentinel — let bracket repair handle it
         if sl_order_id == 'WOULD_TRIGGER':
@@ -386,6 +412,7 @@ class PositionMixin:
                 entry_price=fill_price,
                 move_size=move_size,
                 target_retrace=cfg.target_retrace,
+                position_side=pos_side,
             )
             if tp_order_id == 'WOULD_TRIGGER':
                 logger.warning(
@@ -414,6 +441,7 @@ class PositionMixin:
                 entry_price=fill_price,
                 move_size=move_size,
                 target_retrace=cfg.target_retrace,
+                position_side=pos_side,
             )
             # v12.3.1: Guard against WOULD_TRIGGER sentinel for TP too
             if tp_order_id == 'WOULD_TRIGGER':
@@ -532,6 +560,9 @@ class PositionMixin:
     ) -> bool:
         """Partially close 50% of a position (v4.3 capital preservation).
 
+        Args:
+            symbol: Position key (may be compound: 'BTCUSDT:LONG').
+
         Closes half the position to lock in profit. The remaining half
         continues with a break-even stop. Does NOT remove the position
         from the strategy — it stays tracked with partial_closed=True.
@@ -541,6 +572,9 @@ class PositionMixin:
         pos = self.strategy._positions.get(symbol)
         if pos is None:
             return False
+
+        # Extract Binance symbol from compound key
+        api_symbol = pos.get('symbol', symbol.split(':')[0])
 
         # v12.5 Race guard: If server already handled the partial close
         # intra-bar (_handle_server_partial_tp_fill sets this flag),
@@ -555,23 +589,29 @@ class PositionMixin:
         # v11.1: Cancel old server SL (quantity will change)
         sl_oid = pos.get('server_sl_order_id')
         if sl_oid:
-            self._cancel_server_stop_loss(symbol, sl_oid)
+            self._cancel_server_stop_loss(api_symbol, sl_oid)
 
         # v11.2: Cancel old server TP (quantity will change)
         tp_oid = pos.get('server_tp_order_id')
         if tp_oid:
-            self._cancel_server_take_profit(symbol, tp_oid)
+            self._cancel_server_take_profit(api_symbol, tp_oid)
 
         fraction = self.config.partial_exit_fraction
         full_quantity = pos['notional'] / pos['entry_price']
-        close_qty = self._round_qty(full_quantity * fraction, symbol)
+        close_qty = self._round_qty(full_quantity * fraction, api_symbol)
         if close_qty <= 0:
             return False
 
         # Reverse the entry side to close
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
-        result = self._place_order(symbol, side, close_qty, reduce_only=True)
+        # Hedge Mode: use positionSide instead of reduceOnly
+        pos_side = pos.get('position_side')
+        result = self._place_order(
+            api_symbol, side, close_qty,
+            reduce_only=(pos_side is None),
+            position_side=pos_side,
+        )
         if result is None:
             # Failed: revert partial_closed flag & clear stale order IDs.
             # Without clearing IDs, _sync_server_orders sees the old
@@ -584,11 +624,12 @@ class PositionMixin:
             # the 15-minute protection gap (don't wait for bracket repair).
             if not self.paper_mode:
                 new_sl = self._place_server_stop_loss(
-                    symbol=symbol, signal=pos['signal'],
-                    quantity=self._round_qty(full_quantity, symbol),
+                    symbol=api_symbol, signal=pos['signal'],
+                    quantity=self._round_qty(full_quantity, api_symbol),
                     entry_price=pos['entry_price'],
                     move_size=pos['move_size'],
                     stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
+                    position_side=pos_side,
                 )
                 if new_sl and new_sl != 'WOULD_TRIGGER':
                     pos['server_sl_order_id'] = new_sl
@@ -596,25 +637,27 @@ class PositionMixin:
                 # Non-PBT: full qty server TP for intra-bar capture.
                 if self.config.partial_exit_enabled:
                     tp_qty = self._round_qty(
-                        full_quantity * self.config.partial_exit_fraction, symbol,
+                        full_quantity * self.config.partial_exit_fraction, api_symbol,
                     )
                     new_tp = self._place_server_take_profit(
-                        symbol=symbol, signal=pos['signal'],
+                        symbol=api_symbol, signal=pos['signal'],
                         quantity=tp_qty,
                         entry_price=pos['entry_price'],
                         move_size=pos['move_size'],
                         target_retrace=self.config.target_retrace,
+                        position_side=pos_side,
                     )
                     if new_tp and new_tp != 'WOULD_TRIGGER':
                         pos['server_tp_order_id'] = new_tp
                         pos['server_tp_is_partial'] = True
                 else:
                     new_tp = self._place_server_take_profit(
-                        symbol=symbol, signal=pos['signal'],
-                        quantity=self._round_qty(full_quantity, symbol),
+                        symbol=api_symbol, signal=pos['signal'],
+                        quantity=self._round_qty(full_quantity, api_symbol),
                         entry_price=pos['entry_price'],
                         move_size=pos['move_size'],
                         target_retrace=self.config.target_retrace,
+                        position_side=pos_side,
                     )
                     if new_tp and new_tp != 'WOULD_TRIGGER':
                         pos['server_tp_order_id'] = new_tp
@@ -641,7 +684,7 @@ class PositionMixin:
                 fill_price = pos['entry_price']  # fallback
                 try:
                     recent_trades = self.client.futures_account_trades(
-                        symbol=symbol, limit=10,
+                        symbol=api_symbol, limit=10,
                     )
                     if recent_trades:
                         close_side = 'SELL' if closed_pos['signal'] == 1 else 'BUY'
@@ -660,7 +703,7 @@ class PositionMixin:
                 cost = closed_pos['notional'] * self.config.round_trip_cost
                 net_pnl = pnl_usd - cost
                 trade = {
-                    'symbol': symbol,
+                    'symbol': api_symbol,
                     'signal': closed_pos['signal'],
                     'entry_price': closed_pos['entry_price'],
                     'exit_price': fill_price,
@@ -709,16 +752,17 @@ class PositionMixin:
 
         # v11.1: Place new server SL for remaining quantity
         remaining_qty = self._round_qty(
-            pos['notional'] / pos['entry_price'], symbol,
+            pos['notional'] / pos['entry_price'], api_symbol,
         )
         if remaining_qty > 0 and not self.paper_mode:
             new_sl_oid = self._place_server_stop_loss(
-                symbol=symbol,
+                symbol=api_symbol,
                 signal=pos['signal'],
                 quantity=remaining_qty,
                 entry_price=pos['entry_price'],
                 move_size=pos['move_size'],
                 stop_mult=0.0001,  # Break-even stop (tiny distance)
+                position_side=pos_side,
             )
             pos['server_sl_order_id'] = new_sl_oid
 
@@ -728,12 +772,13 @@ class PositionMixin:
             if not self.config.breakeven_after_partial:
                 # Legacy mode: place TP for remaining half
                 new_tp_oid = self._place_server_take_profit(
-                    symbol=symbol,
+                    symbol=api_symbol,
                     signal=pos['signal'],
                     quantity=remaining_qty,
                     entry_price=pos['entry_price'],
                     move_size=pos['move_size'],
                     target_retrace=self.config.target_retrace,
+                    position_side=pos_side,
                 )
                 pos['server_tp_order_id'] = new_tp_oid
             else:
@@ -819,6 +864,9 @@ class PositionMixin:
         if pos is None:
             return False
 
+        # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT)
+        api_sym = pos.get('symbol', symbol.split(':')[0])
+
         ecfg = getattr(self, 'elliott_config', ElliottConfig())
         add_margin = balance * ecfg.primary_pct
         add_notional = add_margin * ecfg.nominal_leverage
@@ -826,12 +874,15 @@ class PositionMixin:
             return False
 
         add_qty = add_notional / current_price
-        add_qty = self._round_qty(add_qty, symbol)
+        add_qty = self._round_qty(add_qty, api_sym)
         if add_qty <= 0:
             return False
 
         side = 'BUY' if pos['signal'] == 1 else 'SELL'
-        result = self._place_order(symbol, side, add_qty)
+        result = self._place_order(
+            api_sym, side, add_qty,
+            position_side=pos.get('position_side'),
+        )
         if result is None:
             return False
 
@@ -886,6 +937,9 @@ class PositionMixin:
         if pos is None:
             return False
 
+        # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT)
+        api_sym = pos.get('symbol', symbol.split(':')[0])
+
         # Unrealized PnL
         if pos['signal'] == 1:
             gain_pct = (current_price - pos['entry_price']) / pos['entry_price']
@@ -900,12 +954,15 @@ class PositionMixin:
         # Use unrealized profit as margin for pyramid
         pyramid_notional = min(unrealized * ecfg.nominal_leverage, pos['notional'] * 0.5)
         pyramid_qty = pyramid_notional / current_price
-        pyramid_qty = self._round_qty(pyramid_qty, symbol)
+        pyramid_qty = self._round_qty(pyramid_qty, api_sym)
         if pyramid_qty <= 0:
             return False
 
         side = 'BUY' if pos['signal'] == 1 else 'SELL'
-        result = self._place_order(symbol, side, pyramid_qty)
+        result = self._place_order(
+            api_sym, side, pyramid_qty,
+            position_side=pos.get('position_side'),
+        )
         if result is None:
             return False
 
@@ -945,6 +1002,9 @@ class PositionMixin:
     ) -> bool:
         """Close an existing position.
 
+        Args:
+            symbol: Position key (may be compound: 'BTCUSDT:LONG').
+
         Returns True if closed successfully.  Also returns True when the
         exchange reports NO_POSITION (-4118/-2022) because the position is
         already gone — we just clean up our internal state.
@@ -953,25 +1013,34 @@ class PositionMixin:
         if pos is None:
             return False
 
+        # Extract Binance symbol from compound key
+        api_symbol = pos.get('symbol', symbol.split(':')[0])
+
         quantity = pos['notional'] / pos['entry_price']
-        quantity = self._round_qty(quantity, symbol)
+        quantity = self._round_qty(quantity, api_symbol)
         if quantity <= 0:
             return False
 
         # v11.1: Cancel server-side stop-loss BEFORE closing
         sl_oid = pos.get('server_sl_order_id')
         if sl_oid:
-            self._cancel_server_stop_loss(symbol, sl_oid)
+            self._cancel_server_stop_loss(api_symbol, sl_oid)
 
         # v11.2: Cancel server-side take-profit BEFORE closing
         tp_oid = pos.get('server_tp_order_id')
         if tp_oid:
-            self._cancel_server_take_profit(symbol, tp_oid)
+            self._cancel_server_take_profit(api_symbol, tp_oid)
 
         # Reverse the entry side
         side = 'SELL' if pos['signal'] == 1 else 'BUY'
 
-        result = self._place_order(symbol, side, quantity, reduce_only=True)
+        # Hedge Mode: use positionSide instead of reduceOnly
+        pos_side = pos.get('position_side')
+        result = self._place_order(
+            api_symbol, side, quantity,
+            reduce_only=(pos_side is None),  # One-Way only
+            position_side=pos_side,
+        )
 
         # ── NO_POSITION: exchange says position already gone ──
         # This typically means a server-side TP/SL filled between cycles.
@@ -988,7 +1057,7 @@ class PositionMixin:
                 fill_price = current_price  # fallback
                 try:
                     recent_trades = self.client.futures_account_trades(
-                        symbol=symbol, limit=10,
+                        symbol=api_symbol, limit=10,
                     )
                     if recent_trades:
                         # Find the most recent CLOSE trade (opposite side)
@@ -1021,7 +1090,7 @@ class PositionMixin:
 
                 # Trade record
                 trade = {
-                    'symbol': symbol,
+                    'symbol': api_symbol,
                     'signal': closed_pos['signal'],
                     'entry_price': closed_pos['entry_price'],
                     'exit_price': fill_price,
@@ -1100,12 +1169,13 @@ class PositionMixin:
             if is_runner:
                 # Runner: use breakeven stop, no server TP
                 new_sl_oid = self._place_server_stop_loss(
-                    symbol=symbol,
+                    symbol=api_symbol,
                     signal=pos['signal'],
                     quantity=quantity,
                     entry_price=pos['entry_price'],
                     move_size=pos['move_size'],
                     stop_mult=0.0001,  # BE stop
+                    position_side=pos.get('position_side'),
                 )
                 new_tp_oid = None
                 # v12.4.4: Reset ratchet state so _ratchet_runner_sl
@@ -1117,12 +1187,13 @@ class PositionMixin:
             else:
                 # Phase 1: use original stop
                 new_sl_oid = self._place_server_stop_loss(
-                    symbol=symbol,
+                    symbol=api_symbol,
                     signal=pos['signal'],
                     quantity=quantity,
                     entry_price=pos['entry_price'],
                     move_size=pos['move_size'],
                     stop_mult=pos.get('entry_stop_mult', self.config.stop_mult),
+                    position_side=pos.get('position_side'),
                 )
                 # v12.4.3: In PBT mode, do NOT re-place server TP.
                 # Same bug class as v12.4.1 CRITICAL #1: server TP fires
@@ -1135,12 +1206,13 @@ class PositionMixin:
                     new_tp_oid = None
                 else:
                     new_tp_oid = self._place_server_take_profit(
-                        symbol=symbol,
+                        symbol=api_symbol,
                         signal=pos['signal'],
                         quantity=quantity,
                         entry_price=pos['entry_price'],
                         move_size=pos['move_size'],
                         target_retrace=self.config.target_retrace,
+                        position_side=pos.get('position_side'),
                     )
             # Update existing position's server order IDs
             # Guard against sentinel values being stored as order IDs
@@ -1200,7 +1272,7 @@ class PositionMixin:
 
         # Trade record
         trade = {
-            'symbol': symbol,
+            'symbol': api_symbol,
             'signal': pos['signal'],
             'entry_price': pos['entry_price'],
             'exit_price': fill_price,

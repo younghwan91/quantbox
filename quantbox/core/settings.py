@@ -260,7 +260,8 @@ class QuantBoxSettings(BaseSettings):
     vs_s_squeeze_dur: int = 8                # Min squeeze duration
     vs_s_sl: float = 0.015                   # 1.5% SL per straddle leg
     vs_s_tp: float = 0.05                    # 5% TP per straddle leg
-    vs_straddle_enabled: bool = False        # Disabled until hedge mode
+    vs_straddle_enabled: bool = True         # Straddle mode enabled
+    vs_hedge_mode: bool = True               # Binance Hedge Mode (dualSidePosition=true)
 
     # ── Max Hold (bars at each TF, ≈ 48h real-time) ──
     vs_max_hold_15m: int = 192               # 192 × 15m = 48h
@@ -276,6 +277,15 @@ class QuantBoxSettings(BaseSettings):
     vs_base_leverage: float = 1.5            # Flat leverage
     vs_max_leverage: float = 20.0            # Hard cap
     vs_max_concurrent: int = 2               # Max simultaneous positions
+
+    # ── CW-Tier Conviction Sizing (R34) ──
+    vs_cw_enabled: bool = True               # Enable conviction-weighted sizing
+    vs_min_conviction_score: int = 0         # Min score for entry (0=all, 3=T3-Triple)
+    vs_e2_sma_period: int = 20               # E2: SMA period for proximity check
+    vs_e2_threshold: float = 0.005           # E2: 0.5% max distance from SMA
+    vs_c2_btc_mom_threshold: float = 0.01    # C2: 1% max BTC momentum magnitude
+    vs_a3_deep_vr_threshold: float = 0.35    # A3: D deep compression threshold
+    vs_a3_long_squeeze_dur: int = 16         # A3: S extended squeeze duration
 
     # ── Symbol Whitelist (shared with RB by default) ──
     vs_symbol_whitelist: str = ''             # Empty = use RB whitelist
