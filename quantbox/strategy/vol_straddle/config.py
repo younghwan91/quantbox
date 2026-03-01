@@ -27,12 +27,13 @@ class VolStraddleConfig:
     d_sl: float = 0.01              # 1% stop loss
     d_tp: float = 0.05              # 5% take profit
 
-    # ── S_d8: Straddle (Phase 2, requires Binance Hedge Mode) ──
+    # ── S_d8: Straddle (requires Binance Hedge Mode) ──
     s_vr_threshold: float = 0.55    # S VR entry threshold
     s_squeeze_dur: int = 8          # Min consecutive bars below S VR threshold
     s_sl: float = 0.015             # 1.5% stop loss (per leg)
     s_tp: float = 0.05              # 5% take profit (per leg)
-    straddle_enabled: bool = False   # Phase 2: disabled until hedge mode
+    straddle_enabled: bool = True    # S_d8 straddle mode enabled
+    hedge_mode: bool = True          # Binance Hedge Mode (dualSidePosition=true)
 
     # ── Direction ──
     momentum_period: int = 8        # Momentum lookback for D direction

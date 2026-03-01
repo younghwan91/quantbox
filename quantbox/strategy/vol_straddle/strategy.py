@@ -22,6 +22,7 @@ from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
     compute_momentum,
     compute_vr,
+    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
     resample_ohlcv,
@@ -102,7 +103,9 @@ class VolStraddleStrategy:
         cfg = self.config
 
         # Per-symbol dedup: no signal when position already open
-        if symbol in self._positions:
+        # In straddle mode, both legs open simultaneously from one signal,
+        # so if ANY leg exists we skip (no incremental straddle adds).
+        if self.has_position(symbol):
             return 0
 
         high_15m = self._high_data.get(symbol)
@@ -161,8 +164,13 @@ class VolStraddleStrategy:
     ) -> int:
         """Check VR compression signal for a single timeframe.
 
-        Returns directional signal (+1/-1) or 0.
+        Returns:
+            +1 (long), -1 (short), 2 (straddle), or 0 (no signal).
         Stores signal metadata for the scalper to query.
+
+        Signal priority: S_d8 straddle (signal=2) > D_mom8 directional.
+        S_d8 requires sustained squeeze (duration ≥ min_dur), so it fires
+        LATER than D_mom8. They don't compete in practice.
 
         CRITICAL CHECK: Only fires on the LAST bar (current bar close).
         Previous bars are used for VR computation but not for entry.
@@ -187,7 +195,30 @@ class VolStraddleStrategy:
         elif tf == '4h':
             self._last_vr_4h[self._current_symbol] = vr_val
 
-        # D_mom8: VR < threshold → directional entry
+        # ── S_d8 straddle check (higher priority) ──
+        # Requires sustained VR compression for min_dur bars.
+        if cfg.straddle_enabled:
+            s_sig = gen_vr_dur_signal(
+                vr, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup,
+            )
+            if s_sig[-1] == 1:
+                self._last_signal_meta[self._current_symbol] = {
+                    'tf': tf,
+                    'sl': cfg.s_sl,
+                    'tp': cfg.s_tp,
+                    'max_hold': cfg.get_max_hold(tf),
+                    'vr': vr_val,
+                    'momentum': 0.0,
+                    'straddle': True,
+                }
+                logger.info(
+                    f"[{self._current_symbol}] S_d8 straddle signal "
+                    f"TF={tf} VR={vr_val:.3f} "
+                    f"(threshold={cfg.s_vr_threshold})"
+                )
+                return 2  # Straddle signal
+
+        # ── D_mom8: VR < threshold → directional entry ──
         sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
 
         # Only check the LAST bar (current bar close)
@@ -253,6 +284,18 @@ class VolStraddleStrategy:
     # ══════════════════════════════════════════════════════════════════
     #  Position Management
     # ══════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def parse_pos_key(key: str) -> tuple[str, str | None]:
+        """Parse position key → (symbol, position_side or None).
+
+        Compound keys: 'BTCUSDT:LONG' → ('BTCUSDT', 'LONG')
+        Simple keys: 'BTCUSDT' → ('BTCUSDT', None)
+        """
+        if ':' in key:
+            symbol, side = key.split(':', 1)
+            return symbol, side
+        return key, None
 
     def update_position(
         self, symbol: str, current_price: float,
@@ -326,7 +369,17 @@ class VolStraddleStrategy:
     # ══════════════════════════════════════════════════════════════════
 
     def has_position(self, symbol: str) -> bool:
-        """Check if a position exists for this symbol."""
+        """Check if a position exists for this symbol.
+
+        In hedge mode, checks compound keys (symbol:LONG / symbol:SHORT)
+        and also the plain key as fallback for backward compatibility.
+        """
+        if self.config.hedge_mode:
+            return (
+                f"{symbol}:LONG" in self._positions
+                or f"{symbol}:SHORT" in self._positions
+                or symbol in self._positions
+            )
         return symbol in self._positions
 
     def open_position(
@@ -340,6 +393,7 @@ class VolStraddleStrategy:
         """Record a new position.
 
         Stores TF-specific SL/TP/max_hold from signal metadata.
+        In hedge mode, uses compound key (symbol:LONG / symbol:SHORT).
 
         Args:
             symbol: Trading symbol.
@@ -351,12 +405,19 @@ class VolStraddleStrategy:
             entry_stop_mult: SL as fraction (e.g. 0.01 = 1%).
             server_sl_order_id: Exchange SL order ID.
             server_tp_order_id: Exchange TP order ID.
-            **kwargs: Extra fields (sl, tp, tf, max_hold).
+            **kwargs: Extra fields (sl, tp, tf, max_hold, position_side).
         """
         if entry_price <= 0:
             raise ValueError(
                 f"Invalid entry_price for {symbol}: {entry_price}"
             )
+
+        # Determine position key (compound in hedge mode)
+        position_side = kwargs.get('position_side')
+        if position_side:
+            pos_key = f"{symbol}:{position_side}"
+        else:
+            pos_key = symbol
 
         # Get TF-specific parameters from signal metadata or kwargs
         meta = self._last_signal_meta.get(symbol, {})
@@ -367,7 +428,8 @@ class VolStraddleStrategy:
             'max_hold', self.config.get_max_hold(tf),
         ))
 
-        self._positions[symbol] = {
+        self._positions[pos_key] = {
+            'symbol': symbol,  # Actual Binance symbol (for API calls)
             'signal': signal,
             'entry_price': entry_price,
             'notional': notional,
@@ -389,6 +451,8 @@ class VolStraddleStrategy:
             'confidence': 0,
             'highest_since_tp1': 0.0,
             'trail_floor': None,
+            # Hedge mode
+            'position_side': position_side,
         }
 
         logger.info(
@@ -396,10 +460,14 @@ class VolStraddleStrategy:
             f"{'LONG' if signal == 1 else 'SHORT'} "
             f"TF={tf} SL={sl*100:.1f}% TP={tp*100:.1f}% "
             f"max_hold={max_hold} VR={meta.get('vr', 0):.3f}"
+            f"{f' (hedge:{position_side})' if position_side else ''}"
         )
 
     def close_position(self, symbol: str) -> dict | None:
-        """Remove position and return its info."""
+        """Remove position and return its info.
+
+        Accepts raw symbol or compound key (symbol:LONG / symbol:SHORT).
+        """
         return self._positions.pop(symbol, None)
 
     @property

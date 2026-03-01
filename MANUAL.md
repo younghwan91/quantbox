@@ -698,6 +698,12 @@ VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발�
 | `VS_MAX_HOLD_4H` | 12 | 4h TF 최대 보유 (=48h) |
 | `VS_BASE_LEVERAGE` | 1.5 | 기본 레버리지 |
 | `VS_MAX_CONCURRENT` | 2 | 최대 동시 포지션 |
+| `VS_STRADDLE_ENABLED` | true | S_d8 스트래들 활성화 |
+| `VS_HEDGE_MODE` | true | Binance Hedge Mode (dualSidePosition) |
+| `VS_S_VR_THRESHOLD` | 0.55 | S_d8 VR 진입 임계값 |
+| `VS_S_SQUEEZE_DUR` | 8 | S_d8 최소 스퀴즈 지속 바 수 |
+| `VS_S_SL` | 0.015 | S_d8 1.5% 손절 (레그별) |
+| `VS_S_TP` | 0.05 | S_d8 5% 익절 (레그별) |
 
 ### 3.6.3 실행
 
@@ -725,9 +731,20 @@ uv run python -m quantbox.scalper --strategy vol_straddle --paper
 - **4h**: 개별 다운로드, 개발 중 바 제거됨
 - **교차 TF**: VR/모멘텀은 동일 TF 내 데이터만 사용
 
-### 3.6.6 Phase 2 로드맵
+### 3.6.6 S_d8 스트래들 모드 (Hedge Mode)
 
-S_d8 스트래들 (양방향 동시 진입)은 Binance Hedge Mode 필요. 현재 원-웨이 모드 사용 중이므로 별도 업그레이드 예정.
+**v12.7**: S_d8 스트래들이 활성화되었습니다. Binance **Hedge Mode** (`dualSidePosition=true`)가 필요합니다.
+
+**동작 원리:**
+- VR < 0.55 상태가 **8바 이상** 지속 → 양방향 동시 진입 (LONG + SHORT)
+- 각 레그별 SL=1.5%, TP=5%
+- `positionSide` 파라미터로 LONG/SHORT 방향 구분 (Hedge Mode 전용)
+- 포지션 키는 복합 키 (`BTCUSDT:LONG`, `BTCUSDT:SHORT`)로 관리
+
+**사전 준비 (필수):**
+1. Binance 앱/웹 → Futures → Settings ⚙️ → Position Mode → **Hedge Mode** 활성화
+2. `.env`에 `VS_HEDGE_MODE=true`, `VS_STRADDLE_ENABLED=true` 설정
+3. 모든 기존 주문/포지션을 정리한 후 전환 (열린 주문이 있으면 `-4067` 에러)
 
 ---
 
