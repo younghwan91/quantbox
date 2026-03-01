@@ -1147,8 +1147,61 @@ class RubberBandScalper(
 
     # ==================== Entry Points ====================
 
+    def _ensure_position_mode(self) -> None:
+        """Ensure Binance account position mode matches config.
+
+        Hedge mode (dualSidePosition=true) is REQUIRED for VolStraddle
+        S_d8 straddle to open simultaneous LONG+SHORT on the same symbol.
+        Without this, all positionSide=LONG/SHORT orders fail with -4059.
+
+        One-Way mode is required for RubberBand/Elliott (they use reduceOnly).
+        """
+        if self.paper_mode:
+            return
+
+        want_hedge = (
+            self.strategy_name == 'vol_straddle'
+            and self.vs_config.hedge_mode
+        )
+
+        try:
+            resp = self.client.futures_get_position_mode()
+            current_hedge = resp.get('dualSidePosition', False)
+        except Exception as e:
+            logger.error(f"Position mode check failed: {e}")
+            return
+
+        if current_hedge == want_hedge:
+            mode_label = 'Hedge' if current_hedge else 'One-Way'
+            logger.info(f"Position mode: {mode_label} (OK)")
+            return
+
+        try:
+            self.client.futures_change_position_mode(
+                dualSidePosition=want_hedge,
+            )
+            mode_label = 'Hedge' if want_hedge else 'One-Way'
+            logger.info(f"Position mode switched to {mode_label}")
+        except BinanceAPIException as e:
+            if '-4059' in str(e):
+                # Already in desired mode (race condition)
+                pass
+            elif '-4068' in str(e):
+                # Cannot change while positions are open
+                logger.error(
+                    f"Cannot switch position mode — open positions exist. "
+                    f"Close all positions first, then restart."
+                )
+                self.discord.send(content=(
+                    "\U0001f6a8 **포지션 모드 전환 실패** — "
+                    "열린 포지션이 있어 전환 불가. 모든 포지션 청산 후 재시작 필요."
+                ))
+            else:
+                logger.error(f"Position mode change failed: {e}")
+
     def run_once(self) -> None:
         """Run a single trading cycle."""
+        self._ensure_position_mode()
         balance = self.get_balance()
         self._initial_balance = balance
         self._high_water_mark = balance
@@ -1170,6 +1223,7 @@ class RubberBandScalper(
         Starts/stops the Discord bot for interactive commands.
         """
         # Setup
+        self._ensure_position_mode()
         balance = self.get_balance()
         self._initial_balance = balance
         self._high_water_mark = balance
