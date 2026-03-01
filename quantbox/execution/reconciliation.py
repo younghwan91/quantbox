@@ -260,12 +260,20 @@ class ReconciliationMixin:
             logger.warning(f"Position reconciliation failed: {e}")
             return
 
-        # Build map of actual exchange positions
+        # Build map of actual exchange positions.
+        # In Hedge Mode, Binance returns TWO entries per symbol
+        # (positionSide=LONG and SHORT). Use compound key to avoid
+        # one side overwriting the other → false ghost detection.
         exchange_map: dict[str, float] = {}
         for p in exchange_positions:
             amt = float(p.get('positionAmt', '0'))
             if amt != 0:
-                exchange_map[p['symbol']] = amt
+                pos_side = p.get('positionSide', 'BOTH')
+                if pos_side in ('LONG', 'SHORT'):
+                    key = f"{p['symbol']}:{pos_side}"
+                else:
+                    key = p['symbol']
+                exchange_map[key] = amt
 
         # Check each internal position against exchange
         for sym in list(self.strategy.active_positions):
@@ -273,10 +281,15 @@ class ReconciliationMixin:
             if not pos:
                 continue
 
-            # Extract Binance symbol from compound key
+            # Build lookup key: compound (BTCUSDT:LONG) or plain (BTCUSDT)
             api_sym = pos.get('symbol', sym.split(':')[0])
+            pos_side = pos.get('position_side')
+            if pos_side in ('LONG', 'SHORT'):
+                lookup_key = f"{api_sym}:{pos_side}"
+            else:
+                lookup_key = api_sym
 
-            if api_sym not in exchange_map:
+            if lookup_key not in exchange_map:
                 # Ghost position: we think it's open, exchange says no
                 logger.error(
                     f"[{sym}] RECONCILIATION: Ghost position detected! "
@@ -420,7 +433,7 @@ class ReconciliationMixin:
                 continue
 
             # Quantity mismatch check
-            exchange_qty = abs(exchange_map[api_sym])
+            exchange_qty = abs(exchange_map[lookup_key])
             internal_qty = pos['notional'] / pos['entry_price']
             qty_diff_pct = abs(exchange_qty - internal_qty) / max(internal_qty, 1e-8) * 100
             if qty_diff_pct > 5:  # More than 5% mismatch
