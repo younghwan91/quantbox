@@ -1174,7 +1174,13 @@ def apply_mtf_confirmation(
     for i in range(n):
         if out[i] == 0.0:
             continue
-        j = min(i // ratio, len(close_4h) - 1)
+        # Use the LAST COMPLETED 4h bar to avoid lookahead bias.
+        # j = i // ratio gives the current (potentially developing) 4h bar.
+        # If we're inside the bar (i % ratio > 0), use j-1 (completed).
+        # At the 4h boundary (i % ratio == 0), the bar just opened,
+        # so the last completed bar is still j-1.
+        j_raw = min(i // ratio, len(close_4h) - 1)
+        j = j_raw - 1 if j_raw > 0 else 0
         if j < sma_period_4h or np.isnan(sma_4h[j]):
             continue
 

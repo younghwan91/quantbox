@@ -137,13 +137,27 @@ class QuantBoxSettings(BaseSettings):
     # ── v9.0 S+R+M Confluence Pipeline (A/B validated, winning strategy) ──
     # MACD 히스토그램 반전 + 스토캐스틱 %K/%D 크로스 = 추가 컨피던스 증거
     # Combined with Fib exits: Calmar +33.6%, DD -8.5%
-    rb_macd_enabled: bool = True              # MACD 히스토그램 기울기 컨피던스 증거
+    # v12.6: DISABLED — R21 backtest shows Stoch/MACD = noise (WR 51%→62% after removal)
+    rb_macd_enabled: bool = False             # v12.6: DISABLED (R21: noise, WR +11pp without)
     rb_macd_fast: int = 12                    # MACD fast EMA 기간
     rb_macd_slow: int = 26                    # MACD slow EMA 기간
     rb_macd_signal_period: int = 14           # MACD signal EMA 기간 (14=최적)
-    rb_stoch_enabled: bool = True             # 스토캐스틱 크로스 컨피던스 증거
+    rb_stoch_enabled: bool = False            # v12.6: DISABLED (R21: noise, WR +11pp without)
     rb_stoch_k_period: int = 3                # v10.0: 더 빠른 스토캐스틱 (+5% Calmar vs 5)
     rb_stoch_d_period: int = 3                # 스토캐스틱 %D 기간
+
+    # ── v12.6 Climax Volume Filter (R21 champion: Calmar 728→1171, DD 7.7%→5.8%) ──
+    # Climax = vol spike > N×vol_SMA(20); signals exhaustion + high conviction entry
+    rb_climax_enabled: bool = True            # 극단 거래량 스파이크 컨피던스 증거
+    rb_climax_vol_mult: float = 3.0           # vol > 3.0×vol_SMA(20) = climax 정의 (R21 best)
+
+    # ── v12.6 ATR-Based Stop (R21 champion: replaces fixed 0.382×move stop) ──
+    # Dynamic stop = atr_stop_mult × ATR%; wider on noisy small moves, tighter on big moves
+    # R21 [E] Clmx×3.0+ATR2: WR 51%→62%, Calmar 728→1171, Max DD 7.7%→5.8%
+    rb_atr_stop_enabled: bool = True          # ATR 기반 동적 손절 활성화
+    rb_atr_stop_mult: float = 2.0             # SL = 2.0×ATR% (R21 최적)
+    rb_atr_stop_floor: float = 0.005          # SL 최소 0.5% (노이즈 SL 방지)
+    rb_atr_stop_cap: float = 0.04             # SL 최대 4.0% (리스크 제한)
 
     # ── v11.4 Adaptive Threshold (Walk-Forward Validated) ──
     # Per-bar threshold = clip(atr_multiplier × ATR%(atr_period), floor, cap)
@@ -224,6 +238,47 @@ class QuantBoxSettings(BaseSettings):
     # ── v12.3 Direction Diversity (M-2SSTSX, A/B validated) ──
     rb_dir_diversity_enabled: bool = True     # Prevent concentrated same-direction
     rb_max_same_direction: int = 2            # Max positions in same direction
+
+    # ══════════════════════════════════════════════════════════════════
+    #  VolStraddle Strategy Parameters (R35 A1-D50)
+    # ══════════════════════════════════════════════════════════════════
+    # VR compression detector with multi-TF (15m/1h/4h) signals.
+    # OOS validated: N=799 (D_mom8), EV=+29.3bp, PF=1.376, t=3.48.
+
+    # ── VR Computation ──
+    vs_vr_short: int = 7                     # Short ATR period for VR
+    vs_vr_long: int = 50                     # Long ATR period for VR
+
+    # ── D_mom8 Parameters ──
+    vs_d_vr_threshold: float = 0.50          # A1-D50: VR entry threshold (was 0.45)
+    vs_d_sl: float = 0.01                    # 1% stop loss
+    vs_d_tp: float = 0.05                    # 5% take profit
+    vs_momentum_period: int = 8              # Momentum lookback for direction
+
+    # ── S_d8 Parameters (Phase 2 — requires Binance Hedge Mode) ──
+    vs_s_vr_threshold: float = 0.55          # S VR entry threshold
+    vs_s_squeeze_dur: int = 8                # Min squeeze duration
+    vs_s_sl: float = 0.015                   # 1.5% SL per straddle leg
+    vs_s_tp: float = 0.05                    # 5% TP per straddle leg
+    vs_straddle_enabled: bool = False        # Disabled until hedge mode
+
+    # ── Max Hold (bars at each TF, ≈ 48h real-time) ──
+    vs_max_hold_15m: int = 192               # 192 × 15m = 48h
+    vs_max_hold_1h: int = 48                 # 48 × 1h = 48h
+    vs_max_hold_4h: int = 12                 # 12 × 4h = 48h
+
+    # ── Multi-TF Control ──
+    vs_enable_15m: bool = True
+    vs_enable_1h: bool = True
+    vs_enable_4h: bool = True
+
+    # ── Position Sizing ──
+    vs_base_leverage: float = 1.5            # Flat leverage
+    vs_max_leverage: float = 20.0            # Hard cap
+    vs_max_concurrent: int = 2               # Max simultaneous positions
+
+    # ── Symbol Whitelist (shared with RB by default) ──
+    vs_symbol_whitelist: str = ''             # Empty = use RB whitelist
 
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
@@ -356,7 +411,7 @@ class QuantBoxSettings(BaseSettings):
             'target_conf3': self.rb_target_conf3,
             'target_conf4': self.rb_target_conf4,
             'target_conf5': self.rb_target_conf5,
-            # v9.0 S+R+M Confluence
+            # v9.0 S+R+M Confluence (v12.6: both disabled by default)
             'macd_enabled': self.rb_macd_enabled,
             'macd_fast': self.rb_macd_fast,
             'macd_slow': self.rb_macd_slow,
@@ -364,6 +419,14 @@ class QuantBoxSettings(BaseSettings):
             'stoch_enabled': self.rb_stoch_enabled,
             'stoch_k_period': self.rb_stoch_k_period,
             'stoch_d_period': self.rb_stoch_d_period,
+            # v12.6 Climax Volume Filter
+            'climax_enabled': self.rb_climax_enabled,
+            'climax_vol_mult': self.rb_climax_vol_mult,
+            # v12.6 ATR-based Stop
+            'atr_stop_enabled': self.rb_atr_stop_enabled,
+            'atr_stop_mult': self.rb_atr_stop_mult,
+            'atr_stop_floor': self.rb_atr_stop_floor,
+            'atr_stop_cap': self.rb_atr_stop_cap,
             # v7.0 Independent 4H Rubber Band
             'htf_independent_enabled': self.rb_htf_independent_enabled,
             'htf_rb_lookback': self.rb_htf_rb_lookback,

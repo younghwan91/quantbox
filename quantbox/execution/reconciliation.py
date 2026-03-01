@@ -279,19 +279,135 @@ class ReconciliationMixin:
                     f"⚠️ **[{sym}] Ghost position detected** — "
                     f"Position missing on exchange. Cleaning up internal state."
                 ))
-                # Try to find actual fill from recent trades
+                # ── Ghost Fill Audit (P1) ──────────────────────────
+                # Retrieve and log ALL closing fills so we can diagnose
+                # *why* _sync_server_orders missed the fill.
                 fill_price = pos['entry_price']
+                audit_fills: list[dict] = []
                 try:
                     recent = self.client.futures_account_trades(
-                        symbol=sym, limit=20,
+                        symbol=sym, limit=50,
                     )
                     close_side = 'SELL' if pos['signal'] == 1 else 'BUY'
                     for t in reversed(recent):
-                        if t.get('side') == close_side and float(t.get('realizedPnl', '0')) != 0:
-                            fill_price = float(t['price'])
-                            break
-                except Exception:
-                    pass
+                        if (
+                            t.get('side') == close_side
+                            and float(t.get('realizedPnl', '0')) != 0
+                        ):
+                            audit_fills.append({
+                                'orderId': t.get('orderId'),
+                                'price': float(t['price']),
+                                'qty': float(t.get('qty', '0')),
+                                'realizedPnl': float(t.get('realizedPnl', '0')),
+                                'commission': float(t.get('commission', '0')),
+                                'commissionAsset': t.get('commissionAsset', ''),
+                                'time': t.get('time'),          # epoch ms
+                                'maker': t.get('maker', False),
+                                'buyer': t.get('buyer', False),
+                            })
+                    if audit_fills:
+                        fill_price = audit_fills[0]['price']  # most recent
+                except Exception as e:
+                    logger.warning(f"[{sym}] Ghost audit: trade fetch failed: {e}")
+
+                # Also try to find the algo order that caused the fill
+                algo_audit: dict | None = None
+                if audit_fills:
+                    try:
+                        all_orders = self.client.futures_get_all_orders(
+                            symbol=sym, limit=20,
+                        )
+                        fill_order_id = audit_fills[0]['orderId']
+                        for o in reversed(all_orders):
+                            if o.get('orderId') == fill_order_id:
+                                algo_audit = {
+                                    'orderId': o.get('orderId'),
+                                    'clientOrderId': o.get('clientOrderId', ''),
+                                    'type': o.get('type', ''),
+                                    'side': o.get('side', ''),
+                                    'origType': o.get('origType', ''),
+                                    'status': o.get('status', ''),
+                                    'stopPrice': float(o.get('stopPrice', '0')),
+                                    'price': float(o.get('price', '0')),
+                                    'updateTime': o.get('updateTime'),
+                                }
+                                break
+                    except Exception as e:
+                        logger.warning(f"[{sym}] Ghost audit: order fetch failed: {e}")
+
+                # ── Structured audit log ──
+                logger.error(
+                    f"[{sym}] GHOST FILL AUDIT | "
+                    f"entry=${pos['entry_price']:.4f} "
+                    f"signal={'LONG' if pos['signal'] == 1 else 'SHORT'} "
+                    f"bars_held={pos['bars_held']} "
+                    f"notional=${pos['notional']:.2f}"
+                )
+                if audit_fills:
+                    for i, af in enumerate(audit_fills[:5]):
+                        ts_str = ''
+                        if af['time']:
+                            ts_str = datetime.fromtimestamp(
+                                af['time'] / 1000, tz=timezone.utc,
+                            ).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        logger.error(
+                            f"  fill[{i}] orderId={af['orderId']} "
+                            f"price={af['price']:.4f} qty={af['qty']:.6f} "
+                            f"realizedPnl={af['realizedPnl']:+.4f} "
+                            f"commission={af['commission']:.6f} "
+                            f"{'MAKER' if af['maker'] else 'TAKER'} "
+                            f"time={ts_str}"
+                        )
+                else:
+                    logger.error(f"  [NO MATCHING FILLS FOUND in last 50 trades]")
+
+                if algo_audit:
+                    logger.error(
+                        f"  trigger_order: id={algo_audit['orderId']} "
+                        f"type={algo_audit['origType']} "
+                        f"status={algo_audit['status']} "
+                        f"stopPrice={algo_audit['stopPrice']:.4f} "
+                        f"clientId={algo_audit['clientOrderId']}"
+                    )
+
+                # Check for internal state clues: were SL/TP algo IDs set?
+                sl_oid = pos.get('server_sl_order_id')
+                tp_oid = pos.get('server_tp_order_id')
+                logger.error(
+                    f"  internal_state: server_sl_id={sl_oid} "
+                    f"server_tp_id={tp_oid} "
+                    f"pbt_phase={pos.get('pbt_phase', 'N/A')} "
+                    f"server_sl_pct={pos.get('_server_sl_pct', 'N/A')}"
+                )
+
+                # Discord notification with audit summary
+                audit_desc = 'No matching fills found on exchange.'
+                if audit_fills:
+                    af0 = audit_fills[0]
+                    ts_str = ''
+                    if af0['time']:
+                        ts_str = datetime.fromtimestamp(
+                            af0['time'] / 1000, tz=timezone.utc,
+                        ).strftime('%H:%M:%S UTC')
+                    audit_desc = (
+                        f"Fill: ${af0['price']:.4f} × {af0['qty']:.6f} "
+                        f"@ {ts_str}\n"
+                        f"PnL: {af0['realizedPnl']:+.4f} USDT\n"
+                        f"Order: {algo_audit['origType'] if algo_audit else '?'} "
+                        f"(id={af0['orderId']})"
+                    )
+                self.discord.send(embed={
+                    'title': f"👻 [{sym}] Ghost Fill Audit",
+                    'color': 0xFF6D00,
+                    'description': audit_desc,
+                    'fields': [
+                        {'name': 'Entry', 'value': f"${pos['entry_price']:.4f}", 'inline': True},
+                        {'name': 'Bars Held', 'value': str(pos['bars_held']), 'inline': True},
+                        {'name': 'SL AlgoID', 'value': str(sl_oid or 'None'), 'inline': True},
+                        {'name': 'TP AlgoID', 'value': str(tp_oid or 'None'), 'inline': True},
+                        {'name': 'Total Fills', 'value': str(len(audit_fills)), 'inline': True},
+                    ],
+                })
                 self._record_server_fill(sym, fill_price, 0, 'ghost_reconcile')
                 continue
 
