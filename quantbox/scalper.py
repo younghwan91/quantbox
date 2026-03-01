@@ -1215,6 +1215,10 @@ class RubberBandScalper(
                         f"{'4h' if vc.enable_4h else ''}"
                     ).strip(), 'inline': True},
                     {'name': '레버리지', 'value': f'{vc.base_leverage}x', 'inline': True},
+                    {'name': 'CW-Tier', 'value': (
+                        f"{'ON' if vc.cw_enabled else 'OFF'} "
+                        f"(min={vc.min_conviction_score})"
+                    ), 'inline': True},
                     {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
                     {'name': '커밋', 'value': commit_str, 'inline': True},
                 ],
@@ -1620,6 +1624,14 @@ def main():
             soft_eq_scale2=settings.rb_soft_eq_scale2,
             soft_eq_dd3=settings.rb_soft_eq_dd3,
             soft_eq_scale3=settings.rb_soft_eq_scale3,
+            # R34 CW-Tier Conviction Sizing
+            cw_enabled=settings.vs_cw_enabled,
+            min_conviction_score=settings.vs_min_conviction_score,
+            e2_sma_period=settings.vs_e2_sma_period,
+            e2_threshold=settings.vs_e2_threshold,
+            c2_btc_mom_threshold=settings.vs_c2_btc_mom_threshold,
+            a3_deep_vr_threshold=settings.vs_a3_deep_vr_threshold,
+            a3_long_squeeze_dur=settings.vs_a3_long_squeeze_dur,
         ) if args.strategy == 'vol_straddle' else None,
     )
 

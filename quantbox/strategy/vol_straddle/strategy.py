@@ -21,6 +21,7 @@ import numpy as np
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
     compute_momentum,
+    compute_squeeze_dur,
     compute_vr,
     gen_vr_dur_signal,
     gen_vr_signal,
@@ -71,6 +72,9 @@ class VolStraddleStrategy:
         # Legacy single VR for backward compat
         self._last_vr: dict[str, float] = {}
 
+        # ── BTC data for C2 conviction condition ──
+        self._btc_close: np.ndarray | None = None
+
     # ══════════════════════════════════════════════════════════════════
     #  Signal Generation
     # ══════════════════════════════════════════════════════════════════
@@ -94,13 +98,17 @@ class VolStraddleStrategy:
         Args:
             symbol: Trading symbol.
             close_prices: 15m close prices (200 completed bars).
-            btc_close: BTC close prices (not used for VR, kept for interface).
+            btc_close: BTC close prices (used for C2 conviction condition).
 
         Returns:
             +1 (long), -1 (short), or 0 (no signal).
         """
         self._current_symbol = symbol
         cfg = self.config
+
+        # Store BTC close for C2 conviction condition
+        if btc_close is not None:
+            self._btc_close = btc_close
 
         # Per-symbol dedup: no signal when position already open
         # In straddle mode, both legs open simultaneously from one signal,
@@ -217,22 +225,45 @@ class VolStraddleStrategy:
                         f"(straddle takes priority)"
                     )
 
-                self._last_signal_meta[self._current_symbol] = {
-                    'tf': tf,
-                    'sl': cfg.s_sl,
-                    'tp': cfg.s_tp,
-                    'max_hold': cfg.get_max_hold(tf),
-                    'vr': vr_val,
-                    'momentum': 0.0,
-                    'straddle': True,
-                    'd_overlap': d_overlap,
-                }
-                logger.info(
-                    f"[{self._current_symbol}] S_d8 straddle signal "
-                    f"TF={tf} VR={vr_val:.3f} "
-                    f"(threshold={cfg.s_vr_threshold})"
+                # ── R34 Conviction Score ──
+                sq_dur = compute_squeeze_dur(vr, cfg.s_vr_threshold)
+                sq_dur_val = int(sq_dur[-1])
+                # B3: For S_d8, check if D_mom8 would also fire
+                score, cond = self._compute_conviction_score(
+                    close, vr, tf,
+                    is_straddle=True,
+                    d_overlap=d_overlap,
+                    squeeze_dur=sq_dur_val,
                 )
-                return 2  # Straddle signal
+
+                # Min conviction filter (T3-Triple mode)
+                if cfg.cw_enabled and score < cfg.min_conviction_score:
+                    logger.debug(
+                        f"[{self._current_symbol}] S_d8 blocked: "
+                        f"conviction={score} < min={cfg.min_conviction_score} "
+                        f"TF={tf} {cond}"
+                    )
+                    # Don't return — fall through to D_mom8 check
+                else:
+                    self._last_signal_meta[self._current_symbol] = {
+                        'tf': tf,
+                        'sl': cfg.s_sl,
+                        'tp': cfg.s_tp,
+                        'max_hold': cfg.get_max_hold(tf),
+                        'vr': vr_val,
+                        'momentum': 0.0,
+                        'straddle': True,
+                        'd_overlap': d_overlap,
+                        'conviction_score': score,
+                        'conviction_cond': cond,
+                    }
+                    logger.info(
+                        f"[{self._current_symbol}] S_d8 straddle signal "
+                        f"TF={tf} VR={vr_val:.3f} conviction={score}/4 "
+                        f"{cond} "
+                        f"(threshold={cfg.s_vr_threshold})"
+                    )
+                    return 2  # Straddle signal
 
         # ── D_mom8: VR < threshold → directional entry ──
         sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
@@ -249,6 +280,31 @@ class VolStraddleStrategy:
         if direction == 0:
             return 0
 
+        # ── R34 Conviction Score for D_mom8 ──
+        # B3: Check if S_d8 would also fire (reverse overlap)
+        s_overlap = False
+        if cfg.straddle_enabled and cfg.b3_enabled:
+            s_sig = gen_vr_dur_signal(
+                vr, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup,
+            )
+            s_overlap = bool(s_sig[-1] == 1)
+
+        score, cond = self._compute_conviction_score(
+            close, vr, tf,
+            is_straddle=False,
+            d_overlap=s_overlap,  # B3: S would also fire
+            squeeze_dur=0,  # Not relevant for D_mom8
+        )
+
+        # Min conviction filter (T3-Triple mode)
+        if cfg.cw_enabled and score < cfg.min_conviction_score:
+            logger.debug(
+                f"[{self._current_symbol}] D_mom8 blocked: "
+                f"conviction={score} < min={cfg.min_conviction_score} "
+                f"TF={tf} {cond}"
+            )
+            return 0
+
         # Store metadata for scalper to query after on_bar
         # (which TF, SL/TP, max_hold for this specific signal)
         mom_val = float(mom[-1])
@@ -259,16 +315,103 @@ class VolStraddleStrategy:
             'max_hold': cfg.get_max_hold(tf),
             'vr': float(vr[-1]) if not np.isnan(vr[-1]) else 0.0,
             'momentum': mom_val,
+            'conviction_score': score,
+            'conviction_cond': cond,
         }
         logger.info(
             f"[{self._current_symbol}] D_mom8 signal "
             f"TF={tf} VR={vr_val:.3f} {'LONG' if direction == 1 else 'SHORT'} "
-            f"mom={mom_val:.6f} (threshold={cfg.d_vr_threshold})"
+            f"mom={mom_val:.6f} conviction={score}/4 {cond} "
+            f"(threshold={cfg.d_vr_threshold})"
         )
         return direction
 
     # Track current symbol for signal metadata storage
     _current_symbol: str = ''
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Conviction Score (R34 CW-Tier)
+    # ══════════════════════════════════════════════════════════════════
+
+    def _compute_conviction_score(
+        self,
+        close: np.ndarray,
+        vr: np.ndarray,
+        tf: str,
+        is_straddle: bool,
+        d_overlap: bool,
+        squeeze_dur: int = 0,
+    ) -> tuple[int, dict[str, bool]]:
+        """Compute conviction score (0-4) from R34 conditions.
+
+        Conditions:
+            E2: SMA Proximity — |close - SMA(N)| / SMA(N) < threshold
+            C2: BTC Neutral — |BTC momentum(8)| < threshold
+            B3: Confluence — both D_mom8 and S_d8 would fire
+            A3: Quality+ — D: VR < deep threshold; S: duration ≥ long dur
+
+        Args:
+            close: Close prices for this timeframe.
+            vr: VR array for this timeframe.
+            tf: Timeframe label ('15m', '1h', '4h').
+            is_straddle: True if S_d8 signal, False if D_mom8.
+            d_overlap: True if both D and S would fire simultaneously.
+            squeeze_dur: Current squeeze duration (for S_d8 A3 check).
+
+        Returns:
+            Tuple of (score, condition_details_dict).
+        """
+        cfg = self.config
+        score = 0
+        conditions: dict[str, bool] = {
+            'e2_sma': False,
+            'c2_btc': False,
+            'b3_confluence': False,
+            'a3_quality': False,
+        }
+
+        # ── E2: SMA Proximity ──
+        if cfg.e2_enabled and len(close) >= cfg.e2_sma_period:
+            sma = np.mean(close[-cfg.e2_sma_period:])
+            if sma > 0:
+                proximity = abs(close[-1] - sma) / sma
+                if proximity < cfg.e2_threshold:
+                    conditions['e2_sma'] = True
+                    score += 1
+
+        # ── C2: BTC Neutral ──
+        if cfg.c2_enabled and self._btc_close is not None:
+            btc = self._btc_close
+            mom_period = cfg.momentum_period  # Same 8-bar momentum
+            if len(btc) > mom_period:
+                btc_mom = btc[-1] / btc[-mom_period - 1] - 1.0
+                if abs(btc_mom) < cfg.c2_btc_mom_threshold:
+                    conditions['c2_btc'] = True
+                    score += 1
+
+        # ── B3: Confluence (both D_mom8 and S_d8 would fire) ──
+        if cfg.b3_enabled:
+            if d_overlap:
+                # When S_d8 fires: d_overlap was checked in _check_tf_signal
+                # When D_mom8 fires: we need to check if S_d8 would also fire
+                conditions['b3_confluence'] = True
+                score += 1
+
+        # ── A3: Quality+ ──
+        if cfg.a3_enabled:
+            vr_val = float(vr[-1]) if not np.isnan(vr[-1]) else 999.0
+            if is_straddle:
+                # S_d8: extended squeeze duration
+                if squeeze_dur >= cfg.a3_long_squeeze_dur:
+                    conditions['a3_quality'] = True
+                    score += 1
+            else:
+                # D_mom8: extra deep VR compression
+                if vr_val < cfg.a3_deep_vr_threshold:
+                    conditions['a3_quality'] = True
+                    score += 1
+
+        return score, conditions
 
     # ══════════════════════════════════════════════════════════════════
     #  Signal Metadata Query
