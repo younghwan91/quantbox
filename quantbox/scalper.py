@@ -829,11 +829,14 @@ class RubberBandScalper(
                 continue
 
             # v9.0: Download full klines (close + high + low + volume + taker)
-            result = self.download_klines(sym, 200, full=True)
+            # VolStraddle needs 500 bars: 15m warmup=200 needs ≥201 bars,
+            # 1h resampling needs ≥4×(warmup_1h+1)=204 bars. 500 covers both.
+            n_bars = 500 if self.strategy_name == 'vol_straddle' else 200
+            result = self.download_klines(sym, n_bars, full=True)
             if result is None:
                 continue
             close, high, low, volume, taker_buy = result
-            if len(close) < self.config.lookback + 1:
+            if len(close) < self._cfg.lookback + 1:
                 continue
 
             # Wire up volume/taker/high/low data for v9 confluence scoring
@@ -866,13 +869,14 @@ class RubberBandScalper(
                 scan_diags.append(diag)
 
             # Track 8-bar move for diagnostics
-            abs_move = abs(close[-1] / close[-self.config.lookback - 1] - 1.0)
+            _lb = self._cfg.lookback
+            abs_move = abs(close[-1] / close[-_lb - 1] - 1.0)
             moves_seen.append((sym, abs_move))
 
             if signal != 0:
                 # Measure move strength for prioritization
                 move = abs(
-                    close[-1] / close[-self.config.lookback - 1] - 1.0
+                    close[-1] / close[-_lb - 1] - 1.0
                 )
                 candidates.append((sym, signal, move, close))
 
@@ -881,17 +885,31 @@ class RubberBandScalper(
 
         # ── Diagnostic: log scan summary every cycle ──
         top_movers = sorted(moves_seen, key=lambda x: x[1], reverse=True)[:3]
-        print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
-        if candidates:
-            cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
-            logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
+        if self.strategy_name == 'vol_straddle':
+            # VR strategy: show VR threshold, not move threshold
+            print(format_scan_summary(len(candidates), top_movers, 0.0))
+            if candidates:
+                cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
+            else:
+                if moves_seen:
+                    top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
+                    logger.info(
+                        f"No candidates — top moves: {', '.join(top3)} "
+                        f"(VR<{self.vs_config.d_vr_threshold}, signal=VR compression)"
+                    )
         else:
-            if moves_seen:
-                top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
-                logger.info(
-                    f"No candidates — top moves: {', '.join(top3)} "
-                    f"(base >{self.config.threshold*100:.1f}%, adaptive per-symbol)"
-                )
+            print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
+            if candidates:
+                cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
+            else:
+                if moves_seen:
+                    top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
+                    logger.info(
+                        f"No candidates — top moves: {', '.join(top3)} "
+                        f"(base >{self.config.threshold*100:.1f}%, adaptive per-symbol)"
+                    )
 
         # v12.0: Write structured diagnostics to JSONL
         if scan_diags:
@@ -1397,8 +1415,8 @@ def main():
     )
     parser.add_argument(
         '--strategy', choices=['rubberband', 'elliott', 'vol_straddle'],
-        default='rubberband',
-        help='Trading strategy: rubberband (default), elliott, or vol_straddle'
+        default='vol_straddle',
+        help='Trading strategy: vol_straddle (default), rubberband, or elliott'
     )
     args = parser.parse_args()
 
