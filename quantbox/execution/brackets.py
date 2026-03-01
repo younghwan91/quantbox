@@ -23,6 +23,7 @@ class BracketMixin:
         quantity: float, trigger_price: float,
         limit_price: float | None = None,
         label: str = 'order',
+        position_side: str | None = None,
     ) -> str | None:
         """Place a conditional order via Binance Algo Order API.
 
@@ -37,6 +38,8 @@ class BracketMixin:
             trigger_price: Price at which the order triggers.
             limit_price: Limit price for STOP/TAKE_PROFIT. None for MARKET types.
             label: Description for logging.
+            position_side: Hedge Mode position side ('LONG'/'SHORT').
+                When set, positionSide is sent instead of reduceOnly.
 
         Returns:
             algoId string, or None on failure.
@@ -51,8 +54,13 @@ class BracketMixin:
             'type': order_type,
             'quantity': str(quantity),
             'triggerPrice': str(trigger_price),
-            'reduceOnly': 'true',
         }
+        # Hedge Mode: positionSide is mutually exclusive with reduceOnly
+        if position_side is not None:
+            params['positionSide'] = position_side
+        else:
+            params['reduceOnly'] = 'true'
+
         if limit_price is not None:
             params['price'] = str(limit_price)
             params['timeInForce'] = 'GTC'
@@ -90,6 +98,7 @@ class BracketMixin:
     def _place_server_stop_loss(
         self, symbol: str, signal: int, quantity: float,
         entry_price: float, move_size: float, stop_mult: float,
+        position_side: str | None = None,
     ) -> str | None:
         """Place a server-side stop-loss order on Binance as a safety net.
 
@@ -106,6 +115,7 @@ class BracketMixin:
             entry_price: Fill price.
             move_size: Magnitude of the triggering move.
             stop_mult: Stop loss multiplier.
+            position_side: Hedge Mode ('LONG'/'SHORT'). None = One-Way.
 
         Returns:
             algoId string, or None on failure (position still tracked).
@@ -150,6 +160,7 @@ class BracketMixin:
             symbol=symbol, side=close_side, order_type='STOP',
             quantity=quantity, trigger_price=stop_price,
             limit_price=limit_price, label='stop-loss',
+            position_side=position_side,
         )
         if algo_id == 'WOULD_TRIGGER':
             logger.error(
@@ -178,6 +189,7 @@ class BracketMixin:
     def _place_server_take_profit(
         self, symbol: str, signal: int, quantity: float,
         entry_price: float, move_size: float, target_retrace: float,
+        position_side: str | None = None,
     ) -> str | None:
         """Place a server-side take-profit order on Binance.
 
@@ -238,6 +250,7 @@ class BracketMixin:
             symbol=symbol, side=close_side, order_type='TAKE_PROFIT',
             quantity=quantity, trigger_price=trigger_price,
             limit_price=limit_price, label='take-profit',
+            position_side=position_side,
         )
         if algo_id is None:
             logger.warning(
@@ -460,6 +473,9 @@ class BracketMixin:
         if improvement < 0.005:  # 0.5% minimum step to avoid API spam
             return
 
+        # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT)
+        api_sym = pos.get('symbol', symbol.split(':')[0])
+
         entry_price = pos['entry_price']
         signal = pos['signal']
 
@@ -475,7 +491,7 @@ class BracketMixin:
 
         limit_price = trigger_price * (1.0 + buffer)
 
-        info = self.get_symbol_info(symbol)
+        info = self.get_symbol_info(api_sym)
         tick_size = info.get('tick_size', 0.01)
         price_precision = info.get('price_precision', 2)
 
@@ -491,21 +507,22 @@ class BracketMixin:
         # unprotected if the bot crashes between the two API calls.
         # Binance allows multiple algo stop orders to coexist briefly.
         quantity = pos['notional'] / pos['entry_price']
-        quantity = self._round_qty(quantity, symbol)
+        quantity = self._round_qty(quantity, api_sym)
         if quantity <= 0:
             return
 
         new_sl = self._place_algo_order(
-            symbol=symbol, side=close_side, order_type='STOP',
+            symbol=api_sym, side=close_side, order_type='STOP',
             quantity=quantity, trigger_price=trigger_price,
             limit_price=limit_price, label='runner-trail-sl',
+            position_side=pos.get('position_side'),
         )
 
         if new_sl and new_sl != 'WOULD_TRIGGER':
             # Success — now cancel old SL (runner always protected)
             old_sl = pos.get('server_sl_order_id')
             if old_sl:
-                self._cancel_server_stop_loss(symbol, old_sl)
+                self._cancel_server_stop_loss(api_sym, old_sl)
             pos['server_sl_order_id'] = new_sl
             pos['_server_sl_pct'] = trail_stop_pct
             logger.info(

@@ -95,9 +95,11 @@ class CommandsMixin:
                 bars = pos.get('bars_held', 0)
                 best = pos.get('best_pnl', 0) * 100
                 notional = pos.get('notional', 0)
+                # Extract Binance symbol from compound key
+                api_sym = pos.get('symbol', sym.split(':')[0])
                 # v12.5.2: Show real-time mark price uPnL
                 try:
-                    mark = self.client.futures_mark_price(symbol=sym)
+                    mark = self.client.futures_mark_price(symbol=api_sym)
                     cur_px = float(mark['markPrice'])
                     entry_px = pos['entry_price']
                     if pos['signal'] == 1:
@@ -126,7 +128,10 @@ class CommandsMixin:
 
         closed = 0
         for sym in positions:
-            price_arr = self.download_klines(sym, 2)
+            # Extract Binance symbol from compound key for kline download
+            pos = self.strategy._positions.get(sym, {})
+            api_sym = pos.get('symbol', sym.split(':')[0])
+            price_arr = self.download_klines(api_sym, 2)
             price = price_arr[-1] if price_arr is not None else 0
             if self._close_position(sym, 'bot_close_all', price):
                 closed += 1
@@ -155,7 +160,9 @@ class CommandsMixin:
             )
 
         sym, pos = positions[slot_id]
-        price_arr = self.download_klines(sym, 2)
+        # Extract Binance symbol from compound key for kline download
+        api_sym = pos.get('symbol', sym.split(':')[0])
+        price_arr = self.download_klines(api_sym, 2)
         price = price_arr[-1] if price_arr is not None else 0
         if self._close_position(sym, 'bot_close', price):
             self._save_state()
@@ -185,7 +192,10 @@ class CommandsMixin:
         positions = list(self.strategy.active_positions.keys())
         closed = 0
         for sym in positions:
-            price_arr = self.download_klines(sym, 2)
+            # Extract Binance symbol from compound key for kline download
+            pos = self.strategy._positions.get(sym, {})
+            api_sym = pos.get('symbol', sym.split(':')[0])
+            price_arr = self.download_klines(api_sym, 2)
             price = price_arr[-1] if price_arr is not None else 0
             if self._close_position(sym, 'bot_stop', price):
                 closed += 1

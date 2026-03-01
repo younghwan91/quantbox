@@ -11,7 +11,7 @@ QuantBox v12.7는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 세 가지 전략을 지원한다:
 1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
 2. **Elliott Wave Strategy** (v11.6): ZigZag ABC 패턴 + Fibonacci 검증 + Timing Alpha Filter (4h)
-3. **VolStraddle** (A1-D50): VR 압축 감지 → 모멘텀 방향 진입 (15m/1h/4h 멀티TF)
+3. **VolStraddle** (A1-D50): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**)
 **v11.4: Adaptive Threshold + Leverage Optimization** — ATR 기반 적응형 임계값 (`clip(2.5 × ATR%(48), 1%, 6%)`). 18-variant walk-forward sweep + 14-variant leverage grid → 2.5x_f1 선택. OOS Return +5069%, MDD 19.0%, Calmar 266.6. MTF 레버리지 2.0→2.5× (실효 3.75×).
 **v11.6: Elliott Wave Timing Alpha** — 97패턴 리서치 기반 3중 타이밍 필터 (impulse_accel≥0, corr_ratio≥0.20, w3w1≤2.5). Calmar 1.51→5.10, Sharpe 1.07→1.69. 파라미터 비감응 (-0.3~+0.3 동일 결과).
 **v11.4: Elliott Wave Strategy** — ZigZag ABC 패턴 인식, 2단계 포지셔닝 (2% 탐색적 → 8% 확인), 50% 부분 익절 + 브레이크이븐 스탑, BTC 매크로 바이어스, Numba 가속 지표.
@@ -23,6 +23,7 @@ QuantBox v12.7는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 **v12.3: T100_S38_PBT + M-2SSTSX** — R8 stress-tested exit + R6 combo sizing. Production safety fixes.
 **v12.4.6: Production Hardening** — 6 hotfixes: Server TP PBT qty audit (v12.4.1–3), stale SL ratchet reset (v12.4.4), missing save_state after partial (v12.4.5), HWM/history reset on 0-position restart (v12.4.6).
 **v12.6: Climax Volume Filter + ATR Dynamic Stop** — climax_ratio≥3.0 진입 차단, ATR 기반 동적 손절.
+**v12.7: Hedge Mode + S_d8 Straddle** — Binance dualSidePosition 모드 전환. `positionSide` 파라미터 전체 주문 경로 적용. S_d8 스트래들 (VR<0.55, 8바 이상 스퀴즈) 양방향 동시 진입. 복합 포지션 키 (`BTCUSDT:LONG`/`BTCUSDT:SHORT`) 지원.
 **v12.6.1: 4h MTF Lookahead Fix** — `apply_mtf_confirmation()`이 진행 중인 4h 바의 최종 종가(미래 데이터)를 사용하던 버그 수정. 마지막 완성된 4h 바만 참조하도록 변경. 백테스트 WR 83%→43%로 정상화, 라이브(36%)와 근접. **R22 결과: lookahead가 전체 알파의 원천이었음. 수정 후 PF=0.877 (zero cost, 6yr, 436K trades). 15m 러버밴드 평균회귀 시그널에 이론적 엣지 없음.**
 **v12.4: I-HybTight** — Reversal A/B champion: target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3.0. R:R 1.91, Calmar 834, 6yr return 6,300%.
 **v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
@@ -32,7 +33,7 @@ QuantBox v12.7는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 | **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산. `--strategy` CLI로 전략 선택 (rubberband/elliott/vol_straddle). v11.1: 서버사이드 STOP 손절 + 레버리지 검증 |
 | **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 3.2%+ 급등/급락 포착) + Fibonacci Exit (v9.0) + MACD/Stochastic Confluence (v9.0) + MTF 확인 + 독립 4H 트레이딩 + Symbol Whitelist (v10.0) |
 | **ElliottStrategy** (`elliott.py`) | Elliott Wave ABC 패턴 전략 (Numba 가속). ZigZag 피봇 → ABC Fibonacci 검증 → 탐색적/확인 2단계 포지셔닝 → 50% 부분 익절 → 브레이크이븐 → 트레일링 (3×ATR). BTC 매크로 바이어스 (200/500 EMA) |
-| **VolStraddleStrategy** (`vol_straddle/`) | VR 압축 감지 (ATR7/ATR50 < 0.50) + momentum(8) 방향 진입. 15m/1h/4h 멀티TF. SL=1%, TP=5%, MaxHold=48h. R35 OOS: N=799, EV=+29.3bp, PF=1.376 |
+| **VolStraddleStrategy** (`vol_straddle/`) | VR 압축 감지 + D_mom8 방향 진입 + **S_d8 스트래들** (양방향 동시). 15m/1h/4h 멀티TF. **Hedge Mode** (`positionSide` LONG/SHORT). 복합 키: `SYM:LONG`/`SYM:SHORT`. SL=1%, TP=5%, MaxHold=48h |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -270,7 +271,7 @@ else:
 |------|------------------|------|
 | `rubberband.py` | `RubberBandStrategy`, `RubberBandConfig`, `compute_signals`, `compute_signals_with_btc_directional`, `compute_signals_regime_switch`, `compute_signals_confidence`, `compute_signals_with_partial_exit`, `compute_signals_partial_exit_btc_directional`, `compute_rr_gated_leverage`, `apply_rr_gated_leverage`, `apply_mtf_confirmation`, `apply_mtf_leverage`, `compute_signals_4h_independent`, `_compute_ema_inline`, `_compute_stochastic_inline`, `_compute_macd_inline`, `compute_signals_v9`, `compute_atr_pct` | 기본 평균회귀 신호 + BTC 레짐 스위치 + 컨피던스 필터링 + BTC 방향 정렬 + 부분 청산 + R:R-Gated 레버리지 + **MTF 확인 (v7.0)** + **독립 4H 트레이딩 (v7.0)** + **Fibonacci Exit + MACD/Stochastic Confluence (v9.0)** + **Adaptive Threshold (v11.4)** (Numba 컴파일) |
 | `elliott.py` | `ElliottConfig`, `ElliottStrategy`, `compute_elliott_signals`, `compute_ema`, `compute_rsi`, `compute_macd`, `compute_stochastic`, `compute_atr`, `zigzag_pivots`, `detect_abc_patterns`, `detect_bullish_divergence`, `detect_bearish_divergence`, `check_macd_reversal`, `check_stoch_cross`, `detect_ending_diagonal`, `detect_triangle` | Elliott Wave ABC 패턴 전략 (Numba 가속). ZigZag + Fibonacci + 다이버전스/MACD/스토캐스틱 확인 + 웨지/삼각 감지 + 2단계 포지셔닝 + 자본 보존 익절 |
-| `vol_straddle/` | `VolStraddleConfig`, `VolStraddleStrategy`, `compute_vr`, `compute_momentum`, `gen_vr_signal`, `make_direction_momentum`, `resample_ohlcv`, `_atr_pct` | VR 압축 감지 (ATR7/ATR50 < 0.50) + momentum(8) 방향 진입. 15m/1h/4h 멀티TF. SL=1%, TP=5%, MaxHold=48h. R35 A1-D50 검증. 완성된 바만 참조 (zero lookahead) |
+| `vol_straddle/` | `VolStraddleConfig`, `VolStraddleStrategy`, `compute_vr`, `compute_momentum`, `gen_vr_signal`, `gen_vr_dur_signal`, `make_direction_momentum`, `resample_ohlcv`, `_atr_pct` | VR 압축 + D_mom8 방향 + **S_d8 스트래들** (VR<0.55, 8바 스퀴즈). Hedge Mode 복합 키 (`SYM:LONG`/`SYM:SHORT`). 15m/1h/4h 멀티TF. 완성된 바만 참조 (zero lookahead) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig`, `compute_alpha_signals` | 멀티팩터 신호 (볼륨/모멘텀/ATR/트레일링) |
 | `vol_selector.py` | `VolatilitySelector`, `VolSelectorConfig`, `compute_realized_vol` | 실현변동성 기반 심볼 선택 |
 

@@ -172,6 +172,7 @@ class LimitOrderChaser:
         step_size: float = 0.0,
         quantity_precision: int = 8,
         reduce_only: bool = False,
+        position_side: str | None = None,
     ) -> ChaseResult:
         """Limit 지정가 추격 주문 실행.
 
@@ -192,6 +193,10 @@ class LimitOrderChaser:
             reduce_only: True면 reduceOnly=True로 주문.
                 포지션 종료 시 반드시 True로 설정해야 한다.
                 False면 신규 포지션 오픈 주문.
+                Hedge Mode에서는 무시됨 (positionSide와 상호배타).
+            position_side: Hedge Mode용. 'LONG' 또는 'SHORT'.
+                설정 시 reduceOnly 대신 positionSide를 사용한다.
+                None이면 One-Way Mode (기존 동작).
 
         Returns:
             ChaseResult with 체결 정보.
@@ -257,7 +262,10 @@ class LimitOrderChaser:
                     quantity=remaining_qty,
                     price=str(limit_price),
                 )
-                if reduce_only:
+                # Hedge Mode: positionSide is mutually exclusive with reduceOnly
+                if position_side is not None:
+                    order_params['positionSide'] = position_side
+                elif reduce_only:
                     order_params['reduceOnly'] = 'true'
                 order = self.client.futures_create_order(**order_params)
                 last_order_id = str(order["orderId"])
@@ -415,6 +423,7 @@ class LimitOrderChaser:
             market_result = self._market_fallback(
                 symbol, side, remaining_qty, step_size, quantity_precision,
                 reduce_only=reduce_only,
+                position_side=position_side,
             )
             if market_result == 'NO_POSITION':
                 # v12.3.1: If we already had partial limit fills before
@@ -483,6 +492,7 @@ class LimitOrderChaser:
         step_size: float = 0.0,
         quantity_precision: int = 8,
         reduce_only: bool = False,
+        position_side: str | None = None,
     ) -> tuple[float, float, str] | None:
         """시장가 fallback 주문.
 
@@ -497,6 +507,7 @@ class LimitOrderChaser:
             step_size: LOT_SIZE 필터의 stepSize.
             quantity_precision: 수량 소수점 자릿수.
             reduce_only: True면 reduceOnly=True로 주문.
+            position_side: Hedge Mode용 ('LONG'/'SHORT'). None이면 One-Way.
 
         Returns:
             (filled_qty, avg_price, order_id) 또는 None.
@@ -518,7 +529,10 @@ class LimitOrderChaser:
                 quantity=quantity,
                 newOrderRespType="RESULT",
             )
-            if reduce_only:
+            # Hedge Mode: positionSide is mutually exclusive with reduceOnly
+            if position_side is not None:
+                order_params['positionSide'] = position_side
+            elif reduce_only:
                 order_params['reduceOnly'] = 'true'
             order = self.client.futures_create_order(**order_params)
             order_id = str(order["orderId"])

@@ -99,8 +99,9 @@ class TestConfig:
     def test_round_trip_cost(self, cfg):
         assert cfg.round_trip_cost == pytest.approx(0.0008)
 
-    def test_straddle_disabled(self, cfg):
-        assert cfg.straddle_enabled is False
+    def test_straddle_enabled(self, cfg):
+        assert cfg.straddle_enabled is True
+        assert cfg.hedge_mode is True
 
 
 # ══════════════════════════════════════════════════════════════════════════════
