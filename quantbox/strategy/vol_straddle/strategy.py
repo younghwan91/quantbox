@@ -130,9 +130,11 @@ class VolStraddleStrategy:
 
         # 1h: resampled from 15m (completed bars only)
         if cfg.enable_1h:
-            if min_len >= 4 * (cfg.vr_long + cfg.warmup_1h):
+            # Need enough 15m bars so that resampled 1h array >= warmup_1h + 1
+            # Each 1h bar = 4 × 15m bars, plus _check_tf_signal checks warmup
+            if min_len >= 4 * (cfg.warmup_1h + 1):
                 c1h, h1h, l1h, v1h = resample_ohlcv(c15, h15, l15, v15, 4)
-                if len(c1h) >= cfg.warmup_1h:
+                if len(c1h) >= cfg.warmup_1h + 1:
                     sig_1h = self._check_tf_signal(c1h, h1h, l1h, '1h')
                     if sig_1h != 0:
                         return sig_1h
