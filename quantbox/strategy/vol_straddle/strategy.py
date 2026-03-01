@@ -202,6 +202,21 @@ class VolStraddleStrategy:
                 vr, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup,
             )
             if s_sig[-1] == 1:
+                # Parity audit: check if D_mom8 would also fire
+                # In R35 backtest, D and S run independently then dedup.
+                # In live, S has priority. Log overlap for monitoring.
+                d_sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
+                d_overlap = bool(d_sig[-1] == 1)
+                if d_overlap:
+                    mom = compute_momentum(close, cfg.momentum_period)
+                    d_dir = int(make_direction_momentum(d_sig, mom)[-1])
+                    logger.info(
+                        f"[{self._current_symbol}] PARITY: S_d8+D_mom8 overlap "
+                        f"TF={tf} VR={vr_val:.3f} — D would be "
+                        f"{'LONG' if d_dir == 1 else 'SHORT'} "
+                        f"(straddle takes priority)"
+                    )
+
                 self._last_signal_meta[self._current_symbol] = {
                     'tf': tf,
                     'sl': cfg.s_sl,
@@ -210,6 +225,7 @@ class VolStraddleStrategy:
                     'vr': vr_val,
                     'momentum': 0.0,
                     'straddle': True,
+                    'd_overlap': d_overlap,
                 }
                 logger.info(
                     f"[{self._current_symbol}] S_d8 straddle signal "
@@ -235,14 +251,20 @@ class VolStraddleStrategy:
 
         # Store metadata for scalper to query after on_bar
         # (which TF, SL/TP, max_hold for this specific signal)
+        mom_val = float(mom[-1])
         self._last_signal_meta[self._current_symbol] = {
             'tf': tf,
             'sl': cfg.d_sl,
             'tp': cfg.d_tp,
             'max_hold': cfg.get_max_hold(tf),
             'vr': float(vr[-1]) if not np.isnan(vr[-1]) else 0.0,
-            'momentum': float(mom[-1]),
+            'momentum': mom_val,
         }
+        logger.info(
+            f"[{self._current_symbol}] D_mom8 signal "
+            f"TF={tf} VR={vr_val:.3f} {'LONG' if direction == 1 else 'SHORT'} "
+            f"mom={mom_val:.6f} (threshold={cfg.d_vr_threshold})"
+        )
         return direction
 
     # Track current symbol for signal metadata storage
@@ -352,14 +374,32 @@ class VolStraddleStrategy:
 
         # SL check (backtest uses low[j] for long, high[j] for short)
         if worst_gain <= -sl_pct:
+            logger.info(
+                f"[{symbol}] SL hit: worst_gain={worst_gain*100:+.3f}% "
+                f"vs SL={sl_pct*100:.1f}% bars={pos['bars_held']} "
+                f"entry={entry:.6f} "
+                f"{'low' if pos['signal']==1 else 'high'}="
+                f"{current_low if pos['signal']==1 else current_high}"
+            )
             return 'stop_loss'
 
         # TP check (backtest uses high[j] for long, low[j] for short)
         if best_gain >= tp_pct:
+            logger.info(
+                f"[{symbol}] TP hit: best_gain={best_gain*100:+.3f}% "
+                f"vs TP={tp_pct*100:.1f}% bars={pos['bars_held']} "
+                f"entry={entry:.6f} "
+                f"{'high' if pos['signal']==1 else 'low'}="
+                f"{current_high if pos['signal']==1 else current_low}"
+            )
             return 'target'
 
         # Max hold (time-based exit)
         if pos['bars_held'] >= max_hold:
+            logger.info(
+                f"[{symbol}] Max hold reached: bars={pos['bars_held']}/{max_hold} "
+                f"best_gain={best_gain*100:+.3f}% worst_gain={worst_gain*100:+.3f}%"
+            )
             return 'max_hold'
 
         return None

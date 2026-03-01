@@ -770,6 +770,30 @@ class RubberBandScalper(
                 logger.info(
                     f"  [{pos_key}] Exit signal: {exit_reason} @ ${current_price:.4f}"
                 )
+                # Straddle leg tracking: log which leg exits first
+                if ':' in pos_key and self.strategy_name == 'vol_straddle':
+                    api_sym, side = pos_key.split(':', 1)
+                    other_side = 'SHORT' if side == 'LONG' else 'LONG'
+                    other_key = f"{api_sym}:{other_side}"
+                    other_pos = self.strategy._positions.get(other_key)
+                    if other_pos:
+                        entry_o = other_pos.get('entry_price', 0)
+                        if entry_o > 0:
+                            if other_pos['signal'] == 1:
+                                o_gain = (current_price - entry_o) / entry_o
+                            else:
+                                o_gain = (entry_o - current_price) / entry_o
+                            logger.info(
+                                f"  [STRADDLE] {side} leg closed ({exit_reason}), "
+                                f"{other_side} still open "
+                                f"uPnL={o_gain*100:+.2f}% "
+                                f"bars={other_pos.get('bars_held', 0)}"
+                            )
+                    else:
+                        logger.info(
+                            f"  [STRADDLE] Last leg ({side}) closed ({exit_reason}) "
+                            f"— straddle fully unwound"
+                        )
                 if exit_reason == 'partial_close':
                     self._partial_close_position(pos_key, current_price)
                 elif exit_reason == 'confirm_entry':
@@ -917,6 +941,25 @@ class RubberBandScalper(
                     logger.info(
                         f"No candidates — top moves: {', '.join(top3_with_vr)} "
                         f"(threshold VR<{self.vs_config.d_vr_threshold} any TF)"
+                    )
+
+                    # Count symbols near squeeze thresholds for strategy health
+                    near_d = 0  # VR < d_threshold + 0.05
+                    near_s = 0  # VR < s_threshold + 0.05
+                    in_squeeze = 0  # VR < d_threshold
+                    for s, _ in moves_seen:
+                        vr_all = self.strategy.get_vr_all_tf(s)
+                        min_vr = min(vr_all.values())
+                        if min_vr < self.vs_config.d_vr_threshold:
+                            in_squeeze += 1
+                        elif min_vr < self.vs_config.d_vr_threshold + 0.05:
+                            near_d += 1
+                        if min_vr < self.vs_config.s_vr_threshold + 0.05:
+                            near_s += 1
+                    logger.info(
+                        f"Squeeze monitor: {in_squeeze} in squeeze, "
+                        f"{near_d} near D threshold, {near_s} near S threshold "
+                        f"(of {len(moves_seen)} symbols)"
                     )
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
