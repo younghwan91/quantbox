@@ -494,6 +494,7 @@ class RubberBandScalper(
     def _place_order(
         self, symbol: str, side: str, quantity: float,
         leverage: int = 1, reduce_only: bool = False,
+        position_side: str | None = None,
     ) -> dict | None:
         """Place order via LimitOrderChaser.
 
@@ -504,6 +505,9 @@ class RubberBandScalper(
             leverage: Leverage to set before order.
             reduce_only: If True, pass reduceOnly=True to exchange.
                 Must be True when closing positions to avoid margin errors.
+            position_side: Hedge Mode position side ('LONG'/'SHORT').
+                When set, positionSide is sent instead of reduceOnly.
+                None = One-Way Mode (existing behavior).
 
         Returns dict with avgPrice, executedQty on success, None on failure.
         """
@@ -577,6 +581,7 @@ class RubberBandScalper(
                 step_size=step_size,
                 quantity_precision=qty_precision,
                 reduce_only=reduce_only,
+                position_side=position_side,
             )
 
             if result.status == ChaseFillStatus.NO_POSITION:
@@ -673,10 +678,11 @@ class RubberBandScalper(
 
         # 2. Close positions on drawdown halt
         if self._drawdown_halt:
-            for sym in list(self.strategy.active_positions):
-                close = self.download_klines(sym, 2)
+            for pos_key in list(self.strategy.active_positions):
+                api_sym = pos_key.split(':')[0] if ':' in pos_key else pos_key
+                close = self.download_klines(api_sym, 2)
                 price = close[-1] if close is not None else 0
-                self._close_position(sym, 'drawdown_halt', price)
+                self._close_position(pos_key, 'drawdown_halt', price)
             self._save_state()
             return
 
@@ -704,9 +710,10 @@ class RubberBandScalper(
             self._reconcile_positions()
 
         # v12.5.1: Log position status AFTER sync (SL/TP verified)
-        for sym, pos in self.strategy.active_positions.items():
+        for pos_key, pos in self.strategy.active_positions.items():
+            api_sym = pos.get('symbol', pos_key.split(':')[0])
             try:
-                mark = self.client.futures_mark_price(symbol=sym)
+                mark = self.client.futures_mark_price(symbol=api_sym)
                 cur_px = float(mark['markPrice'])
             except Exception:
                 cur_px = pos.get('entry_price', 0)
@@ -723,18 +730,21 @@ class RubberBandScalper(
             bars = pos.get('bars_held', 0)
             direction = 'L' if pos.get('signal') == 1 else 'S'
             logger.info(
-                f"  [{sym}] {direction} entry=${entry_px:.4f} "
+                f"  [{pos_key}] {direction} entry=${entry_px:.4f} "
                 f"mark=${cur_px:.4f} uPnL={upnl_pct:+.2f}% bars={bars} "
                 f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}"
             )
 
         # 4. Process existing positions (always, even when paused)
-        for sym in list(self.strategy.active_positions):
+        for pos_key in list(self.strategy.active_positions):
+            # Extract Binance symbol from compound key (e.g., BTCUSDT:LONG → BTCUSDT)
+            api_sym = pos_key.split(':')[0] if ':' in pos_key else pos_key
+
             # v12.3.2: Download full OHLC for active positions to compute
             # fresh ATR. Previously only close was downloaded, so runner
             # trailing used stale ATR from entry time (on_bar never called
             # for symbols with open positions).
-            result_full = self.download_klines(sym, 200, full=True)
+            result_full = self.download_klines(api_sym, 200, full=True)
             if result_full is None:
                 continue
             close, high, low, _vol, _tb = result_full
@@ -753,39 +763,39 @@ class RubberBandScalper(
                 current_atr = 0.02
 
             exit_reason = self.strategy.update_position(
-                sym, current_price, current_atr_pct=current_atr,
+                pos_key, current_price, current_atr_pct=current_atr,
                 current_high=float(high[-1]), current_low=float(low[-1]),
             )
             if exit_reason:
                 logger.info(
-                    f"  [{sym}] Exit signal: {exit_reason} @ ${current_price:.4f}"
+                    f"  [{pos_key}] Exit signal: {exit_reason} @ ${current_price:.4f}"
                 )
                 if exit_reason == 'partial_close':
-                    self._partial_close_position(sym, current_price)
+                    self._partial_close_position(pos_key, current_price)
                 elif exit_reason == 'confirm_entry':
                     # Elliott: upgrade 2% exploratory → add 8% primary
-                    self._add_to_position(sym, current_price, balance)
+                    self._add_to_position(pos_key, current_price, balance)
                 elif exit_reason == 'pyramid':
                     # Elliott: pyramid using unrealized profits
-                    self._pyramid_position(sym, current_price, balance)
+                    self._pyramid_position(pos_key, current_price, balance)
                 elif exit_reason == 'cancel_exploration':
                     # Elliott: confirmation timed out → close pilot
-                    self._close_position(sym, exit_reason, current_price)
+                    self._close_position(pos_key, exit_reason, current_price)
                 else:
-                    self._close_position(sym, exit_reason, current_price)
+                    self._close_position(pos_key, exit_reason, current_price)
             else:
-                pos = self.strategy._positions.get(sym)
+                pos = self.strategy._positions.get(pos_key)
                 if pos:
                     _mh = pos.get('max_hold', self.config.max_hold)
                     logger.debug(
-                        f"  [{sym}] HOLD: bars={pos.get('bars_held', 0)}/{_mh} "
+                        f"  [{pos_key}] HOLD: bars={pos.get('bars_held', 0)}/{_mh} "
                         f"best_pnl={pos.get('best_pnl', 0)*100:.2f}%"
                     )
                     # v12.3.3: Ratchet server SL for runners to protect profits
                     if (pos.get('partial_closed')
                             and self.config.breakeven_after_partial
                             and not self.paper_mode):
-                        self._ratchet_runner_sl(sym, pos)
+                        self._ratchet_runner_sl(pos_key, pos)
 
         # 5. Look for new entries (skip if risk blocked or paused)
         if self._paused:
@@ -878,7 +888,12 @@ class RubberBandScalper(
                 move = abs(
                     close[-1] / close[-_lb - 1] - 1.0
                 )
-                candidates.append((sym, signal, move, close))
+                if signal == 2:
+                    # Straddle: expand into LONG + SHORT candidates
+                    candidates.append((sym, 1, move, close))
+                    candidates.append((sym, -1, move, close))
+                else:
+                    candidates.append((sym, signal, move, close))
 
         # Prioritize strongest moves
         candidates.sort(key=lambda x: x[2], reverse=True)

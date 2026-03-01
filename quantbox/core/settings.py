@@ -260,7 +260,8 @@ class QuantBoxSettings(BaseSettings):
     vs_s_squeeze_dur: int = 8                # Min squeeze duration
     vs_s_sl: float = 0.015                   # 1.5% SL per straddle leg
     vs_s_tp: float = 0.05                    # 5% TP per straddle leg
-    vs_straddle_enabled: bool = False        # Disabled until hedge mode
+    vs_straddle_enabled: bool = True         # Straddle mode enabled
+    vs_hedge_mode: bool = True               # Binance Hedge Mode (dualSidePosition=true)
 
     # ── Max Hold (bars at each TF, ≈ 48h real-time) ──
     vs_max_hold_15m: int = 192               # 192 × 15m = 48h
