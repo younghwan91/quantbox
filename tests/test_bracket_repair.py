@@ -315,7 +315,7 @@ class TestForceCloseRecursionGuard:
         # Second call (force_sl_would_trigger): _place_order returns a fill
         call_count = [0]
 
-        def mock_place_order(symbol, side, qty, reduce_only=False, leverage=1):
+        def mock_place_order(symbol, side, qty, reduce_only=False, leverage=1, position_side=None):
             call_count[0] += 1
             if call_count[0] == 1:
                 return None  # first attempt fails

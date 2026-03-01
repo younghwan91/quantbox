@@ -21,7 +21,9 @@ import numpy as np
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
     compute_momentum,
+    compute_squeeze_dur,
     compute_vr,
+    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
     resample_ohlcv,
@@ -70,6 +72,9 @@ class VolStraddleStrategy:
         # Legacy single VR for backward compat
         self._last_vr: dict[str, float] = {}
 
+        # ── BTC data for C2 conviction condition ──
+        self._btc_close: np.ndarray | None = None
+
     # ══════════════════════════════════════════════════════════════════
     #  Signal Generation
     # ══════════════════════════════════════════════════════════════════
@@ -93,7 +98,7 @@ class VolStraddleStrategy:
         Args:
             symbol: Trading symbol.
             close_prices: 15m close prices (200 completed bars).
-            btc_close: BTC close prices (not used for VR, kept for interface).
+            btc_close: BTC close prices (used for C2 conviction condition).
 
         Returns:
             +1 (long), -1 (short), or 0 (no signal).
@@ -101,8 +106,14 @@ class VolStraddleStrategy:
         self._current_symbol = symbol
         cfg = self.config
 
+        # Store BTC close for C2 conviction condition
+        if btc_close is not None:
+            self._btc_close = btc_close
+
         # Per-symbol dedup: no signal when position already open
-        if symbol in self._positions:
+        # In straddle mode, both legs open simultaneously from one signal,
+        # so if ANY leg exists we skip (no incremental straddle adds).
+        if self.has_position(symbol):
             return 0
 
         high_15m = self._high_data.get(symbol)
@@ -161,8 +172,13 @@ class VolStraddleStrategy:
     ) -> int:
         """Check VR compression signal for a single timeframe.
 
-        Returns directional signal (+1/-1) or 0.
+        Returns:
+            +1 (long), -1 (short), 2 (straddle), or 0 (no signal).
         Stores signal metadata for the scalper to query.
+
+        Signal priority: S_d8 straddle (signal=2) > D_mom8 directional.
+        S_d8 requires sustained squeeze (duration ≥ min_dur), so it fires
+        LATER than D_mom8. They don't compete in practice.
 
         CRITICAL CHECK: Only fires on the LAST bar (current bar close).
         Previous bars are used for VR computation but not for entry.
@@ -187,7 +203,69 @@ class VolStraddleStrategy:
         elif tf == '4h':
             self._last_vr_4h[self._current_symbol] = vr_val
 
-        # D_mom8: VR < threshold → directional entry
+        # ── S_d8 straddle check (higher priority) ──
+        # Requires sustained VR compression for min_dur bars.
+        if cfg.straddle_enabled:
+            s_sig = gen_vr_dur_signal(
+                vr, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup,
+            )
+            if s_sig[-1] == 1:
+                # Parity audit: check if D_mom8 would also fire
+                # In R35 backtest, D and S run independently then dedup.
+                # In live, S has priority. Log overlap for monitoring.
+                d_sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
+                d_overlap = bool(d_sig[-1] == 1)
+                if d_overlap:
+                    mom = compute_momentum(close, cfg.momentum_period)
+                    d_dir = int(make_direction_momentum(d_sig, mom)[-1])
+                    logger.info(
+                        f"[{self._current_symbol}] PARITY: S_d8+D_mom8 overlap "
+                        f"TF={tf} VR={vr_val:.3f} — D would be "
+                        f"{'LONG' if d_dir == 1 else 'SHORT'} "
+                        f"(straddle takes priority)"
+                    )
+
+                # ── R34 Conviction Score ──
+                sq_dur = compute_squeeze_dur(vr, cfg.s_vr_threshold)
+                sq_dur_val = int(sq_dur[-1])
+                # B3: For S_d8, check if D_mom8 would also fire
+                score, cond = self._compute_conviction_score(
+                    close, vr, tf,
+                    is_straddle=True,
+                    d_overlap=d_overlap,
+                    squeeze_dur=sq_dur_val,
+                )
+
+                # Min conviction filter (T3-Triple mode)
+                if cfg.cw_enabled and score < cfg.min_conviction_score:
+                    logger.debug(
+                        f"[{self._current_symbol}] S_d8 blocked: "
+                        f"conviction={score} < min={cfg.min_conviction_score} "
+                        f"TF={tf} {cond}"
+                    )
+                    # Don't return — fall through to D_mom8 check
+                else:
+                    self._last_signal_meta[self._current_symbol] = {
+                        'tf': tf,
+                        'sl': cfg.s_sl,
+                        'tp': cfg.s_tp,
+                        'max_hold': cfg.get_max_hold(tf),
+                        'vr': vr_val,
+                        'momentum': 0.0,
+                        'straddle': True,
+                        'd_overlap': d_overlap,
+                        'conviction_score': score,
+                        'conviction_cond': cond,
+                    }
+                    logger.info(
+                        f"[{self._current_symbol}] S_d8 straddle signal "
+                        f"TF={tf} VR={vr_val:.3f} conviction={score}/4 "
+                        f"{cond} "
+                        f"(threshold={cfg.s_vr_threshold})"
+                    )
+                    return 2  # Straddle signal
+
+        # ── D_mom8: VR < threshold → directional entry ──
         sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
 
         # Only check the LAST bar (current bar close)
@@ -202,20 +280,138 @@ class VolStraddleStrategy:
         if direction == 0:
             return 0
 
+        # ── R34 Conviction Score for D_mom8 ──
+        # B3: Check if S_d8 would also fire (reverse overlap)
+        s_overlap = False
+        if cfg.straddle_enabled and cfg.b3_enabled:
+            s_sig = gen_vr_dur_signal(
+                vr, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup,
+            )
+            s_overlap = bool(s_sig[-1] == 1)
+
+        score, cond = self._compute_conviction_score(
+            close, vr, tf,
+            is_straddle=False,
+            d_overlap=s_overlap,  # B3: S would also fire
+            squeeze_dur=0,  # Not relevant for D_mom8
+        )
+
+        # Min conviction filter (T3-Triple mode)
+        if cfg.cw_enabled and score < cfg.min_conviction_score:
+            logger.debug(
+                f"[{self._current_symbol}] D_mom8 blocked: "
+                f"conviction={score} < min={cfg.min_conviction_score} "
+                f"TF={tf} {cond}"
+            )
+            return 0
+
         # Store metadata for scalper to query after on_bar
         # (which TF, SL/TP, max_hold for this specific signal)
+        mom_val = float(mom[-1])
         self._last_signal_meta[self._current_symbol] = {
             'tf': tf,
             'sl': cfg.d_sl,
             'tp': cfg.d_tp,
             'max_hold': cfg.get_max_hold(tf),
             'vr': float(vr[-1]) if not np.isnan(vr[-1]) else 0.0,
-            'momentum': float(mom[-1]),
+            'momentum': mom_val,
+            'conviction_score': score,
+            'conviction_cond': cond,
         }
+        logger.info(
+            f"[{self._current_symbol}] D_mom8 signal "
+            f"TF={tf} VR={vr_val:.3f} {'LONG' if direction == 1 else 'SHORT'} "
+            f"mom={mom_val:.6f} conviction={score}/4 {cond} "
+            f"(threshold={cfg.d_vr_threshold})"
+        )
         return direction
 
     # Track current symbol for signal metadata storage
     _current_symbol: str = ''
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Conviction Score (R34 CW-Tier)
+    # ══════════════════════════════════════════════════════════════════
+
+    def _compute_conviction_score(
+        self,
+        close: np.ndarray,
+        vr: np.ndarray,
+        tf: str,
+        is_straddle: bool,
+        d_overlap: bool,
+        squeeze_dur: int = 0,
+    ) -> tuple[int, dict[str, bool]]:
+        """Compute conviction score (0-4) from R34 conditions.
+
+        Conditions:
+            E2: SMA Proximity — |close - SMA(N)| / SMA(N) < threshold
+            C2: BTC Neutral — |BTC momentum(8)| < threshold
+            B3: Confluence — both D_mom8 and S_d8 would fire
+            A3: Quality+ — D: VR < deep threshold; S: duration ≥ long dur
+
+        Args:
+            close: Close prices for this timeframe.
+            vr: VR array for this timeframe.
+            tf: Timeframe label ('15m', '1h', '4h').
+            is_straddle: True if S_d8 signal, False if D_mom8.
+            d_overlap: True if both D and S would fire simultaneously.
+            squeeze_dur: Current squeeze duration (for S_d8 A3 check).
+
+        Returns:
+            Tuple of (score, condition_details_dict).
+        """
+        cfg = self.config
+        score = 0
+        conditions: dict[str, bool] = {
+            'e2_sma': False,
+            'c2_btc': False,
+            'b3_confluence': False,
+            'a3_quality': False,
+        }
+
+        # ── E2: SMA Proximity ──
+        if cfg.e2_enabled and len(close) >= cfg.e2_sma_period:
+            sma = np.mean(close[-cfg.e2_sma_period:])
+            if sma > 0:
+                proximity = abs(close[-1] - sma) / sma
+                if proximity < cfg.e2_threshold:
+                    conditions['e2_sma'] = True
+                    score += 1
+
+        # ── C2: BTC Neutral ──
+        if cfg.c2_enabled and self._btc_close is not None:
+            btc = self._btc_close
+            mom_period = cfg.momentum_period  # Same 8-bar momentum
+            if len(btc) > mom_period:
+                btc_mom = btc[-1] / btc[-mom_period - 1] - 1.0
+                if abs(btc_mom) < cfg.c2_btc_mom_threshold:
+                    conditions['c2_btc'] = True
+                    score += 1
+
+        # ── B3: Confluence (both D_mom8 and S_d8 would fire) ──
+        if cfg.b3_enabled:
+            if d_overlap:
+                # When S_d8 fires: d_overlap was checked in _check_tf_signal
+                # When D_mom8 fires: we need to check if S_d8 would also fire
+                conditions['b3_confluence'] = True
+                score += 1
+
+        # ── A3: Quality+ ──
+        if cfg.a3_enabled:
+            vr_val = float(vr[-1]) if not np.isnan(vr[-1]) else 999.0
+            if is_straddle:
+                # S_d8: extended squeeze duration
+                if squeeze_dur >= cfg.a3_long_squeeze_dur:
+                    conditions['a3_quality'] = True
+                    score += 1
+            else:
+                # D_mom8: extra deep VR compression
+                if vr_val < cfg.a3_deep_vr_threshold:
+                    conditions['a3_quality'] = True
+                    score += 1
+
+        return score, conditions
 
     # ══════════════════════════════════════════════════════════════════
     #  Signal Metadata Query
@@ -253,6 +449,18 @@ class VolStraddleStrategy:
     # ══════════════════════════════════════════════════════════════════
     #  Position Management
     # ══════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def parse_pos_key(key: str) -> tuple[str, str | None]:
+        """Parse position key → (symbol, position_side or None).
+
+        Compound keys: 'BTCUSDT:LONG' → ('BTCUSDT', 'LONG')
+        Simple keys: 'BTCUSDT' → ('BTCUSDT', None)
+        """
+        if ':' in key:
+            symbol, side = key.split(':', 1)
+            return symbol, side
+        return key, None
 
     def update_position(
         self, symbol: str, current_price: float,
@@ -309,14 +517,32 @@ class VolStraddleStrategy:
 
         # SL check (backtest uses low[j] for long, high[j] for short)
         if worst_gain <= -sl_pct:
+            logger.info(
+                f"[{symbol}] SL hit: worst_gain={worst_gain*100:+.3f}% "
+                f"vs SL={sl_pct*100:.1f}% bars={pos['bars_held']} "
+                f"entry={entry:.6f} "
+                f"{'low' if pos['signal']==1 else 'high'}="
+                f"{current_low if pos['signal']==1 else current_high}"
+            )
             return 'stop_loss'
 
         # TP check (backtest uses high[j] for long, low[j] for short)
         if best_gain >= tp_pct:
+            logger.info(
+                f"[{symbol}] TP hit: best_gain={best_gain*100:+.3f}% "
+                f"vs TP={tp_pct*100:.1f}% bars={pos['bars_held']} "
+                f"entry={entry:.6f} "
+                f"{'high' if pos['signal']==1 else 'low'}="
+                f"{current_high if pos['signal']==1 else current_low}"
+            )
             return 'target'
 
         # Max hold (time-based exit)
         if pos['bars_held'] >= max_hold:
+            logger.info(
+                f"[{symbol}] Max hold reached: bars={pos['bars_held']}/{max_hold} "
+                f"best_gain={best_gain*100:+.3f}% worst_gain={worst_gain*100:+.3f}%"
+            )
             return 'max_hold'
 
         return None
@@ -326,7 +552,17 @@ class VolStraddleStrategy:
     # ══════════════════════════════════════════════════════════════════
 
     def has_position(self, symbol: str) -> bool:
-        """Check if a position exists for this symbol."""
+        """Check if a position exists for this symbol.
+
+        In hedge mode, checks compound keys (symbol:LONG / symbol:SHORT)
+        and also the plain key as fallback for backward compatibility.
+        """
+        if self.config.hedge_mode:
+            return (
+                f"{symbol}:LONG" in self._positions
+                or f"{symbol}:SHORT" in self._positions
+                or symbol in self._positions
+            )
         return symbol in self._positions
 
     def open_position(
@@ -340,6 +576,7 @@ class VolStraddleStrategy:
         """Record a new position.
 
         Stores TF-specific SL/TP/max_hold from signal metadata.
+        In hedge mode, uses compound key (symbol:LONG / symbol:SHORT).
 
         Args:
             symbol: Trading symbol.
@@ -351,12 +588,19 @@ class VolStraddleStrategy:
             entry_stop_mult: SL as fraction (e.g. 0.01 = 1%).
             server_sl_order_id: Exchange SL order ID.
             server_tp_order_id: Exchange TP order ID.
-            **kwargs: Extra fields (sl, tp, tf, max_hold).
+            **kwargs: Extra fields (sl, tp, tf, max_hold, position_side).
         """
         if entry_price <= 0:
             raise ValueError(
                 f"Invalid entry_price for {symbol}: {entry_price}"
             )
+
+        # Determine position key (compound in hedge mode)
+        position_side = kwargs.get('position_side')
+        if position_side:
+            pos_key = f"{symbol}:{position_side}"
+        else:
+            pos_key = symbol
 
         # Get TF-specific parameters from signal metadata or kwargs
         meta = self._last_signal_meta.get(symbol, {})
@@ -367,7 +611,8 @@ class VolStraddleStrategy:
             'max_hold', self.config.get_max_hold(tf),
         ))
 
-        self._positions[symbol] = {
+        self._positions[pos_key] = {
+            'symbol': symbol,  # Actual Binance symbol (for API calls)
             'signal': signal,
             'entry_price': entry_price,
             'notional': notional,
@@ -389,6 +634,8 @@ class VolStraddleStrategy:
             'confidence': 0,
             'highest_since_tp1': 0.0,
             'trail_floor': None,
+            # Hedge mode
+            'position_side': position_side,
         }
 
         logger.info(
@@ -396,10 +643,14 @@ class VolStraddleStrategy:
             f"{'LONG' if signal == 1 else 'SHORT'} "
             f"TF={tf} SL={sl*100:.1f}% TP={tp*100:.1f}% "
             f"max_hold={max_hold} VR={meta.get('vr', 0):.3f}"
+            f"{f' (hedge:{position_side})' if position_side else ''}"
         )
 
     def close_position(self, symbol: str) -> dict | None:
-        """Remove position and return its info."""
+        """Remove position and return its info.
+
+        Accepts raw symbol or compound key (symbol:LONG / symbol:SHORT).
+        """
         return self._positions.pop(symbol, None)
 
     @property
