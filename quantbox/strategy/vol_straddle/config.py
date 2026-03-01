@@ -82,6 +82,42 @@ class VolStraddleConfig:
     soft_eq_dd3: float = 0.06       # 6% DD → 40% sizing
     soft_eq_scale3: float = 0.40
 
+    # ── CW-Tier Conviction Sizing (R34 validated) ──
+    # Score = count of 4 conditions: E2, C2, B3, A3 (0-4)
+    # CW-Tier multiplier applied to position size based on score.
+    # T3-Triple: optional high-conviction filter (score ≥ min_conviction_score).
+    cw_enabled: bool = True          # Enable conviction-weighted sizing
+    min_conviction_score: int = 0    # Min score to enter (0=all, 3=T3-Triple)
+    cw_multipliers: list[float] = field(default_factory=lambda: [
+        0.5,   # score 0 → 0.5x
+        1.0,   # score 1 → 1.0x (baseline)
+        1.5,   # score 2 → 1.5x
+        2.0,   # score 3 → 2.0x
+        2.5,   # score 4 → 2.5x (max conviction)
+    ])
+
+    # ── E2: SMA Proximity ──
+    # |close - SMA(20)| / SMA(20) < threshold → near mean → squeeze valid
+    e2_enabled: bool = True
+    e2_sma_period: int = 20          # SMA lookback for mean proximity
+    e2_threshold: float = 0.005      # 0.5% max distance from SMA
+
+    # ── C2: BTC Neutral ──
+    # |BTC momentum(8)| < threshold → BTC not trending → altcoin squeeze valid
+    c2_enabled: bool = True
+    c2_btc_mom_threshold: float = 0.01  # 1% max BTC momentum magnitude
+
+    # ── B3: Confluence ──
+    # Both D_mom8 AND S_d8 would fire simultaneously (overlap)
+    b3_enabled: bool = True
+
+    # ── A3: Quality+ ──
+    # D_mom8: VR < deep_vr_threshold (extra deep compression)
+    # S_d8: squeeze duration ≥ long_squeeze_dur (extended squeeze)
+    a3_enabled: bool = True
+    a3_deep_vr_threshold: float = 0.35   # D_mom8 deep compression
+    a3_long_squeeze_dur: int = 16        # S_d8 extended squeeze duration
+
     # ── Symbol Selection ──
     symbol_whitelist: list[str] = field(default_factory=list)
     exclude_symbols: list[str] = field(default_factory=lambda: [

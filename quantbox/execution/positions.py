@@ -83,6 +83,18 @@ class PositionMixin:
             tf_label = sig_meta.get('tf', '15m')
             max_hold = sig_meta.get('max_hold', vs.get_max_hold(tf_label))
 
+            # ── R34 CW-Tier Conviction Sizing ──
+            conviction_score = sig_meta.get('conviction_score', 0)
+            if vs.cw_enabled and vs.cw_multipliers:
+                idx = min(conviction_score, len(vs.cw_multipliers) - 1)
+                cw_mult = vs.cw_multipliers[idx]
+                notional *= cw_mult
+                logger.info(
+                    f"[{symbol}] CW-Tier: score={conviction_score}/4 → "
+                    f"{cw_mult:.1f}x → notional=${notional:.2f} "
+                    f"({sig_meta.get('conviction_cond', {})})"
+                )
+
         # ── Elliott: 2% exploratory sizing (winning_strategy §4.2) ──
         elif self.strategy_name == 'elliott':
             ecfg = getattr(self, 'elliott_config', ElliottConfig())
@@ -248,7 +260,8 @@ class PositionMixin:
             logger.info(
                 f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
                 f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
-                f"TF={tf_label}, SL={sl_pct*100:.1f}%, TP={tp_pct*100:.1f}%)"
+                f"TF={tf_label}, SL={sl_pct*100:.1f}%, TP={tp_pct*100:.1f}%, "
+                f"conviction={conviction_score}/4)"
             )
 
             sl_order_id = self._place_server_stop_loss(
@@ -345,6 +358,7 @@ class PositionMixin:
                     {'name': '🛑 SL', 'value': f'${sl_price:.4f} ({sl_pct*100:.1f}%)', 'inline': True},
                     {'name': 'TP 방식', 'value': _tp_tag, 'inline': True},
                     {'name': 'SL 방식', 'value': _sl_tag, 'inline': True},
+                    {'name': '확신도', 'value': f'{conviction_score}/4', 'inline': True},
                     {'name': '슬롯', 'value': f'{n_active}/{self.vs_config.max_concurrent}', 'inline': True},
                     {'name': '── 활성 포지션 ──', 'value': f'```\n{_pos_summary}\n```', 'inline': False},
                     {'name': '잔고', 'value': f'${balance_after:,.2f}', 'inline': True},

@@ -705,7 +705,43 @@ VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발�
 | `VS_S_SL` | 0.015 | S_d8 1.5% 손절 (레그별) |
 | `VS_S_TP` | 0.05 | S_d8 5% 익절 (레그별) |
 
-### 3.6.3 실행
+### 3.6.3 CW-Tier 확신도 사이징 (R34 검증)
+
+4가지 조건(E2, C2, B3, A3)의 충족 수(0~4)에 따라 포지션 크기를 조절합니다.
+
+**조건:**
+- **E2 (SMA 근접)**: `|close - SMA(20)| / SMA(20) < 0.5%` — 가격이 평균 근처일 때 스퀴즈 유효
+- **C2 (BTC 중립)**: `|BTC momentum(8)| < 1%` — BTC 비추세 시 알트코인 스퀴즈 유효
+- **B3 (컨플루언스)**: D_mom8과 S_d8이 동시에 발동 — 두 시그널 동시 확인
+- **A3 (퀄리티+)**: D는 VR < 0.35 (깊은 압축), S는 squeeze ≥ 16바 (연장 스퀴즈)
+
+**CW-Tier 배율:**
+
+| Score | 배율 | 의미 |
+|-------|------|------|
+| 0 | 0.5x | 최소 확신 |
+| 1 | 1.0x | 기본 |
+| 2 | 1.5x | 보통 확신 |
+| 3 | 2.0x | 높은 확신 |
+| 4 | 2.5x | 최고 확신 |
+
+**T3-Triple 모드**: `VS_MIN_CONVICTION_SCORE=3`으로 설정하면 score ≥ 3인 경우에만 진입 (고확신 필터).
+
+| 파라미터 | 값 | 설명 |
+|---------|-----|------|
+| `VS_CW_ENABLED` | true | CW-Tier 확신도 사이징 활성화 |
+| `VS_MIN_CONVICTION_SCORE` | 0 | 최소 확신도 점수 (0=전체, 3=T3모드) |
+| `VS_E2_SMA_PERIOD` | 20 | E2: SMA 기간 |
+| `VS_E2_THRESHOLD` | 0.005 | E2: 0.5% 최대 SMA 거리 |
+| `VS_C2_BTC_MOM_THRESHOLD` | 0.01 | C2: 1% 최대 BTC 모멘텀 |
+| `VS_A3_DEEP_VR_THRESHOLD` | 0.35 | A3: D 깊은 압축 임계값 |
+| `VS_A3_LONG_SQUEEZE_DUR` | 16 | A3: S 연장 스퀴즈 기간 |
+
+**OOS 검증 결과 (R34):**
+- CW-Tier: PF=1.603, EV=+96.9bp, EV×N=+68,024 (기본 대비 +51.2%)
+- T3-Triple: PF=1.943, EV=+85.9bp, DD=14.8%, CI_lo=1.520
+
+### 3.6.4 실행
 
 ```bash
 # VolStraddle 전략으로 실행
@@ -715,7 +751,7 @@ uv run python -m quantbox.scalper --strategy vol_straddle
 uv run python -m quantbox.scalper --strategy vol_straddle --paper
 ```
 
-### 3.6.4 백테스트 결과 (R35 OOS)
+### 3.6.5 백테스트 결과 (R35 OOS)
 
 | D_mom8 (A1-D50) | 15m | 1h | 4h | 합계 |
 |------------------|-----|-----|-----|------|

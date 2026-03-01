@@ -278,6 +278,15 @@ class QuantBoxSettings(BaseSettings):
     vs_max_leverage: float = 20.0            # Hard cap
     vs_max_concurrent: int = 2               # Max simultaneous positions
 
+    # ── CW-Tier Conviction Sizing (R34) ──
+    vs_cw_enabled: bool = True               # Enable conviction-weighted sizing
+    vs_min_conviction_score: int = 0         # Min score for entry (0=all, 3=T3-Triple)
+    vs_e2_sma_period: int = 20               # E2: SMA period for proximity check
+    vs_e2_threshold: float = 0.005           # E2: 0.5% max distance from SMA
+    vs_c2_btc_mom_threshold: float = 0.01    # C2: 1% max BTC momentum magnitude
+    vs_a3_deep_vr_threshold: float = 0.35    # A3: D deep compression threshold
+    vs_a3_long_squeeze_dur: int = 16         # A3: S extended squeeze duration
+
     # ── Symbol Whitelist (shared with RB by default) ──
     vs_symbol_whitelist: str = ''             # Empty = use RB whitelist
 
