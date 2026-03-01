@@ -63,6 +63,13 @@ class VolStraddleStrategy:
         # ── Signal metadata (set by on_bar, read by scalper) ──
         self._last_signal_meta: dict[str, dict] = {}
 
+        # ── VR debug (per symbol per TF) ──
+        self._last_vr_15m: dict[str, float] = {}
+        self._last_vr_1h: dict[str, float] = {}
+        self._last_vr_4h: dict[str, float] = {}
+        # Legacy single VR for backward compat
+        self._last_vr: dict[str, float] = {}
+
     # ══════════════════════════════════════════════════════════════════
     #  Signal Generation
     # ══════════════════════════════════════════════════════════════════
@@ -169,6 +176,17 @@ class VolStraddleStrategy:
         # Compute VR
         vr = compute_vr(close, high, low, cfg.vr_short, cfg.vr_long)
 
+        # Store last VR for debug logging (even if no signal)
+        vr_val = float(vr[-1]) if len(vr) > 0 and not np.isnan(vr[-1]) else 999.0
+        self._last_vr[self._current_symbol] = vr_val
+        # Store per-TF VR
+        if tf == '15m':
+            self._last_vr_15m[self._current_symbol] = vr_val
+        elif tf == '1h':
+            self._last_vr_1h[self._current_symbol] = vr_val
+        elif tf == '4h':
+            self._last_vr_4h[self._current_symbol] = vr_val
+
         # D_mom8: VR < threshold → directional entry
         sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
 
@@ -213,6 +231,24 @@ class VolStraddleStrategy:
             Empty dict if no signal metadata available.
         """
         return self._last_signal_meta.get(symbol, {})
+
+    def get_last_vr(self, symbol: str) -> float | None:
+        """Get last computed VR value for this symbol (debug only).
+
+        Returns VR value or None if not yet computed.
+        """
+        return self._last_vr.get(symbol)
+
+    def get_vr_all_tf(self, symbol: str) -> dict[str, float]:
+        """Get VR for all timeframes (debug only).
+
+        Returns dict with '15m', '1h', '4h' keys.
+        """
+        return {
+            '15m': self._last_vr_15m.get(symbol, 999.0),
+            '1h': self._last_vr_1h.get(symbol, 999.0),
+            '4h': self._last_vr_4h.get(symbol, 999.0),
+        }
 
     # ══════════════════════════════════════════════════════════════════
     #  Position Management

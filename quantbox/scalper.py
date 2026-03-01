@@ -886,17 +886,22 @@ class RubberBandScalper(
         # ── Diagnostic: log scan summary every cycle ──
         top_movers = sorted(moves_seen, key=lambda x: x[1], reverse=True)[:3]
         if self.strategy_name == 'vol_straddle':
-            # VR strategy: show VR threshold, not move threshold
+            # VR strategy: show VR threshold + actual VR values
             print(format_scan_summary(len(candidates), top_movers, 0.0))
             if candidates:
                 cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
-                    top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
+                    # Show top 3 moves with VR for all TFs
+                    top3_with_vr = []
+                    for s, m in top_movers:
+                        vr_all = self.strategy.get_vr_all_tf(s)
+                        vr_str = f"15m={vr_all['15m']:.2f}/1h={vr_all['1h']:.2f}/4h={vr_all['4h']:.2f}"
+                        top3_with_vr.append(f"{s}({m*100:.2f}%, {vr_str})")
                     logger.info(
-                        f"No candidates — top moves: {', '.join(top3)} "
-                        f"(VR<{self.vs_config.d_vr_threshold}, signal=VR compression)"
+                        f"No candidates — top moves: {', '.join(top3_with_vr)} "
+                        f"(threshold VR<{self.vs_config.d_vr_threshold} any TF)"
                     )
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
