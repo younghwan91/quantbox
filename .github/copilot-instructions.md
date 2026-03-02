@@ -62,6 +62,7 @@
 3. **Phase 1에서 N, PF가 `docs/backtest_results/` 내 최신 정식 리포트와 ±1% 이내인지 확인.** 불일치 시 즉시 중단.
 4. **슬롯 수 명시.** 15 slots ≠ 10 slots. Production은 10 slots.
 5. **재구현 불가피 시** static params로 baseline 재현 검증을 **먼저** 실행.
+6. **베이스라인 = 배포 수치. 예외 없음.** 리서치에서 출력한 baseline이 배포 리포트와 다르면 리서치 전체가 무효.
 
 ## 실전 교훈 (Incident-Driven Rules)
 
