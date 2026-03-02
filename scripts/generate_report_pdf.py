@@ -128,7 +128,7 @@ def chart_monthly_heatmap() -> str:
             fw = "bold" if abs(val) >= 50 else "normal"
             ax.text(mi, yi, f"{val:+.0f}%", ha="center", va="center", fontsize=6.5, color=c, fontweight=fw)
     plt.colorbar(im, ax=ax, shrink=0.8, label="월수익률 (%)")
-    ax.set_title("월별 수익률 히트맵 — 6년 72개월 (3x lev / 15 slots)", fontsize=11, fontweight="bold")
+    ax.set_title("월별 수익률 히트맵 — R40 분석 (3x / 15 slots)", fontsize=11, fontweight="bold")
     fig.tight_layout(); return _png_b64(fig)
 
 
@@ -140,7 +140,7 @@ def chart_annual_returns() -> str:
     for bar, val in zip(bars, rets):
         ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+60,
                 f"+{val:,}%", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
-    ax.set_title("연도별 수익률 (3x 레버리지, 15 슬롯)", fontsize=11, fontweight="bold")
+    ax.set_title("연도별 수익률 — R40 분석 (3x / 15 슬롯)", fontsize=11, fontweight="bold")
     ax.set_ylabel("Annual Return (%)"); ax.set_ylim(0, max(rets)*1.18)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x,_: f"{x:,.0f}%"))
     _style_ax(ax); fig.tight_layout(); return _png_b64(fig)
@@ -202,8 +202,8 @@ def chart_leverage_sensitivity() -> str:
     ax1.plot(d["lev"], d["ann_ret"], "o-", color=STYLE["blue"], linewidth=2.5, markersize=7, label="Annual Return %")
     ax2.plot(d["lev"], d["max_dd"],  "s--", color=STYLE["red"],   linewidth=2, markersize=7, label="Max DD %")
     ax2.plot(d["lev"], d["calmar"],  "^:",  color=STYLE["green"], linewidth=2, markersize=7, label="Calmar")
-    ax1.axvline(3, color=STYLE["gold"], linewidth=2, linestyle="--", alpha=0.85)
-    ax1.text(3.1, 700, "3x optimal", fontsize=8, color=STYLE["gold"], fontweight="bold")
+    ax1.axvline(3, color=STYLE["gray"], linewidth=1.5, linestyle="--", alpha=0.5)
+    ax1.text(3.1, 700, "3x (슬롯 15 고정 시)", fontsize=8, color=STYLE["gray"])
     ax1.set_xlabel("Leverage"); ax1.set_ylabel("Annual Return %", color=STYLE["blue"])
     ax2.set_ylabel("Max DD % / Calmar"); ax1.set_xticks(d["lev"]); _style_ax(ax1)
     ax1.set_title("레버리지 민감도 (5x+ 부터 복리 붕괴)", fontsize=11, fontweight="bold")
