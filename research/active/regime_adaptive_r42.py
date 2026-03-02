@@ -57,6 +57,8 @@ from research.active.mtf_vol_straddle_r31 import (
 from research.active.scaling_r38 import (
     compute_metrics, precompute_all_vr,
     COST_DIRECTIONAL, COST_STRADDLE, G_3TF,
+    collect_trades as r38_collect_trades,
+    portfolio_sim, CFG_V13,
 )
 
 
@@ -531,30 +533,7 @@ def fast_regime_pnl(
     return np.array(all_pnl) if all_pnl else np.empty(0)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Portfolio Simulation (from R38)
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-def portfolio_sim(
-    all_trades: list[tuple[str, int, int, float]],
-    max_concurrent: int,
-) -> np.ndarray:
-    """Filter trades by max concurrent positions, no same-symbol overlap."""
-    trades = sorted(all_trades, key=lambda x: x[1])
-    accepted_pnl: list[float] = []
-    active: list[tuple[str, int]] = []
-
-    for sym, entry, exit_b, pnl_val in trades:
-        active = [(s, e) for s, e in active if e > entry]
-        if any(s == sym for s, _ in active):
-            continue
-        if len(active) >= max_concurrent:
-            continue
-        active.append((sym, exit_b))
-        accepted_pnl.append(pnl_val)
-
-    return np.array(accepted_pnl) if accepted_pnl else np.empty(0)
+# portfolio_sim — imported from R38 (single source of truth, no local copy)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -673,37 +652,28 @@ def main() -> None:
     print("  Phase 1: BASELINE (static v13.0 params)")
     print(f"{'='*120}")
 
+    # ── Baseline: R38 canonical sim (rule: never reimplement) ──
     baseline_params = RegimeParams(
         d_vr=0.50, s_vr=0.55, s_dur=4, d_sl=0.01, s_sl=0.015, tp=0.05,
         d_max_hold=192, s_max_hold=384,
     )
-    # Static = same params for all regimes
+    # Static = same params for all regimes (used by adaptive phases)
     static_params = [baseline_params, baseline_params, baseline_params]
 
-    for strat in ["D_mom8", "S_d8"]:
-        for sp, lp in [(8, 56)]:
-            pnl = fast_regime_pnl(
-                data_15m, data_1h, data_4h, regime_4h,
-                static_params, strat, sp, lp,
-            )
-            m = compute_metrics(pnl, data_years)
-            print(f"\n  {strat} VR{sp}_{lp} (static): "
-                  f"N={m['N']:,}  PF={m['PF']:.3f}  EV={m['EV_bp']:+.1f}bp  "
-                  f"t={m['t']:.2f}  WR={m['WR']:.1f}%  R:R={m['RR']:.2f}  "
-                  f"TPD={m['tpd']:.2f}  AnnRet={m['ann_ret_pct']:+.1f}%  "
-                  f"DD={m['max_dd_pct']:.1f}%  Calmar={m['calmar']:.1f}")
-
-    # Combined baseline
-    d_pnl_bl = fast_regime_pnl(data_15m, data_1h, data_4h, regime_4h,
-                               static_params, "D_mom8", 8, 56)
-    s_pnl_bl = fast_regime_pnl(data_15m, data_1h, data_4h, regime_4h,
-                               static_params, "S_d8", 8, 56)
-    # Collect trades for portfolio sim + yearly
-    d_trades_bl = collect_regime_trades(data_15m, data_1h, data_4h, regime_4h,
-                                       static_params, "D_mom8", 8, 56)
-    s_trades_bl = collect_regime_trades(data_15m, data_1h, data_4h, regime_4h,
-                                       static_params, "S_d8", 8, 56)
+    # Baseline via R38 canonical collect_trades (NOT reimplemented sim)
+    d_trades_bl = r38_collect_trades(CFG_V13, data_15m, data_1h, data_4h, "D_mom8")
+    s_trades_bl = r38_collect_trades(CFG_V13, data_15m, data_1h, data_4h, "S_d8")
     all_trades_bl = d_trades_bl + s_trades_bl
+
+    for strat, trades in [("D_mom8", d_trades_bl), ("S_d8", s_trades_bl)]:
+        pnl = np.array([t[3] for t in trades]) if trades else np.empty(0)
+        m = compute_metrics(pnl, data_years)
+        print(f"\n  {strat} VR8_56 (R38 canonical): "
+              f"N={m['N']:,}  PF={m['PF']:.3f}  EV={m['EV_bp']:+.1f}bp  "
+              f"t={m['t']:.2f}  WR={m['WR']:.1f}%  R:R={m['RR']:.2f}  "
+              f"TPD={m['tpd']:.2f}  AnnRet={m['ann_ret_pct']:+.1f}%  "
+              f"DD={m['max_dd_pct']:.1f}%  Calmar={m['calmar']:.1f}")
+
     bl_pnl_10s = portfolio_sim(all_trades_bl, 10)
     bl_m = compute_metrics(bl_pnl_10s, data_years)
     print(f"\n  COMBINED (10 slots): "
@@ -711,6 +681,18 @@ def main() -> None:
           f"t={bl_m['t']:.2f}  WR={bl_m['WR']:.1f}%  "
           f"AnnRet={bl_m['ann_ret_pct']:+.1f}%  DD={bl_m['max_dd_pct']:.1f}%  "
           f"Calmar={bl_m['calmar']:.1f}")
+
+    # Sanity check: baseline must match PDF canonical (±1%)
+    _PDF_N, _PDF_PF = 2265, 1.285
+    n_drift = abs(bl_m["N"] - _PDF_N) / _PDF_N
+    pf_drift = abs(bl_m["PF"] - _PDF_PF) / _PDF_PF
+    if n_drift > 0.01 or pf_drift > 0.01:
+        print(f"\n  ⚠ BASELINE DRIFT DETECTED")
+        print(f"    N:  {bl_m['N']} vs PDF {_PDF_N} ({n_drift*100:.2f}%)")
+        print(f"    PF: {bl_m['PF']:.3f} vs PDF {_PDF_PF:.3f} ({pf_drift*100:.2f}%)")
+        print(f"    ABORTING — baseline ≠ deployment. Fix before continuing.")
+        return
+    print(f"\n  ✓ Baseline matches deployment (N Δ{n_drift*100:.2f}%, PF Δ{pf_drift*100:.2f}%)")
 
     # Year-by-year baseline
     yearly_bl = pnl_by_year(all_trades_bl, n_15m, data_days)
