@@ -32,6 +32,9 @@ class ReconciliationMixin:
             if not pos:
                 continue
 
+            # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT)
+            api_sym = pos.get('symbol', sym.split(':')[0])
+
             tp_oid = pos.get('server_tp_order_id')
             sl_oid = pos.get('server_sl_order_id')
             logger.debug(
@@ -42,7 +45,7 @@ class ReconciliationMixin:
 
             # Check TP order first (the happy path)
             if tp_oid:
-                filled = self._check_order_filled(sym, tp_oid)
+                filled = self._check_order_filled(api_sym, tp_oid)
                 if filled and filled.get('status') == 'FILLED':
                     fill_price = float(filled['avgPrice'])
                     fill_qty = float(filled['executedQty'])
@@ -65,7 +68,7 @@ class ReconciliationMixin:
                     )
                     # Cancel the counterpart SL
                     if sl_oid:
-                        self._cancel_server_stop_loss(sym, sl_oid)
+                        self._cancel_server_stop_loss(api_sym, sl_oid)
                     self._record_server_fill(
                         sym, fill_price, fill_qty, 'server_tp',
                     )
@@ -81,7 +84,7 @@ class ReconciliationMixin:
 
             # Check SL order
             if sl_oid:
-                filled = self._check_order_filled(sym, sl_oid)
+                filled = self._check_order_filled(api_sym, sl_oid)
                 if filled and filled.get('status') == 'FILLED':
                     fill_price = float(filled['avgPrice'])
                     fill_qty = float(filled['executedQty'])
@@ -91,7 +94,7 @@ class ReconciliationMixin:
                     )
                     # Cancel the counterpart TP
                     if tp_oid:
-                        self._cancel_server_take_profit(sym, tp_oid)
+                        self._cancel_server_take_profit(api_sym, tp_oid)
                     self._record_server_fill(
                         sym, fill_price, fill_qty, 'server_sl',
                     )
@@ -121,7 +124,7 @@ class ReconciliationMixin:
 
             if missing_sl or missing_tp:
                 quantity = pos['notional'] / pos['entry_price']
-                quantity = self._round_qty(quantity, sym)
+                quantity = self._round_qty(quantity, api_sym)
                 signal = pos['signal']
                 entry_price = pos['entry_price']
                 move_size = pos.get('move_size', 0.03)
@@ -136,9 +139,10 @@ class ReconciliationMixin:
                     else:
                         repair_stop_mult = stop_mult
                     new_sl = self._place_server_stop_loss(
-                        symbol=sym, signal=signal, quantity=quantity,
+                        symbol=api_sym, signal=signal, quantity=quantity,
                         entry_price=entry_price, move_size=move_size,
                         stop_mult=repair_stop_mult,
+                        position_side=pos.get('position_side'),
                     )
                     if new_sl == 'WOULD_TRIGGER':
                         # ═══ FORCE-CLOSE: Price blew past SL level ═══
@@ -159,7 +163,7 @@ class ReconciliationMixin:
                         _fc_price = entry_price  # safe fallback
                         try:
                             _book = self.client.futures_orderbook_ticker(
-                                symbol=sym,
+                                symbol=api_sym,
                             )
                             _fc_price = float(_book['bidPrice'])
                         except Exception:
@@ -206,14 +210,15 @@ class ReconciliationMixin:
                     # Non-PBT: full qty server TP for intra-bar capture.
                     if self.config.partial_exit_enabled:
                         tp_qty = self._round_qty(
-                            quantity * self.config.partial_exit_fraction, sym,
+                            quantity * self.config.partial_exit_fraction, api_sym,
                         )
                     else:
                         tp_qty = quantity
                     new_tp = self._place_server_take_profit(
-                        symbol=sym, signal=signal, quantity=tp_qty,
+                        symbol=api_sym, signal=signal, quantity=tp_qty,
                         entry_price=entry_price, move_size=move_size,
                         target_retrace=self.config.target_retrace,
+                        position_side=pos.get('position_side'),
                     )
                     if new_tp:
                         pos['server_tp_order_id'] = new_tp
@@ -255,12 +260,20 @@ class ReconciliationMixin:
             logger.warning(f"Position reconciliation failed: {e}")
             return
 
-        # Build map of actual exchange positions
+        # Build map of actual exchange positions.
+        # In Hedge Mode, Binance returns TWO entries per symbol
+        # (positionSide=LONG and SHORT). Use compound key to avoid
+        # one side overwriting the other → false ghost detection.
         exchange_map: dict[str, float] = {}
         for p in exchange_positions:
             amt = float(p.get('positionAmt', '0'))
             if amt != 0:
-                exchange_map[p['symbol']] = amt
+                pos_side = p.get('positionSide', 'BOTH')
+                if pos_side in ('LONG', 'SHORT'):
+                    key = f"{p['symbol']}:{pos_side}"
+                else:
+                    key = p['symbol']
+                exchange_map[key] = amt
 
         # Check each internal position against exchange
         for sym in list(self.strategy.active_positions):
@@ -268,7 +281,15 @@ class ReconciliationMixin:
             if not pos:
                 continue
 
-            if sym not in exchange_map:
+            # Build lookup key: compound (BTCUSDT:LONG) or plain (BTCUSDT)
+            api_sym = pos.get('symbol', sym.split(':')[0])
+            pos_side = pos.get('position_side')
+            if pos_side in ('LONG', 'SHORT'):
+                lookup_key = f"{api_sym}:{pos_side}"
+            else:
+                lookup_key = api_sym
+
+            if lookup_key not in exchange_map:
                 # Ghost position: we think it's open, exchange says no
                 logger.error(
                     f"[{sym}] RECONCILIATION: Ghost position detected! "
@@ -286,7 +307,7 @@ class ReconciliationMixin:
                 audit_fills: list[dict] = []
                 try:
                     recent = self.client.futures_account_trades(
-                        symbol=sym, limit=50,
+                        symbol=api_sym, limit=50,
                     )
                     close_side = 'SELL' if pos['signal'] == 1 else 'BUY'
                     for t in reversed(recent):
@@ -315,7 +336,7 @@ class ReconciliationMixin:
                 if audit_fills:
                     try:
                         all_orders = self.client.futures_get_all_orders(
-                            symbol=sym, limit=20,
+                            symbol=api_sym, limit=20,
                         )
                         fill_order_id = audit_fills[0]['orderId']
                         for o in reversed(all_orders):
@@ -412,7 +433,7 @@ class ReconciliationMixin:
                 continue
 
             # Quantity mismatch check
-            exchange_qty = abs(exchange_map[sym])
+            exchange_qty = abs(exchange_map[lookup_key])
             internal_qty = pos['notional'] / pos['entry_price']
             qty_diff_pct = abs(exchange_qty - internal_qty) / max(internal_qty, 1e-8) * 100
             if qty_diff_pct > 5:  # More than 5% mismatch
@@ -451,10 +472,13 @@ class ReconciliationMixin:
             pos['server_tp_is_partial'] = False
             return
 
+        # Extract Binance symbol from compound key
+        api_sym = pos.get('symbol', symbol.split(':')[0])
+
         # 1. Cancel old SL (100% qty, no longer valid)
         sl_oid = pos.get('server_sl_order_id')
         if sl_oid:
-            self._cancel_server_stop_loss(symbol, sl_oid)
+            self._cancel_server_stop_loss(api_sym, sl_oid)
             pos['server_sl_order_id'] = None
 
         # 2. PnL on the partial portion
@@ -482,16 +506,17 @@ class ReconciliationMixin:
 
         # 4. Place BE SL for remaining qty
         remaining_qty = self._round_qty(
-            pos['notional'] / pos['entry_price'], symbol,
+            pos['notional'] / pos['entry_price'], api_sym,
         )
         if remaining_qty > 0 and not self.paper_mode:
             new_sl_oid = self._place_server_stop_loss(
-                symbol=symbol,
+                symbol=api_sym,
                 signal=pos['signal'],
                 quantity=remaining_qty,
                 entry_price=pos['entry_price'],
                 move_size=pos['move_size'],
                 stop_mult=0.0001,  # Break-even stop
+                position_side=pos.get('position_side'),
             )
             pos['server_sl_order_id'] = new_sl_oid
             # Reset ratchet state for fresh runner
@@ -504,7 +529,7 @@ class ReconciliationMixin:
 
         # 5. Trade record (partial)
         trade = {
-            'symbol': symbol,
+            'symbol': api_sym,
             'signal': pos['signal'],
             'entry_price': pos['entry_price'],
             'exit_price': fill_price,
@@ -555,6 +580,9 @@ class ReconciliationMixin:
         if not pos:
             return
 
+        # Extract Binance symbol from compound key for trade records
+        api_sym = pos.get('symbol', symbol.split(':')[0])
+
         # PnL calculation
         if pos['signal'] == 1:
             pnl_pct = (fill_price - pos['entry_price']) / pos['entry_price']
@@ -575,7 +603,7 @@ class ReconciliationMixin:
         net_pnl = pnl_usd - cost
 
         trade = {
-            'symbol': symbol,
+            'symbol': api_sym,
             'signal': pos['signal'],
             'entry_price': pos['entry_price'],
             'exit_price': fill_price,
