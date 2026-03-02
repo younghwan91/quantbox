@@ -347,16 +347,25 @@ def safe_write(pdf, h, txt):
     avail = pdf.w - pdf.l_margin - pdf.r_margin
     if avail < 5:
         pdf.ln(h); return
+    # Ensure x is within left margin before writing
+    if pdf.get_x() < pdf.l_margin:
+        pdf.set_x(pdf.l_margin)
     try:
         pdf.multi_cell(0, h, txt)
     except Exception:
-        pdf.cell(0, h, txt[:80], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        try:
+            pdf.multi_cell(0, h, txt[:120])
+        except Exception:
+            pdf.cell(0, h, txt[:60], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
 def render_table(pdf, rows):
     if not rows: return
     n_cols = max(len(r) for r in rows)
-    col_w = (PAGE_W - 2*MARGIN) / n_cols
+    usable = pdf.w - pdf.l_margin - pdf.r_margin  # real usable width
+    col_w = usable / n_cols
+    # Max chars per cell based on col width (approx 1.6 chars/mm at font 6.5)
+    max_chars = max(8, int(col_w * 1.6))
     for idx, row in enumerate(rows):
         while len(row) < n_cols: row.append("")
         if idx == 0:
@@ -365,7 +374,9 @@ def render_table(pdf, rows):
             pdf.set_font("NotoSans", "", 6.5)
             pdf.set_fill_color(248, 248, 252) if idx % 2 == 0 else pdf.set_fill_color(255, 255, 255)
         for cell in row:
-            pdf.cell(col_w, 4.5, cell[:36], border=1, fill=True)
+            # Truncate with ellipsis if too long
+            text = cell if len(cell) <= max_chars else cell[:max_chars-1] + "…"
+            pdf.cell(col_w, 4.5, text, border=1, fill=True)
         pdf.ln()
     pdf.ln(2)
 
@@ -465,14 +476,19 @@ def main():
 
         if stripped.startswith("**") and ":**" in stripped:
             pdf.set_font("NotoSans", "", 8); pdf.set_text_color(0, 0, 0)
-            pdf.cell(0, 4.5, stripped.replace("**","").replace("`",""), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            # Use multi_cell so long metadata lines wrap instead of overflowing
+            safe_write(pdf, 4.5, stripped.replace("**","").replace("`",""))
             i += 1; continue
 
         if stripped.startswith("```"):
             i += 1
             pdf.set_font("NotoSans", "", 7); pdf.set_text_color(60, 60, 60)
             while i < len(lines) and not lines[i].strip().startswith("```"):
-                safe_write(pdf, 3.5, lines[i]); i += 1
+                # Code lines: strip leading whitespace, hard-wrap at ~100 chars
+                code_line = lines[i].rstrip()
+                if len(code_line) > 100:
+                    code_line = code_line[:99] + "…"
+                safe_write(pdf, 3.5, code_line); i += 1
             pdf.set_text_color(0, 0, 0)
             if i < len(lines): i += 1
             continue
