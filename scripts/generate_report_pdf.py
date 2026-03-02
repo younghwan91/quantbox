@@ -128,7 +128,7 @@ def chart_monthly_heatmap() -> str:
             fw = "bold" if abs(val) >= 50 else "normal"
             ax.text(mi, yi, f"{val:+.0f}%", ha="center", va="center", fontsize=6.5, color=c, fontweight=fw)
     plt.colorbar(im, ax=ax, shrink=0.8, label="월수익률 (%)")
-    ax.set_title("월별 수익률 히트맵 — R40 분석 (3x / 15 slots)", fontsize=11, fontweight="bold")
+    ax.set_title("월별 수익률 히트맵 — R40 6년 72개월", fontsize=11, fontweight="bold")
     fig.tight_layout(); return _png_b64(fig)
 
 
@@ -140,7 +140,7 @@ def chart_annual_returns() -> str:
     for bar, val in zip(bars, rets):
         ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+60,
                 f"+{val:,}%", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
-    ax.set_title("연도별 수익률 — R40 분석 (3x / 15 슬롯)", fontsize=11, fontweight="bold")
+    ax.set_title("연도별 수익률 — R40 6년 백테스트", fontsize=11, fontweight="bold")
     ax.set_ylabel("Annual Return (%)"); ax.set_ylim(0, max(rets)*1.18)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x,_: f"{x:,.0f}%"))
     _style_ax(ax); fig.tight_layout(); return _png_b64(fig)
