@@ -7,11 +7,11 @@
 
 ## 1. 시스템 개요
 
-QuantBox v12.9는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
+QuantBox v13.0는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
 세 가지 전략을 지원한다:
 1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
 2. **Elliott Wave Strategy** (v11.6): ZigZag ABC 패턴 + Fibonacci 검증 + Timing Alpha Filter (4h)
-3. **VolStraddle** (R40-VR856-3x): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**, ATR 8/56, 3x leverage, max_concurrent=15)
+3. **VolStraddle** (v13.0-VR856-25x): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**, ATR 8/56, 25x leverage, max_concurrent=10)
 **v11.4: Adaptive Threshold + Leverage Optimization** — ATR 기반 적응형 임계값 (`clip(2.5 × ATR%(48), 1%, 6%)`). 18-variant walk-forward sweep + 14-variant leverage grid → 2.5x_f1 선택. OOS Return +5069%, MDD 19.0%, Calmar 266.6. MTF 레버리지 2.0→2.5× (실효 3.75×).
 **v11.6: Elliott Wave Timing Alpha** — 97패턴 리서치 기반 3중 타이밍 필터 (impulse_accel≥0, corr_ratio≥0.20, w3w1≤2.5). Calmar 1.51→5.10, Sharpe 1.07→1.69. 파라미터 비감응 (-0.3~+0.3 동일 결과).
 **v11.4: Elliott Wave Strategy** — ZigZag ABC 패턴 인식, 2단계 포지셔닝 (2% 탐색적 → 8% 확인), 50% 부분 익절 + 브레이크이븐 스탑, BTC 매크로 바이어스, Numba 가속 지표.
@@ -26,6 +26,7 @@ QuantBox v12.9는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 **v12.8: R39-VR856 Frequency Boost** — ATR(7)/ATR(50) → ATR(8)/ATR(56)로 변경. 132 배리언트 그리드 서치에서 연간 수익률 × Calmar 최적화. 6년 연속 흑자, AnnRet=+187.2%, DD=32.4%, Calmar=5.8. s_squeeze_dur 8→4, max_concurrent 2→10. TPD=1.03.
 
 **v12.9: R40 Tournament-Grade Aggression** — 3x leverage (63% Kelly, optimal 4.8x) + 15 slots. AnnRet=+922.5%, DD=77.2%, 6년 연속 흑자. 연도별: 2020 +4838%, 2021 +749%, 2022 +3036%, 2023 +54%, 2024 +2606%, 2025 +109%.
+**v13.0: Aggressive Deployment** — 25x leverage + 10 slots (L/N=2.5). 25×25 fine grid + 4 adaptive model 분석. Fixed L/N이 최적 (adaptive 전패). AnnRet=+687%, DD=68%, Calmar=10.12, 0 losing years. Scalper fallback min(lev,25).
 **v12.7: Hedge Mode + S_d8 Straddle** — Binance dualSidePosition 모드 전환. `positionSide` 파라미터 전체 주문 경로 적용. S_d8 스트래들 (VR<0.55, 8바 이상 스퀴즈) 양방향 동시 진입. 복합 포지션 키 (`BTCUSDT:LONG`/`BTCUSDT:SHORT`) 지원.
 **v12.6.1: 4h MTF Lookahead Fix** — `apply_mtf_confirmation()`이 진행 중인 4h 바의 최종 종가(미래 데이터)를 사용하던 버그 수정. 마지막 완성된 4h 바만 참조하도록 변경. 백테스트 WR 83%→43%로 정상화, 라이브(36%)와 근접. **R22 결과: lookahead가 전체 알파의 원천이었음. 수정 후 PF=0.877 (zero cost, 6yr, 436K trades). 15m 러버밴드 평균회귀 시그널에 이론적 엣지 없음.**
 **v12.4: I-HybTight** — Reversal A/B champion: target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3.0. R:R 1.91, Calmar 834, 6yr return 6,300%.
@@ -54,11 +55,11 @@ QuantBox v12.9는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
          stop_decay=0.0
          entry_mode='confidence'
          min_confidence=3 (v12.3 M-2SSTSX quality gate)
-         max_concurrent=15 (R40 tournament 15-slot)
+         max_concurrent=10 (v13.0 aggressive 10-slot)
          btc_regime_period=96 (24h SMA for regime detection)
          asset_trend_period=192 (48h SMA for classic pullback)
          btc_directional_period=48 (12h BTC momentum for sympathy)
-         base_leverage=3.0, leverage_scale=0.0, max_leverage=20.0 (R40 tournament 3x)
+         base_leverage=25.0, leverage_scale=0.0, max_leverage=25.0 (v13.0 aggressive 25x, L/N=2.5)
          # v11.4 Adaptive Threshold (2.5x_f1 variant, walk-forward validated)
          atr_period=48 (12h ATR lookback)
          atr_multiplier=2.0 (ATR × 2.0, v12.2 E-3Slot A/B validated)
