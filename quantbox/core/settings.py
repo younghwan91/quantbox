@@ -246,8 +246,8 @@ class QuantBoxSettings(BaseSettings):
     # OOS validated: N=799 (D_mom8), EV=+29.3bp, PF=1.376, t=3.48.
 
     # ── VR Computation ──
-    vs_vr_short: int = 7                     # Short ATR period for VR
-    vs_vr_long: int = 50                     # Long ATR period for VR
+    vs_vr_short: int = 8                     # Short ATR period for VR (R39: was 7)
+    vs_vr_long: int = 56                     # Long ATR period for VR (R39: was 50)
 
     # ── D_mom8 Parameters ──
     vs_d_vr_threshold: float = 0.50          # A1-D50: VR entry threshold (was 0.45)
@@ -257,7 +257,7 @@ class QuantBoxSettings(BaseSettings):
 
     # ── S_d8 Parameters (Phase 2 — requires Binance Hedge Mode) ──
     vs_s_vr_threshold: float = 0.55          # S VR entry threshold
-    vs_s_squeeze_dur: int = 8                # Min squeeze duration
+    vs_s_squeeze_dur: int = 4                # Min squeeze duration (R39: was 8)
     vs_s_sl: float = 0.015                   # 1.5% SL per straddle leg
     vs_s_tp: float = 0.05                    # 5% TP per straddle leg
     vs_straddle_enabled: bool = True         # Straddle mode enabled
@@ -276,7 +276,7 @@ class QuantBoxSettings(BaseSettings):
     # ── Position Sizing ──
     vs_base_leverage: float = 1.5            # Flat leverage
     vs_max_leverage: float = 20.0            # Hard cap
-    vs_max_concurrent: int = 2               # Max simultaneous positions
+    vs_max_concurrent: int = 10              # Max simultaneous positions (R39: was 2)
 
     # ── CW-Tier Conviction Sizing (R34) ──
     vs_cw_enabled: bool = True               # Enable conviction-weighted sizing
