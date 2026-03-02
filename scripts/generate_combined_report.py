@@ -184,11 +184,11 @@ def chart_leverage():
     ax1.plot(d["lev"],d["ann_ret"],"o-",color=ST["blue"],linewidth=2.5,markersize=7,label="Annual Return %")
     ax2.plot(d["lev"],d["max_dd"],"s--",color=ST["red"],linewidth=2,markersize=7,label="Max DD %")
     ax2.plot(d["lev"],d["calmar"],"^:",color=ST["green"],linewidth=2,markersize=7,label="Calmar")
-    ax1.axvline(3,color=ST["gold"],linewidth=2.2,linestyle="--",alpha=0.85)
-    ax1.text(3.1,700,"3x 최적",fontsize=9,color=ST["gold"],fontweight="bold")
+    ax1.axvline(3,color=ST["gray"],linewidth=1.5,linestyle="--",alpha=0.5)
+    ax1.text(3.1,700,"3x (슬롯 15 고정 시)",fontsize=8,color=ST["gray"])
     ax1.set_xlabel("Leverage");ax1.set_ylabel("Annual Return %",color=ST["blue"])
     ax2.set_ylabel("Max DD % / Calmar");ax1.set_xticks(d["lev"]);_ax(ax1)
-    ax1.set_title("레버리지 민감도 — 5x+부터 복리 붕괴",fontsize=11,fontweight="bold")
+    ax1.set_title("레버리지 민감도 (슬롯 15 고정) — L/N ratio 발견의 단초",fontsize=11,fontweight="bold")
     lines1,l1=ax1.get_legend_handles_labels();lines2,l2=ax2.get_legend_handles_labels()
     ax1.legend(lines1+lines2,l1+l2,loc="upper right",fontsize=8)
     fig.tight_layout();return _png_b64(fig)
@@ -488,17 +488,18 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <h2>5. 심볼별 성과</h2>
 {img("symbols")}
 
-<h2>6. 레버리지 민감도 — 왜 3x인가</h2>
+<h2>6. 레버리지 민감도 — 슬롯 고정 분석의 한계</h2>
 {img("leverage")}
 <div class="tw"><table>
-<tr><th>Leverage</th><th class="r">AnnRet</th><th class="r">Max DD</th><th class="r">Calmar</th><th class="c">Losing Years</th></tr>
-<tr><td>1x</td><td class="r">+195%</td><td class="r">35.3%</td><td class="r">5.5</td><td class="c">0</td></tr>
-<tr><td>2x</td><td class="r">+540%</td><td class="r">60.0%</td><td class="r">9.0</td><td class="c">0</td></tr>
-<tr><td class="bold">3x ★</td><td class="r green bold">+923%</td><td class="r">77.2%</td><td class="r bold">12.0</td><td class="c green bold">0</td></tr>
-<tr><td>5x</td><td class="r">+960%</td><td class="r red">95.8%</td><td class="r">10.0</td><td class="c red">2</td></tr>
-<tr><td>7.5x</td><td class="r">+104%</td><td class="r red">99.9%</td><td class="r red">1.0</td><td class="c red">2</td></tr>
-<tr><td>10x</td><td class="r red">-94%</td><td class="r red">100%</td><td class="r red">-0.9</td><td class="c red">4</td></tr>
+<tr><th>Leverage</th><th class="r">AnnRet</th><th class="r">Max DD</th><th class="r">Calmar</th><th class="c">Losing Years</th><th>비고</th></tr>
+<tr><td>1x</td><td class="r">+195%</td><td class="r">35.3%</td><td class="r">5.5</td><td class="c">0</td><td></td></tr>
+<tr><td>2x</td><td class="r">+540%</td><td class="r">60.0%</td><td class="r">9.0</td><td class="c">0</td><td></td></tr>
+<tr><td>3x</td><td class="r">+923%</td><td class="r">77.2%</td><td class="r">12.0</td><td class="c">0</td><td>슬롯 15 고정 시 최적</td></tr>
+<tr><td>5x</td><td class="r">+960%</td><td class="r red">95.8%</td><td class="r">10.0</td><td class="c red">2</td><td>복리 붕괴 시작</td></tr>
+<tr><td>7.5x</td><td class="r">+104%</td><td class="r red">99.9%</td><td class="r red">1.0</td><td class="c red">2</td><td></td></tr>
+<tr><td>10x</td><td class="r red">-94%</td><td class="r red">100%</td><td class="r red">-0.9</td><td class="c red">4</td><td></td></tr>
 </table></div>
+<div class="callout"><strong>⚠ 이 분석은 슬롯 15 고정 상태에서 레버리지만 변화시킨 결과.</strong> 5x 이상에서 복리 붕괴가 일어나는 건 맞지만, <strong>변수가 레버리지 하나뿐</strong>이라는 한계. 이 발견이 Part 2의 핵심 질문으로 이어졌다 — <em>"레버리지와 슬롯을 동시에 조절하면?"</em> → L/N ratio 발견 → <strong>현재 운용: 25x/10slots (L/N=2.5), Calmar 10.12, Losing Year 0.</strong></div>
 
 <h2>7. Bootstrap 신뢰구간 & 통계적 유의성</h2>
 <div class="tw"><table>
