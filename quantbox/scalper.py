@@ -116,11 +116,12 @@ GIT_COMMIT = _get_git_commit()
 
 # ──────────────────────── Logging ──────────────────────────────────────
 
-def _setup_logging() -> Path:
-    log_dir = Path('logs/bot')
+def _setup_logging(strategy_name: str = 'vol_straddle', paper_mode: bool = False) -> Path:
+    log_dir = Path('logs/bot') / strategy_name
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = log_dir / f'scalper_{ts}.log'
+    mode = 'paper' if paper_mode else 'live'
+    log_file = log_dir / f'scalper_{mode}_{ts}.log'
 
     # Write git commit header before configuring logging handlers
     # so the log file starts with version traceability info
@@ -147,7 +148,6 @@ def _setup_logging() -> Path:
     return log_file
 
 
-_log_path = _setup_logging()
 logger = logging.getLogger('Scalper')
 
 
@@ -1592,6 +1592,8 @@ def main():
         help='Trading strategy: vol_straddle (default), rubberband, or elliott'
     )
     args = parser.parse_args()
+
+    _setup_logging(strategy_name=args.strategy, paper_mode=args.paper)
 
     # Build config from .env settings (pydantic-settings) + CLI overrides
     settings = get_settings()
