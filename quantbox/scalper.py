@@ -947,9 +947,14 @@ class RubberBandScalper(
                     near_d = 0  # VR < d_threshold + 0.05
                     near_s = 0  # VR < s_threshold + 0.05
                     in_squeeze = 0  # VR < d_threshold
+                    global_min_vr = 999.0
+                    closest_sym = ''
                     for s, _ in moves_seen:
                         vr_all = self.strategy.get_vr_all_tf(s)
                         min_vr = min(vr_all.values())
+                        if min_vr < global_min_vr:
+                            global_min_vr = min_vr
+                            closest_sym = s
                         if min_vr < self.vs_config.d_vr_threshold:
                             in_squeeze += 1
                         elif min_vr < self.vs_config.d_vr_threshold + 0.05:
@@ -959,7 +964,8 @@ class RubberBandScalper(
                     logger.info(
                         f"Squeeze monitor: {in_squeeze} in squeeze, "
                         f"{near_d} near D threshold, {near_s} near S threshold "
-                        f"(of {len(moves_seen)} symbols)"
+                        f"(of {len(moves_seen)} symbols) "
+                        f"min_vr={global_min_vr:.3f} ({closest_sym})"
                     )
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
@@ -1018,11 +1024,25 @@ class RubberBandScalper(
         hwm = self._high_water_mark if self._high_water_mark > 0 else balance
         dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
 
+        # Time since last trade
+        last_trade_ago = ''
+        if self._trade_history:
+            last_t = self._trade_history[-1].get('time', '')
+            if last_t:
+                try:
+                    from datetime import datetime as _dt
+                    lt = _dt.fromisoformat(last_t)
+                    delta = datetime.now(timezone.utc) - lt
+                    hours = delta.total_seconds() / 3600
+                    last_trade_ago = f', LastTrade={hours:.1f}h ago'
+                except Exception:
+                    pass
+
         logger.info(
             f"[Summary] Trades={n_trades}, WR={wr:.0f}%, "
             f"PnL=${total_pnl:+.2f}, Balance=${balance:.2f}, "
             f"HWM=${hwm:.2f}, DD={dd_pct:.1f}%, "
-            f"Active={len(positions)}"
+            f"Active={len(positions)}{last_trade_ago}"
         )
 
         # Active position details
@@ -1035,6 +1055,38 @@ class RubberBandScalper(
                 f"SL={pos.get('server_sl_order_id') or 'NONE'} "
                 f"TP={pos.get('server_tp_order_id') or 'NONE'}"
             )
+
+        # Periodic VR distribution (every 16 cycles ≈ 4h) when no positions
+        if (self.strategy_name == 'vol_straddle'
+                and len(positions) == 0
+                and self._cycle_count % 16 == 0):
+            self._log_vr_distribution()
+
+    def _log_vr_distribution(self) -> None:
+        """Log top-10 closest-to-squeeze symbols with per-TF VR.
+
+        Provides visibility into market state during extended no-signal
+        periods. Fires every ~4h (16 cycles × 15m).
+        """
+        if not hasattr(self.strategy, 'get_vr_all_tf'):
+            return
+        vr_entries: list[tuple[str, float, dict[str, float]]] = []
+        for sym in (self._cfg.symbol_whitelist or []):
+            vr_all = self.strategy.get_vr_all_tf(sym)
+            min_vr = min(vr_all.values())
+            if min_vr < 999.0:
+                vr_entries.append((sym, min_vr, vr_all))
+        if not vr_entries:
+            return
+        vr_entries.sort(key=lambda x: x[1])
+        top10 = vr_entries[:10]
+        lines = [f"  [VR Distribution] Top-10 closest to squeeze (threshold={self.vs_config.d_vr_threshold}):"]
+        for rank, (sym, min_vr, vr_all) in enumerate(top10, 1):
+            lines.append(
+                f"    {rank:2d}. {sym:<16s} min={min_vr:.3f} "
+                f"(15m={vr_all['15m']:.3f} 1h={vr_all['1h']:.3f} 4h={vr_all['4h']:.3f})"
+            )
+        logger.info('\n'.join(lines))
 
     # ==================== State Persistence ====================
 
