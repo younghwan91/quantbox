@@ -1,165 +1,77 @@
-# QuantBox Copilot Instructions (Strict Profitable Mode)
+# QuantBox Copilot Instructions
 
-너의 목표는 나를 100% 전적으로 지지하기 위해 만들어졌다. 
-바이낸스 USDT-M 선물 **러버밴드 스캘핑 시스템** 'QuantBox'의 절대적인 개발 지침입니다.
-우리의 목표는 **학술적 연구가 아닌, 실제 시장에서 수익을 내는 시스템**을 구축하는 것입니다. 
-나는 항상 세력의 관점에서만 생각한다.
+바이낸스 USDT-M 선물 VR 스퀴즈 시스템 'QuantBox'의 개발 지침.
+목표: **실제 시장에서 수익을 내는 시스템**. 학술적 연구 아님.
 
-Top Critical Rule: Always be absolutely honest and transparent about your answers, and never make up numbers or facts. If you are not 100% sure, say you don't know.
+**Top Rule: 수치/사실을 절대 추측하지 말라. 모르면 모른다고 하라.**
 
-## 🚨 최우선 원칙 (Strict Rules)
+## 핵심 원칙
 
-1.  **Real Data Only (No Mock Data)**
-    - 백테스트와 로직 검증에는 **반드시 실제 바이낸스 과거 데이터**만 사용한다.
-    - `np.random` 등을 사용한 가짜(Synthetic) 가격 데이터 생성은 **절대 금지**한다.
+1. **No Mock Data** — 백테스트에 실제 바이낸스 데이터만 사용. `np.random` 합성 데이터 금지.
 
-2.  **Test-Code Parity (1:1 테스트 강제)**
-    - 모든 기능 함수(Function)나 클래스 작성 시, 해당 기능을 검증하는 `pytest` 코드를 **반드시 함께 작성**한다.
-    - 테스트 없는 코드는 '미완성'으로 간주한다.
-    - `pytest-asyncio`를 사용하여 비동기 함수도 철저히 테스트한다.
-    - 절대 많은 테스트가 중요한 것이 아니라 짧지만 효과적인 테스트가 중요하다.
+2. **Backtest-Live Parity** — 백테스트 로직 = 실거래 로직. 백테스트에만 유리한 조건 금지. **룩어헤드/미래 데이터 누수 절대 금지.**
 
-3.  **Execution Reality (현실적 체결)**
-    - 단순 시장가(Market) 주문보다는, 슬리피지를 최소화하는 지정가(Limit) 추격 로직을 우선 고려한다.
-    - 백테스트 수익 계산 시 **거래 수수료(0.05%)** 뿐만 아니라 **펀딩비(Funding Fee)**와 **슬리피지**를 보수적으로 차감해야 한다.
+3. **Test-Code Parity** — 모든 기능에 `pytest` 테스트 필수. 짧고 효과적인 테스트 우선. 테스트 없는 코드 = 미완성.
 
-4. **실거래와 백테스트의 일치**
-    - 백테스트에서 사용한 로직과 동일한 로직이 실거래에서도 사용되어야 한다. 
-    - 실거래와 백테스트 간의 괴리는 절대 발생해서는 안 된다.
-    - 백테스트에서만 특별히 유리한 조건을 부여하는 코드는 허용되지 않는다.
-    - 백테스팅은 창의적이면서, 단순히 시간이 긴 것이 중요한 것이 아니라 효율적인 탐색이 중요하다.
-    - 모델을 고도화시켜 알파를 찾기를 두려워하지 말라. 하지만 하이퍼파라미터를 과최적화해선 안된다.
-    - 룩어헤드(lookahead)나 미래 데이터 누수는 절대 허용되지 않는다. 모든 시점에서 과거 데이터만 사용해야 한다.
+4. **Execution Reality** — 수수료(0.05%) + 펀딩비 + 슬리피지 보수적 차감. 지정가 추격 우선.
 
-5. **모든 권한을 에이전트에게 위임**
-    - 에이전트가 스스로 학습하고 개선할 수 있도록, 가능한 한 많은 권한과 자율성을 부여한다.
-    - File write operations detected that cannot be auto approved: /tmp/* 라는 말이 절대 나오지 않도록 한다.
+5. **Code First** — 파라미터, 설정값 답변 시 반드시 코드/설정을 먼저 읽고 답변. 추측 금지.
 
-6. **Code First, Talk Later (코드 확인 후 발언)**
-    - 전략 파라미터, 설정값, 현재 상태에 대해 답변할 때 **반드시 코드/설정/로그를 먼저 읽고** 답변한다.
-    - 기억이나 추측으로 수치를 말하는 것은 **절대 금지**한다. 틀린 숫자는 잘못된 투자 판단을 유발한다.
-    - 확실하지 않으면 "코드를 확인하겠습니다"라고 말하고, 확인 후 답변한다.
-    
-## 📝 문서 자동 관리 (Documentation Auto-Sync)
+6. **Agent Autonomy** — 에이전트에게 최대한 자율성 부여. `/tmp/*` 쓰기 차단 경고가 나오지 않도록 한다.
 
-코드 변경 시 아래 항목을 **사용자가 요청하지 않아도 알아서** 최신 상태로 유지한다:
+## 문서 자동 관리
 
-1. **README.md**: 새 기능 추가/삭제 시 주요 기능 섹션, 프로젝트 구조, 테스트 수를 업데이트한다.
-2. **MANUAL.md**: 환경변수 추가, 전략 파라미터 변경, 새 모듈 추가 시 해당 섹션을 업데이트한다. 버전 번호와 최종 업데이트 날짜도 갱신한다.
-3. **.env.example**: 새 환경변수 추가 시 **반드시** `.env.example`에도 주석과 함께 추가한다. 동시에 .env 파일에도 수정을 반영한다.
+코드 변경 시 **요청 없이** 동기화:
+- **README.md**: 기능 목록, 프로젝트 구조, 테스트 수
+- **MANUAL.md**: 환경변수, 전략 파라미터, 모듈 추가/변경
+- **.env.example + .env**: 새 환경변수 추가 시 3곳(`settings.py`, `.env`, `.env.example`) 동시 수정
+- **agents.md**: 아키텍처/모듈/안전장치 변경 시 동기화
 
-> ⚠️ **`.env` 우선순위 주의**: `pydantic-settings`는 `.env` 값이 `settings.py` 기본값보다 **항상 우선**한다. 파라미터를 변경할 때 `settings.py`만 수정하고 `.env`를 안 바꾸면 **실제 적용값은 변하지 않는다.** 반드시 `settings.py`, `.env`, `.env.example` **3곳을 동시에** 수정해야 한다.
-4. **copilot-instructions.md**: 개발 원칙이나 워크플로우가 변경될 때 이 문서도 갱신한다.
-5. **agents.md**: 아키텍처, 모듈 구조, 안전장치, 파라미터, 트레이딩 흐름 등이 변경될 때 `.github/agents.md`도 **반드시** 동기화한다. `copilot-instructions.md`와 `agents.md`는 항상 쌍으로 최신 상태를 유지해야 한다.
+> ⚠️ `pydantic-settings`는 `.env` 값이 `settings.py` 기본값보다 항상 우선. `settings.py`만 바꾸고 `.env` 안 바꾸면 **적용 안 됨**.
 
-**판단 기준:**
-- feature 브랜치 머지 시: README.md 기능 목록 + MANUAL.md 해당 섹션 확인
-- 환경변수 추가 시: .env.example + MANUAL.md 환경변수 섹션
-- 테스트 파일 추가/삭제 시: README.md 테스트 수 갱신
-- 프로젝트 구조 변경 시 (파일 추가/삭제/이동): README.md 프로젝트 구조 트리 갱신
+## 커밋 추적
 
-## 🔗 커밋 추적 (Commit Traceability)
+모든 출력물(로그, 백테스트, Discord)에 커밋 SHA 포함. 이미 `_setup_logging()`에 구현됨.
+백테스트 결과: `docs/backtest_results/{commit}_{date}_{desc}.md` 형식.
 
-모든 출력물(로그, 백테스트 결과, 문서)은 **어떤 커밋에서 생성되었는지** 추적 가능해야 한다.
+## 코딩 컨벤션
 
-1. **로그 파일**: `scalper.py`의 `_setup_logging()`이 모든 새 로그 파일 상단에 4줄 커밋 헤더를 자동 기록한다:
-   ```
-   # Commit: abc1234 (2026-02-19 00:00 +0900)
-   # Message: feat: some feature description
-   # Full SHA: abc1234567890abcdef...
-   #
-   ```
-2. **백테스트 결과**: `docs/backtest_results/` 폴더에 `{commit_short}_{date}_{description}.md` 형식으로 저장한다. 새 백테스트 실행 시 반드시 해당 커밋의 결과 스냅샷을 생성하고, `docs/backtest_results/README.md` 인덱스를 갱신한다.
-3. **Discord 시작 알림**: 봇 시작 시 Discord embed에 현재 커밋 SHA를 포함한다.
-4. **스크립트 출력**: 백테스트 스크립트 실행 시 출력물 상단에 커밋 정보를 포함하는 것을 지향한다.
+- Type Hints: `list[]`, `dict[]`, `tuple[]` (Python 3.9+)
+- Docstring: Google Style, 입출력 형상 명시
+- Numba: 10,000회+ 반복 연산에 `@numba.jit(nopython=True)` 필수
+- 환경: `BINANCE_API_KEY/SECRET` 미설정 시 실행 거부 (`pydantic-settings`)
 
-## 코딩 컨벤션 및 타입
+## Git Flow
 
-Type Hinting: typing.List, typing.Dict 대신 Python 3.9+ 표준인 list[], dict[], tuple[] 사용을 지향한다.
-Docstring: Google Style Docstring을 사용하여 입출력 데이터의 형상을 명시한다.
-Numba: 루프가 10,000회 이상 반복되는 연산(백테스트)에는 반드시 @numba.jit(nopython=True)를 적용한다.
+| 브랜치 | 용도 | 머지 방식 |
+|--------|------|-----------|
+| `main` | 프로덕션. 직접 커밋 금지 | `develop` → `main` `--no-ff` |
+| `develop` | 통합. 직접 커밋 금지 | feature/fix에서만 머지 |
+| `feature/xxx` | 새 기능 | backtest 리포트 포함 → `--no-ff`, 나머지 → `--squash` |
+| `fix/xxx` | 버그 수정 | `--squash` |
+| `hotfix/xxx` | 긴급 (`main`에서 분기) | `main` + `develop` 둘 다 머지 |
 
-## 환경 설정
+**반드시 develop에 머지 후 push.** 브랜치만 push하고 develop 안 건드리면 안 됨.
 
-.env 파일에 BINANCE_API_KEY, BINANCE_API_SECRET이 없으면 실행되지 않도록 pydantic-settings (`quantbox.core.settings`)를 활용하여 검증한다.
-로그 레벨은 개발 시 DEBUG, 운영 시 INFO로 설정하되, 주문 체결 로그는 별도 파일로 영구 보존한다.
+## 실전 교훈 (Incident-Driven Rules)
 
-## Git Flow 전략 (필수 준수)
+> 실제 자금 손실에서 비롯된 규칙. 절대 반복 금지.
 
-- **main**: 프로덕션 릴리스 브랜치. 태그(v1.x.x)만 존재. 직접 커밋 금지.
-- **develop**: 개발 통합 브랜치. 모든 feature가 머지되는 곳.
-- **feature/xxx**: 새 기능 개발. `develop`에서 분기 → 완료 후 `develop`으로 머지.
-- **fix/xxx**: 버그 수정. `develop`에서 분기 → 완료 후 `develop`으로 머지.
-- **hotfix/xxx**: 긴급 수정. `main`에서 분기 → `main`과 `develop` 둘 다 머지.
+### #1: Reduce-Only Leverage Crash (2026-02-21)
+
+`reduce_only=True` 주문에서 `futures_change_leverage()` 호출 → API -2028 → TP1 실패 → 수익 확정 기회 상실.
 
 **규칙:**
-1. feature/fix 브랜치 작업 완료 시 **반드시 develop에 머지**한 뒤 push한다. 브랜치만 push하고 develop을 안 건드리면 안 된다.
-2. develop에 직접 커밋하지 않고, 항상 feature/fix 브랜치를 경유한다.
-3. main에는 릴리스 준비가 완료된 develop만 머지한다.
-4. **백테스트/리서치 브랜치** (`docs/backtest_results/`에 리포트를 생성하는 경우): **`--no-ff`** 머지. 리포트 안의 커밋 해시가 머지 후에도 유효해야 하므로 원본 커밋을 보존한다.
-5. **그 외 모든 브랜치** (fix, chore, config 등): **squash merge** (`git merge --squash`). 히스토리를 깔끔하게 유지한다.
-6. develop → main 머지 시에는 **`--no-ff`** 옵션으로 머지 커밋을 남긴다.
+- **reduce_only 주문은 leverage/margin 변경 금지.** 감산만 수행.
+- **돈이 오가는 함수** (`_place_order`, `_close_position` 등)는 `reduce_only` 양쪽 경로 모두 테스트.
+- **안전장치 실패 시** ERROR 로그 + Discord 즉시 알림. 반복 경고는 3회 후 요약 전환.
+- **포지션 변경 API** (`futures_change_leverage` 등)는 **신규 진입 시에만** 호출.
 
-**Agent Note:** 사용자는 엄격하며 공격적인 퀀트 트레이더입니다. 코드가 예쁘게 보이는 것보다, **돈을 잃지 않는 안전장치(Safety check)**가 구현되었는지를 가장 중요하게 생각합니다.
+### #2: 4h MTF Lookahead Bias (2026-02-26)
 
-## 🩸 실수로부터의 교훈 (Lessons from Live Incidents)
+`i // ratio`가 developing bar의 final close 참조 → 백테스트 WR 83% (실제 36%).
 
-> 아래 원칙들은 실제 자금 손실 또는 수익 기회 상실을 초래한 실전 버그에서 비롯되었다.
-> **절대 반복해서는 안 된다.**
-
-### Incident #1: Partial Close Leverage Crash (2026-02-21, v12.4.6)
-
-**사건:** `_place_order()`가 `reduce_only=True`인 주문에도 `futures_change_leverage()`를 호출했다.
-Cross 4x 포지션에서 leverage를 기본값 1로 변경 시도 → Binance APIError `-2028: insufficient margin balance` → **TP1 partial close 실패**. 가격이 TP1을 크게 넘어 수익 구간까지 갔다가 되돌아왔으나, 50% 이익 확정 기회를 완전히 상실.
-
-**근본 원인:**
-1. `reduce_only` 주문은 마진 요구사항을 변경하지 않으므로 leverage 변경이 불필요하다는 사실을 코드에 반영하지 않았다.
-2. PBT 모드에서 서버 TP를 의도적으로 건너뛰는 로직이 bracket repair에 반영되지 않아, 매 분마다 `TP=MISSING` 로그를 무한 생성하여 진짜 문제를 노이즈 속에 묻어버렸다.
-3. 해당 코드 경로(open position + reduce_only close)에 대한 테스트가 없었다.
-
-**영구 원칙:**
-
-1. **Reduce-Only = No Side Effects (감산 주문은 부작용 금지)**
-   - `reduce_only=True` 주문은 **기존 포지션을 줄이기만** 한다. leverage 변경, margin mode 변경 등 포지션 구조를 바꾸는 API 호출을 절대 포함하지 않는다.
-
-2. **Money-Path Full Coverage (돈이 오가는 경로는 100% 테스트)**
-   - `_place_order()`, `_partial_close_position()`, `_close_position()` 등 실제 주문을 발생시키는 모든 함수는 반드시 `reduce_only=True`와 `reduce_only=False` 양쪽 경로를 테스트해야 한다.
-   - Mock 레벨이 아닌, **실제 API 에러 코드(-2028, -4028, -2022 등)에 대한 대응 테스트**를 포함한다.
-
-3. **Silent Failure = Critical Bug (조용한 실패는 치명적 버그)**
-   - 안전장치(TP1 partial close, SL, bracket repair)가 실패했을 때 **ERROR 로그 + Discord 알림**을 즉시 발송해야 한다. 로그에 묻히는 실패는 없는 것과 같다.
-   - bracket repair가 같은 문제를 반복 로깅할 때, 횟수 제한 없이 매 분 반복하는 것은 노이즈이며 실제 장애를 가린다. **반복 경고는 최대 3회 후 요약으로 전환**한다.
-
-4. **Position-Mutating API Audit (포지션 변경 API 감사)**
-   - `futures_change_leverage()`, `futures_change_margin_type()` 등 포지션 구조를 변경하는 API는 **오직 신규 진입(entry) 시에만 호출**한다. 포지션이 열려 있는 상태에서 호출하면 예측 불가능한 거부가 발생할 수 있다.
-
-### Incident #2: 4h MTF Lookahead Bias (2026-02-26, v12.6.1 발견)
-
-**사건:** `apply_mtf_confirmation()`이 15m 바를 4h 바로 매핑할 때 `j = i // ratio`를 사용했다.
-이 인덱스 `j`는 **현재 진행 중인** 4h 바를 가리키며, `close_4h[j]`는 해당 바의 **최종 종가** (미래 데이터)이다.
-라이브에서는 Binance가 developing bar의 **현재 시점 가격**을 반환하므로 lookahead가 없지만, 백테스트에서는 bar-end close를 사용 → **체계적 미래 정보 유출**.
-
-**영향:**
-- 패리티 백테스트: 12 trades / 83.3% WR (lookahead) → 28 trades / 42.9% WR (fix) → 라이브 25 trades / 36% WR와 근접
-- 6년 전체 백테스트(`r15`, `r16`, `signals.py`): 모든 MTF 필터 결과가 부풀려짐 → 재실행 필요
-- BTC crash 구간에서 4h bar가 최종적으로 하락 마감 → LONG 차단. 하지만 bar 초반에는 가격이 SMA 위 → 라이브는 LONG 허용
-
-**근본 원인:**
-1. 멀티 타임프레임 데이터를 cross-reference할 때 "완성된 바만 참조" 원칙이 없었다.
-2. `i // ratio`가 직관적으로 올바르게 보이지만, 실제로는 developing bar의 final close를 사용하는 lookahead.
-3. 백테스트 결과가 비정상적으로 높은 WR을 보여도, 전략이 원래 좋다고 믿고 검증하지 않았다.
-
-**영구 원칙:**
-
-1. **Completed Bars Only (완성된 바만 참조)**
-   - 타임프레임 간 참조(15m → 4h, 15m → 1d 등)에서는 반드시 **마지막으로 완성된** 상위 타임프레임 바만 사용한다.
-   - `j = i // ratio` (현재 developing bar) 대신 `j = (i // ratio) - 1` (마지막 완성된 bar)을 사용한다.
-   - 예외: 동일 타임프레임 내에서 SMA 등 후행 지표 계산은 현재 바 포함 가능 (이미 close가 확정).
-
-2. **Cross-Timeframe Audit (교차 타임프레임 감사)**
-   - 새로운 상위 타임프레임 데이터를 참조하는 로직 추가 시, 반드시 "이 바가 아직 진행 중일 때 이 값을 알 수 있는가?" 질문을 던진다.
-   - `test_mtf_lookahead.py`의 3가지 시나리오(mid-bar, boundary, reversal)로 회귀 테스트한다.
-
-3. **Backtest WR Sanity Check (백테스트 WR 정상성 검증)**
-   - 백테스트 WR이 라이브 WR보다 2배 이상 높으면 **lookahead bias**를 즉시 의심한다.
-   - 특히 MTF 필터, 상위 타임프레임 참조, 미래 데이터 참조 가능한 모든 지점을 점검한다.
+**규칙:**
+- **교차 타임프레임 참조는 완성된 바만 사용.** `j = (i // ratio) - 1`.
+- 새 상위 TF 참조 추가 시: "이 바가 진행 중일 때 이 값을 알 수 있는가?" 반드시 검증.
+- **백테스트 WR이 라이브의 2배 이상이면 lookahead 즉시 의심.**
