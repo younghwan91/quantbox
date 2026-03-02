@@ -109,7 +109,7 @@ def chart_annual():
     for bar,val in zip(bars,rets):
         ax.text(bar.get_x()+bar.get_width()/2,bar.get_height()+60,
                 f"+{val:,}%",ha="center",va="bottom",fontsize=8.5,fontweight="bold")
-    ax.set_title("연도별 수익률 — R40 분석 (3x / 15 Slots)",fontsize=11,fontweight="bold")
+    ax.set_title("연도별 수익률 — R40 6년 백테스트",fontsize=11,fontweight="bold")
     ax.set_ylabel("Annual Return (%)");ax.set_ylim(0,max(rets)*1.18)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x,_:f"{x:,.0f}%"))
     _ax(ax);fig.tight_layout();return _png_b64(fig)
@@ -436,7 +436,7 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <h2>1. 핵심 성과 지표</h2>
 {img("annual")}
 <div class="tw"><table>
-<tr><th>Metric</th><th class="r">R40 분석 (3x/15s)</th><th class="r">기준선 (1x/15s)</th></tr>
+<tr><th>Metric</th><th class="r">R40 백테스트</th><th class="r">레버리지 없음 (1x)</th></tr>
 <tr><td>연간 수익률</td><td class="r bold green">+922.5%</td><td class="r">+195.4%</td></tr>
 <tr><td>Max Drawdown</td><td class="r warn">77.2%</td><td class="r">35.3%</td></tr>
 <tr><td>Calmar Ratio</td><td class="r bold">12.0</td><td class="r">5.5</td></tr>
