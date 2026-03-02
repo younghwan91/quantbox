@@ -7,11 +7,11 @@
 
 ## 1. 시스템 개요
 
-QuantBox v12.7는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
+QuantBox v12.8는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
 세 가지 전략을 지원한다:
 1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
 2. **Elliott Wave Strategy** (v11.6): ZigZag ABC 패턴 + Fibonacci 검증 + Timing Alpha Filter (4h)
-3. **VolStraddle** (A1-D50): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**)
+3. **VolStraddle** (R39-VR856): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**, ATR 8/56, max_concurrent=10)
 **v11.4: Adaptive Threshold + Leverage Optimization** — ATR 기반 적응형 임계값 (`clip(2.5 × ATR%(48), 1%, 6%)`). 18-variant walk-forward sweep + 14-variant leverage grid → 2.5x_f1 선택. OOS Return +5069%, MDD 19.0%, Calmar 266.6. MTF 레버리지 2.0→2.5× (실효 3.75×).
 **v11.6: Elliott Wave Timing Alpha** — 97패턴 리서치 기반 3중 타이밍 필터 (impulse_accel≥0, corr_ratio≥0.20, w3w1≤2.5). Calmar 1.51→5.10, Sharpe 1.07→1.69. 파라미터 비감응 (-0.3~+0.3 동일 결과).
 **v11.4: Elliott Wave Strategy** — ZigZag ABC 패턴 인식, 2단계 포지셔닝 (2% 탐색적 → 8% 확인), 50% 부분 익절 + 브레이크이븐 스탑, BTC 매크로 바이어스, Numba 가속 지표.
@@ -23,6 +23,7 @@ QuantBox v12.7는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 **v12.3: T100_S38_PBT + M-2SSTSX** — R8 stress-tested exit + R6 combo sizing. Production safety fixes.
 **v12.4.6: Production Hardening** — 6 hotfixes: Server TP PBT qty audit (v12.4.1–3), stale SL ratchet reset (v12.4.4), missing save_state after partial (v12.4.5), HWM/history reset on 0-position restart (v12.4.6).
 **v12.6: Climax Volume Filter + ATR Dynamic Stop** — climax_ratio≥3.0 진입 차단, ATR 기반 동적 손절.
+**v12.8: R39-VR856 Frequency Boost** — ATR(7)/ATR(50) → ATR(8)/ATR(56)로 변경. 132 배리언트 그리드 서치에서 연간 수익률 × Calmar 최적화. 6년 연속 흑자, AnnRet=+187.2%, DD=32.4%, Calmar=5.8. s_squeeze_dur 8→4, max_concurrent 2→10. TPD=1.03.
 **v12.7: Hedge Mode + S_d8 Straddle** — Binance dualSidePosition 모드 전환. `positionSide` 파라미터 전체 주문 경로 적용. S_d8 스트래들 (VR<0.55, 8바 이상 스퀴즈) 양방향 동시 진입. 복합 포지션 키 (`BTCUSDT:LONG`/`BTCUSDT:SHORT`) 지원.
 **v12.6.1: 4h MTF Lookahead Fix** — `apply_mtf_confirmation()`이 진행 중인 4h 바의 최종 종가(미래 데이터)를 사용하던 버그 수정. 마지막 완성된 4h 바만 참조하도록 변경. 백테스트 WR 83%→43%로 정상화, 라이브(36%)와 근접. **R22 결과: lookahead가 전체 알파의 원천이었음. 수정 후 PF=0.877 (zero cost, 6yr, 436K trades). 15m 러버밴드 평균회귀 시그널에 이론적 엣지 없음.**
 **v12.4: I-HybTight** — Reversal A/B champion: target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3.0. R:R 1.91, Calmar 834, 6yr return 6,300%.
@@ -51,7 +52,7 @@ QuantBox v12.7는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
          stop_decay=0.0
          entry_mode='confidence'
          min_confidence=3 (v12.3 M-2SSTSX quality gate)
-         max_concurrent=2 (v12.3 M-2SSTSX 2-slot)
+         max_concurrent=10 (R39-VR856 10-slot)
          btc_regime_period=96 (24h SMA for regime detection)
          asset_trend_period=192 (48h SMA for classic pullback)
          btc_directional_period=48 (12h BTC momentum for sympathy)
@@ -523,7 +524,7 @@ else:
 | `test_server_oco` | 서버 OCO 주문 | SL/TP 서버 주문 |
 | `test_ghost_audit` | Ghost Fill 감사 | 고스트 포지션 감지 시 체결 상세 로깅 (4개) |
 | `test_mtf_lookahead` | MTF 4h Lookahead 방지 | mid-bar/boundary/reversal 3가지 시나리오에서 완성된 바만 사용하는지 검증 (3개) |
-| `test_vol_straddle` | VolStraddle 전략 전체 | Config A1-D50 파라미터, VR/모멘텀/방향 신호, 리샘플링 lookahead 방지, on_bar 시그널, per-symbol dedup, SL/TP/max_hold 포지션 관리, 멀티TF 우선순위, 스칼퍼 인터페이스, 상태 직렬화 (34개) |
+| `test_vol_straddle` | VolStraddle 전략 전체 | Config R39-VR856 파라미터, VR/모멘텀/방향 신호, 리샘플링 lookahead 방지, on_bar 시그널, per-symbol dedup, SL/TP/max_hold 포지션 관리, 멀티TF 우선순위, 스칼퍼 인터페이스, 상태 직렬화 (34개) |
 | `test_terminal_ui` | 터미널 UI | 실시간 상태 표시 |
 | `test_elliott` | Elliott Wave | ZigZag, ABC, 품질 스코어 |
 
