@@ -8,13 +8,13 @@
 
 ## 🌟 주요 기능
 
-### 🎯 VolStraddle — VR Compression Detector (R40-VR856-3x)
+### 🎯 VolStraddle — VR Compression Detector (v13.0-VR856-25x)
 - **Volatility Ratio (VR) 압축 감지**: `VR = ATR(8)/ATR(56) < 0.50` — 변동성 압축 후 폭발 포착
 - **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
 - **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정
 - **S_d8 스트래들**: VR < 0.55 × 4바 지속 → 양방향 동시 진입 (Hedge Mode)
 - **백테스트 파리티**: SL=1%, TP=5%, MaxHold=48h (타임프레임별 192/48/12바)
-- **R40 Tournament**: 3x leverage @15 slots, AnnRet=+922.5%, DD=77.2%, 6년 연속 흑자, Kelly 63%
+- **v13.0 Aggressive**: 25x leverage @10 slots (L/N=2.5), AnnRet=+687%, DD=68%, Calmar 10.12, 6년 연속 흑자
 - **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
 
 ### 🔥 Rubber Band Scalper (v12.6 — ATR Stop + Climax Filter)

@@ -274,9 +274,9 @@ class QuantBoxSettings(BaseSettings):
     vs_enable_4h: bool = True
 
     # ── Position Sizing ──
-    vs_base_leverage: float = 3.0            # R40 tournament: 3x (63% Kelly)
-    vs_max_leverage: float = 20.0            # Hard cap
-    vs_max_concurrent: int = 15              # R40: 15 slots (was 10)
+    vs_base_leverage: float = 25.0           # v13.0: 25x aggressive (L/N=2.5, Calmar 10.12)
+    vs_max_leverage: float = 25.0            # Hard cap (matches base_leverage)
+    vs_max_concurrent: int = 10              # v13.0: 10 slots (L/N=25/10=2.5)
 
     # ── CW-Tier Conviction Sizing (R34) ──
     vs_cw_enabled: bool = True               # Enable conviction-weighted sizing
