@@ -1,24 +1,34 @@
-"""Generate PDF from the R40 deep stats markdown report using fpdf2."""
+"""Generate PDF from markdown report using fpdf2.
+
+Usage:
+    uv run python scripts/generate_report_pdf.py [markdown_file]
+    # defaults to v13.0 deployment report
+"""
 from __future__ import annotations
-import re
+import re, sys
 from pathlib import Path
 from fpdf import FPDF, XPos, YPos
 
-REPORT_MD = Path(__file__).resolve().parent.parent / "docs" / "backtest_results" / "748630b_20260302_r40_deep_stats.md"
-OUTPUT_PDF = REPORT_MD.with_suffix(".pdf")
+DEFAULT_MD = Path(__file__).resolve().parent.parent / "docs" / "backtest_results" / "e4b5831_20260302_v13_deployment.md"
 
 REG_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 BOLD_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+# NotoSansCJK TTC index: 0=JP, 1=KR, 2=SC, 3=TC, 4=HK
+FONT_INDEX = 1  # Korean
 
 MARGIN = 10
 PAGE_W = 210  # A4 width mm
 
 
 class ReportPDF(FPDF):
+    def __init__(self, header_text: str = "QuantBox Report"):
+        super().__init__()
+        self._header_text = header_text
+
     def header(self):
         self.set_font("NotoSans", "B", 8)
         self.set_text_color(140, 140, 140)
-        self.cell(0, 5, "QuantBox R40 Deep Statistical Analysis", align="R",
+        self.cell(0, 5, self._header_text, align="R",
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(4)
 
@@ -83,17 +93,30 @@ def render_table(pdf: FPDF, rows: list[list[str]]):
 
 
 def main():
-    text = REPORT_MD.read_text(encoding="utf-8")
+    md_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_MD
+    if not md_path.exists():
+        print(f"Error: {md_path} not found")
+        sys.exit(1)
+    output_pdf = md_path.with_suffix(".pdf")
+
+    text = md_path.read_text(encoding="utf-8")
     lines = text.split("\n")
 
-    pdf = ReportPDF()
+    # Extract title from first heading
+    title = "QuantBox Report"
+    for line in lines:
+        if line.strip().startswith("# ") and not line.strip().startswith("## "):
+            title = line.strip().lstrip("# ")
+            break
+
+    pdf = ReportPDF(header_text=title)
     pdf.alias_nb_pages()
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.set_left_margin(MARGIN)
     pdf.set_right_margin(MARGIN)
 
-    pdf.add_font("NotoSans", "", REG_FONT)
-    pdf.add_font("NotoSans", "B", BOLD_FONT)
+    pdf.add_font("NotoSans", "", REG_FONT, collection_font_number=FONT_INDEX)
+    pdf.add_font("NotoSans", "B", BOLD_FONT, collection_font_number=FONT_INDEX)
 
     pdf.add_page()
 
@@ -190,6 +213,29 @@ def main():
             i += 1
             continue
 
+        # === Code block ===
+        if stripped.startswith("```"):
+            i += 1
+            pdf.set_font("NotoSans", "", 7)
+            pdf.set_text_color(60, 60, 60)
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                pdf.cell(0, 3.5, lines[i], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                i += 1
+            pdf.set_text_color(0, 0, 0)
+            if i < len(lines):
+                i += 1  # skip closing ```
+            continue
+
+        # === Numbered list (1. 2. 3.) ===
+        num_match = re.match(r'^(\d+)\.\s+(.+)', stripped)
+        if num_match:
+            pdf.set_font("NotoSans", "", 8)
+            pdf.set_text_color(0, 0, 0)
+            content = num_match.group(2).replace("**", "").replace("`", "")
+            safe_write(pdf, 4.5, f"  {num_match.group(1)}. {content}")
+            i += 1
+            continue
+
         # === Regular text ===
         pdf.set_font("NotoSans", "", 8)
         pdf.set_text_color(0, 0, 0)
@@ -197,10 +243,10 @@ def main():
         safe_write(pdf, 4.5, clean)
         i += 1
 
-    pdf.output(str(OUTPUT_PDF))
-    print(f"PDF saved: {OUTPUT_PDF}")
+    pdf.output(str(output_pdf))
+    print(f"PDF saved: {output_pdf}")
     print(f"Pages: {pdf.pages_count}")
-    print(f"Size: {OUTPUT_PDF.stat().st_size / 1024:.1f} KB")
+    print(f"Size: {output_pdf.stat().st_size / 1024:.1f} KB")
 
 
 if __name__ == "__main__":
