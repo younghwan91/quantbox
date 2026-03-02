@@ -1,9 +1,10 @@
 """VolStraddle strategy configuration dataclass.
 
-A1-D50: VR compression detector with multi-TF (15m/1h/4h) signal generation.
-OOS validated: N=799 (D_mom8 only), EV=+29.3bp, PF=1.376, t=3.48.
+R39-VR856: VR compression detector with multi-TF (15m/1h/4h) signal generation.
+Full 6yr validated: N=2,265 @10 slots, AnnRet=+187%, DD=32%, Calmar=5.8.
+6 consecutive profitable years (2020-2025). 0 losing years.
 
-Parameters are locked to R35 A1-D50 backtest values for parity.
+Parameters are locked to R39 backtest values for parity.
 Do NOT change without re-running backtest validation.
 """
 from __future__ import annotations
@@ -15,12 +16,12 @@ from dataclasses import dataclass, field
 class VolStraddleConfig:
     """VolStraddle (VR compression) strategy configuration.
 
-    All values match R35 A1-D50 exactly for backtest-live parity.
+    All values match R39-VR856 exactly for backtest-live parity.
     """
 
     # ── VR Computation ──
-    vr_short: int = 7               # Short ATR period for VR
-    vr_long: int = 50               # Long ATR period for VR
+    vr_short: int = 8               # Short ATR period for VR (R39: was 7)
+    vr_long: int = 56               # Long ATR period for VR (R39: was 50)
 
     # ── D_mom8: Directional Momentum ──
     d_vr_threshold: float = 0.50    # A1-D50: D VR entry threshold (was 0.45)
@@ -29,7 +30,7 @@ class VolStraddleConfig:
 
     # ── S_d8: Straddle (requires Binance Hedge Mode) ──
     s_vr_threshold: float = 0.55    # S VR entry threshold
-    s_squeeze_dur: int = 8          # Min consecutive bars below S VR threshold
+    s_squeeze_dur: int = 4          # Min consecutive bars below S VR threshold (R39: was 8)
     s_sl: float = 0.015             # 1.5% stop loss (per leg)
     s_tp: float = 0.05              # 5% take profit (per leg)
     straddle_enabled: bool = True    # S_d8 straddle mode enabled
@@ -59,7 +60,7 @@ class VolStraddleConfig:
     risk_per_trade: float = 0.01    # 1% risk per trade
 
     # ── Risk Management ──
-    max_concurrent: int = 2         # Max simultaneous positions
+    max_concurrent: int = 10        # Max simultaneous positions (R39: was 2)
     max_drawdown_pct: float = 0.10  # 10% session drawdown → halt
 
     # ── Costs (conservative) ──
