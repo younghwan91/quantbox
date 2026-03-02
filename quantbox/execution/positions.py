@@ -492,12 +492,6 @@ class PositionMixin:
             leverage=lev_int,
             size_usd=fill_qty * fill_price,
         ))
-        logger.info(
-            f"[{symbol}] OPENED {_side_str} "
-            f"qty={fill_qty:.6f} @ ${fill_price:.4f} "
-            f"(notional=${fill_qty * fill_price:.2f}, "
-            f"lev={lev_int}x, move={move_size*100:.2f}%)"
-        )
 
         # v12.0: Entry diagnostic to JSONL
         if hasattr(self.strategy, 'diagnose_bar'):
