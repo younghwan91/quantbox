@@ -8,13 +8,13 @@
 
 ## 🌟 주요 기능
 
-### 🎯 VolStraddle — VR Compression Detector (R39-VR856)
+### 🎯 VolStraddle — VR Compression Detector (R40-VR856-3x)
 - **Volatility Ratio (VR) 압축 감지**: `VR = ATR(8)/ATR(56) < 0.50` — 변동성 압축 후 폭발 포착
 - **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
 - **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정
 - **S_d8 스트래들**: VR < 0.55 × 4바 지속 → 양방향 동시 진입 (Hedge Mode)
 - **백테스트 파리티**: SL=1%, TP=5%, MaxHold=48h (타임프레임별 192/48/12바)
-- **R39 6yr 검증**: N=2,265 @10 slots, AnnRet=+187.2%, DD=32.4%, Calmar=5.8, 6년 연속 흑자
+- **R40 Tournament**: 3x leverage @15 slots, AnnRet=+922.5%, DD=77.2%, 6년 연속 흑자, Kelly 63%
 - **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
 
 ### 🔥 Rubber Band Scalper (v12.6 — ATR Stop + Climax Filter)
@@ -218,8 +218,8 @@ quantbox/
 │   │   ├── config.py       # RubberBandConfig (전략 파라미터)
 │   │   ├── signals.py      # Numba 시그널 엔진 (23개 함수)
 │   │   └── strategy.py     # RubberBandStrategy 클래스
-│   ├── vol_straddle/       # VolStraddle VR 압축 감지기 (R39-VR856)
-│   │   ├── config.py       # VolStraddleConfig (R39 락 파라미터)
+│   ├── vol_straddle/       # VolStraddle VR 압축 감지기 (R40-VR856-3x)
+│   │   ├── config.py       # VolStraddleConfig (R40 tournament 파라미터)
 │   │   ├── signals.py      # Numba VR/모멘텀/리샘플링 (8개 함수)
 │   │   └── strategy.py     # VolStraddleStrategy 클래스
 │   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
