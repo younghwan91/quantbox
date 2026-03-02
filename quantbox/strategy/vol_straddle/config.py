@@ -55,12 +55,12 @@ class VolStraddleConfig:
     warmup_4h: int = 13             # ~52h of 4h bars
 
     # ── Position Sizing & Leverage ──
-    base_leverage: float = 1.5      # Flat leverage (same as rubber band baseline)
+    base_leverage: float = 3.0       # R40 tournament: 3x (63% Kelly, optimal 4.8x)
     max_leverage: float = 20.0      # Hard cap (exchange safety limit)
     risk_per_trade: float = 0.01    # 1% risk per trade
 
     # ── Risk Management ──
-    max_concurrent: int = 10        # Max simultaneous positions (R39: was 2)
+    max_concurrent: int = 15         # R40: 15 slots (was 10)
     max_drawdown_pct: float = 0.10  # 10% session drawdown → halt
 
     # ── Costs (conservative) ──
