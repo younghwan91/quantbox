@@ -109,7 +109,7 @@ def chart_annual():
     for bar,val in zip(bars,rets):
         ax.text(bar.get_x()+bar.get_width()/2,bar.get_height()+60,
                 f"+{val:,}%",ha="center",va="bottom",fontsize=8.5,fontweight="bold")
-    ax.set_title("연도별 수익률 (3x Lev / 15 Slots)",fontsize=11,fontweight="bold")
+    ax.set_title("연도별 수익률 — R40 분석 (3x / 15 Slots)",fontsize=11,fontweight="bold")
     ax.set_ylabel("Annual Return (%)");ax.set_ylim(0,max(rets)*1.18)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x,_:f"{x:,.0f}%"))
     _ax(ax);fig.tight_layout();return _png_b64(fig)
@@ -430,13 +430,13 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <!-- ═══════════════════ PART 1 ═══════════════════ -->
 <div class="part-header">
   <h2>Part 1 — R40 전략 심층 분석</h2>
-  <div class="desc">VR8_56_SL1_TP5_D4 @3x Leverage / 15 Slots · 백테스트 기반 엣지 검증</div>
+  <div class="desc">VR8_56_SL1_TP5_D4 · 전략 엣지 검증 (분석 당시 3x/15slots — 현재 운용 설정은 Part 2 참조)</div>
 </div>
 
 <h2>1. 핵심 성과 지표</h2>
 {img("annual")}
 <div class="tw"><table>
-<tr><th>Metric</th><th class="r">3x @15 slots</th><th class="r">1x @15 slots</th></tr>
+<tr><th>Metric</th><th class="r">R40 분석 (3x/15s)</th><th class="r">기준선 (1x/15s)</th></tr>
 <tr><td>연간 수익률</td><td class="r bold green">+922.5%</td><td class="r">+195.4%</td></tr>
 <tr><td>Max Drawdown</td><td class="r warn">77.2%</td><td class="r">35.3%</td></tr>
 <tr><td>Calmar Ratio</td><td class="r bold">12.0</td><td class="r">5.5</td></tr>
@@ -494,7 +494,7 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <tr><th>Leverage</th><th class="r">AnnRet</th><th class="r">Max DD</th><th class="r">Calmar</th><th class="c">Losing Years</th><th>비고</th></tr>
 <tr><td>1x</td><td class="r">+195%</td><td class="r">35.3%</td><td class="r">5.5</td><td class="c">0</td><td></td></tr>
 <tr><td>2x</td><td class="r">+540%</td><td class="r">60.0%</td><td class="r">9.0</td><td class="c">0</td><td></td></tr>
-<tr><td>3x</td><td class="r">+923%</td><td class="r">77.2%</td><td class="r">12.0</td><td class="c">0</td><td>슬롯 15 고정 시 최적</td></tr>
+<tr><td>3x</td><td class="r">+923%</td><td class="r">77.2%</td><td class="r">12.0</td><td class="c">0</td><td>슬롯 15 고정 시 Calmar 최대</td></tr>
 <tr><td>5x</td><td class="r">+960%</td><td class="r red">95.8%</td><td class="r">10.0</td><td class="c red">2</td><td>복리 붕괴 시작</td></tr>
 <tr><td>7.5x</td><td class="r">+104%</td><td class="r red">99.9%</td><td class="r red">1.0</td><td class="c red">2</td><td></td></tr>
 <tr><td>10x</td><td class="r red">-94%</td><td class="r red">100%</td><td class="r red">-0.9</td><td class="c red">4</td><td></td></tr>
