@@ -2,7 +2,7 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + VolStraddle**
 
-> 버전: 12.8  
+> 버전: 12.9  
 > 최종 업데이트: 2026년 3월 2일
 
 ---
@@ -671,7 +671,7 @@ DISCORD_CHANNEL_ID=            # 명령 수신 채널 ID (숫자)
 
 ---
 
-## 3.6 🎯 VolStraddle — VR Compression Detector (R39-VR856)
+## 3.6 🎯 VolStraddle — VR Compression Detector (R40-VR856-3x)
 
 ### 3.6.1 전략 개요
 
@@ -683,9 +683,10 @@ VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발�
 - **Momentum(8)** 방향으로 진입 (양수 → LONG, 음수 → SHORT)
 - **멀티 타임프레임**: 15m / 1h / 4h 독립 스캔, 높은 TF 우선
 
-### 3.6.2 파라미터 (R39-VR856, 6yr 검증)
+### 3.6.2 파라미터 (R40 Tournament, 6yr 검증)
 
-**R39 검증 결과:** N=2,265 @10 slots, AnnRet=+187.2%, DD=32.4%, Calmar=5.8, 6년 연속 흑자.
+**R40 검증 결과:** N=2,280 @3x leverage ×15 slots, AnnRet=+922.5%, DD=77.2%, 6년 연속 흑자.
+Kelly 최적 4.8x, 63% Kelly(3x) 적용. 연도별: 2020 +4838%, 2021 +749%, 2022 +3036%, 2023 +54%, 2024 +2606%, 2025 +109%.
 
 | 파라미터 | 값 | 설명 |
 |---------|-----|------|
@@ -698,8 +699,8 @@ VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발�
 | `VS_MAX_HOLD_15M` | 192 | 15m TF 최대 보유 (=48h) |
 | `VS_MAX_HOLD_1H` | 48 | 1h TF 최대 보유 (=48h) |
 | `VS_MAX_HOLD_4H` | 12 | 4h TF 최대 보유 (=48h) |
-| `VS_BASE_LEVERAGE` | 1.5 | 기본 레버리지 |
-| `VS_MAX_CONCURRENT` | 10 | 최대 동시 포지션 (R39: was 2) |
+| `VS_BASE_LEVERAGE` | 3.0 | R40 tournament: 3x (63% Kelly, optimal 4.8x) |
+| `VS_MAX_CONCURRENT` | 15 | R40: 15 slots (was 10) |
 | `VS_STRADDLE_ENABLED` | true | S_d8 스트래들 활성화 |
 | `VS_HEDGE_MODE` | true | Binance Hedge Mode (dualSidePosition) |
 | `VS_S_VR_THRESHOLD` | 0.55 | S_d8 VR 진입 임계값 |
