@@ -2,7 +2,7 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + VolStraddle**
 
-> 버전: 12.9  
+> 버전: 13.0  
 > 최종 업데이트: 2026년 3월 2일
 
 ---
