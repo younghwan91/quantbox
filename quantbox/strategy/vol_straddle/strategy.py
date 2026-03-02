@@ -760,12 +760,23 @@ class VolStraddleStrategy:
         self, symbol: str, close_prices: np.ndarray,
         btc_close: np.ndarray | None = None,
     ) -> dict:
-        """Return diagnostic info for the current bar (for JSONL logging)."""
+        """Return diagnostic info for the current bar (for JSONL logging).
+
+        Always includes VR values from get_vr_all_tf() regardless of signal,
+        so diagnostics capture market state even during dry spells.
+        """
         meta = self._last_signal_meta.get(symbol, {})
+        vr_all = self.get_vr_all_tf(symbol)
+        # Use per-TF VR (always available after on_bar), not just signal meta
+        min_vr = min(vr_all.values())
         return {
             'symbol': symbol,
             'strategy': 'vol_straddle',
             'vr': meta.get('vr', None),
+            'vr_15m': vr_all['15m'] if vr_all['15m'] < 999.0 else None,
+            'vr_1h': vr_all['1h'] if vr_all['1h'] < 999.0 else None,
+            'vr_4h': vr_all['4h'] if vr_all['4h'] < 999.0 else None,
+            'vr_min': min_vr if min_vr < 999.0 else None,
             'tf': meta.get('tf', None),
             'momentum': meta.get('momentum', None),
         }
