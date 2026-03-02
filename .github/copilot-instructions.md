@@ -53,6 +53,8 @@
 
 **반드시 develop에 머지 후 push.** 브랜치만 push하고 develop 안 건드리면 안 됨.
 
+**main에 머지할 때는 반드시 버전 태그 생성 및 push.** `git tag -a vX.Y.Z -m "..."`
+
 ## 실전 교훈 (Incident-Driven Rules)
 
 > 실제 자금 손실에서 비롯된 규칙. 절대 반복 금지.
