@@ -235,14 +235,17 @@ quantbox/
 └── scalper.py              # 코어 엔진 — init, cycle, scan, state (4개 Mixin 상속)
 
 scripts/                    # 리서치 & 유틸리티 스크립트
-├── download_15m_data.py    # 15분 캔들 데이터 캐시 갱신
-├── download_6yr_data.py    # 6년 장기 데이터 다운로드
-├── download_extended_data.py # 장기 과거 데이터 다운로드
-├── download_mtf_data.py    # 멀티 타임프레임 데이터 다운로드
-├── portfolio_backtest_2slot.py     # 포트폴리오 백테스트 (2-slot)
-├── alpha_search_r10~r12.py         # Alpha Search R10-R12
-└── ...                              # A/B tests, sweeps, validations
-tests/                      # 유닛 테스트 (824개, 36 파일)
+├── download_15m_data.py        # 15분 캔들 데이터 캐시 갱신
+├── download_6yr_data.py        # 6년 장기 데이터 다운로드
+├── download_extended_data.py   # 장기 과거 데이터 다운로드
+├── download_mtf_data.py        # 멀티 타임프레임 데이터 다운로드
+├── download_new_symbols.py     # 신규 심볼 데이터 추가
+├── backtest_live_period.py     # Live 기간 재백테스트 검증
+├── check_account.py            # 계좌 상태 점검
+├── win_rate_check.py           # 실시간 Win Rate 검증
+├── generate_report_pdf.py      # 단일 마크다운 → PDF (Chrome headless)
+└── generate_combined_report.py # R40×v13 종합 PDF 리포트 (9 charts)
+tests/                      # 유닛 테스트 (824개, 42 파일)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
@@ -265,7 +268,7 @@ tests/                      # 유닛 테스트 (824개, 36 파일)
 >
 > **v12.4.1–v12.4.6 Production Hardening**: 6 hotfixes — server TP PBT qty (3 rounds), stale SL ratchet reset, missing save_state after partial, HWM/history reset on 0-position restart.
 >
-> **v12.6 Climax+ATR (Current)**: Ghost-SL 제거 (ATR 적응형 스탑). Climax filter vol×3.0으로 trade quality 극대화 (trade 수 −20%, WR +11.1pp). Calmar **1,171** (+60.8%), DD **5.8%** (6yr, 50 symbols). 775 tests.
+> **v12.6 Climax+ATR (Current)**: Ghost-SL 제거 (ATR 적응형 스탑). Climax filter vol×3.0으로 trade quality 극대화 (trade 수 −20%, WR +11.1pp). Calmar **1,171** (+60.8%), DD **5.8%** (6yr, 50 symbols). 824 tests.
 
 ## 🧪 테스트
 
