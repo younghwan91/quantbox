@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + VolStraddle**
 
-> 버전: 12.7  
-> 최종 업데이트: 2026년 2월 27일
+> 버전: 12.8  
+> 최종 업데이트: 2026년 3월 2일
 
 ---
 
@@ -671,24 +671,26 @@ DISCORD_CHANNEL_ID=            # 명령 수신 채널 ID (숫자)
 
 ---
 
-## 3.6 🎯 VolStraddle — VR Compression Detector (A1-D50)
+## 3.6 🎯 VolStraddle — VR Compression Detector (R39-VR856)
 
 ### 3.6.1 전략 개요
 
 VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발적 움직임의 방향을 포착하는 전략입니다.
 
 **핵심 원리:**
-- **VR (Volatility Ratio)** = ATR(7) / ATR(50) — 단기 변동성 / 장기 변동성
+- **VR (Volatility Ratio)** = ATR(8) / ATR(56) — 단기 변동성 / 장기 변동성
 - VR < 0.50 = 변동성 압축 감지 → 폭발 임박
 - **Momentum(8)** 방향으로 진입 (양수 → LONG, 음수 → SHORT)
 - **멀티 타임프레임**: 15m / 1h / 4h 독립 스캔, 높은 TF 우선
 
-### 3.6.2 파라미터 (A1-D50, R35 검증)
+### 3.6.2 파라미터 (R39-VR856, 6yr 검증)
+
+**R39 검증 결과:** N=2,265 @10 slots, AnnRet=+187.2%, DD=32.4%, Calmar=5.8, 6년 연속 흑자.
 
 | 파라미터 | 값 | 설명 |
 |---------|-----|------|
-| `VS_VR_SHORT` | 7 | 단기 ATR 기간 |
-| `VS_VR_LONG` | 50 | 장기 ATR 기간 |
+| `VS_VR_SHORT` | 8 | 단기 ATR 기간 (R39: was 7) |
+| `VS_VR_LONG` | 56 | 장기 ATR 기간 (R39: was 50) |
 | `VS_D_VR_THRESHOLD` | 0.50 | D_mom8 VR 진입 임계값 |
 | `VS_D_SL` | 0.01 | 1% 손절 |
 | `VS_D_TP` | 0.05 | 5% 익절 |
@@ -697,11 +699,11 @@ VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발�
 | `VS_MAX_HOLD_1H` | 48 | 1h TF 최대 보유 (=48h) |
 | `VS_MAX_HOLD_4H` | 12 | 4h TF 최대 보유 (=48h) |
 | `VS_BASE_LEVERAGE` | 1.5 | 기본 레버리지 |
-| `VS_MAX_CONCURRENT` | 2 | 최대 동시 포지션 |
+| `VS_MAX_CONCURRENT` | 10 | 최대 동시 포지션 (R39: was 2) |
 | `VS_STRADDLE_ENABLED` | true | S_d8 스트래들 활성화 |
 | `VS_HEDGE_MODE` | true | Binance Hedge Mode (dualSidePosition) |
 | `VS_S_VR_THRESHOLD` | 0.55 | S_d8 VR 진입 임계값 |
-| `VS_S_SQUEEZE_DUR` | 8 | S_d8 최소 스퀴즈 지속 바 수 |
+| `VS_S_SQUEEZE_DUR` | 4 | S_d8 최소 스퀴즈 지속 바 수 (R39: was 8) |
 | `VS_S_SL` | 0.015 | S_d8 1.5% 손절 (레그별) |
 | `VS_S_TP` | 0.05 | S_d8 5% 익절 (레그별) |
 
