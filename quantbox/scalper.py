@@ -551,9 +551,9 @@ class RubberBandScalper(
                         # Leverage too high — try lower
                         try:
                             resp = self.client.futures_change_leverage(
-                                symbol=symbol, leverage=min(leverage, 20),
+                                symbol=symbol, leverage=min(leverage, 25),
                             )
-                            actual_leverage = int(resp.get('leverage', min(leverage, 20)))
+                            actual_leverage = int(resp.get('leverage', min(leverage, 25)))
                         except Exception:
                             logger.error(
                                 f"[{symbol}] Leverage fallback also failed — "
