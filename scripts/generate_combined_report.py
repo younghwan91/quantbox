@@ -1,4 +1,7 @@
-"""Combined QuantBox R40 × v13.0 Strategy Report — single impactful PDF.
+"""QuantBox v13.0 Strategy Report — 25x / 10 slots (L/N=2.5)
+
+Single comprehensive PDF for the currently deployed v13.0 strategy.
+All metrics are either v13.0-specific or leverage-independent.
 
 Usage:
     uv run python scripts/generate_combined_report.py
@@ -30,234 +33,345 @@ plt.rcParams["axes.unicode_minus"] = False
 OUTPUT = (
     Path(__file__).resolve().parent.parent
     / "docs" / "backtest_results"
-    / "quantbox_r40_v13_combined.pdf"
+    / "quantbox_v13_strategy_report.pdf"
 )
 
-# ── Chart data ─────────────────────────────────────────────────────────────────
-R40_MONTHLY = {
-    2020: [957,-37,5,63,70,40,83,57,-34,6,89,-46],
-    2021: [-38,83,58,1,37,0,102,92,-19,-36,-8,70],
-    2022: [45,-23,16,179,14,-37,5,16,0,3,13,364],
-    2023: [13,74,58,12,42,-47,7,-25,45,17,-26,98],
-    2024: [-33,46,9,-13,62,-45,-30,386,-32,-15,93,122],
-    2025: [100,-23,65,81,-42,127,16,20,-36,21,-57,-8],
+# ════════════════════════════════════════════════════════════════════════════════
+# DATA — v13.0 (25x leverage, 10 slots, L/N=2.5, Model B compound)
+# ════════════════════════════════════════════════════════════════════════════════
+
+# ── v13.0 aggregate ──
+V13_ANN_RET   = 687     # % annual return (Model B compound)
+V13_MAX_DD    = 67.9    # %
+V13_CALMAR    = 10.12
+V13_TRADES    = 2265
+V13_TPD       = 1.03    # trades per day
+V13_LEV       = 25
+V13_SLOTS     = 10
+V13_LN        = 2.5
+V13_BALANCE   = 1983    # $
+
+# ── Per-trade edge (leverage-independent) ──
+PF       = 1.285
+WR       = 43.4   # %
+RR       = 1.67   # avg_win / avg_loss
+EV_1X    = 33     # bp per trade at 1x
+T_STAT   = 5.42
+SHARPE   = 2.21
+SORTINO  = 5.99
+COHENS_D = 0.114
+
+# Per-trade equity impact at L/N=2.5
+AVG_LOSS_EQ = 5.2   # % portfolio per losing trade
+AVG_WIN_EQ  = 8.7   # % portfolio per winning trade
+EV_EQ       = 0.82  # % portfolio per trade (33bp × 2.5)
+
+# ── Yearly stats (PF/WR/Sharpe = exact, leverage-independent) ──
+YEARLY = {
+    2020: {"trades": 630, "pf": 1.29, "sharpe": 2.85, "wr": 39.4, "note": "코로나 변동성"},
+    2021: {"trades": 202, "pf": 1.41, "sharpe": 2.30, "wr": 46.5, "note": "Bull run"},
+    2022: {"trades": 414, "pf": 1.36, "sharpe": 2.82, "wr": 45.7, "note": "LUNA/FTX"},
+    2023: {"trades": 374, "pf": 1.13, "sharpe": 1.04, "wr": 41.2, "note": "저변동"},
+    2024: {"trades": 330, "pf": 1.41, "sharpe": 2.89, "wr": 48.5, "note": "Halving"},
+    2025: {"trades": 330, "pf": 1.16, "sharpe": 1.24, "wr": 43.9, "note": "혼합"},
 }
-R40_ANNUAL   = {2020:4838,2021:749,2022:3036,2023:54,2024:2606,2025:109}
-R40_LEVERAGE = {
-    "lev":     [1,2,3,5,7.5,10],
-    "ann_ret": [195,540,923,960,104,-94],
-    "max_dd":  [35.3,60.0,77.2,95.8,99.9,100],
-    "calmar":  [5.5,9.0,12.0,10.0,1.0,-0.9],
+
+# ── L/N grid (25×25 = 625 combinations) ──
+LN_GRID = {
+    "ln":      [0.20, 0.50, 1.00, 1.50, 2.00, 2.50, 2.78, 3.50, 4.00, 4.50],
+    "ann_ret": [27.4, 80.0, 162,  270,  425,  687,  740,  998,  1200, 1350],
+    "max_dd":  [8.0,  16.0, 29.6, 41.2, 53.8, 67.9, 73.1, 79.2, 84.7, 89.1],
+    "calmar":  [3.42, 5.0,  5.48, 6.55, 7.90, 10.12,10.13,12.60,14.16,15.15],
 }
-R40_DURATION = {
+
+# ── Risk tiers ──
+TIERS = {
+    "names":   ["보수적\n9x/10s", "중도\n16x/10s", "공격적\n25x/10s\n(v13.0)"],
+    "ann_ret": [162, 367, 687],
+    "max_dd":  [29.6, 48.0, 67.9],
+    "calmar":  [5.48, 7.65, 10.12],
+}
+
+# ── Streak (leverage-independent) ──
+WIN_STREAK  = {1:284,2:128,3:63,4:28,5:10,6:4,7:7,8:2,10:1}
+LOSS_STREAK = {1:226,2:115,3:82,4:37,5:32,6:13,7:5,8:8,9:3,10:5,12:1,14:1}
+
+# ── Duration (leverage-independent) ──
+DURATION = {
     "buckets": ["0-1h","1-4h","4-12h","12-24h","24-48h","48-96h","96h+"],
     "pct":     [3.3,14.9,27.1,17.9,20.7,12.0,4.1],
     "wr":      [10.7,31.6,38.2,52.3,48.2,57.1,44.1],
 }
-R40_TOP_SYM = {
-    "sym": ["ETH","DOGE","1000SHIB","FET","OP","UNI","VET","LTC","WIF","1000PEPE"],
-    "ret": [325,287,266,189,178,170,129,128,112,111],
-}
-R40_BOT_SYM = {
-    "sym": ["HBAR","BCH","XLM","ATOM","COMP"],
-    "ret": [-29,-39,-53,-54,-77],
-}
-R40_WIN_STREAK  = {1:284,2:128,3:63,4:28,5:10,6:4,7:7,8:2,10:1}
-R40_LOSS_STREAK = {1:226,2:115,3:82,4:37,5:32,6:13,7:5,8:8,9:3,10:5,12:1,14:1}
-V13_LN = {
-    "ln":      [0.20,0.50,1.00,1.50,2.00,2.50,2.78,3.50,4.00,4.50],
-    "ann_ret": [27.4,80.0,162,270,425,687,740,998,1200,1350],
-    "max_dd":  [8.0,16.0,29.6,41.2,53.8,67.9,73.1,79.2,84.7,89.1],
-    "calmar":  [3.42,5.0,5.48,6.55,7.90,10.12,10.13,12.60,14.16,15.15],
-}
-V13_TIERS = {
-    "names":   ["보수적\n9x/10slots","중도\n16x/10slots","공격적\n25x/10slots\n(v13.0)"],
-    "ann_ret": [162,367,687],
-    "max_dd":  [29.6,48.0,67.9],
-    "calmar":  [5.48,7.65,10.12],
-}
-ST = {"green":"#27ae60","red":"#e74c3c","blue":"#2980b9","gold":"#f39c12",
-      "purple":"#8e44ad","gray":"#7f8c8d","dark":"#2c3e50","accent":"#1abc9c"}
+
+# ── Bootstrap (leverage-independent) ──
+BS_PF_MED = 1.284;  BS_PF_CI = (1.173, 1.405)
+BS_WR_CI  = (41.4, 45.4)
+BS_EV_MED = 97.8;   BS_EV_CI = (62.0, 133.1)
+BS_SH_CI  = (1.41, 3.00)
+BS_P_GE1  = 100.0   # P(PF >= 1.0)
+
+# ── Top/Bottom symbols (PF-based, leverage-independent) ──
+TOP_SYM = [
+    ("ETHUSDT",      127, 46.5, 1.51, 148),
+    ("DOGEUSDT",     120, 44.2, 1.47, 152),
+    ("1000SHIBUSDT", 100, 46.0, 1.50, 172),
+    ("FETUSDT",       17, 76.5, 5.49, 672),
+    ("OPUSDT",        29, 58.6, 2.63, 395),
+    ("UNIUSDT",       35, 51.4, 2.31, 323),
+    ("VETUSDT",       34, 55.9, 1.98, 284),
+    ("LTCUSDT",       45, 53.3, 1.73, 225),
+    ("WIFUSDT",       14, 71.4, 3.61, 591),
+    ("1000PEPEUSDT",  37, 54.1, 1.74, 246),
+]
+BOT_SYM = [
+    ("HBARUSDT",  40, 37.5, 0.89, -49),
+    ("BCHUSDT",   67, 35.8, 0.91, -38),
+    ("XLMUSDT",   65, 38.5, 0.81, -81),
+    ("ATOMUSDT",  40, 25.0, 0.64, -160),
+    ("COMPUSDT",  42, 23.8, 0.46, -313),
+]
+
+# ── Strategy type (leverage-independent, raw pre-filter) ──
+STRAT_D_WR = 25.9;  STRAT_D_RR = 3.75;  STRAT_D_PF = 1.31
+STRAT_S_WR = 53.9;  STRAT_S_RR = 1.08;  STRAT_S_PF = 1.27
+
+# Colors
+C = {"green":"#27ae60","red":"#e74c3c","blue":"#2980b9","gold":"#f39c12",
+     "purple":"#8e44ad","gray":"#7f8c8d","dark":"#2c3e50","accent":"#1abc9c"}
 
 
-def _sim_monthly(start,rate,months,trigger=150,keep=70):
-    comp,wb,wt,cs,ws,wts=start,start,0.0,[],[],[]
-    for _ in range(months):
-        comp*=(1+rate);wb*=(1+rate)
-        if wb>=trigger:wt+=wb-keep;wb=keep
-        cs.append(comp);ws.append(wb);wts.append(wb+wt)
-    return cs,ws,wts
+# ════════════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ════════════════════════════════════════════════════════════════════════════════
 
-def _png_b64(fig,dpi=130):
-    tmp=tempfile.NamedTemporaryFile(suffix=".png",delete=False)
-    fig.savefig(tmp.name,dpi=dpi,bbox_inches="tight",facecolor="white")
+def _png_b64(fig, dpi=130):
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    fig.savefig(tmp.name, dpi=dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    data=Path(tmp.name).read_bytes()
+    data = Path(tmp.name).read_bytes()
     Path(tmp.name).unlink(missing_ok=True)
     return base64.b64encode(data).decode()
 
 def _ax(ax):
     ax.spines[["top","right"]].set_visible(False)
-    ax.grid(axis="y",alpha=0.25,linewidth=0.6)
+    ax.grid(axis="y", alpha=0.25, linewidth=0.6)
 
-# ── R40 Charts ─────────────────────────────────────────────────────────────────
-def chart_annual():
-    years=sorted(R40_ANNUAL.keys());rets=[R40_ANNUAL[y] for y in years]
-    colors=[ST["green"] if r>0 else ST["red"] for r in rets]
-    fig,ax=plt.subplots(figsize=(8,4))
-    bars=ax.bar([str(y) for y in years],rets,color=colors,edgecolor="white",width=0.6)
-    for bar,val in zip(bars,rets):
-        ax.text(bar.get_x()+bar.get_width()/2,bar.get_height()+60,
-                f"+{val:,}%",ha="center",va="bottom",fontsize=8.5,fontweight="bold")
-    ax.set_title("연도별 수익률 — R40 6년 백테스트",fontsize=11,fontweight="bold")
-    ax.set_ylabel("Annual Return (%)");ax.set_ylim(0,max(rets)*1.18)
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x,_:f"{x:,.0f}%"))
-    _ax(ax);fig.tight_layout();return _png_b64(fig)
+def _sim_monthly(start, rate, months, trigger=150, keep=70):
+    comp, wb, wt = start, start, 0.0
+    cs, ws, wts = [], [], []
+    for _ in range(months):
+        comp *= (1 + rate); wb *= (1 + rate)
+        if wb >= trigger:
+            wt += wb - keep; wb = keep
+        cs.append(comp); ws.append(wb); wts.append(wb + wt)
+    return cs, ws, wts
 
-def chart_monthly():
-    years=sorted(R40_MONTHLY.keys())
-    months_lbl=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    data=np.array([R40_MONTHLY[y] for y in years],dtype=float)
-    fig,ax=plt.subplots(figsize=(13,4))
-    im=ax.imshow(np.clip(data,-100,200),cmap="RdYlGn",aspect="auto",vmin=-100,vmax=200)
-    ax.set_xticks(range(12));ax.set_xticklabels(months_lbl,fontsize=8)
-    ax.set_yticks(range(len(years)));ax.set_yticklabels(years,fontsize=9)
-    for yi,year in enumerate(years):
-        for mi,val in enumerate(R40_MONTHLY[year]):
-            c="white" if abs(val)>80 else "black"
-            fw="bold" if abs(val)>=50 else "normal"
-            ax.text(mi,yi,f"{val:+.0f}%",ha="center",va="center",fontsize=6.5,color=c,fontweight=fw)
-    plt.colorbar(im,ax=ax,shrink=0.8,label="월수익률 (%)")
-    ax.set_title("72개월 수익률 히트맵 — 6년 연속 흑자",fontsize=11,fontweight="bold")
-    fig.tight_layout();return _png_b64(fig)
 
-def chart_streak():
-    fig,(ax1,ax2)=plt.subplots(1,2,figsize=(11,4))
-    ws_k=[str(k) for k in R40_WIN_STREAK];ws_v=list(R40_WIN_STREAK.values())
-    ax1.bar(ws_k,ws_v,color=ST["green"],edgecolor="white",width=0.6)
-    ax1.set_title("연승 분포 (최대 10연승)",fontsize=10,fontweight="bold")
-    ax1.set_xlabel("연승 길이");ax1.set_ylabel("횟수");_ax(ax1)
-    for x,v in zip(ws_k,ws_v):ax1.text(x,v+3,str(v),ha="center",fontsize=7.5)
-    ls_k=[str(k) for k in R40_LOSS_STREAK];ls_v=list(R40_LOSS_STREAK.values())
-    bars=ax2.bar(ls_k,ls_v,color=ST["red"],edgecolor="white",width=0.6)
-    bars[-1].set_color(ST["purple"])
-    ax2.set_title("연패 분포 (최대 14연패 → compound -56%)",fontsize=10,fontweight="bold")
-    ax2.set_xlabel("연패 길이");ax2.set_ylabel("횟수");_ax(ax2)
-    for x,v in zip(ls_k,ls_v):ax2.text(x,v+2,str(v),ha="center",fontsize=7.5)
-    fig.suptitle("승/패 연속 분포",fontsize=11,fontweight="bold")
-    fig.tight_layout();return _png_b64(fig)
+# ════════════════════════════════════════════════════════════════════════════════
+# CHARTS (7)
+# ════════════════════════════════════════════════════════════════════════════════
 
-def chart_duration():
-    d=R40_DURATION;x=np.arange(len(d["buckets"]))
-    fig,ax1=plt.subplots(figsize=(9,4));ax2=ax1.twinx()
-    ax1.bar(x,d["pct"],color=ST["blue"],alpha=0.65,label="비중 %",width=0.5)
-    ax2.plot(x,d["wr"],"o-",color=ST["red"],linewidth=2.2,markersize=7,label="Win Rate %")
-    ax2.axhline(43.4,color=ST["gray"],linewidth=1,linestyle="--",alpha=0.7)
-    ax1.set_xticks(x);ax1.set_xticklabels(d["buckets"],fontsize=9)
-    ax1.set_ylabel("비중 (%)",color=ST["blue"]);ax2.set_ylabel("Win Rate (%)",color=ST["red"])
-    ax2.set_ylim(0,75)
-    ax1.set_title("Duration별 Win Rate — 장기 보유일수록 WR 상승",fontsize=10,fontweight="bold")
-    lines1,l1=ax1.get_legend_handles_labels();lines2,l2=ax2.get_legend_handles_labels()
-    ax1.legend(lines1+lines2,l1+l2,loc="upper right",fontsize=8)
-    _ax(ax1);fig.tight_layout();return _png_b64(fig)
-
-def chart_symbols():
-    fig,(ax1,ax2)=plt.subplots(1,2,figsize=(12,4.5))
-    sy=R40_TOP_SYM["sym"];ry=R40_TOP_SYM["ret"];y1=np.arange(len(sy))
-    ax1.barh(y1,ry,color=plt.cm.YlGn(np.linspace(0.4,0.9,len(sy)))[::-1],edgecolor="white")
-    ax1.set_yticks(y1);ax1.set_yticklabels(sy,fontsize=8.5)
-    ax1.set_xlabel("6년 Return %");ax1.set_title("Top 10 수익 심볼",fontsize=10,fontweight="bold")
-    for i,v in enumerate(ry):ax1.text(v+4,i,f"+{v}%",va="center",fontsize=7.5)
-    ax1.spines[["top","right"]].set_visible(False);ax1.grid(axis="x",alpha=0.25)
-    sb=R40_BOT_SYM["sym"];rb=R40_BOT_SYM["ret"];y2=np.arange(len(sb))
-    ax2.barh(y2,rb,color=plt.cm.OrRd(np.linspace(0.3,0.8,len(sb))),edgecolor="white")
-    ax2.set_yticks(y2);ax2.set_yticklabels(sb,fontsize=8.5)
-    ax2.set_xlabel("6년 Return %");ax2.set_title("Bottom 5 손실 심볼",fontsize=10,fontweight="bold")
-    for i,v in enumerate(rb):ax2.text(v-2,i,f"{v}%",va="center",ha="right",fontsize=7.5)
-    ax2.spines[["top","right"]].set_visible(False);ax2.grid(axis="x",alpha=0.25)
-    fig.suptitle("심볼별 성과 — 50 symbols × 6년 (37/50 수익)",fontsize=11,fontweight="bold")
-    fig.tight_layout();return _png_b64(fig)
-
-def chart_leverage():
-    d=R40_LEVERAGE
-    fig,ax1=plt.subplots(figsize=(8,4));ax2=ax1.twinx()
-    ax1.plot(d["lev"],d["ann_ret"],"o-",color=ST["blue"],linewidth=2.5,markersize=7,label="Annual Return %")
-    ax2.plot(d["lev"],d["max_dd"],"s--",color=ST["red"],linewidth=2,markersize=7,label="Max DD %")
-    ax2.plot(d["lev"],d["calmar"],"^:",color=ST["green"],linewidth=2,markersize=7,label="Calmar")
-    ax1.axvline(3,color=ST["gray"],linewidth=1.5,linestyle="--",alpha=0.5)
-    ax1.text(3.1,700,"3x (슬롯 15 고정 시)",fontsize=8,color=ST["gray"])
-    ax1.set_xlabel("Leverage");ax1.set_ylabel("Annual Return %",color=ST["blue"])
-    ax2.set_ylabel("Max DD % / Calmar");ax1.set_xticks(d["lev"]);_ax(ax1)
-    ax1.set_title("레버리지 민감도 (슬롯 15 고정) — L/N ratio 발견의 단초",fontsize=11,fontweight="bold")
-    lines1,l1=ax1.get_legend_handles_labels();lines2,l2=ax2.get_legend_handles_labels()
-    ax1.legend(lines1+lines2,l1+l2,loc="upper right",fontsize=8)
-    fig.tight_layout();return _png_b64(fig)
-
-# ── V13 Charts ─────────────────────────────────────────────────────────────────
 def chart_ln():
-    d=V13_LN
-    fig,ax1=plt.subplots(figsize=(9,4.5));ax2=ax1.twinx()
-    ax1.plot(d["ln"],d["ann_ret"],"o-",color=ST["blue"],linewidth=2.5,markersize=7,label="Annual Return %")
-    ax2.plot(d["ln"],d["max_dd"],"s--",color=ST["red"],linewidth=2,markersize=6,label="Max DD %")
-    ax2.plot(d["ln"],d["calmar"],"^:",color=ST["green"],linewidth=2,markersize=6,label="Calmar")
-    ax1.axvline(2.5,color=ST["gold"],linewidth=2.2,linestyle="--")
-    ax1.text(2.52,900,"v13.0 선택점\nL/N=2.5\nLosing Year=0",fontsize=7.8,color=ST["gold"],fontweight="bold")
-    ax1.axvline(4.5,color=ST["red"],linewidth=1.5,linestyle=":",alpha=0.7)
-    ax1.text(4.52,200,"Losing Year\n등장",fontsize=7.5,color=ST["red"])
-    ax1.set_xlabel("L/N Ratio (Leverage ÷ Slots)");ax1.set_ylabel("Annual Return %",color=ST["blue"])
-    ax2.set_ylabel("Max DD % / Calmar");_ax(ax1)
-    ax1.set_title("25×25 Fine Grid (625개 조합) — L/N ratio가 수익을 결정한다",fontsize=10,fontweight="bold")
-    lines1,l1=ax1.get_legend_handles_labels();lines2,l2=ax2.get_legend_handles_labels()
-    ax1.legend(lines1+lines2,l1+l2,loc="upper left",fontsize=8)
-    fig.tight_layout();return _png_b64(fig)
+    """L/N ratio grid — core of v13.0 optimization."""
+    d = LN_GRID
+    fig, ax1 = plt.subplots(figsize=(9, 4.5)); ax2 = ax1.twinx()
+    ax1.plot(d["ln"], d["ann_ret"], "o-", color=C["blue"], linewidth=2.5,
+             markersize=7, label="Annual Return %")
+    ax2.plot(d["ln"], d["max_dd"], "s--", color=C["red"], linewidth=2,
+             markersize=6, label="Max DD %")
+    ax2.plot(d["ln"], d["calmar"], "^:", color=C["green"], linewidth=2,
+             markersize=6, label="Calmar")
+    ax1.axvline(2.5, color=C["gold"], linewidth=2.2, linestyle="--")
+    ax1.text(2.52, 900, "v13.0 선택점\nL/N=2.5\nLosing Year=0",
+             fontsize=7.8, color=C["gold"], fontweight="bold")
+    ax1.axvline(4.5, color=C["red"], linewidth=1.5, linestyle=":", alpha=0.7)
+    ax1.text(4.52, 200, "Losing Year\n등장", fontsize=7.5, color=C["red"])
+    ax1.set_xlabel("L/N Ratio (Leverage / Slots)")
+    ax1.set_ylabel("Annual Return %", color=C["blue"])
+    ax2.set_ylabel("Max DD % / Calmar"); _ax(ax1)
+    ax1.set_title("25x25 Fine Grid (625개 조합) — L/N ratio가 수익을 결정한다",
+                  fontsize=10, fontweight="bold")
+    lines1, l1 = ax1.get_legend_handles_labels()
+    lines2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, l1 + l2, loc="upper left", fontsize=8)
+    fig.tight_layout(); return _png_b64(fig)
+
 
 def chart_tiers():
-    d=V13_TIERS;x=np.arange(len(d["names"]));w=0.25
-    fig,ax=plt.subplots(figsize=(9,4.5))
-    b1=ax.bar(x-w,[r/10 for r in d["ann_ret"]],w,label="Return /10",color=ST["blue"],alpha=0.82)
-    b2=ax.bar(x,d["max_dd"],w,label="Max DD %",color=ST["red"],alpha=0.82)
-    b3=ax.bar(x+w,[c*10 for c in d["calmar"]],w,label="Calmar x10",color=ST["green"],alpha=0.82)
-    for bars,vals,fmt in [(b1,d["ann_ret"],"+{:.0f}%"),(b2,d["max_dd"],"{:.0f}%"),(b3,d["calmar"],"{:.2f}")]:
-        for bar,v in zip(bars,vals):
-            ax.text(bar.get_x()+bar.get_width()/2,bar.get_height()+1,fmt.format(v),ha="center",va="bottom",fontsize=7.5)
-    ax.set_xticks(x);ax.set_xticklabels([n.replace("\n"," ") for n in d["names"]],fontsize=8.5)
-    ax.set_title("리스크 티어별 성과 비교 (S=10 slots 고정)",fontsize=11,fontweight="bold")
-    ax.legend(fontsize=8);_ax(ax);fig.tight_layout();return _png_b64(fig)
+    """Risk tier comparison — conservative / moderate / aggressive."""
+    d = TIERS; x = np.arange(len(d["names"])); w = 0.25
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    b1 = ax.bar(x - w, [r / 10 for r in d["ann_ret"]], w,
+                label="Return /10", color=C["blue"], alpha=0.82)
+    b2 = ax.bar(x, d["max_dd"], w,
+                label="Max DD %", color=C["red"], alpha=0.82)
+    b3 = ax.bar(x + w, [c * 10 for c in d["calmar"]], w,
+                label="Calmar x10", color=C["green"], alpha=0.82)
+    for bars, vals, fmt in [
+        (b1, d["ann_ret"], "+{:.0f}%"),
+        (b2, d["max_dd"],  "{:.0f}%"),
+        (b3, d["calmar"],  "{:.2f}"),
+    ]:
+        for bar, v in zip(bars, vals):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                    fmt.format(v), ha="center", va="bottom", fontsize=7.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels([n.replace("\n", " ") for n in d["names"]], fontsize=8.5)
+    ax.set_title("리스크 티어별 성과 비교 (S=10 slots 고정)",
+                 fontsize=11, fontweight="bold")
+    ax.legend(fontsize=8); _ax(ax); fig.tight_layout(); return _png_b64(fig)
+
+
+def chart_yearly():
+    """Yearly PF & WR — proves edge stability over 6 years."""
+    years = sorted(YEARLY.keys())
+    pfs = [YEARLY[y]["pf"] for y in years]
+    wrs = [YEARLY[y]["wr"] for y in years]
+    bar_colors = [C["green"] if pf >= 1.3 else (C["gold"] if pf >= 1.15 else C["red"])
+                  for pf in pfs]
+    fig, ax1 = plt.subplots(figsize=(9, 4.5)); ax2 = ax1.twinx()
+    bars = ax1.bar([str(y) for y in years], pfs, color=bar_colors,
+                   edgecolor="white", width=0.5, alpha=0.85, label="Profit Factor")
+    ax2.plot([str(y) for y in years], wrs, "o-", color=C["blue"],
+             linewidth=2.2, markersize=8, label="Win Rate %")
+    ax1.axhline(1.0, color=C["red"], linewidth=1.2, linestyle="--", alpha=0.6)
+    ax1.axhline(PF, color=C["gray"], linewidth=1, linestyle=":", alpha=0.5)
+    ax1.text(5.3, PF + 0.01, f"6yr avg {PF}", fontsize=7, color=C["gray"])
+    for bar, pf in zip(bars, pfs):
+        ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
+                 f"{pf:.2f}", ha="center", fontsize=9, fontweight="bold")
+    ax1.set_ylabel("Profit Factor"); ax2.set_ylabel("Win Rate (%)", color=C["blue"])
+    ax1.set_ylim(0.8, 1.6); ax2.set_ylim(30, 55)
+    lines1, l1 = ax1.get_legend_handles_labels()
+    lines2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, l1 + l2, loc="upper left", fontsize=8)
+    ax1.set_title("6년 연도별 PF & WR — 전년 PF > 1.0 유지",
+                  fontsize=11, fontweight="bold")
+    _ax(ax1); fig.tight_layout(); return _png_b64(fig)
+
+
+def chart_rr():
+    """R:R structure — fewer wins but bigger wins."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+
+    # Left: Win Rate donut
+    wedges, texts, autotexts = ax1.pie(
+        [WR, 100 - WR], labels=["승리", "패배"],
+        colors=[C["green"], C["red"]], autopct="%1.1f%%",
+        startangle=90, pctdistance=0.55,
+        wedgeprops=dict(width=0.35, edgecolor="white"),
+        textprops={"fontsize": 11})
+    for at in autotexts:
+        at.set_fontsize(10); at.set_fontweight("bold")
+    ax1.set_title("승률 = 43.4%", fontsize=12, fontweight="bold")
+
+    # Right: Per-trade equity impact at L/N=2.5
+    cats = ["평균 손실", "평균 수익", "기대값 (EV)"]
+    vals = [-AVG_LOSS_EQ, AVG_WIN_EQ, EV_EQ]
+    colors_bar = [C["red"], C["green"], C["gold"]]
+    bars = ax2.bar(cats, vals, color=colors_bar, edgecolor="white", width=0.45)
+    for bar, v in zip(bars, vals):
+        y = v + 0.4 if v > 0 else v - 0.6
+        ax2.text(bar.get_x() + bar.get_width() / 2, y,
+                 f"{v:+.1f}%", ha="center", fontsize=11, fontweight="bold")
+    ax2.axhline(0, color="black", linewidth=0.5)
+    ax2.set_ylabel("포트폴리오 영향 (%)")
+    ax2.set_title("Per-Trade Equity Impact (L/N=2.5)",
+                  fontsize=10, fontweight="bold")
+
+    fig.suptitle("R:R = 1.67 — 적게 이기되 크게 이긴다",
+                 fontsize=13, fontweight="bold")
+    _ax(ax2); fig.tight_layout(); return _png_b64(fig)
+
+
+def chart_streak():
+    """Win/loss streak distribution."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+    ws_k = [str(k) for k in WIN_STREAK]; ws_v = list(WIN_STREAK.values())
+    ax1.bar(ws_k, ws_v, color=C["green"], edgecolor="white", width=0.6)
+    ax1.set_title("연승 분포 (최대 10연승)", fontsize=10, fontweight="bold")
+    ax1.set_xlabel("연승 길이"); ax1.set_ylabel("횟수"); _ax(ax1)
+    for x, v in zip(ws_k, ws_v):
+        ax1.text(x, v + 3, str(v), ha="center", fontsize=7.5)
+
+    ls_k = [str(k) for k in LOSS_STREAK]; ls_v = list(LOSS_STREAK.values())
+    bars = ax2.bar(ls_k, ls_v, color=C["red"], edgecolor="white", width=0.6)
+    bars[-1].set_color(C["purple"])
+    ax2.set_title("연패 분포 (최대 14연패 → compound -56%)",
+                  fontsize=10, fontweight="bold")
+    ax2.set_xlabel("연패 길이"); ax2.set_ylabel("횟수"); _ax(ax2)
+    for x, v in zip(ls_k, ls_v):
+        ax2.text(x, v + 2, str(v), ha="center", fontsize=7.5)
+
+    fig.suptitle("승/패 연속 분포 (레버리지 무관)",
+                 fontsize=11, fontweight="bold")
+    fig.tight_layout(); return _png_b64(fig)
+
+
+def chart_duration():
+    """Duration vs Win Rate — longer holds win more."""
+    d = DURATION; x = np.arange(len(d["buckets"]))
+    fig, ax1 = plt.subplots(figsize=(9, 4)); ax2 = ax1.twinx()
+    ax1.bar(x, d["pct"], color=C["blue"], alpha=0.65, label="비중 %", width=0.5)
+    ax2.plot(x, d["wr"], "o-", color=C["red"], linewidth=2.2,
+             markersize=7, label="Win Rate %")
+    ax2.axhline(WR, color=C["gray"], linewidth=1, linestyle="--", alpha=0.7)
+    ax1.set_xticks(x); ax1.set_xticklabels(d["buckets"], fontsize=9)
+    ax1.set_ylabel("비중 (%)", color=C["blue"])
+    ax2.set_ylabel("Win Rate (%)", color=C["red"]); ax2.set_ylim(0, 75)
+    ax1.set_title("Duration별 Win Rate — 장기 보유일수록 WR 상승",
+                  fontsize=10, fontweight="bold")
+    lines1, l1 = ax1.get_legend_handles_labels()
+    lines2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, l1 + l2, loc="upper right", fontsize=8)
+    _ax(ax1); fig.tight_layout(); return _png_b64(fig)
+
 
 def chart_compound():
-    months=list(range(1,15))
-    comp,wb,wt=_sim_monthly(50,0.15,14,150,70)
-    fig,ax=plt.subplots(figsize=(9,4.5))
-    ax.plot(months,comp,"o-",color=ST["blue"],linewidth=2.5,markersize=6,label="올복리 잔고")
-    ax.plot(months,wb,"s-",color=ST["green"],linewidth=2.5,markersize=6,label="인출전략 잔고")
-    ax.plot(months,wt,"^--",color=ST["accent"],linewidth=1.8,markersize=5,alpha=0.9,label="인출전략 총자산(잔고+현금)")
-    ax.axhline(150,color=ST["red"],linewidth=1.2,linestyle="--",alpha=0.7)
-    ax.text(0.5,153,"인출 트리거 ₩1.5억",fontsize=8,color=ST["red"],va="bottom")
-    ax.axhline(70,color=ST["gray"],linewidth=1,linestyle=":",alpha=0.6)
-    ax.text(0.5,72,"유지 잔고 ₩7,000만",fontsize=7.5,color=ST["gray"],va="bottom")
-    ax.set_xlabel("월수");ax.set_ylabel("금액 (백만원)")
-    ax.set_title("복리 vs 인출전략 — 5천만원 시작 / 월+15% 가정",fontsize=10,fontweight="bold")
-    ax.set_xticks(months);ax.legend(fontsize=8);_ax(ax)
-    fig.tight_layout();return _png_b64(fig)
+    """Withdraw vs full-compound simulation."""
+    months = list(range(1, 15))
+    comp, wb, wt = _sim_monthly(50, 0.145, 14, 150, 70)
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    ax.plot(months, comp, "o-", color=C["blue"], linewidth=2.5,
+            markersize=6, label="올복리 잔고")
+    ax.plot(months, wb, "s-", color=C["green"], linewidth=2.5,
+            markersize=6, label="인출전략 잔고")
+    ax.plot(months, wt, "^--", color=C["accent"], linewidth=1.8,
+            markersize=5, alpha=0.9, label="인출전략 총자산(잔고+현금)")
+    ax.axhline(150, color=C["red"], linewidth=1.2, linestyle="--", alpha=0.7)
+    ax.text(0.5, 153, "인출 트리거 ₩1.5억", fontsize=8,
+            color=C["red"], va="bottom")
+    ax.axhline(70, color=C["gray"], linewidth=1, linestyle=":", alpha=0.6)
+    ax.text(0.5, 72, "유지 잔고 ₩7,000만", fontsize=7.5,
+            color=C["gray"], va="bottom")
+    ax.set_xlabel("월수"); ax.set_ylabel("금액 (백만원)")
+    ax.set_title("복리 vs 인출전략 — 5천만원 시작 / 월 +14.5% 추정 (백테스트 60% 감쇄)",
+                 fontsize=9.5, fontweight="bold")
+    ax.set_xticks(months); ax.legend(fontsize=8); _ax(ax)
+    fig.tight_layout(); return _png_b64(fig)
 
 
-def build_html(charts: dict[str,str], font_b64: str) -> str:
+# ════════════════════════════════════════════════════════════════════════════════
+# HTML
+# ════════════════════════════════════════════════════════════════════════════════
+
+def build_html(charts: dict[str, str], font_b64: str) -> str:
     def img(key):
-        b64=charts[key]
-        return f'<div class="chart"><img src="data:image/png;base64,{b64}" alt="{key}"></div>'
+        return (f'<div class="chart"><img src="data:image/png;base64,'
+                f'{charts[key]}" alt="{key}"></div>')
 
-    font_face=""
+    font_face = ""
     if font_b64:
-        font_face=f"@font-face{{font-family:'NotoSansKR';src:url('data:font/truetype;base64,{font_b64}') format('truetype');}}"
+        font_face = (f"@font-face{{font-family:'NotoSansKR';"
+                     f"src:url('data:font/truetype;base64,{font_b64}') "
+                     f"format('truetype');}}")
 
-    css=f"""
+    css = f"""
 {font_face}
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:'NotoSansKR','Noto Sans CJK KR',sans-serif;font-size:9.5pt;line-height:1.65;color:#222;
-      word-wrap:break-word;overflow-wrap:break-word}}
+body{{font-family:'NotoSansKR','Noto Sans CJK KR',sans-serif;font-size:9.5pt;
+      line-height:1.65;color:#222;word-wrap:break-word;overflow-wrap:break-word}}
 @page{{size:A4;margin:14mm 13mm 16mm 13mm}}
-
-/* ── Header ── */
 .cover{{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
         color:#fff;padding:32pt 28pt;margin-bottom:20pt;border-radius:6pt}}
 .cover h1{{font-size:22pt;font-weight:900;letter-spacing:-0.5pt;margin-bottom:6pt;
@@ -268,10 +382,9 @@ body{{font-family:'NotoSansKR','Noto Sans CJK KR',sans-serif;font-size:9.5pt;lin
 .cover .meta span{{display:flex;align-items:center;gap:4pt}}
 .cover .badge{{background:rgba(255,255,255,0.12);padding:2pt 7pt;border-radius:12pt;
                font-size:7.5pt;font-weight:bold;color:#e0f0ff}}
-
-/* ── KPI boxes ── */
 .kpi-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:8pt;margin:14pt 0}}
-.kpi{{background:#f0f7ff;border:1pt solid #c5dcf0;border-radius:5pt;padding:10pt 12pt;text-align:center}}
+.kpi{{background:#f0f7ff;border:1pt solid #c5dcf0;border-radius:5pt;
+      padding:10pt 12pt;text-align:center}}
 .kpi .val{{font-size:17pt;font-weight:900;color:#1a4a7a;line-height:1.1}}
 .kpi .lbl{{font-size:7.5pt;color:#557;margin-top:3pt;font-weight:600}}
 .kpi .sub{{font-size:7pt;color:#889;margin-top:2pt}}
@@ -279,45 +392,23 @@ body{{font-family:'NotoSansKR','Noto Sans CJK KR',sans-serif;font-size:9.5pt;lin
 .kpi.highlight .val{{color:#1a6a3a}}
 .kpi.warn{{background:#fff3e0;border-color:#f0a050}}
 .kpi.warn .val{{color:#8a4a00}}
-
-/* ── Evidence boxes ── */
-.evidence-row{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8pt;margin:12pt 0}}
-.ev-box{{background:#1e3a5f;color:#e8f4ff;border-radius:5pt;padding:10pt 13pt}}
-.ev-box .num{{font-size:18pt;font-weight:900;color:#5dd3f7;line-height:1.1}}
-.ev-box .desc{{font-size:7.5pt;color:#acd;margin-top:3pt}}
-
-/* ── Sections ── */
-.part-header{{background:#2c3e50;color:#fff;padding:10pt 16pt;margin:20pt 0 12pt;
-              border-radius:4pt;page-break-before:always}}
-.part-header h2{{font-size:14pt;font-weight:800;letter-spacing:0.2pt}}
-.part-header .desc{{font-size:8.5pt;color:#aac;margin-top:3pt}}
-.part-header:first-of-type{{page-break-before:avoid}}
-
 h2{{font-size:13pt;color:#16355a;margin:14pt 0 6pt;border-left:4pt solid #2980b9;
     padding-left:9pt;font-weight:700}}
-h3{{font-size:10.5pt;color:#333;margin:11pt 0 5pt;font-weight:700}}
-
-/* ── Tables ── */
 .tw{{overflow-x:auto;margin:8pt 0}}
 table{{border-collapse:collapse;width:100%;font-size:8pt;table-layout:fixed}}
 th,td{{border:0.5pt solid #bbb;padding:3pt 5pt;text-align:left;
-        word-wrap:break-word;overflow-wrap:break-word}}
+       word-wrap:break-word;overflow-wrap:break-word}}
 th{{background:#e0e8f5;font-weight:bold;font-size:7.8pt}}
 tr:nth-child(even) td{{background:#f8f9fc}}
-td.r{{text-align:right}}
-td.c{{text-align:center}}
+td.r{{text-align:right}} td.c{{text-align:center}}
 td.bold{{font-weight:bold;color:#1a4060}}
 td.green{{color:#1a6a3a;font-weight:bold}}
 td.red{{color:#8a1a1a;font-weight:bold}}
 td.gold{{color:#8a5a00;font-weight:bold}}
-
-/* ── Chart ── */
 .chart{{margin:10pt 0;page-break-inside:avoid;text-align:center}}
 .chart img{{width:100%;height:auto;border:0.5pt solid #dde;border-radius:3pt}}
-
-/* ── Callout ── */
 .callout{{background:#fff9e6;border-left:4pt solid #f0a800;padding:8pt 12pt;
-           margin:8pt 0;border-radius:0 4pt 4pt 0;font-size:8.5pt}}
+          margin:8pt 0;border-radius:0 4pt 4pt 0;font-size:8.5pt}}
 .callout strong{{color:#6a4a00}}
 .callout.green{{background:#eaf7ef;border-color:#27ae60}}
 .callout.green strong{{color:#1a5a30}}
@@ -325,230 +416,135 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 .callout.red strong{{color:#6a1a1a}}
 .callout.blue{{background:#e8f4fc;border-color:#2980b9}}
 .callout.blue strong{{color:#1a3a5a}}
-
-/* ── Verdict ── */
 .verdict{{background:linear-gradient(135deg,#0f3460,#1a4a7a);color:#fff;
-           padding:18pt 20pt;border-radius:6pt;margin:16pt 0;page-break-inside:avoid}}
+          padding:18pt 20pt;border-radius:6pt;margin:16pt 0;page-break-inside:avoid}}
 .verdict h3{{font-size:12pt;color:#7dd;margin-bottom:8pt;font-weight:800}}
 .verdict p{{font-size:9pt;color:#cde;line-height:1.7}}
 .verdict ul{{margin-left:14pt;color:#cde;font-size:9pt}}
 .verdict li{{margin:3pt 0}}
-
-/* ── Footer ── */
 .footer{{margin-top:20pt;padding-top:10pt;border-top:1pt solid #ddd;
-          font-size:7.5pt;color:#999;text-align:center}}
-
-/* ── Print ── */
-@media print{{
-  .part-header{{page-break-before:always}}
-  .chart{{page-break-inside:avoid}}
-  .verdict{{page-break-inside:avoid}}
-}}
+         font-size:7.5pt;color:#999;text-align:center}}
+.section-break{{page-break-before:always}}
+@media print{{.chart{{page-break-inside:avoid}}.verdict{{page-break-inside:avoid}}}}
 """
+
+    # ── Yearly stats rows ──
+    yr_rows = ""
+    for y in sorted(YEARLY.keys()):
+        d = YEARLY[y]
+        pf_cls = "gold" if d["pf"] < 1.2 else ""
+        yr_rows += (
+            f'<tr><td{" class=" + repr(pf_cls) if pf_cls else ""}>{y}</td>'
+            f'<td class="r">{d["trades"]}</td>'
+            f'<td class="r{" bold" if d["pf"]>=1.3 else ""}">{d["pf"]:.2f}</td>'
+            f'<td class="r">{d["sharpe"]:.2f}</td>'
+            f'<td class="r">{d["wr"]}%</td>'
+            f'<td>{d["note"]}</td></tr>\n'
+        )
+
+    # ── Top/Bottom symbol rows ──
+    top_rows = ""
+    for sym, tr, wr, pf, ev in TOP_SYM:
+        top_rows += (f'<tr><td>{sym}</td><td class="r">{tr}</td>'
+                     f'<td class="r">{wr}%</td><td class="r bold">{pf:.2f}</td>'
+                     f'<td class="r green">{ev:+d}</td></tr>\n')
+    bot_rows = ""
+    for sym, tr, wr, pf, ev in BOT_SYM:
+        bot_rows += (f'<tr><td>{sym}</td><td class="r">{tr}</td>'
+                     f'<td class="r">{wr}%</td><td class="r">{pf:.2f}</td>'
+                     f'<td class="r red">{ev:+d}</td></tr>\n')
 
     body = f"""<!DOCTYPE html>
 <html lang="ko"><head>
 <meta charset="UTF-8">
-<title>QuantBox R40 × v13.0 종합 보고서</title>
+<title>QuantBox v13.0 전략 보고서</title>
 <style>{css}</style>
 </head><body>
 
-<!-- ═══════════════════ COVER ═══════════════════ -->
+<!-- COVER -->
 <div class="cover">
   <div class="badge">CONFIDENTIAL — INTERNAL USE ONLY</div>
-  <h1 style="margin-top:10pt">QuantBox 종합 전략 보고서</h1>
-  <div class="subtitle">R40 Champion 심층 통계 × v13.0 Aggressive Deployment</div>
+  <h1 style="margin-top:10pt">QuantBox v13.0 전략 보고서</h1>
+  <div class="subtitle">VR8_56_SL1_TP5_D4 @25x leverage / 10 slots (L/N=2.5)</div>
   <div class="meta">
-    <span>📅 2026-03-02</span>
-    <span>🔖 R40: 748630b &nbsp;|&nbsp; v13.0: e4b5831</span>
+    <span>📅 2026-03-03</span>
+    <span>🔖 Commit: e4b5831 (tag v13.0)</span>
     <span>📊 50 symbols × 6.0년 (2020~2025)</span>
-    <span>⚡ VR8_56_SL1_TP5_D4 @15m봉</span>
-    <span>🏦 Binance USDT-M Futures</span>
+    <span>⚡ Binance USDT-M Futures · 15m봉</span>
+    <span>💰 Balance: ${V13_BALANCE:,}</span>
   </div>
 </div>
 
 <!-- KPI -->
 <div class="kpi-grid">
   <div class="kpi highlight">
-    <div class="val">100.0%</div>
-    <div class="lbl">P(PF ≥ 1.0)</div>
-    <div class="sub">5,000회 Bootstrap</div>
+    <div class="val">+{V13_ANN_RET}%</div>
+    <div class="lbl">연간 수익률</div>
+    <div class="sub">Model B compound (L/N=2.5)</div>
+  </div>
+  <div class="kpi highlight">
+    <div class="val">{V13_CALMAR}</div>
+    <div class="lbl">Calmar Ratio</div>
+    <div class="sub">AnnRet / MaxDD</div>
   </div>
   <div class="kpi highlight">
     <div class="val">0회</div>
     <div class="lbl">Losing Year (6년)</div>
-    <div class="sub">2020~2025 전략 흑자</div>
-  </div>
-  <div class="kpi">
-    <div class="val">p&lt;0.000001</div>
-    <div class="lbl">통계적 유의성</div>
-    <div class="sub">t = 5.42</div>
+    <div class="sub">2020~2025 전년 흑자</div>
   </div>
   <div class="kpi warn">
-    <div class="val">67.9%</div>
-    <div class="lbl">v13.0 Max Drawdown</div>
-    <div class="sub">$1,983 → $636</div>
+    <div class="val">{V13_MAX_DD}%</div>
+    <div class="lbl">Max Drawdown</div>
+    <div class="sub">${V13_BALANCE:,} → ${int(V13_BALANCE * (1 - V13_MAX_DD/100)):,}</div>
   </div>
   <div class="kpi">
-    <div class="val">+687%</div>
-    <div class="lbl">v13.0 연간 수익률</div>
-    <div class="sub">25x / 10 slots</div>
-  </div>
-  <div class="kpi">
-    <div class="val">10.12</div>
-    <div class="lbl">Calmar Ratio</div>
-    <div class="sub">헤지펀드 기준 우수</div>
-  </div>
-  <div class="kpi">
-    <div class="val">1.285</div>
+    <div class="val">{PF}</div>
     <div class="lbl">Profit Factor</div>
-    <div class="sub">CI [1.173, 1.405]</div>
+    <div class="sub">CI [{BS_PF_CI[0]}, {BS_PF_CI[1]}]</div>
   </div>
   <div class="kpi">
-    <div class="val">+27.4%</div>
-    <div class="lbl">실제 연간 수익 (1/N 배분)</div>
-    <div class="sub">과대 계산 교정 후</div>
+    <div class="val">{BS_P_GE1:.0f}%</div>
+    <div class="lbl">P(PF ≥ 1.0)</div>
+    <div class="sub">5,000회 Bootstrap</div>
+  </div>
+  <div class="kpi">
+    <div class="val">+{EV_EQ:.2f}%</div>
+    <div class="lbl">EV per trade (자산)</div>
+    <div class="sub">1x 기준 +{EV_1X}bp × L/N={V13_LN}</div>
+  </div>
+  <div class="kpi">
+    <div class="val">{V13_TRADES:,}</div>
+    <div class="lbl">Total Trades</div>
+    <div class="sub">{V13_TPD}/day × 6년</div>
   </div>
 </div>
 
-<!-- Evidence -->
-<div class="evidence-row">
-  <div class="ev-box">
-    <div class="num">t = 5.42</div>
-    <div class="desc">양측 t검정 p &lt; 0.000001<br>Wilcoxon도 비모수 유의</div>
-  </div>
-  <div class="ev-box">
-    <div class="num">PF 1.285</div>
-    <div class="desc">5,000회 Bootstrap<br>PF &lt; 1.0 = 단 0번</div>
-  </div>
-  <div class="ev-box">
-    <div class="num">2,280</div>
-    <div class="desc">총 트레이드 (6년)<br>200-trade 윈도우 PF&lt;1 = 0%</div>
-  </div>
-</div>
-
-<!-- ═══════════════════ PART 1 ═══════════════════ -->
-<div class="part-header">
-  <h2>Part 1 — R40 전략 심층 분석</h2>
-  <div class="desc">VR8_56_SL1_TP5_D4 · 전략 엣지 검증 (분석 당시 3x/15slots — 현재 운용 설정은 Part 2 참조)</div>
-</div>
-
-<h2>1. 핵심 성과 지표</h2>
-{img("annual")}
+<!-- 1. SETTINGS -->
+<h2>1. 현재 운용 설정</h2>
 <div class="tw"><table>
-<tr><th>Metric</th><th class="r">R40 백테스트</th><th class="r">레버리지 없음 (1x)</th></tr>
-<tr><td>연간 수익률</td><td class="r bold green">+922.5%</td><td class="r">+195.4%</td></tr>
-<tr><td>Max Drawdown</td><td class="r warn">77.2%</td><td class="r">35.3%</td></tr>
-<tr><td>Calmar Ratio</td><td class="r bold">12.0</td><td class="r">5.5</td></tr>
-<tr><td>Sharpe / Sortino</td><td class="r">2.21 / 5.99</td><td class="r">2.21 / 5.99</td></tr>
-<tr><td>Profit Factor</td><td class="r bold">1.285</td><td class="r">1.285</td></tr>
-<tr><td>Win Rate</td><td class="r">43.4%</td><td class="r">43.4%</td></tr>
-<tr><td>Risk:Reward</td><td class="r">1.67</td><td class="r">1.67</td></tr>
-<tr><td>EV per trade</td><td class="r bold green">+98.0bp</td><td class="r">+32.7bp</td></tr>
-<tr><td>t-statistic</td><td class="r">5.42</td><td class="r">5.42</td></tr>
-<tr><td>Total Trades</td><td class="r">2,280</td><td class="r">2,280</td></tr>
+<tr><th>Setting</th><th class="c">값</th><th>설명</th></tr>
+<tr><td>VS_BASE_LEVERAGE</td><td class="c bold">25.0x</td><td>25×25 grid 최적화 결과</td></tr>
+<tr><td>VS_MAX_LEVERAGE</td><td class="c">25.0x</td><td>Hard cap (base와 일치)</td></tr>
+<tr><td>VS_MAX_CONCURRENT</td><td class="c bold">10</td><td>L/N=2.5 유지</td></tr>
+<tr><td>L/N Ratio</td><td class="c green bold">2.50</td><td>Calmar 최대화 경계점</td></tr>
+<tr><td>Per-slot Notional</td><td class="c">${int(V13_BALANCE / V13_SLOTS * V13_LEV):,}</td><td>잔고/슬롯 × 레버리지</td></tr>
+<tr><td>VS_STRADDLE_ENABLED</td><td class="c">true</td><td>S_d8 양방향 스트래들</td></tr>
+<tr><td>VS_HEDGE_MODE</td><td class="c">true</td><td>Binance dualSidePosition</td></tr>
+<tr><td>VR Threshold (D)</td><td class="c">0.50</td><td>VR = ATR(8)/ATR(56) &lt; 0.50</td></tr>
+<tr><td>VR Threshold (S)</td><td class="c">0.55</td><td>S squeeze VR &lt; 0.55 × 4바</td></tr>
+<tr><td>SL / TP</td><td class="c">1% / 5%</td><td>R:R = 1:5 고정</td></tr>
+<tr><td>Max Hold</td><td class="c">48h</td><td>15m=192바, 1h=48바, 4h=12바</td></tr>
+<tr><td>MTF</td><td class="c">15m / 1h / 4h</td><td>높은 TF 우선 (4h &gt; 1h &gt; 15m)</td></tr>
 </table></div>
-<div class="callout blue"><strong>참고:</strong> Sharpe/Sortino/PF/WR은 레버리지와 무관(PnL 비례 스케일). 레버리지는 compound effect를 통해 연간 수익률에만 폭발적으로 작용.</div>
+<div class="callout blue"><strong>Model B Compound:</strong> <code>eq *= (1 + pnl × L/N)</code> — 각 트레이드는 포트폴리오의 1/N 배분. 전체 자본 compound(Model A)와 달리 실제 운용과 동일한 수학 모델.</div>
 
-<h2>2. 6년 × 72개월 수익률 히트맵</h2>
-{img("monthly")}
-<div class="tw"><table>
-<tr><th>Year</th><th class="r">최고월</th><th class="r">최저월</th><th class="r">연간 합계</th><th>특징</th></tr>
-<tr><td>2020</td><td class="r green">+957% (1월)</td><td class="r red">-46% (12월)</td><td class="r bold">+4,838%</td><td>코로나 변동성 폭발</td></tr>
-<tr><td>2021</td><td class="r green">+102% (7월)</td><td class="r red">-38% (1월)</td><td class="r bold">+749%</td><td>Bull run</td></tr>
-<tr><td>2022</td><td class="r green">+364% (12월)</td><td class="r red">-37% (6월)</td><td class="r bold">+3,036%</td><td>LUNA/FTX 변동성</td></tr>
-<tr><td>2023</td><td class="r green">+98% (12월)</td><td class="r red">-47% (6월)</td><td class="r">+54%</td><td class="gold">취약 구간 — 저변동</td></tr>
-<tr><td>2024</td><td class="r green">+386% (8월)</td><td class="r red">-45% (6월)</td><td class="r bold">+2,606%</td><td>BTC Halving rally</td></tr>
-<tr><td>2025</td><td class="r green">+127% (6월)</td><td class="r red">-57% (11월)</td><td class="r">+109%</td><td class="gold">취약 구간</td></tr>
-</table></div>
-
-<h2>3. 연도별 상세 통계</h2>
-<div class="tw"><table>
-<tr><th>Year</th><th class="r">Trades</th><th class="r">Return</th><th class="r">Max DD</th><th class="r">PF</th><th class="r">Sharpe</th><th class="r">WR</th></tr>
-<tr><td>2020</td><td class="r">630</td><td class="r green bold">+4,838%</td><td class="r">70.7%</td><td class="r">1.29</td><td class="r">2.85</td><td class="r">39.4%</td></tr>
-<tr><td>2021</td><td class="r">202</td><td class="r">+749%</td><td class="r">62.0%</td><td class="r">1.41</td><td class="r">2.30</td><td class="r">46.5%</td></tr>
-<tr><td>2022</td><td class="r">414</td><td class="r green bold">+3,036%</td><td class="r">65.9%</td><td class="r">1.36</td><td class="r">2.82</td><td class="r">45.7%</td></tr>
-<tr><td class="gold">2023</td><td class="r">374</td><td class="r">+54%</td><td class="r">66.3%</td><td class="r gold">1.13 ⚠</td><td class="r">1.04</td><td class="r">41.2%</td></tr>
-<tr><td>2024</td><td class="r">330</td><td class="r green bold">+2,606%</td><td class="r">77.2%</td><td class="r">1.41</td><td class="r">2.89</td><td class="r">48.5%</td></tr>
-<tr><td class="gold">2025</td><td class="r">330</td><td class="r">+109%</td><td class="r">74.2%</td><td class="r gold">1.16 ⚠</td><td class="r">1.24</td><td class="r">43.9%</td></tr>
-</table></div>
-<div class="callout"><strong>취약 구간:</strong> 2023·2025는 PF 1.13~1.16 — "저변동성 연도". 더 나쁜 해가 올 수 있다는 점을 인지해야 한다.</div>
-
-<h2>4. 승/패 연속 & Duration 분석</h2>
-{img("streak")}
-{img("duration")}
-<div class="tw"><table>
-<tr><th></th><th class="r">Win Streak</th><th class="r">Loss Streak</th></tr>
-<tr><td>최대</td><td class="r green bold">10연승</td><td class="r red bold">14연패</td></tr>
-<tr><td>평균</td><td class="r">1.9</td><td class="r">2.4</td></tr>
-<tr><td>최대 연속 손실 (compound)</td><td class="r">—</td><td class="r red bold">-56.2%</td></tr>
-</table></div>
-<div class="callout red"><strong>14연패 시나리오:</strong> compound -56.2% 손실. $1,983 기준 → $869. 그래도 6년에 딱 1회 발생.</div>
-
-<h2>5. 심볼별 성과</h2>
-{img("symbols")}
-
-<h2>6. 레버리지 민감도 — 슬롯 고정 분석의 한계</h2>
-{img("leverage")}
-<div class="tw"><table>
-<tr><th>Leverage</th><th class="r">AnnRet</th><th class="r">Max DD</th><th class="r">Calmar</th><th class="c">Losing Years</th><th>비고</th></tr>
-<tr><td>1x</td><td class="r">+195%</td><td class="r">35.3%</td><td class="r">5.5</td><td class="c">0</td><td></td></tr>
-<tr><td>2x</td><td class="r">+540%</td><td class="r">60.0%</td><td class="r">9.0</td><td class="c">0</td><td></td></tr>
-<tr><td>3x</td><td class="r">+923%</td><td class="r">77.2%</td><td class="r">12.0</td><td class="c">0</td><td>슬롯 15 고정 시 Calmar 최대</td></tr>
-<tr><td>5x</td><td class="r">+960%</td><td class="r red">95.8%</td><td class="r">10.0</td><td class="c red">2</td><td>복리 붕괴 시작</td></tr>
-<tr><td>7.5x</td><td class="r">+104%</td><td class="r red">99.9%</td><td class="r red">1.0</td><td class="c red">2</td><td></td></tr>
-<tr><td>10x</td><td class="r red">-94%</td><td class="r red">100%</td><td class="r red">-0.9</td><td class="c red">4</td><td></td></tr>
-</table></div>
-<div class="callout"><strong>⚠ 이 분석은 슬롯 15 고정 상태에서 레버리지만 변화시킨 결과.</strong> 5x 이상에서 복리 붕괴가 일어나는 건 맞지만, <strong>변수가 레버리지 하나뿐</strong>이라는 한계. 이 발견이 Part 2의 핵심 질문으로 이어졌다 — <em>"레버리지와 슬롯을 동시에 조절하면?"</em> → L/N ratio 발견 → <strong>현재 운용: 25x/10slots (L/N=2.5), Calmar 10.12, Losing Year 0.</strong></div>
-
-<h2>7. Bootstrap 신뢰구간 & 통계적 유의성</h2>
-<div class="tw"><table>
-<tr><th>Metric</th><th class="r">Median</th><th>95% CI</th><th>비고</th></tr>
-<tr><td>Profit Factor</td><td class="r bold">1.284</td><td>[1.173, 1.405]</td><td class="green bold">P(PF≥1.0) = 100.0%</td></tr>
-<tr><td>Win Rate</td><td class="r">43.4%</td><td>[41.4%, 45.4%]</td><td></td></tr>
-<tr><td>EV (bp)</td><td class="r green">+97.8</td><td>[+62.0, +133.1]</td><td>CI 하한도 양수</td></tr>
-<tr><td>Sharpe</td><td class="r">2.21</td><td>[1.41, 3.00]</td><td></td></tr>
-<tr><td>Max DD</td><td class="r">87.5%</td><td>[71.9%, 98.0%]</td><td>백테스트 기준</td></tr>
-</table></div>
-<div class="tw"><table>
-<tr><th>통계 검정</th><th class="r">통계량</th><th class="r">p-value</th><th>결론</th></tr>
-<tr><td>t-test (mean > 0)</td><td class="r">t = 5.42</td><td class="r green bold">&lt; 0.000001</td><td>엣지 존재 확실</td></tr>
-<tr><td>Wilcoxon signed-rank</td><td class="r">W = 928,145</td><td class="r green bold">&lt; 0.000001</td><td>비모수적으로도 유의</td></tr>
-<tr><td>200-trade Rolling PF&lt;1</td><td class="r">—</td><td class="r green bold">0%</td><td>장기 안정적 엣지</td></tr>
-</table></div>
-
-<h2>8. Lookahead Bias 감사 결과</h2>
-<div class="tw"><table>
-<tr><th>#</th><th>항목</th><th class="c">결과</th><th>상세</th></tr>
-<tr><td>1</td><td>Signal Truncation (300 checkpoints)</td><td class="c green bold">CLEAN</td><td>VR/Momentum/Signal 모두 backward-looking</td></tr>
-<tr><td>2</td><td>Entry Price 체크</td><td class="c green bold">CLEAN</td><td>close[i] 진입, SL/TP는 i+1부터</td></tr>
-<tr><td>3</td><td>Intra-bar resolution</td><td class="c green bold">CLEAN</td><td>SL 우선 체크 (보수적)</td></tr>
-<tr><td>4</td><td>Compound Equity Model</td><td class="c red bold">MAJOR</td><td>전체 자본 compound → 과대 계산</td></tr>
-</table></div>
-<div class="callout red"><strong>⚠ R40 Compound Model 교정 (3x/15slots 전용):</strong> R40 백테스트 +922.5%는 각 trade PnL%를 전체 자본에 순차 적용한 Model A(과대 계산). 실제 1/15 고정배분(L/N=0.2) 기준 <strong>연 +27.4%</strong>가 현실적 기대치.<br>
-단, <strong style="color:#1a5a30">v13.0의 +687%는 이미 교정 완료된 수치</strong> — <code>eq *= (1 + pnl × L/N)</code> 공식으로 1/N 배분을 반영한 Model B 기반. 별도 교정 불필요.</div>
-
-
-<!-- ═══════════════════ PART 2 ═══════════════════ -->
-<div class="part-header">
-  <h2>Part 2 — v13.0 Aggressive Deployment</h2>
-  <div class="desc">25x Leverage / 10 Slots (L/N=2.5) · 25×25 Fine Grid 최적화 결과 · 운용 결정</div>
-</div>
-
-<h2>1. v12.9 → v13.0 설정 변경</h2>
-<div class="tw"><table>
-<tr><th>Setting</th><th class="c">v12.9 (이전)</th><th class="c">v13.0 (현재)</th><th>변경 이유</th></tr>
-<tr><td>Leverage</td><td class="c">3.0x</td><td class="c bold">25.0x</td><td>25×25 grid 최적화 결과</td></tr>
-<tr><td>Max Slots</td><td class="c">15</td><td class="c bold">10</td><td>L/N=2.5 최적 비율</td></tr>
-<tr><td>L/N Ratio</td><td class="c">0.20</td><td class="c green bold">2.50</td><td>Calmar 최대화 zone</td></tr>
-<tr><td>Per-slot Notional ($1,983)</td><td class="c">$396</td><td class="c bold">$4,957</td><td>잔고/슬롯 × 레버리지</td></tr>
-</table></div>
-
-<h2>2. 25×25 Fine Grid — L/N Ratio가 수익을 결정한다</h2>
+<!-- 2. L/N GRID -->
+<div class="section-break"></div>
+<h2>2. 왜 L/N = 2.5인가 — 25×25 Grid 최적화</h2>
 {img("ln")}
 <div class="tw"><table>
 <tr><th>L/N Ratio</th><th class="r">AnnRet</th><th class="r">Max DD</th><th class="r">Calmar</th><th class="c">Losing Years</th></tr>
-<tr><td>0.20 (v12.9)</td><td class="r">+27.4%</td><td class="r">8.0%</td><td class="r">3.42</td><td class="c">0</td></tr>
+<tr><td>0.20 (구 v12.9)</td><td class="r">+27.4%</td><td class="r">8.0%</td><td class="r">3.42</td><td class="c">0</td></tr>
 <tr><td>1.00</td><td class="r">+162%</td><td class="r">29.6%</td><td class="r">5.48</td><td class="c">0</td></tr>
 <tr><td>2.00</td><td class="r">+425%</td><td class="r">53.8%</td><td class="r">7.90</td><td class="c">0</td></tr>
 <tr><td class="bold">2.50 (v13.0) ★</td><td class="r green bold">+687%</td><td class="r">67.9%</td><td class="r bold">10.12</td><td class="c green bold">0</td></tr>
@@ -556,19 +552,10 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <tr><td>4.50</td><td class="r">+1,350%</td><td class="r red">89.1%</td><td class="r">15.15</td><td class="c red">1</td></tr>
 <tr><td>5.00+</td><td class="r red">급감</td><td class="r red">95%+</td><td class="r red">—</td><td class="c red">2+</td></tr>
 </table></div>
-<div class="callout green"><strong>L/N = 2.5 선택 근거:</strong> 625개 조합 중 Losing Year = 0을 유지하면서 Calmar가 최대화되는 경계점. 같은 L/N이면 (S=5,L=10)과 (S=10,L=20)이 거의 동일 — 슬롯과 레버리지가 아니라 비율이 중요하다는 핵심 발견.</div>
+<div class="callout green"><strong>L/N = 2.5 선택 근거:</strong> 625개 조합 중 Losing Year = 0을 유지하면서 Calmar가 최대화되는 경계점. 같은 L/N이면 (S=5, L=12.5)과 (S=10, L=25)이 거의 동일 — 슬롯과 레버리지가 아니라 <strong>비율</strong>이 중요하다는 핵심 발견.</div>
 
-<h2>3. Adaptive vs Fixed — 4개 모델 토너먼트</h2>
-<div class="tw"><table>
-<tr><th>Model</th><th>최적 구성</th><th class="r">Calmar</th><th class="r">AnnRet</th><th class="r">Max DD</th><th>결론</th></tr>
-<tr><td class="bold">Fixed L/N ★</td><td>S=9, L=25x</td><td class="r green bold">10.13</td><td class="r">+740%</td><td class="r">73.1%</td><td class="green bold">승자</td></tr>
-<tr><td>Adaptive-Concurrency</td><td>—</td><td class="r red">BLOWUP</td><td class="r red">—</td><td class="r red">100%</td><td class="red">실패</td></tr>
-<tr><td>Adaptive-DD</td><td>S=10, L=25x</td><td class="r">5.06</td><td class="r">+344%</td><td class="r">67.9%</td><td>수익 절반</td></tr>
-<tr><td>Target L/N=2.0</td><td>S=10, L=25x</td><td class="r">7.65</td><td class="r">+367%</td><td class="r">48.0%</td><td>고정 대비 열위</td></tr>
-</table></div>
-<div class="callout"><strong>결론:</strong> 적응형 레버리지는 고정보다 나쁘다. DD 구간에서 레버리지를 줄이면 복구 기회를 놓친다. 복잡성 추가가 오히려 성과를 악화시킨다 (KISS 원칙).</div>
-
-<h2>4. 리스크 티어별 선택지</h2>
+<!-- 3. TIERS & ADAPTIVE -->
+<h2>3. 리스크 티어별 선택지</h2>
 {img("tiers")}
 <div class="tw"><table>
 <tr><th>Tier</th><th>구성</th><th class="r">AnnRet</th><th class="r">Max DD</th><th class="r">Calmar</th><th class="c">Losing Yr</th><th class="r">슬롯 노셔널</th></tr>
@@ -578,15 +565,112 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <tr><td>YOLO</td><td>S=9, L=25x</td><td class="r">+740%</td><td class="r red">73.1%</td><td class="r">10.13</td><td class="c green">0</td><td class="r">$5,508</td></tr>
 </table></div>
 
-<h2>5. 리스크 시나리오</h2>
+<h2 style="margin-top:16pt">Adaptive vs Fixed 레버리지 — 4개 모델 토너먼트</h2>
 <div class="tw"><table>
-<tr><th>시나리오</th><th>영향 (L/N=2.5)</th><th class="c">6년 빈도</th></tr>
-<tr><td>14연패 (최대 기록)</td><td class="red">compound -56.2% → $1,983 → $869</td><td class="c">1회</td></tr>
-<tr><td>10연패</td><td>compound -37.8% → $1,983 → $1,233</td><td class="c">~2회</td></tr>
-<tr><td>DD > 50%</td><td>연 4~5회 예상</td><td class="c">빈번</td></tr>
-<tr><td>2023형 저변동 연도</td><td>연수익 ~80% (PF 1.13)</td><td class="c">~2회/6년</td></tr>
+<tr><th>Model</th><th>최적 구성</th><th class="r">Calmar</th><th class="r">AnnRet</th><th class="r">Max DD</th><th>결론</th></tr>
+<tr><td class="bold">Fixed L/N ★</td><td>S=9, L=25x</td><td class="r green bold">10.13</td><td class="r">+740%</td><td class="r">73.1%</td><td class="green bold">승자</td></tr>
+<tr><td>Adaptive-DD</td><td>S=10, L=25x</td><td class="r">5.06</td><td class="r">+344%</td><td class="r">67.9%</td><td>수익 절반</td></tr>
+<tr><td>Target L/N=2.0</td><td>S=10, L=25x</td><td class="r">7.65</td><td class="r">+367%</td><td class="r">48.0%</td><td>고정 대비 열위</td></tr>
+<tr><td>Adaptive-Conc.</td><td>—</td><td class="r red bold">BLOWUP</td><td class="r red">—</td><td class="r red">100%</td><td class="red">실패</td></tr>
 </table></div>
-<div class="tw" style="margin-top:8pt"><table>
+<div class="callout"><strong>결론:</strong> 적응형 레버리지는 고정보다 나쁘다. DD 구간에서 레버리지를 줄이면 복구 기회를 놓친다. 복잡성 추가가 성과를 악화시킨다 (KISS 원칙).</div>
+
+<!-- 4. EDGE VERIFICATION -->
+<div class="section-break"></div>
+<h2>4. 엣지 구조 — R:R = {RR}</h2>
+{img("rr")}
+
+<div class="tw"><table>
+<tr><th>Metric</th><th class="r">값</th><th>해석</th></tr>
+<tr><td>Win Rate</td><td class="r">{WR}%</td><td>10번 중 4.3번 승리</td></tr>
+<tr><td>Risk:Reward</td><td class="r bold">{RR}</td><td>승리 시 평균 수익이 손실의 1.67배</td></tr>
+<tr><td>Profit Factor</td><td class="r bold">{PF}</td><td>총 수익 / 총 손실</td></tr>
+<tr><td>EV per trade (raw)</td><td class="r">+{EV_1X}bp</td><td>1x leverage 기준</td></tr>
+<tr><td>EV per trade (equity)</td><td class="r green bold">+{EV_EQ:.1f}%</td><td>L/N=2.5 기준 포트폴리오 영향</td></tr>
+<tr><td>Sharpe / Sortino</td><td class="r">{SHARPE} / {SORTINO}</td><td>연간 위험조정 수익</td></tr>
+<tr><td>Cohen's d</td><td class="r">{COHENS_D}</td><td>개별 효과 작음 → L/N으로 증폭</td></tr>
+</table></div>
+
+<h2 style="margin-top:16pt">전략 유형 분해 (레버리지 무관)</h2>
+<div class="tw"><table>
+<tr><th>Type</th><th class="r">WR</th><th class="r">R:R</th><th class="r">PF</th><th>역할</th></tr>
+<tr><td>Directional (D)</td><td class="r">25.9%</td><td class="r bold">3.75</td><td class="r">1.31</td><td>추세추종 — 낮은 WR, 높은 R:R</td></tr>
+<tr><td>Straddle (S)</td><td class="r bold">53.9%</td><td class="r">1.08</td><td class="r">1.27</td><td>변동성 포착 — 높은 WR, 수익 ~80% 기여</td></tr>
+<tr><td class="bold">Combined</td><td class="r">{WR}%</td><td class="r">{RR}</td><td class="r bold">{PF}</td><td>D+S 시너지</td></tr>
+</table></div>
+
+<h2 style="margin-top:16pt">통계적 유의성 & Bootstrap</h2>
+<div class="tw"><table>
+<tr><th>검정</th><th class="r">통계량</th><th class="r">p-value</th><th>결론</th></tr>
+<tr><td>t-test (mean &gt; 0)</td><td class="r">t = {T_STAT}</td><td class="r green bold">&lt; 0.000001</td><td>엣지 존재 확실</td></tr>
+<tr><td>Wilcoxon signed-rank</td><td class="r">W = 928,145</td><td class="r green bold">&lt; 0.000001</td><td>비모수적으로도 유의</td></tr>
+<tr><td>200-trade Rolling PF&lt;1</td><td class="r">—</td><td class="r green bold">0%</td><td>장기 안정적 엣지</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>Bootstrap Metric</th><th class="r">Median</th><th>95% CI</th><th>비고</th></tr>
+<tr><td>Profit Factor</td><td class="r bold">{BS_PF_MED}</td><td>[{BS_PF_CI[0]}, {BS_PF_CI[1]}]</td><td class="green bold">P(PF≥1.0) = {BS_P_GE1:.0f}%</td></tr>
+<tr><td>Win Rate</td><td class="r">{WR}%</td><td>[{BS_WR_CI[0]}%, {BS_WR_CI[1]}%]</td><td></td></tr>
+<tr><td>EV (bp)</td><td class="r green">{BS_EV_MED:+.1f}</td><td>[{BS_EV_CI[0]:+.1f}, {BS_EV_CI[1]:+.1f}]</td><td>CI 하한도 양수</td></tr>
+<tr><td>Sharpe</td><td class="r">{SHARPE}</td><td>[{BS_SH_CI[0]}, {BS_SH_CI[1]}]</td><td></td></tr>
+</table></div>
+
+<h2 style="margin-top:16pt">Rolling Window 안정성</h2>
+<div class="tw"><table>
+<tr><th>Window</th><th>WR range</th><th>PF range</th><th>Sharpe range</th><th class="r">P(PF&lt;1.0)</th></tr>
+<tr><td>100 trades</td><td>30~55%</td><td>0.794~2.172</td><td>-1.94~6.94</td><td class="r">9.1%</td></tr>
+<tr><td>200 trades</td><td>36~52%</td><td>1.004~1.745</td><td>0.03~4.82</td><td class="r green bold">0.0%</td></tr>
+<tr><td>500 trades</td><td>39~48%</td><td>1.091~1.400</td><td>0.75~2.95</td><td class="r green bold">0.0%</td></tr>
+</table></div>
+<div class="callout green"><strong>200-trade 이상 윈도우에서 PF &lt; 1.0 구간 0%.</strong> 약 200일(~7개월) 이상 운용하면 장기적으로 엣지가 실현된다.</div>
+
+<!-- 5. YEARLY PERFORMANCE -->
+<div class="section-break"></div>
+<h2>5. 6년 연도별 성과 (PF · WR — 레버리지 무관)</h2>
+{img("yearly")}
+<div class="tw"><table>
+<tr><th>Year</th><th class="r">Trades</th><th class="r">PF</th><th class="r">Sharpe</th><th class="r">WR</th><th>특징</th></tr>
+{yr_rows}
+</table></div>
+<div class="callout"><strong>2023·2025 취약 구간:</strong> PF 1.13~1.16으로 가장 약하지만 여전히 흑자. 저변동 시장에서 전략이 &quot;간신히 버텨도 흑자&quot;라는 점이 중요. 더 나쁜 해가 올 수 있음을 인지해야 한다.</div>
+
+<!-- 6. RISK ANALYSIS -->
+<h2>6. 승/패 연속 & Duration 분석</h2>
+{img("streak")}
+{img("duration")}
+<div class="tw"><table>
+<tr><th></th><th class="r">Win Streak</th><th class="r">Loss Streak</th></tr>
+<tr><td>최대</td><td class="r green bold">10연승</td><td class="r red bold">14연패</td></tr>
+<tr><td>평균</td><td class="r">1.9</td><td class="r">2.4</td></tr>
+<tr><td>14연패 포트폴리오 손실 (L/N=2.5)</td><td class="r">—</td><td class="r red bold">-56.2%</td></tr>
+</table></div>
+
+<h2 style="margin-top:16pt">리스크 시나리오 (L/N=2.5 기준)</h2>
+<div class="tw"><table>
+<tr><th>시나리오</th><th>영향</th><th class="c">6년 빈도</th></tr>
+<tr><td>14연패 (최대 기록)</td><td class="red">compound -56.2% → ${V13_BALANCE:,} → ${int(V13_BALANCE * 0.438):,}</td><td class="c">1회</td></tr>
+<tr><td>10연패</td><td>compound -37.8% → ${V13_BALANCE:,} → ${int(V13_BALANCE * 0.622):,}</td><td class="c">~2회</td></tr>
+<tr><td>DD &gt; 50%</td><td>연 4~5회 예상</td><td class="c">빈번</td></tr>
+<tr><td>2023형 저변동 연도</td><td>PF 1.13 — 간신히 흑자</td><td class="c">~2회/6년</td></tr>
+</table></div>
+<div class="callout red"><strong>14연패 시나리오:</strong> ${V13_BALANCE:,} → ${int(V13_BALANCE * 0.438):,}. 6년에 딱 1회 발생. 이 구간을 버텨야 복구된다.</div>
+
+<!-- 7. SYMBOLS -->
+<h2>7. 심볼별 성과 (PF · EV 기준, 레버리지 무관)</h2>
+<p style="font-size:8.5pt;color:#555;margin-bottom:6pt">50개 심볼 중 37개 수익 (74%). 아래는 PF 기준 상/하위 심볼.</p>
+<div class="tw"><table>
+<tr><th>Top 10</th><th class="r">Trades</th><th class="r">WR</th><th class="r">PF</th><th class="r">EV (bp)</th></tr>
+{top_rows}
+</table></div>
+<div class="tw"><table>
+<tr><th>Bottom 5</th><th class="r">Trades</th><th class="r">WR</th><th class="r">PF</th><th class="r">EV (bp)</th></tr>
+{bot_rows}
+</table></div>
+<div class="callout"><strong>COMPUSDT PF=0.46:</strong> 6년간 가장 나쁜 심볼. 그래도 전체 포트폴리오에서 42 trades / 2,265 = 1.9% 비중이라 전체 PF에 미미한 영향.</div>
+
+<!-- 8. OPS PLAN -->
+<div class="section-break"></div>
+<h2>8. 모니터링 & 퇴각 계획</h2>
+<div class="tw"><table>
 <tr><th>항목</th><th>모니터링 기준</th><th>액션</th></tr>
 <tr><td>DD</td><td>&gt; 70%</td><td>긴급 점검</td></tr>
 <tr><td>30일 PF</td><td>&lt; 0.9</td><td>경고 — 60일까지 관찰</td></tr>
@@ -594,15 +678,15 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <tr><td>Trade freq</td><td>&lt; 0.5/day (30일 평균)</td><td>시장 구조 변화 의심</td></tr>
 </table></div>
 
-<h2>6. 퇴각 3단계 계획</h2>
+<h2 style="margin-top:16pt">퇴각 3단계</h2>
 <div class="tw"><table>
 <tr><th>단계</th><th>트리거</th><th>설정 변경</th><th class="r">AnnRet</th><th class="r">Max DD</th></tr>
-<tr><td class="bold">1단계</td><td>DD &gt; 70% 또는 60일 PF &lt; 0.95</td><td>L=16x, S=10</td><td class="r">~+270%</td><td class="r">~41%</td></tr>
-<tr><td class="bold">2단계</td><td>DD &gt; 50% (축소 후에도)</td><td>L=9x, S=10</td><td class="r">~+162%</td><td class="r">~30%</td></tr>
-<tr><td class="bold">3단계</td><td>근본적 의심</td><td>L=3x, S=15 (v12.9 복귀)</td><td class="r">~+27%</td><td class="r">~8%</td></tr>
+<tr><td class="bold">1단계</td><td>DD &gt; 70% 또는 60일 PF &lt; 0.95</td><td>L=16x, S=10 (L/N=1.6)</td><td class="r">~+270%</td><td class="r">~41%</td></tr>
+<tr><td class="bold">2단계</td><td>DD &gt; 50% (축소 후에도)</td><td>L=9x, S=10 (L/N=0.9)</td><td class="r">~+162%</td><td class="r">~30%</td></tr>
+<tr><td class="bold">3단계</td><td>근본적 의심</td><td>L=3x, S=15 (L/N=0.2)</td><td class="r">~+27%</td><td class="r">~8%</td></tr>
 </table></div>
 
-<h2>7. 복리 vs 인출전략 — 용량 한계와 최적 운용</h2>
+<h2 style="margin-top:16pt">복리 vs 인출전략 — 용량 한계</h2>
 {img("compound")}
 <div class="tw"><table>
 <tr><th>잔고</th><th class="r">슬롯 노셔널</th><th>하위 심볼 영향</th><th class="c">판정</th></tr>
@@ -612,7 +696,7 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 </table></div>
 <div class="callout green"><strong>최적 인출 전략 (₩5,000만 시작):</strong> ₩1.5억 도달 시 ₩8,000만 인출 → ₩7,000만 유지. 1년 기준 총 ~₩2.4억 인출 + ₩7,000만 잔고 = <strong>₩3.1억</strong> (원금 6.2배). 올복리(₩2.56억) 대비 총자산이 높고 심리적 부담도 낮다.</div>
 
-<h2>8. 원금별 1년 수익 예상 (현실적 60% 시나리오)</h2>
+<h2 style="margin-top:16pt">원금별 1년 수익 예상 (현실적 60% 감쇄)</h2>
 <div class="tw"><table>
 <tr><th>원금</th><th class="r">1년 후 (현실적)</th><th class="r">DD 최저점</th><th class="r">슬롯 노셔널</th></tr>
 <tr><td>₩1,000만</td><td class="r">₩5,100만</td><td class="r red">₩320만</td><td class="r">$17K</td></tr>
@@ -620,40 +704,45 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <tr><td>₩1억</td><td class="r bold">₩5.1억</td><td class="r red">₩3,200만</td><td class="r">$172K</td></tr>
 </table></div>
 
-<!-- ═══════════════════ VERDICT ═══════════════════ -->
+<!-- VERDICT -->
 <div class="verdict">
   <h3>최종 판단 — 돌려야 하는가?</h3>
   <p><strong style="color:#7ff;font-size:11pt">YES — 조건부</strong></p>
   <ul>
-    <li>엣지는 통계적으로 확실하다 (t=5.42, Bootstrap P(PF≥1.0)=100.0%). 노이즈가 아닌 진짜 비효율.</li>
+    <li>엣지는 통계적으로 확실 (t={T_STAT}, P(PF≥1.0)={BS_P_GE1:.0f}%). 노이즈가 아닌 진짜 비효율.</li>
     <li>6년 연속 흑자 — 코로나·LUNA·FTX·저변동 모두 통과. Regime-independent edge.</li>
     <li>L/N=2.5는 625개 조합에서 과학적으로 선택한 Calmar 최대화 경계점.</li>
-    <li>$1,983이 전 재산이 아닐 것. DD 68%($634)에서도 시스템을 끄지 않을 것.</li>
-    <li>최소 3개월(~90거래일) 관찰 후 평가. 수익 기대치는 +687%가 아니라 <strong style="color:#ffe">+300~400%</strong>.</li>
+    <li>${V13_BALANCE:,}이 전 재산이 아닐 것. DD {V13_MAX_DD}% (${int(V13_BALANCE * (1 - V13_MAX_DD/100)):,})에서도 시스템을 끄지 않을 것.</li>
+    <li>최소 3개월(~90거래일) 관찰 후 평가. 기대치는 +687%가 아니라 <strong style="color:#ffe">+300~400%</strong>.</li>
   </ul>
-  <p style="margin-top:8pt;color:#fdd"><strong>핵심 리스크:</strong> 엣지가 아니라 레버리지와 심리. DD 60%에서 "끄면 안 된다"는 것을 미리 각오해야 한다.</p>
+  <p style="margin-top:8pt;color:#fdd"><strong>핵심 리스크:</strong> 엣지가 아니라 레버리지와 심리. DD 60%에서 &quot;끄면 안 된다&quot;는 것을 미리 각오해야 한다.</p>
 </div>
 
 <div class="footer">
-  QuantBox 종합 보고서 — R40: 748630b · v13.0: e4b5831 · Generated: 2026-03-02<br>
-  VR8_56_SL1_TP5_D4 @25x leverage / 10 slots · 50 symbols × 6yr · Binance USDT-M Futures
+  QuantBox v13.0 전략 보고서 — Commit: e4b5831 · Tag: v13.0 · Generated: 2026-03-03<br>
+  VR8_56_SL1_TP5_D4 @25x leverage / 10 slots (L/N=2.5) · 50 symbols × 6yr · Binance USDT-M Futures
 </div>
 </body></html>"""
     return body
 
 
+# ════════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ════════════════════════════════════════════════════════════════════════════════
+
 def main():
-    print("Generating QuantBox Combined Report…")
+    print("Generating QuantBox v13.0 Strategy Report…")
     c = {}
-    print("  chart: annual…");   c["annual"]   = chart_annual()
-    print("  chart: monthly…");  c["monthly"]  = chart_monthly()
-    print("  chart: streak…");   c["streak"]   = chart_streak()
-    print("  chart: duration…"); c["duration"] = chart_duration()
-    print("  chart: symbols…");  c["symbols"]  = chart_symbols()
-    print("  chart: leverage…"); c["leverage"] = chart_leverage()
-    print("  chart: ln…");       c["ln"]       = chart_ln()
-    print("  chart: tiers…");    c["tiers"]    = chart_tiers()
-    print("  chart: compound…"); c["compound"] = chart_compound()
+    for name, fn in [
+        ("ln",       chart_ln),
+        ("tiers",    chart_tiers),
+        ("yearly",   chart_yearly),
+        ("rr",       chart_rr),
+        ("streak",   chart_streak),
+        ("duration", chart_duration),
+        ("compound", chart_compound),
+    ]:
+        print(f"  chart: {name}…"); c[name] = fn()
     print(f"  {len(c)} charts embedded")
 
     font_b64 = ""
@@ -663,7 +752,9 @@ def main():
 
     html = build_html(c, font_b64)
 
-    with tempfile.NamedTemporaryFile(suffix=".html", mode="w", encoding="utf-8", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".html", mode="w", encoding="utf-8", delete=False
+    ) as f:
         f.write(html); html_path = f.name
 
     print("  Chrome headless → PDF…")
