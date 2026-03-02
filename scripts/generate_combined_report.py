@@ -524,7 +524,8 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <tr><td>3</td><td>Intra-bar resolution</td><td class="c green bold">CLEAN</td><td>SL 우선 체크 (보수적)</td></tr>
 <tr><td>4</td><td>Compound Equity Model</td><td class="c red bold">MAJOR</td><td>전체 자본 compound → 과대 계산</td></tr>
 </table></div>
-<div class="callout red"><strong>⚠ Compound Model 교정:</strong> 백테스트 +922.5%는 전체 자본에 각 trade PnL을 적용한 값. 실제 1/15 고정배분 시 <strong>연 +27.4%</strong>가 현실적 기대치. Per-trade 지표(PF, WR, t-stat)는 교정 불필요.</div>
+<div class="callout red"><strong>⚠ R40 Compound Model 교정 (3x/15slots 전용):</strong> R40 백테스트 +922.5%는 각 trade PnL%를 전체 자본에 순차 적용한 Model A(과대 계산). 실제 1/15 고정배분(L/N=0.2) 기준 <strong>연 +27.4%</strong>가 현실적 기대치.<br>
+단, <strong style="color:#1a5a30">v13.0의 +687%는 이미 교정 완료된 수치</strong> — <code>eq *= (1 + pnl × L/N)</code> 공식으로 1/N 배분을 반영한 Model B 기반. 별도 교정 불필요.</div>
 
 
 <!-- ═══════════════════ PART 2 ═══════════════════ -->
