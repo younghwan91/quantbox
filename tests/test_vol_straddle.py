@@ -81,8 +81,8 @@ class TestConfig:
         assert cfg.d_vr_threshold == 0.50
 
     def test_vr_periods(self, cfg):
-        assert cfg.vr_short == 7
-        assert cfg.vr_long == 50
+        assert cfg.vr_short == 8   # R39: was 7
+        assert cfg.vr_long == 56   # R39: was 50
 
     def test_sl_tp(self, cfg):
         assert cfg.d_sl == 0.01   # 1% SL
