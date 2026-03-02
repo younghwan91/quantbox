@@ -116,11 +116,12 @@ GIT_COMMIT = _get_git_commit()
 
 # ──────────────────────── Logging ──────────────────────────────────────
 
-def _setup_logging() -> Path:
-    log_dir = Path('logs/bot')
+def _setup_logging(strategy_name: str = 'vol_straddle', paper_mode: bool = False) -> Path:
+    log_dir = Path('logs/bot') / strategy_name
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = log_dir / f'scalper_{ts}.log'
+    mode = 'paper' if paper_mode else 'live'
+    log_file = log_dir / f'scalper_{mode}_{ts}.log'
 
     # Write git commit header before configuring logging handlers
     # so the log file starts with version traceability info
@@ -147,7 +148,6 @@ def _setup_logging() -> Path:
     return log_file
 
 
-_log_path = _setup_logging()
 logger = logging.getLogger('Scalper')
 
 
@@ -494,6 +494,7 @@ class RubberBandScalper(
     def _place_order(
         self, symbol: str, side: str, quantity: float,
         leverage: int = 1, reduce_only: bool = False,
+        position_side: str | None = None,
     ) -> dict | None:
         """Place order via LimitOrderChaser.
 
@@ -504,6 +505,9 @@ class RubberBandScalper(
             leverage: Leverage to set before order.
             reduce_only: If True, pass reduceOnly=True to exchange.
                 Must be True when closing positions to avoid margin errors.
+            position_side: Hedge Mode position side ('LONG'/'SHORT').
+                When set, positionSide is sent instead of reduceOnly.
+                None = One-Way Mode (existing behavior).
 
         Returns dict with avgPrice, executedQty on success, None on failure.
         """
@@ -577,6 +581,7 @@ class RubberBandScalper(
                 step_size=step_size,
                 quantity_precision=qty_precision,
                 reduce_only=reduce_only,
+                position_side=position_side,
             )
 
             if result.status == ChaseFillStatus.NO_POSITION:
@@ -673,10 +678,11 @@ class RubberBandScalper(
 
         # 2. Close positions on drawdown halt
         if self._drawdown_halt:
-            for sym in list(self.strategy.active_positions):
-                close = self.download_klines(sym, 2)
+            for pos_key in list(self.strategy.active_positions):
+                api_sym = pos_key.split(':')[0] if ':' in pos_key else pos_key
+                close = self.download_klines(api_sym, 2)
                 price = close[-1] if close is not None else 0
-                self._close_position(sym, 'drawdown_halt', price)
+                self._close_position(pos_key, 'drawdown_halt', price)
             self._save_state()
             return
 
@@ -704,9 +710,10 @@ class RubberBandScalper(
             self._reconcile_positions()
 
         # v12.5.1: Log position status AFTER sync (SL/TP verified)
-        for sym, pos in self.strategy.active_positions.items():
+        for pos_key, pos in self.strategy.active_positions.items():
+            api_sym = pos.get('symbol', pos_key.split(':')[0])
             try:
-                mark = self.client.futures_mark_price(symbol=sym)
+                mark = self.client.futures_mark_price(symbol=api_sym)
                 cur_px = float(mark['markPrice'])
             except Exception:
                 cur_px = pos.get('entry_price', 0)
@@ -723,18 +730,21 @@ class RubberBandScalper(
             bars = pos.get('bars_held', 0)
             direction = 'L' if pos.get('signal') == 1 else 'S'
             logger.info(
-                f"  [{sym}] {direction} entry=${entry_px:.4f} "
+                f"  [{pos_key}] {direction} entry=${entry_px:.4f} "
                 f"mark=${cur_px:.4f} uPnL={upnl_pct:+.2f}% bars={bars} "
                 f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}"
             )
 
         # 4. Process existing positions (always, even when paused)
-        for sym in list(self.strategy.active_positions):
+        for pos_key in list(self.strategy.active_positions):
+            # Extract Binance symbol from compound key (e.g., BTCUSDT:LONG → BTCUSDT)
+            api_sym = pos_key.split(':')[0] if ':' in pos_key else pos_key
+
             # v12.3.2: Download full OHLC for active positions to compute
             # fresh ATR. Previously only close was downloaded, so runner
             # trailing used stale ATR from entry time (on_bar never called
             # for symbols with open positions).
-            result_full = self.download_klines(sym, 200, full=True)
+            result_full = self.download_klines(api_sym, 200, full=True)
             if result_full is None:
                 continue
             close, high, low, _vol, _tb = result_full
@@ -753,39 +763,63 @@ class RubberBandScalper(
                 current_atr = 0.02
 
             exit_reason = self.strategy.update_position(
-                sym, current_price, current_atr_pct=current_atr,
+                pos_key, current_price, current_atr_pct=current_atr,
                 current_high=float(high[-1]), current_low=float(low[-1]),
             )
             if exit_reason:
                 logger.info(
-                    f"  [{sym}] Exit signal: {exit_reason} @ ${current_price:.4f}"
+                    f"  [{pos_key}] Exit signal: {exit_reason} @ ${current_price:.4f}"
                 )
+                # Straddle leg tracking: log which leg exits first
+                if ':' in pos_key and self.strategy_name == 'vol_straddle':
+                    api_sym, side = pos_key.split(':', 1)
+                    other_side = 'SHORT' if side == 'LONG' else 'LONG'
+                    other_key = f"{api_sym}:{other_side}"
+                    other_pos = self.strategy._positions.get(other_key)
+                    if other_pos:
+                        entry_o = other_pos.get('entry_price', 0)
+                        if entry_o > 0:
+                            if other_pos['signal'] == 1:
+                                o_gain = (current_price - entry_o) / entry_o
+                            else:
+                                o_gain = (entry_o - current_price) / entry_o
+                            logger.info(
+                                f"  [STRADDLE] {side} leg closed ({exit_reason}), "
+                                f"{other_side} still open "
+                                f"uPnL={o_gain*100:+.2f}% "
+                                f"bars={other_pos.get('bars_held', 0)}"
+                            )
+                    else:
+                        logger.info(
+                            f"  [STRADDLE] Last leg ({side}) closed ({exit_reason}) "
+                            f"— straddle fully unwound"
+                        )
                 if exit_reason == 'partial_close':
-                    self._partial_close_position(sym, current_price)
+                    self._partial_close_position(pos_key, current_price)
                 elif exit_reason == 'confirm_entry':
                     # Elliott: upgrade 2% exploratory → add 8% primary
-                    self._add_to_position(sym, current_price, balance)
+                    self._add_to_position(pos_key, current_price, balance)
                 elif exit_reason == 'pyramid':
                     # Elliott: pyramid using unrealized profits
-                    self._pyramid_position(sym, current_price, balance)
+                    self._pyramid_position(pos_key, current_price, balance)
                 elif exit_reason == 'cancel_exploration':
                     # Elliott: confirmation timed out → close pilot
-                    self._close_position(sym, exit_reason, current_price)
+                    self._close_position(pos_key, exit_reason, current_price)
                 else:
-                    self._close_position(sym, exit_reason, current_price)
+                    self._close_position(pos_key, exit_reason, current_price)
             else:
-                pos = self.strategy._positions.get(sym)
+                pos = self.strategy._positions.get(pos_key)
                 if pos:
                     _mh = pos.get('max_hold', self.config.max_hold)
                     logger.debug(
-                        f"  [{sym}] HOLD: bars={pos.get('bars_held', 0)}/{_mh} "
+                        f"  [{pos_key}] HOLD: bars={pos.get('bars_held', 0)}/{_mh} "
                         f"best_pnl={pos.get('best_pnl', 0)*100:.2f}%"
                     )
                     # v12.3.3: Ratchet server SL for runners to protect profits
                     if (pos.get('partial_closed')
                             and self.config.breakeven_after_partial
                             and not self.paper_mode):
-                        self._ratchet_runner_sl(sym, pos)
+                        self._ratchet_runner_sl(pos_key, pos)
 
         # 5. Look for new entries (skip if risk blocked or paused)
         if self._paused:
@@ -878,7 +912,12 @@ class RubberBandScalper(
                 move = abs(
                     close[-1] / close[-_lb - 1] - 1.0
                 )
-                candidates.append((sym, signal, move, close))
+                if signal == 2:
+                    # Straddle: expand into LONG + SHORT candidates
+                    candidates.append((sym, 1, move, close))
+                    candidates.append((sym, -1, move, close))
+                else:
+                    candidates.append((sym, signal, move, close))
 
         # Prioritize strongest moves
         candidates.sort(key=lambda x: x[2], reverse=True)
@@ -886,17 +925,47 @@ class RubberBandScalper(
         # ── Diagnostic: log scan summary every cycle ──
         top_movers = sorted(moves_seen, key=lambda x: x[1], reverse=True)[:3]
         if self.strategy_name == 'vol_straddle':
-            # VR strategy: show VR threshold, not move threshold
+            # VR strategy: show VR threshold + actual VR values
             print(format_scan_summary(len(candidates), top_movers, 0.0))
             if candidates:
                 cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
-                    top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
+                    # Show top 3 moves with VR for all TFs
+                    top3_with_vr = []
+                    for s, m in top_movers:
+                        vr_all = self.strategy.get_vr_all_tf(s)
+                        vr_str = f"15m={vr_all['15m']:.2f}/1h={vr_all['1h']:.2f}/4h={vr_all['4h']:.2f}"
+                        top3_with_vr.append(f"{s}({m*100:.2f}%, {vr_str})")
                     logger.info(
-                        f"No candidates — top moves: {', '.join(top3)} "
-                        f"(VR<{self.vs_config.d_vr_threshold}, signal=VR compression)"
+                        f"No candidates — top moves: {', '.join(top3_with_vr)} "
+                        f"(threshold VR<{self.vs_config.d_vr_threshold} any TF)"
+                    )
+
+                    # Count symbols near squeeze thresholds for strategy health
+                    near_d = 0  # VR < d_threshold + 0.05
+                    near_s = 0  # VR < s_threshold + 0.05
+                    in_squeeze = 0  # VR < d_threshold
+                    global_min_vr = 999.0
+                    closest_sym = ''
+                    for s, _ in moves_seen:
+                        vr_all = self.strategy.get_vr_all_tf(s)
+                        min_vr = min(vr_all.values())
+                        if min_vr < global_min_vr:
+                            global_min_vr = min_vr
+                            closest_sym = s
+                        if min_vr < self.vs_config.d_vr_threshold:
+                            in_squeeze += 1
+                        elif min_vr < self.vs_config.d_vr_threshold + 0.05:
+                            near_d += 1
+                        if min_vr < self.vs_config.s_vr_threshold + 0.05:
+                            near_s += 1
+                    logger.info(
+                        f"Squeeze monitor: {in_squeeze} in squeeze, "
+                        f"{near_d} near D threshold, {near_s} near S threshold "
+                        f"(of {len(moves_seen)} symbols) "
+                        f"min_vr={global_min_vr:.3f} ({closest_sym})"
                     )
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
@@ -955,11 +1024,25 @@ class RubberBandScalper(
         hwm = self._high_water_mark if self._high_water_mark > 0 else balance
         dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
 
+        # Time since last trade
+        last_trade_ago = ''
+        if self._trade_history:
+            last_t = self._trade_history[-1].get('time', '')
+            if last_t:
+                try:
+                    from datetime import datetime as _dt
+                    lt = _dt.fromisoformat(last_t)
+                    delta = datetime.now(timezone.utc) - lt
+                    hours = delta.total_seconds() / 3600
+                    last_trade_ago = f', LastTrade={hours:.1f}h ago'
+                except Exception:
+                    pass
+
         logger.info(
             f"[Summary] Trades={n_trades}, WR={wr:.0f}%, "
             f"PnL=${total_pnl:+.2f}, Balance=${balance:.2f}, "
             f"HWM=${hwm:.2f}, DD={dd_pct:.1f}%, "
-            f"Active={len(positions)}"
+            f"Active={len(positions)}{last_trade_ago}"
         )
 
         # Active position details
@@ -972,6 +1055,38 @@ class RubberBandScalper(
                 f"SL={pos.get('server_sl_order_id') or 'NONE'} "
                 f"TP={pos.get('server_tp_order_id') or 'NONE'}"
             )
+
+        # Periodic VR distribution (every 16 cycles ≈ 4h) when no positions
+        if (self.strategy_name == 'vol_straddle'
+                and len(positions) == 0
+                and self._cycle_count % 16 == 0):
+            self._log_vr_distribution()
+
+    def _log_vr_distribution(self) -> None:
+        """Log top-10 closest-to-squeeze symbols with per-TF VR.
+
+        Provides visibility into market state during extended no-signal
+        periods. Fires every ~4h (16 cycles × 15m).
+        """
+        if not hasattr(self.strategy, 'get_vr_all_tf'):
+            return
+        vr_entries: list[tuple[str, float, dict[str, float]]] = []
+        for sym in (self._cfg.symbol_whitelist or []):
+            vr_all = self.strategy.get_vr_all_tf(sym)
+            min_vr = min(vr_all.values())
+            if min_vr < 999.0:
+                vr_entries.append((sym, min_vr, vr_all))
+        if not vr_entries:
+            return
+        vr_entries.sort(key=lambda x: x[1])
+        top10 = vr_entries[:10]
+        lines = [f"  [VR Distribution] Top-10 closest to squeeze (threshold={self.vs_config.d_vr_threshold}):"]
+        for rank, (sym, min_vr, vr_all) in enumerate(top10, 1):
+            lines.append(
+                f"    {rank:2d}. {sym:<16s} min={min_vr:.3f} "
+                f"(15m={vr_all['15m']:.3f} 1h={vr_all['1h']:.3f} 4h={vr_all['4h']:.3f})"
+            )
+        logger.info('\n'.join(lines))
 
     # ==================== State Persistence ====================
 
@@ -1084,8 +1199,61 @@ class RubberBandScalper(
 
     # ==================== Entry Points ====================
 
+    def _ensure_position_mode(self) -> None:
+        """Ensure Binance account position mode matches config.
+
+        Hedge mode (dualSidePosition=true) is REQUIRED for VolStraddle
+        S_d8 straddle to open simultaneous LONG+SHORT on the same symbol.
+        Without this, all positionSide=LONG/SHORT orders fail with -4059.
+
+        One-Way mode is required for RubberBand/Elliott (they use reduceOnly).
+        """
+        if self.paper_mode:
+            return
+
+        want_hedge = (
+            self.strategy_name == 'vol_straddle'
+            and self.vs_config.hedge_mode
+        )
+
+        try:
+            resp = self.client.futures_get_position_mode()
+            current_hedge = resp.get('dualSidePosition', False)
+        except Exception as e:
+            logger.error(f"Position mode check failed: {e}")
+            return
+
+        if current_hedge == want_hedge:
+            mode_label = 'Hedge' if current_hedge else 'One-Way'
+            logger.info(f"Position mode: {mode_label} (OK)")
+            return
+
+        try:
+            self.client.futures_change_position_mode(
+                dualSidePosition=want_hedge,
+            )
+            mode_label = 'Hedge' if want_hedge else 'One-Way'
+            logger.info(f"Position mode switched to {mode_label}")
+        except BinanceAPIException as e:
+            if '-4059' in str(e):
+                # Already in desired mode (race condition)
+                pass
+            elif '-4068' in str(e):
+                # Cannot change while positions are open
+                logger.error(
+                    f"Cannot switch position mode — open positions exist. "
+                    f"Close all positions first, then restart."
+                )
+                self.discord.send(content=(
+                    "\U0001f6a8 **포지션 모드 전환 실패** — "
+                    "열린 포지션이 있어 전환 불가. 모든 포지션 청산 후 재시작 필요."
+                ))
+            else:
+                logger.error(f"Position mode change failed: {e}")
+
     def run_once(self) -> None:
         """Run a single trading cycle."""
+        self._ensure_position_mode()
         balance = self.get_balance()
         self._initial_balance = balance
         self._high_water_mark = balance
@@ -1107,6 +1275,7 @@ class RubberBandScalper(
         Starts/stops the Discord bot for interactive commands.
         """
         # Setup
+        self._ensure_position_mode()
         balance = self.get_balance()
         self._initial_balance = balance
         self._high_water_mark = balance
@@ -1152,6 +1321,10 @@ class RubberBandScalper(
                         f"{'4h' if vc.enable_4h else ''}"
                     ).strip(), 'inline': True},
                     {'name': '레버리지', 'value': f'{vc.base_leverage}x', 'inline': True},
+                    {'name': 'CW-Tier', 'value': (
+                        f"{'ON' if vc.cw_enabled else 'OFF'} "
+                        f"(min={vc.min_conviction_score})"
+                    ), 'inline': True},
                     {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
                     {'name': '커밋', 'value': commit_str, 'inline': True},
                 ],
@@ -1420,6 +1593,8 @@ def main():
     )
     args = parser.parse_args()
 
+    _setup_logging(strategy_name=args.strategy, paper_mode=args.paper)
+
     # Build config from .env settings (pydantic-settings) + CLI overrides
     settings = get_settings()
     config = RubberBandConfig(
@@ -1557,6 +1732,14 @@ def main():
             soft_eq_scale2=settings.rb_soft_eq_scale2,
             soft_eq_dd3=settings.rb_soft_eq_dd3,
             soft_eq_scale3=settings.rb_soft_eq_scale3,
+            # R34 CW-Tier Conviction Sizing
+            cw_enabled=settings.vs_cw_enabled,
+            min_conviction_score=settings.vs_min_conviction_score,
+            e2_sma_period=settings.vs_e2_sma_period,
+            e2_threshold=settings.vs_e2_threshold,
+            c2_btc_mom_threshold=settings.vs_c2_btc_mom_threshold,
+            a3_deep_vr_threshold=settings.vs_a3_deep_vr_threshold,
+            a3_long_squeeze_dur=settings.vs_a3_long_squeeze_dur,
         ) if args.strategy == 'vol_straddle' else None,
     )
 
