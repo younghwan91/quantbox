@@ -11,10 +11,11 @@ from fpdf import FPDF, XPos, YPos
 
 DEFAULT_MD = Path(__file__).resolve().parent.parent / "docs" / "backtest_results" / "e4b5831_20260302_v13_deployment.md"
 
-REG_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-BOLD_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
-# NotoSansCJK TTC index: 0=JP, 1=KR, 2=SC, 3=TC, 4=HK
-FONT_INDEX = 1  # Korean
+# Standalone NotoSansKR variable TTF — avoids CFF-based TTC rendering issues
+_FONT_DIR = Path.home() / ".local" / "share" / "fonts"
+KR_FONT = str(_FONT_DIR / "NotoSansKR.ttf")
+# Fallback: system TTC (may garble Korean glyphs on some PDF viewers)
+_TTC_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 
 MARGIN = 10
 PAGE_W = 210  # A4 width mm
@@ -115,8 +116,10 @@ def main():
     pdf.set_left_margin(MARGIN)
     pdf.set_right_margin(MARGIN)
 
-    pdf.add_font("NotoSans", "", REG_FONT, collection_font_number=FONT_INDEX)
-    pdf.add_font("NotoSans", "B", BOLD_FONT, collection_font_number=FONT_INDEX)
+    font_path = KR_FONT if Path(KR_FONT).exists() else _TTC_FONT
+    kwargs = {} if font_path == KR_FONT else {"collection_font_number": 1}
+    pdf.add_font("NotoSans", "", font_path, **kwargs)
+    pdf.add_font("NotoSans", "B", font_path, **kwargs)
 
     pdf.add_page()
 
