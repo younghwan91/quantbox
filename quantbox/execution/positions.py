@@ -83,10 +83,21 @@ class PositionMixin:
             tf_label = sig_meta.get('tf', '15m')
             max_hold = sig_meta.get('max_hold', vs.get_max_hold(tf_label))
             is_straddle = sig_meta.get('straddle', False)
+            strategy_type = sig_meta.get('strategy_type', 'vr_squeeze')
 
-            # ── R34 CW-Tier Conviction Sizing ──
+            # ── R44d V17: MA Cluster uses different leverage ──
+            # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
+            if 'leverage_override' in sig_meta:
+                leverage = sig_meta['leverage_override']
+                notional = per_slot_capital * leverage
+                logger.info(
+                    f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x "
+                    f"(override, SL={sl_pct*100:.0f}%)"
+                )
+
+            # ── R34 CW-Tier Conviction Sizing (VR squeeze only) ──
             conviction_score = sig_meta.get('conviction_score', 0)
-            if vs.cw_enabled and vs.cw_multipliers:
+            if vs.cw_enabled and vs.cw_multipliers and strategy_type == 'vr_squeeze':
                 idx = min(conviction_score, len(vs.cw_multipliers) - 1)
                 cw_mult = vs.cw_multipliers[idx]
                 notional *= cw_mult
@@ -262,7 +273,8 @@ class PositionMixin:
                 f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
                 f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
                 f"TF={tf_label}, SL={sl_pct*100:.1f}%, TP={tp_pct*100:.1f}%, "
-                f"conviction={conviction_score}/4)"
+                f"{strategy_type}"
+                f"{f', conviction={conviction_score}/4' if strategy_type == 'vr_squeeze' else ''})"
             )
 
             sl_order_id = self._place_server_stop_loss(
