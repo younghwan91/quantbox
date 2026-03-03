@@ -1,10 +1,11 @@
 """VolStraddle strategy configuration dataclass.
 
-R39-VR856: VR compression detector with multi-TF (15m/1h/4h) signal generation.
-Full 6yr validated: N=2,265 @10 slots, AnnRet=+187%, DD=32%, Calmar=5.8.
+R43-Exit: VR compression detector with trailing stop exit (R43 validated).
+Full 6yr validated: N=2,336 @10 slots, PF=1.351, Calmar=9.4, DD=30.0%.
 6 consecutive profitable years (2020-2025). 0 losing years.
 
-Parameters are locked to R39 backtest values for parity.
+v13.1 changes (R43): Directional TP 5%→12% + trailing stop (activate 2%, distance 0.3%).
+Straddle exit unchanged (SL=1.5%, TP=5%).
 Do NOT change without re-running backtest validation.
 """
 from __future__ import annotations
@@ -26,7 +27,14 @@ class VolStraddleConfig:
     # ── D_mom8: Directional Momentum ──
     d_vr_threshold: float = 0.50    # A1-D50: D VR entry threshold (was 0.45)
     d_sl: float = 0.01              # 1% stop loss
-    d_tp: float = 0.05              # 5% take profit
+    d_tp: float = 0.12              # 12% hard TP ceiling (R43: was 5%)
+
+    # ── D_mom8: Trailing Stop (R43 validated) ──
+    # Once unrealized gain reaches trail_activate, a trailing stop
+    # follows at trail_distance below peak. Hard TP at d_tp (12%).
+    # Mechanism: lets VR squeeze explosive releases run beyond fixed TP.
+    d_trail_activate: float = 0.02  # Activate trailing after +2% gain
+    d_trail_distance: float = 0.003 # Trail 0.3% behind peak
 
     # ── S_d8: Straddle (requires Binance Hedge Mode) ──
     s_vr_threshold: float = 0.55    # S VR entry threshold
@@ -55,12 +63,12 @@ class VolStraddleConfig:
     warmup_4h: int = 13             # ~52h of 4h bars
 
     # ── Position Sizing & Leverage ──
-    base_leverage: float = 3.0       # R40 tournament: 3x (63% Kelly, optimal 4.8x)
-    max_leverage: float = 20.0      # Hard cap (exchange safety limit)
+    base_leverage: float = 25.0      # v13.0: 25x (L/N=2.5, Calmar 10.12)
+    max_leverage: float = 25.0      # Hard cap (matches base_leverage)
     risk_per_trade: float = 0.01    # 1% risk per trade
 
     # ── Risk Management ──
-    max_concurrent: int = 15         # R40: 15 slots (was 10)
+    max_concurrent: int = 10         # v13.0: 10 slots (L/N=25/10=2.5)
     max_drawdown_pct: float = 0.10  # 10% session drawdown → halt
 
     # ── Costs (conservative) ──

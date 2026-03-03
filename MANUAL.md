@@ -694,7 +694,9 @@ VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발�
 | `VS_VR_LONG` | 56 | 장기 ATR 기간 (R39: was 50) |
 | `VS_D_VR_THRESHOLD` | 0.50 | D_mom8 VR 진입 임계값 |
 | `VS_D_SL` | 0.01 | 1% 손절 |
-| `VS_D_TP` | 0.05 | 5% 익절 |
+| `VS_D_TP` | 0.12 | 12% 하드 TP 천장 (R43: trail이 먼저 작동) |
+| `VS_D_TRAIL_ACTIVATE` | 0.02 | R43: +2% 이상 미실현 수익 시 트레일 활성화 |
+| `VS_D_TRAIL_DISTANCE` | 0.003 | R43: 고점 대비 0.3% 되돌림 시 트레일 청산 |
 | `VS_MOMENTUM_PERIOD` | 8 | 방향 결정 모멘텀 기간 |
 | `VS_MAX_HOLD_15M` | 192 | 15m TF 최대 보유 (=48h) |
 | `VS_MAX_HOLD_1H` | 48 | 1h TF 최대 보유 (=48h) |

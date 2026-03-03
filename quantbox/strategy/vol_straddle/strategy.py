@@ -470,9 +470,13 @@ class VolStraddleStrategy:
     ) -> str | None:
         """Check if position should be closed.
 
-        Simple SL/TP/max_hold exit — matches R35 backtest exactly.
-        NO PBT, NO trailing, NO partial close.
-        This ensures backtest-live parity.
+        Directional trades: SL → Trailing Stop → Hard TP (R43 validated).
+        Straddle trades: unchanged SL/TP/max_hold exit.
+
+        Trailing stop (directional only):
+        - Before trail_activate: fixed SL only.
+        - After best_gain >= trail_activate: trail at peak - distance.
+        - Hard TP at d_tp (12%) as safety ceiling.
 
         Uses intra-bar high/low for SL/TP detection when available,
         matching the backtest's bar-by-bar SL/TP checking.
@@ -515,8 +519,49 @@ class VolStraddleStrategy:
         if best_gain > pos.get('best_pnl', 0.0):
             pos['best_pnl'] = best_gain
 
-        # SL check (backtest uses low[j] for long, high[j] for short)
-        if worst_gain <= -sl_pct:
+        # ── Straddle: unchanged simple SL/TP/max_hold exit ──
+        is_straddle = pos.get('is_straddle', False)
+        if is_straddle:
+            return self._exit_simple(pos, symbol, worst_gain, best_gain,
+                                     sl_pct, tp_pct, max_hold)
+
+        # ── Directional: Trailing Stop (R43) ──
+        trail_activate = self.config.d_trail_activate
+        trail_distance = self.config.d_trail_distance
+
+        # Update peak gain tracking
+        peak_gain = pos.get('peak_gain', 0.0)
+        if best_gain > peak_gain:
+            peak_gain = best_gain
+            pos['peak_gain'] = peak_gain
+
+        trail_active = pos.get('trail_active', False)
+
+        # Activate trailing stop when peak gain reaches threshold
+        if not trail_active and peak_gain >= trail_activate:
+            trail_active = True
+            pos['trail_active'] = True
+            logger.info(
+                f"[{symbol}] Trail ACTIVATED: peak_gain={peak_gain*100:+.3f}% "
+                f"≥ activate={trail_activate*100:.1f}% "
+                f"trail_stop={peak_gain - trail_distance:.4f}"
+            )
+
+        # Check trailing stop (must come before SL check)
+        if trail_active:
+            trail_stop_gain = peak_gain - trail_distance
+            if worst_gain <= trail_stop_gain:
+                exit_pnl = max(trail_stop_gain, -sl_pct)
+                logger.info(
+                    f"[{symbol}] TRAIL HIT: worst={worst_gain*100:+.3f}% "
+                    f"≤ trail_stop={trail_stop_gain*100:+.3f}% "
+                    f"(peak={peak_gain*100:+.3f}% - dist={trail_distance*100:.1f}%) "
+                    f"bars={pos['bars_held']} exit_pnl≈{exit_pnl*100:+.3f}%"
+                )
+                return 'trailing_stop'
+
+        # SL check (only when trailing is NOT active — same as backtest)
+        if not trail_active and worst_gain <= -sl_pct:
             logger.info(
                 f"[{symbol}] SL hit: worst_gain={worst_gain*100:+.3f}% "
                 f"vs SL={sl_pct*100:.1f}% bars={pos['bars_held']} "
@@ -526,14 +571,12 @@ class VolStraddleStrategy:
             )
             return 'stop_loss'
 
-        # TP check (backtest uses high[j] for long, low[j] for short)
+        # Hard TP check (safety ceiling at 12%)
         if best_gain >= tp_pct:
             logger.info(
-                f"[{symbol}] TP hit: best_gain={best_gain*100:+.3f}% "
-                f"vs TP={tp_pct*100:.1f}% bars={pos['bars_held']} "
-                f"entry={entry:.6f} "
-                f"{'high' if pos['signal']==1 else 'low'}="
-                f"{current_high if pos['signal']==1 else current_low}"
+                f"[{symbol}] Hard TP hit: best_gain={best_gain*100:+.3f}% "
+                f"≥ TP={tp_pct*100:.1f}% bars={pos['bars_held']} "
+                f"entry={entry:.6f}"
             )
             return 'target'
 
@@ -545,6 +588,31 @@ class VolStraddleStrategy:
             )
             return 'max_hold'
 
+        return None
+
+    def _exit_simple(
+        self, pos: dict, symbol: str,
+        worst_gain: float, best_gain: float,
+        sl_pct: float, tp_pct: float, max_hold: int,
+    ) -> str | None:
+        """Simple SL/TP/max_hold exit for straddle legs."""
+        if worst_gain <= -sl_pct:
+            logger.info(
+                f"[{symbol}] SL hit: worst_gain={worst_gain*100:+.3f}% "
+                f"vs SL={sl_pct*100:.1f}% bars={pos['bars_held']}"
+            )
+            return 'stop_loss'
+        if best_gain >= tp_pct:
+            logger.info(
+                f"[{symbol}] TP hit: best_gain={best_gain*100:+.3f}% "
+                f"vs TP={tp_pct*100:.1f}% bars={pos['bars_held']}"
+            )
+            return 'target'
+        if pos['bars_held'] >= max_hold:
+            logger.info(
+                f"[{symbol}] Max hold reached: bars={pos['bars_held']}/{max_hold}"
+            )
+            return 'max_hold'
         return None
 
     # ══════════════════════════════════════════════════════════════════
@@ -625,6 +693,10 @@ class VolStraddleStrategy:
             'tp': tp,
             'tf': tf,
             'max_hold': max_hold,
+            'is_straddle': kwargs.get('is_straddle', False),
+            # R43 Trailing Stop (directional only)
+            'trail_active': False,
+            'peak_gain': 0.0,
             # Server bracket IDs
             'server_sl_order_id': server_sl_order_id,
             'server_tp_order_id': server_tp_order_id,
