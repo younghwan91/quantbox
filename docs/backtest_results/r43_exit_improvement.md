@@ -22,9 +22,20 @@ Comprehensive exit optimization research across 6 vectors, 5 iterations (R43–R
 | PF | 1.280 | 1.351 | +5.5% |
 | EV | +32.1bp | +38.3bp | +6.2bp |
 | WR | 43.4% | 47.3% | +3.9pp |
-| AnnRet | +187.2% | +280.5% | +93.3pp |
-| MaxDD | 32.4% | **30.0%** | **-2.4pp** |
-| Calmar | 5.8 | 9.4 | **+62%** |
+| AnnRet (1x) | +187.2% | +280.5% | +93.3pp |
+| MaxDD (1x) | 32.4% | **30.0%** | **-2.4pp** |
+| Calmar (1x) | 5.8 | 9.4 | **+62%** |
+
+**P1 Leveraged (25x / 10 slots, L/N=2.5)**:
+
+| Metric | Baseline (2.5x) | P1 (2.5x) | Change |
+|--------|------|----|----|
+| AnnRet | +686.9% | +1493.0% | +806.1pp |
+| MaxDD | 67.9% | **61.6%** | **-6.3pp** |
+| Calmar | 10.1 | **24.2** | **+14.1** |
+
+> Note: PF, EV, WR은 개별 트레이드 비율이므로 레버리지 무관 (1x와 동일).
+
 
 **P3 (Aggressive)**: Trail activate=4.0%, distance=0.3%, TP=12%
 
