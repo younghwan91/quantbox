@@ -523,3 +523,129 @@ class TestStrategyIntegration:
             current_high=101.0, current_low=100.0,
         )
         assert result == 'max_hold'
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  v14.0 Audit: Stateless Duration & Edge Cases
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStatelessDuration:
+    """Verify the stateless backward scan produces correct duration."""
+
+    def test_duration_output_matches_cluster_bars(self):
+        """duration_out[0] reflects actual consecutive cluster bars."""
+        n = 30
+        close = np.full(n, 100.0)
+        sma20 = np.full(n, 110.0)   # NOT clustered
+        sma50 = np.full(n, 90.0)
+        sma100 = np.full(n, 100.0)
+        sma200 = np.full(n, 100.0)
+        mom = np.full(n, 0.05)
+
+        # Last 15 bars are clustered
+        for i in range(n - 15, n):
+            sma20[i] = 100.3
+            sma50[i] = 99.7
+            sma100[i] = 100.1
+            sma200[i] = 99.9
+
+        close[-1] = 105.0  # breakout
+
+        cooldown = np.zeros(1, dtype=np.int64)
+        dur = np.zeros(1, dtype=np.int64)
+
+        check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown, duration_out=dur,
+        )
+        assert dur[0] == 15
+
+    def test_duration_zero_when_last_bar_not_clustered(self):
+        """If last bar isn't clustered, duration=0 even if earlier bars were."""
+        n = 20
+        close = np.full(n, 100.0)
+        # All bars clustered EXCEPT the last one
+        sma20 = np.full(n, 100.3)
+        sma50 = np.full(n, 99.7)
+        sma100 = np.full(n, 100.1)
+        sma200 = np.full(n, 99.9)
+        # Dissolve cluster on last bar
+        sma20[-1] = 110.0
+        sma50[-1] = 90.0
+        mom = np.full(n, 0.05)
+
+        cooldown = np.zeros(1, dtype=np.int64)
+        dur = np.zeros(1, dtype=np.int64)
+
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown, duration_out=dur,
+        )
+        assert sig == 0
+        assert dur[0] == 0
+
+    def test_sma200_min_data_requirement(self):
+        """check_ma_cluster returns 0 when SMA200 is NaN (insufficient data)."""
+        n = 100  # Not enough for SMA(200)
+        close = np.full(n, 100.0)
+        sma200 = np.full(n, np.nan)  # All NaN
+        sma20 = np.full(n, 100.0)
+        sma50 = np.full(n, 100.0)
+        sma100 = np.full(n, 100.0)
+        mom = np.full(n, 0.05)
+
+        cooldown = np.zeros(1, dtype=np.int64)
+        dur = np.zeros(1, dtype=np.int64)
+
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown, duration_out=dur,
+        )
+        assert sig == 0
+        assert dur[0] == 0
+
+
+class TestMaxHoldTfConversion:
+    """Verify max_hold is correctly converted from native TF to 15m bars."""
+
+    def test_4h_max_hold_in_signal_meta(self):
+        """MA cluster signal metadata has max_hold = 12 * 16 = 192."""
+        from quantbox.strategy.vol_straddle.strategy import _TF_TO_15M
+
+        assert _TF_TO_15M == {'15m': 1, '1h': 4, '4h': 16}
+
+        strategy = VolStraddleStrategy(VolStraddleConfig(
+            enable_15m=False, enable_1h=False, enable_4h=True,
+            ma_cluster_enabled=True,
+        ))
+
+        # Build data where MA cluster fires
+        n = 250
+        data = {
+            'close': np.full(n, 100.0, dtype=np.float64),
+            'high': np.full(n, 101.0, dtype=np.float64),
+            'low': np.full(n, 99.0, dtype=np.float64),
+        }
+        data['close'][-1] = 105.0  # breakout
+
+        strategy.update_htf_data('TESTUSDT', data['close'], data['high'], data['low'])
+        strategy.update_market_data(
+            'TESTUSDT', np.ones(500), np.ones(500),
+            np.full(500, 101.0), np.full(500, 99.0),
+        )
+
+        sig = strategy.on_bar('TESTUSDT', np.full(500, 100.0))
+        if sig != 0:
+            meta = strategy.get_last_signal_meta('TESTUSDT')
+            assert meta['max_hold'] == 12 * 16  # 192 bars of 15m
+
+    def test_vr_1h_max_hold_conversion(self):
+        """VR 1h signal should have max_hold = 48 * 4 = 192."""
+        from quantbox.strategy.vol_straddle.strategy import _TF_TO_15M
+        cfg = VolStraddleConfig()
+        expected = cfg.get_max_hold('1h') * _TF_TO_15M['1h']
+        assert expected == 48 * 4  # 192

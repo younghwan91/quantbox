@@ -1213,13 +1213,15 @@ class PositionMixin:
                 if self.config.partial_exit_enabled:
                     new_tp_oid = None
                 else:
+                    # v14.0: Use per-position TP (not RubberBand default).
+                    retry_tp = pos.get('tp', self.config.target_retrace)
                     new_tp_oid = self._place_server_take_profit(
                         symbol=api_symbol,
                         signal=pos['signal'],
                         quantity=quantity,
                         entry_price=pos['entry_price'],
                         move_size=pos['move_size'],
-                        target_retrace=self.config.target_retrace,
+                        target_retrace=retry_tp,
                         position_side=pos.get('position_side'),
                     )
             # Update existing position's server order IDs
