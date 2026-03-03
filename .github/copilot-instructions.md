@@ -55,6 +55,15 @@
 
 **main에 머지할 때는 반드시 버전 태그 생성 및 push.** `git tag -a vX.Y.Z -m "..."`
 
+## 리서치 베이스라인 규칙
+
+1. **Sim 함수 재구현 금지.** baseline은 반드시 `scaling_r38.py`의 `collect_trades()` + `portfolio_sim()`을 import. 새로 짜면 momentum=0 처리, squeeze 카운터 리셋 등 미묘한 차이로 수치가 틀어진다.
+2. **Config는 `CFG_V13` import.** 하드코딩 금지.
+3. **Phase 1에서 N, PF가 `docs/backtest_results/` 내 최신 정식 리포트와 ±1% 이내인지 확인.** 불일치 시 즉시 중단.
+4. **슬롯 수 명시.** 15 slots ≠ 10 slots. Production은 10 slots.
+5. **재구현 불가피 시** static params로 baseline 재현 검증을 **먼저** 실행.
+6. **베이스라인 = 배포 수치. 예외 없음.** 리서치에서 출력한 baseline이 배포 리포트와 다르면 리서치 전체가 무효.
+
 ## 실전 교훈 (Incident-Driven Rules)
 
 > 실제 자금 손실에서 비롯된 규칙. 절대 반복 금지.
