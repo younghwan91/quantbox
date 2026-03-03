@@ -82,6 +82,7 @@ class PositionMixin:
             tp_pct = sig_meta.get('tp', vs.d_tp)
             tf_label = sig_meta.get('tf', '15m')
             max_hold = sig_meta.get('max_hold', vs.get_max_hold(tf_label))
+            is_straddle = sig_meta.get('straddle', False)
 
             # ── R34 CW-Tier Conviction Sizing ──
             conviction_score = sig_meta.get('conviction_score', 0)
@@ -312,6 +313,7 @@ class PositionMixin:
                 sl=sl_pct, tp=tp_pct, tf=tf_label,
                 max_hold=max_hold,
                 position_side=pos_side,
+                is_straddle=is_straddle,
             )
 
             # Paper balance cost
@@ -350,13 +352,13 @@ class PositionMixin:
                 'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} {_dir} | VS 진입",
                 'color': 0x00C853 if signal == 1 else 0xFF1744,
                 'fields': [
-                    {'name': '전략', 'value': f'VolStraddle D ({tf_label})', 'inline': True},
+                    {'name': '전략', 'value': f"VolStraddle {'S' if is_straddle else 'D'} ({tf_label})", 'inline': True},
                     {'name': '진입가', 'value': f'${fill_price:.4f}', 'inline': True},
                     {'name': '포지션', 'value': f'${fill_qty * fill_price:,.2f}', 'inline': True},
                     {'name': '레버리지', 'value': f'{lev_int}x', 'inline': True},
                     {'name': '🎯 TP', 'value': f'${tp_price:.4f} ({tp_pct*100:.1f}%)', 'inline': True},
                     {'name': '🛑 SL', 'value': f'${sl_price:.4f} ({sl_pct*100:.1f}%)', 'inline': True},
-                    {'name': 'TP 방식', 'value': _tp_tag, 'inline': True},
+                    {'name': 'Exit', 'value': 'SL/TP' if is_straddle else f'Trail({vs.d_trail_activate*100:.0f}%/{vs.d_trail_distance*100:.1f}%)', 'inline': True},
                     {'name': 'SL 방식', 'value': _sl_tag, 'inline': True},
                     {'name': '확신도', 'value': f'{conviction_score}/4', 'inline': True},
                     {'name': '슬롯', 'value': f'{n_active}/{self.vs_config.max_concurrent}', 'inline': True},
