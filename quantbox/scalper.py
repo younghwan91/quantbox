@@ -727,7 +727,9 @@ class RubberBandScalper(
                 upnl_pct = 0.0
             sl_id = pos.get('server_sl_order_id')
             tp_id = pos.get('server_tp_order_id')
-            bars = pos.get('bars_held', 0)
+            # Use bars_held+1 to match the value AFTER this cycle's update,
+            # consistent with the Summary section printed later.
+            bars = pos.get('bars_held', 0) + 1
             direction = 'L' if pos.get('signal') == 1 else 'S'
             logger.info(
                 f"  [{pos_key}] {direction} entry=${entry_px:.4f} "
@@ -1332,6 +1334,10 @@ class RubberBandScalper(
         self._daily_start_balance = balance
         self._load_state()
 
+        # Refresh balance after state load (paper_balance may have been
+        # restored from saved state, overriding the settings default).
+        balance = self.get_balance()
+
         mode_str = "PAPER" if self.paper_mode else "LIVE"
         n_symbols = len(self._cfg.symbol_whitelist) if self._cfg.symbol_whitelist else 0
         self._print_startup_banner(balance, n_symbols)
@@ -1535,6 +1541,12 @@ class RubberBandScalper(
                 entry_mode='vr_compression',
                 min_confidence=0.0,
                 testnet=settings.binance_testnet,
+                ma_cluster_enabled=vc.ma_cluster_enabled,
+                ma_cluster_pct=vc.ma_cluster_pct,
+                ma_cluster_min_duration=vc.ma_cluster_min_duration,
+                ma_cluster_sl=vc.ma_cluster_sl,
+                ma_cluster_tp=vc.ma_cluster_tp,
+                ma_cluster_leverage=vc.ma_cluster_leverage,
             )
         else:
             print_system_info(
