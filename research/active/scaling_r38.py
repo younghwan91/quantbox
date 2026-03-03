@@ -68,6 +68,13 @@ CFG_A = {"sp": 5, "lp": 35, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 8,
 CFG_BL = {"sp": 7, "lp": 50, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 8,
           "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
 
+# v13.0.1 Champion — canonical baseline for all research
+# Reference: R40 deep stats (748630b), R39 yearly (d70cd2f)
+# 15 slots: N=2,280, PF=1.285, WR=43.4%, EV=+32.7bp, t=5.42
+# 10 slots (production): N=2,265, PF=1.280, AnnRet=+187.2%, DD=32.4%, Calmar=5.8
+CFG_V13 = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 4,
+           "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
+
 
 def get_commit_short() -> str:
     try:
