@@ -17,6 +17,16 @@
 - **v13.0 Aggressive**: 25x leverage @10 slots (L/N=2.5), AnnRet=+687%, DD=68%, Calmar 10.12, 6년 연속 흑자
 - **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
 
+### 📐 MA Cluster Squeeze — 4h SMA Convergence Breakout (V17, R44d)
+- **MA 클러스터 감지**: SMA(20/50/100/200) 4선 수렴도 ≤ 3% 지속 ≥ 8바 (32h) → 브레이크아웃 포착
+- **4h 전용**: 상위 타임프레임에서만 동작, VR squeeze와 93.7% 비중복
+- **Momentum(8) 방향**: 클러스터 이탈 시 모멘텀 방향으로 진입
+- **리스크 패리티**: 12x leverage × 2% SL ≈ 25x × 1% SL (동일 per-trade risk)
+- **Simple Exit**: SL=2%, TP=8%, MaxHold=12바 (48h), 트레일링 스탑 없음
+- **One-Signal-Per-Episode**: 클러스터 해소 전까지 재진입 차단 (쿨다운)
+- **백테스트 (4.7yr, 50 심볼)**: N=1,836, PF=1.285, WR=38.6%, EV=+33.2bp, DD=35.5%, Calmar=5.4
+- **결합 포트폴리오**: N=3,295, Calmar=10.8 (VR 단독 4.3의 2.5배), P(PF≥1.0)=100%, 6/6년 흑자
+
 ### 🔥 Rubber Band Scalper (v12.6 — ATR Stop + Climax Filter)
 - **v12.6 Climax Volume Filter + ATR Stop (R21, 2026-02-24)**:
   - **ATR-Based Stop**: `SL = clamp(2.0 × ATR_pct, 0.5%, 4.0%)` — 고정 0.382×에서 적응형 스탑으로 전환, Ghost-SL 문제 해결
@@ -218,10 +228,10 @@ quantbox/
 │   │   ├── config.py       # RubberBandConfig (전략 파라미터)
 │   │   ├── signals.py      # Numba 시그널 엔진 (23개 함수)
 │   │   └── strategy.py     # RubberBandStrategy 클래스
-│   ├── vol_straddle/       # VolStraddle VR 압축 감지기 (R40-VR856-3x)
-│   │   ├── config.py       # VolStraddleConfig (R40 tournament 파라미터)
-│   │   ├── signals.py      # Numba VR/모멘텀/리샘플링 (8개 함수)
-│   │   └── strategy.py     # VolStraddleStrategy 클래스
+│   ├── vol_straddle/       # VolStraddle VR 압축 + MA 클러스터 스퀴즈
+│   │   ├── config.py       # VolStraddleConfig (VR + MA cluster 파라미터)
+│   │   ├── signals.py      # Numba VR/모멘텀/SMA/MA클러스터 (10개 함수)
+│   │   └── strategy.py     # VolStraddleStrategy 클래스 (VR + MA cluster)
 │   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
@@ -245,7 +255,7 @@ scripts/                    # 리서치 & 유틸리티 스크립트
 ├── win_rate_check.py           # 실시간 Win Rate 검증
 ├── generate_report_pdf.py      # 단일 마크다운 → PDF (Chrome headless)
 └── generate_combined_report.py # R40×v13 종합 PDF 리포트 (9 charts)
-tests/                      # 유닛 테스트 (824개, 42 파일)
+tests/                      # 유닛 테스트 (859개, 43 파일)
 \`\`\`
 
 ## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)

@@ -2,8 +2,8 @@
 
 **암호화폐 트레이딩 프레임워크 완벽 가이드 — Rubber Band Scalper + Elliott Wave + VolStraddle**
 
-> 버전: 13.0  
-> 최종 업데이트: 2026년 3월 2일
+> 버전: 13.2  
+> 최종 업데이트: 2026년 3월 5일
 
 ---
 
@@ -787,6 +787,49 @@ uv run python -m quantbox.scalper --strategy vol_straddle --paper
 1. Binance 앱/웹 → Futures → Settings ⚙️ → Position Mode → **Hedge Mode** 활성화
 2. `.env`에 `VS_HEDGE_MODE=true`, `VS_STRADDLE_ENABLED=true` 설정
 3. 모든 기존 주문/포지션을 정리한 후 전환 (열린 주문이 있으면 `-4067` 에러)
+
+### 3.6.7 MA Cluster Squeeze — 4h SMA 수렴 브레이크아웃 (V17, R44d)
+
+VR squeeze와 **93.7% 비중복**인 보완 전략. 4개 이동평균이 수렴하는 구간에서 브레이크아웃을 포착합니다.
+
+**핵심 원리:**
+- SMA(20/50/100/200) 4선의 spread = (max − min) / close
+- spread ≤ `cluster_pct` (3%) 상태가 `min_duration` (8바 = 32h) 이상 지속 → 클러스터 감지
+- 가격이 MA 밴드 밖으로 이탈 + |momentum(8)| > 0.3% → 브레이크아웃 신호
+- momentum(8) 방향으로 LONG/SHORT 진입
+- **One-Signal-Per-Episode**: 클러스터가 해소될 때까지 재진입 차단 (쿨다운)
+
+**리스크 패리티:**
+- VR squeeze: 25x × 1% SL = 25% 명목 리스크
+- MA cluster: 12x × 2% SL = 24% 명목 리스크
+- → per-trade risk 거의 동일
+
+**CW-Tier 적용 안 됨** — MA cluster는 VR 기반 신호가 아니므로 conviction sizing이 별도 적용되지 않습니다.
+
+| 파라미터 | 값 | 설명 |
+|---------|-----|------|
+| `VS_MA_CLUSTER_ENABLED` | true | MA 클러스터 스퀴즈 활성화 |
+| `VS_MA_CLUSTER_PCT` | 0.03 | 3% 최대 수렴도 |
+| `VS_MA_CLUSTER_MIN_DURATION` | 8 | 최소 8바 (32h) 클러스터 지속 |
+| `VS_MA_CLUSTER_SL` | 0.02 | 2% 손절 |
+| `VS_MA_CLUSTER_TP` | 0.08 | 8% 익절 |
+| `VS_MA_CLUSTER_MAX_HOLD_4H` | 12 | 12바 (48h) 최대 보유 |
+| `VS_MA_CLUSTER_LEVERAGE` | 12.0 | 12x 레버리지 (리스크 패리티) |
+| `VS_MA_CLUSTER_SMA_PERIODS` | [20,50,100,200] | SMA 기간 목록 |
+
+**Exit 방식:** Simple exit (SL/TP/MaxHold만 적용). 트레일링 스탑 없음 — R44d 백테스트와 동일.
+
+**백테스트 (4.7yr, 50 심볼):**
+
+| 지표 | V17 단독 | VR+V17 결합 |
+|------|---------|------------|
+| N (트레이드) | 1,836 | 3,295 |
+| PF (수익 팩터) | 1.285 | 1.287 |
+| WR (승률) | 38.6% | — |
+| EV (기대치) | +33.2bp | — |
+| DD (최대 낙폭) | 35.5% | 41.2% |
+| Calmar | 5.4 | **10.8** |
+| P(PF≥1.0) | 100% | 100% |
 
 ---
 
