@@ -752,7 +752,7 @@ class RubberBandScalper(
             current_price = close[-1]
 
             # v12.3.2: Compute FRESH ATR for PBT runner trailing
-            # VolStraddle doesn't use ATR-based trailing; pass default.
+            # VolStraddle uses R43 trailing stop (client-side, no ATR needed).
             if self.strategy_name == 'vol_straddle':
                 current_atr = 0.02
             elif self.config.atr_period > 0 and len(close) >= self.config.atr_period:
@@ -1190,6 +1190,16 @@ class RubberBandScalper(
                 )
                 self.strategy._positions[sym]['_server_sl_pct'] = pos.get(
                     '_server_sl_pct', 0.0
+                )
+                # R43: Trailing stop state for directional trades
+                self.strategy._positions[sym]['trail_active'] = pos.get(
+                    'trail_active', False
+                )
+                self.strategy._positions[sym]['peak_gain'] = pos.get(
+                    'peak_gain', 0.0
+                )
+                self.strategy._positions[sym]['is_straddle'] = pos.get(
+                    'is_straddle', False
                 )
 
         logger.info(
@@ -1706,6 +1716,8 @@ def main():
             d_vr_threshold=settings.vs_d_vr_threshold,
             d_sl=settings.vs_d_sl,
             d_tp=settings.vs_d_tp,
+            d_trail_activate=settings.vs_d_trail_activate,
+            d_trail_distance=settings.vs_d_trail_distance,
             momentum_period=settings.vs_momentum_period,
             s_vr_threshold=settings.vs_s_vr_threshold,
             s_squeeze_dur=settings.vs_s_squeeze_dur,
