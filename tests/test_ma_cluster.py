@@ -94,24 +94,41 @@ class TestCheckMaCluster:
 
     def test_no_signal_before_duration(self):
         """No signal when cluster hasn't persisted long enough."""
-        close, sma20, sma50, sma100, sma200, mom = self._make_converging_data(
-            cluster_bars=3,  # < min_duration=8
-        )
-        count_arr = np.zeros(1, dtype=np.int64)
+        # Only 3 bars of convergence (< min_duration=8)
+        n = 210
+        close = np.full(n, 100.0)
+        sma20 = np.full(n, 110.0)   # 10% spread — NOT clustered
+        sma50 = np.full(n, 90.0)
+        sma100 = np.full(n, 100.0)
+        sma200 = np.full(n, 100.0)
+
+        # Only last 3 bars are clustered
+        for i in range(n - 3, n):
+            sma20[i] = 100.3
+            sma50[i] = 99.7
+            sma100[i] = 100.1
+            sma200[i] = 99.9
+
+        close[-1] = 105.0  # breakout
+        mom = np.zeros(n)
+        mom[-1] = 0.05
+
         cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
             close, sma20, sma50, sma100, sma200, mom,
             cluster_pct=0.03, min_duration=8,
-            cluster_count_arr=count_arr, in_cooldown_arr=cooldown_arr,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
         )
         assert sig == 0
+        assert duration_out[0] == 3  # Only 3 bars of cluster
 
     def test_signal_after_duration(self):
         """Signal fires when cluster persists >= min_duration with breakout."""
         n = 250
         close = np.full(n, 100.0)
-        # All SMAs within 1% for 20 bars (well above min_duration=8)
+        # All SMAs within 1% for all bars (well above min_duration=8)
         sma20 = np.full(n, 100.5)
         sma50 = np.full(n, 99.5)
         sma100 = np.full(n, 100.2)
@@ -124,25 +141,47 @@ class TestCheckMaCluster:
         mom = np.zeros(n)
         mom[-1] = 0.05
 
-        count_arr = np.zeros(1, dtype=np.int64)
         cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
 
-        # Simulate bar-by-bar advancement
-        for i in range(n):
-            c = close[:i + 1]
-            s20 = sma20[:i + 1]
-            s50 = sma50[:i + 1]
-            s100 = sma100[:i + 1]
-            s200 = sma200[:i + 1]
-            m = mom[:i + 1]
-            sig = check_ma_cluster(
-                c, s20, s50, s100, s200, m,
-                cluster_pct=0.03, min_duration=8,
-                cluster_count_arr=count_arr, in_cooldown_arr=cooldown_arr,
-            )
-
-        # Last bar should have signal (breakout + duration met)
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+        )
         assert sig == 1  # Positive momentum → long
+        assert duration_out[0] >= 8
+
+    def test_idempotent_repeated_calls(self):
+        """Calling with the same data multiple times fires only once (cooldown)."""
+        n = 50
+        close = np.full(n, 100.0)
+        sma20 = np.full(n, 100.3)
+        sma50 = np.full(n, 99.7)
+        sma100 = np.full(n, 100.1)
+        sma200 = np.full(n, 99.9)
+        mom = np.full(n, 0.05)
+        close[-1] = 105.0
+
+        cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
+
+        # First call → signal fires
+        sig1 = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+        )
+        assert sig1 == 1
+
+        # Second call with SAME data → blocked by cooldown
+        sig2 = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+        )
+        assert sig2 == 0
+        assert cooldown_arr[0] == 1  # Still in cooldown
 
     def test_cooldown_blocks_second_signal(self):
         """After signal fires, no second signal until cluster dissolves."""
@@ -157,24 +196,17 @@ class TestCheckMaCluster:
         # Breakout
         close[-1] = 105.0
 
-        count_arr = np.zeros(1, dtype=np.int64)
         cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
 
-        # Bar-by-bar
-        sig_first = 0
-        for i in range(n):
-            sig = check_ma_cluster(
-                close[:i + 1], sma20[:i + 1], sma50[:i + 1],
-                sma100[:i + 1], sma200[:i + 1], mom[:i + 1],
-                cluster_pct=0.03, min_duration=8,
-                cluster_count_arr=count_arr, in_cooldown_arr=cooldown_arr,
-            )
-            if sig != 0 and sig_first == 0:
-                sig_first = sig
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+        )
+        assert sig != 0
 
-        assert sig_first != 0
-
-        # Now try again with same state — should be blocked (cooldown)
+        # Try with new breakout bar but cluster still active
         close_next = np.full(51, 100.0)
         close_next[-1] = 106.0
         sma20_next = np.full(51, 100.3)
@@ -186,36 +218,49 @@ class TestCheckMaCluster:
         sig2 = check_ma_cluster(
             close_next, sma20_next, sma50_next, sma100_next, sma200_next,
             mom_next, cluster_pct=0.03, min_duration=8,
-            cluster_count_arr=count_arr, in_cooldown_arr=cooldown_arr,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
         )
         assert sig2 == 0  # Blocked by cooldown
 
     def test_cooldown_resets_on_cluster_dissolve(self):
         """Cooldown resets when cluster spread exceeds threshold."""
-        count_arr = np.zeros(1, dtype=np.int64)
         cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
 
-        # Fire a signal
-        count_arr[0] = 10
-        cooldown_arr[0] = 1  # In cooldown
-
-        # Now dissolve: spread > cluster_pct
-        n = 10
+        # First: fire a signal to set cooldown
+        n = 50
         close = np.full(n, 100.0)
-        sma20 = np.full(n, 110.0)  # 10% spread — way over cluster_pct
-        sma50 = np.full(n, 90.0)
-        sma100 = np.full(n, 100.0)
-        sma200 = np.full(n, 100.0)
+        sma20 = np.full(n, 100.3)
+        sma50 = np.full(n, 99.7)
+        sma100 = np.full(n, 100.1)
+        sma200 = np.full(n, 99.9)
         mom = np.full(n, 0.05)
+        close[-1] = 105.0
 
         sig = check_ma_cluster(
             close, sma20, sma50, sma100, sma200, mom,
             cluster_pct=0.03, min_duration=8,
-            cluster_count_arr=count_arr, in_cooldown_arr=cooldown_arr,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
         )
-        assert sig == 0
+        assert sig != 0
+        assert cooldown_arr[0] == 1
+
+        # Now dissolve: spread > cluster_pct
+        close2 = np.full(10, 100.0)
+        sma20_2 = np.full(10, 110.0)  # 10% spread — way over cluster_pct
+        sma50_2 = np.full(10, 90.0)
+        sma100_2 = np.full(10, 100.0)
+        sma200_2 = np.full(10, 100.0)
+        mom2 = np.full(10, 0.05)
+
+        sig2 = check_ma_cluster(
+            close2, sma20_2, sma50_2, sma100_2, sma200_2, mom2,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+        )
+        assert sig2 == 0
         assert cooldown_arr[0] == 0  # Reset
-        assert count_arr[0] == 0     # Reset
+        assert duration_out[0] == 0  # No cluster
 
     def test_short_signal_on_negative_momentum(self):
         """Negative momentum → short signal."""
@@ -229,17 +274,14 @@ class TestCheckMaCluster:
 
         close[-1] = 95.0  # Below cluster band
 
-        count_arr = np.zeros(1, dtype=np.int64)
         cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
 
-        for i in range(n):
-            sig = check_ma_cluster(
-                close[:i + 1], sma20[:i + 1], sma50[:i + 1],
-                sma100[:i + 1], sma200[:i + 1], mom[:i + 1],
-                cluster_pct=0.03, min_duration=8,
-                cluster_count_arr=count_arr, in_cooldown_arr=cooldown_arr,
-            )
-
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+        )
         assert sig == -1
 
     def test_no_signal_when_close_inside_band(self):
@@ -252,17 +294,14 @@ class TestCheckMaCluster:
         sma200 = np.full(n, 99.7)
         mom = np.full(n, 0.05)
 
-        count_arr = np.zeros(1, dtype=np.int64)
         cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
 
-        for i in range(n):
-            sig = check_ma_cluster(
-                close[:i + 1], sma20[:i + 1], sma50[:i + 1],
-                sma100[:i + 1], sma200[:i + 1], mom[:i + 1],
-                cluster_pct=0.03, min_duration=8,
-                cluster_count_arr=count_arr, in_cooldown_arr=cooldown_arr,
-            )
-
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+        )
         assert sig == 0  # No breakout → no signal
 
 
@@ -350,22 +389,21 @@ class TestStrategyIntegration:
             np.full(500, 101.0), np.full(500, 99.0),
         )
 
-        # Simulate multiple bar calls to build up cluster count
-        for _ in range(20):
-            sig = strategy.on_bar('BTCUSDT', close_15m)
+        # Stateless: first call should fire (cluster duration computed from data)
+        sig = strategy.on_bar('BTCUSDT', close_15m)
 
         # Should get a signal from MA cluster (all SMAs = 100, close = 105)
         # The 4h data is static (all 100), so SMAs all converge at 100.
         # Breakout happens because close[-1]=105 > ma_max ≈ 100.
-        # Momentum should be positive (105 vs previous 100).
-        if sig != 0:
-            meta = strategy.get_last_signal_meta('BTCUSDT')
-            assert meta['strategy_type'] == 'ma_cluster'
-            assert meta['sl'] == 0.02
-            assert meta['tp'] == 0.08
-            assert meta['tf'] == '4h'
-            assert 'leverage_override' in meta
-            assert meta['leverage_override'] == 12.0
+        assert sig != 0
+        meta = strategy.get_last_signal_meta('BTCUSDT')
+        assert meta['strategy_type'] == 'ma_cluster'
+        assert meta['sl'] == 0.02
+        assert meta['tp'] == 0.08
+        assert meta['tf'] == '4h'
+        assert meta['leverage_override'] == 12.0
+        # max_hold should be converted: 12 bars × 16 (4h→15m) = 192
+        assert meta['max_hold'] == 12 * 16
 
     def test_ma_cluster_disabled(self):
         """No MA cluster signal when disabled."""
@@ -381,10 +419,8 @@ class TestStrategyIntegration:
             np.full(500, 101.0), np.full(500, 99.0),
         )
 
-        for _ in range(20):
-            sig = strategy.on_bar('BTCUSDT', close_15m)
-        # Can't guarantee 0 (VR might fire), but MA cluster is disabled
-        # So no ma_cluster metadata should appear
+        sig = strategy.on_bar('BTCUSDT', close_15m)
+        # MA cluster disabled → no ma_cluster metadata
         meta = strategy.get_last_signal_meta('BTCUSDT')
         assert meta.get('strategy_type') != 'ma_cluster'
 
