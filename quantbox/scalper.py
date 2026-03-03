@@ -884,8 +884,10 @@ class RubberBandScalper(
                     c4h, h4h, l4h, _, _ = result_4h
                     self.strategy.update_htf_data(sym, c4h, h4h, l4h)
             elif self.strategy_name == 'vol_straddle':
-                # VolStraddle needs full 4h OHLCV for VR computation
-                result_4h = self.download_klines(sym, 100, interval='4h', full=True)
+                # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
+                # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
+                n_bars_4h = 300 if (self.vs_config and self.vs_config.ma_cluster_enabled) else 100
+                result_4h = self.download_klines(sym, n_bars_4h, interval='4h', full=True)
                 if result_4h is not None:
                     c4h, h4h, l4h, _, _ = result_4h
                     self.strategy.update_htf_data(sym, c4h, h4h, l4h)
@@ -1104,6 +1106,14 @@ class RubberBandScalper(
             'trade_history': self._trade_history[-100:],  # Keep last 100
             'cycle_count': self._cycle_count,
         }
+        # v14.0: Persist MA cluster cooldown for crash recovery.
+        # Without this, a restart during an active cluster episode would
+        # re-fire a duplicate signal on the same cluster.
+        if self.strategy_name == 'vol_straddle' and hasattr(self.strategy, '_ma_cluster_cooldown'):
+            state['ma_cluster_cooldown'] = {
+                sym: int(arr[0])
+                for sym, arr in self.strategy._ma_cluster_cooldown.items()
+            }
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
         try:
             _save_scalper_state(state, filepath=filepath)
@@ -1224,6 +1234,18 @@ class RubberBandScalper(
             f"Restored {len(positions)} positions, "
             f"{len(self._trade_history)} trade records"
         )
+
+        # v14.0: Restore MA cluster cooldown state
+        if self.strategy_name == 'vol_straddle' and hasattr(self.strategy, '_ma_cluster_cooldown'):
+            cooldown_data = state.get('ma_cluster_cooldown', {})
+            for sym, val in cooldown_data.items():
+                arr = np.zeros(1, dtype=np.int64)
+                arr[0] = val
+                self.strategy._ma_cluster_cooldown[sym] = arr
+            if cooldown_data:
+                logger.info(
+                    f"Restored MA cluster cooldown for {len(cooldown_data)} symbols"
+                )
 
     # ==================== Entry Points ====================
 
