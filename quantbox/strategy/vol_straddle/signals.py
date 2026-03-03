@@ -309,38 +309,61 @@ def check_ma_cluster(
     momentum: np.ndarray,
     cluster_pct: float,
     min_duration: int,
-    cluster_count_arr: np.ndarray,
     in_cooldown_arr: np.ndarray,
+    duration_out: np.ndarray,
 ) -> int:
     """Check MA cluster squeeze signal on the LAST completed bar.
 
-    Maintains running state via cluster_count_arr and in_cooldown_arr
-    (both are 1-element arrays for mutability across calls).
+    Duration is computed statelessly by scanning backward through the 4h
+    data, counting consecutive bars with spread ≤ cluster_pct.  This is
+    safe to call at any frequency (every 15m cycle) because the count
+    derives from the data itself, not from the call cadence.
+
+    Cooldown: ``in_cooldown_arr`` (1-element array) prevents re-firing
+    while the *same* cluster episode is still active.
+
+    Args:
+        close: 4h close prices (completed bars).
+        sma20/50/100/200: Pre-computed SMA arrays.
+        momentum: Momentum array (8-bar).
+        cluster_pct: Max spread for cluster detection.
+        min_duration: Min consecutive 4h bars in cluster.
+        in_cooldown_arr: 1-elem int64 array — cooldown state (persists).
+        duration_out: 1-elem int64 array — filled with cluster duration.
 
     Returns:
         +1 (long), -1 (short), or 0 (no signal).
     """
     idx = len(close) - 1  # Last completed bar
+    duration_out[0] = 0
     if idx < 0 or np.isnan(sma200[idx]):
-        cluster_count_arr[0] = 0
+        in_cooldown_arr[0] = 0
         return 0
 
-    # Compute MA band spread
-    ma_max = max(sma20[idx], max(sma50[idx], max(sma100[idx], sma200[idx])))
-    ma_min = min(sma20[idx], min(sma50[idx], min(sma100[idx], sma200[idx])))
-    if close[idx] <= 0:
-        return 0
-    spread = (ma_max - ma_min) / close[idx]
+    # ── Stateless backward scan for consecutive cluster bars ──
+    duration = 0
+    for i in range(idx, -1, -1):
+        if np.isnan(sma200[i]):
+            break
+        ma_max = max(sma20[i], max(sma50[i], max(sma100[i], sma200[i])))
+        ma_min = min(sma20[i], min(sma50[i], min(sma100[i], sma200[i])))
+        if close[i] <= 0:
+            break
+        spread = (ma_max - ma_min) / close[i]
+        if spread <= cluster_pct:
+            duration += 1
+        else:
+            break
 
-    if spread <= cluster_pct:
-        cluster_count_arr[0] += 1
-    else:
-        cluster_count_arr[0] = 0
-        in_cooldown_arr[0] = 0  # Cluster dissolved → reset cooldown
+    duration_out[0] = duration
+
+    # No cluster → reset cooldown
+    if duration == 0:
+        in_cooldown_arr[0] = 0
         return 0
 
     # Duration filter
-    if cluster_count_arr[0] < min_duration:
+    if duration < min_duration:
         return 0
 
     # One signal per cluster episode: skip if already fired
@@ -348,7 +371,9 @@ def check_ma_cluster(
         return 0
 
     # Breakout: close outside the cluster band
-    if ma_min <= close[idx] <= ma_max:
+    ma_max_last = max(sma20[idx], max(sma50[idx], max(sma100[idx], sma200[idx])))
+    ma_min_last = min(sma20[idx], min(sma50[idx], min(sma100[idx], sma200[idx])))
+    if ma_min_last <= close[idx] <= ma_max_last:
         return 0
 
     # Momentum direction

@@ -38,6 +38,10 @@ from quantbox.strategy.vol_straddle.signals import (
 
 logger = logging.getLogger('VolStraddle')
 
+# bars_held increments per 15m cycle, so max_hold must be in 15m bars.
+# Config stores max_hold in native TF bars — multiply to convert.
+_TF_TO_15M = {'15m': 1, '1h': 4, '4h': 16}
+
 
 class VolStraddleStrategy:
     """VR compression (volatility squeeze) strategy.
@@ -83,10 +87,10 @@ class VolStraddleStrategy:
         self._btc_close: np.ndarray | None = None
 
         # ── MA Cluster Squeeze state (R44d V17) ──
-        # Per-symbol tracking for one-signal-per-episode logic.
-        # cluster_count: consecutive 4h bars where all 4 SMAs are within cluster_pct
-        # in_cooldown: True after signal fired, reset when cluster dissolves
-        self._ma_cluster_count: dict[str, np.ndarray] = {}   # 1-elem array for numba
+        # Per-symbol cooldown for one-signal-per-episode logic.
+        # Duration is computed statelessly from the 4h data (backward scan),
+        # so only the cooldown flag needs per-symbol state.
+        # in_cooldown: True after signal fired, reset when cluster dissolves.
         self._ma_cluster_cooldown: dict[str, np.ndarray] = {}  # 1-elem array for numba
 
     # ══════════════════════════════════════════════════════════════════
@@ -276,7 +280,7 @@ class VolStraddleStrategy:
                         'tf': tf,
                         'sl': cfg.s_sl,
                         'tp': cfg.s_tp,
-                        'max_hold': cfg.get_max_hold(tf),
+                        'max_hold': cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
                         'vr': vr_val,
                         'momentum': 0.0,
                         'straddle': True,
@@ -339,7 +343,7 @@ class VolStraddleStrategy:
             'tf': tf,
             'sl': cfg.d_sl,
             'tp': cfg.d_tp,
-            'max_hold': cfg.get_max_hold(tf),
+            'max_hold': cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
             'vr': float(vr[-1]) if not np.isnan(vr[-1]) else 0.0,
             'momentum': mom_val,
             'conviction_score': score,
@@ -407,18 +411,17 @@ class VolStraddleStrategy:
         # Compute momentum(8) on 4h close
         mom = compute_momentum(close_4h, cfg.momentum_period)
 
-        # Initialize per-symbol state if needed
-        if symbol not in self._ma_cluster_count:
-            self._ma_cluster_count[symbol] = np.zeros(1, dtype=np.int64)
+        # Initialize per-symbol cooldown if needed
+        if symbol not in self._ma_cluster_cooldown:
             self._ma_cluster_cooldown[symbol] = np.zeros(1, dtype=np.int64)
 
-        count_arr = self._ma_cluster_count[symbol]
         cooldown_arr = self._ma_cluster_cooldown[symbol]
+        duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
             close_4h, sma20, sma50, sma100, sma200, mom,
             cfg.ma_cluster_pct, cfg.ma_cluster_min_duration,
-            count_arr, cooldown_arr,
+            cooldown_arr, duration_out,
         )
 
         if sig != 0:
@@ -434,18 +437,18 @@ class VolStraddleStrategy:
                 'tf': '4h',
                 'sl': cfg.ma_cluster_sl,
                 'tp': cfg.ma_cluster_tp,
-                'max_hold': cfg.ma_cluster_max_hold_4h,
+                'max_hold': cfg.ma_cluster_max_hold_4h * _TF_TO_15M['4h'],
                 'vr': 0.0,  # Not a VR signal
                 'momentum': mom_val,
                 'strategy_type': 'ma_cluster',
                 'ma_cluster_spread': spread,
-                'ma_cluster_duration': int(count_arr[0]),
+                'ma_cluster_duration': int(duration_out[0]),
                 'leverage_override': cfg.ma_cluster_leverage,
             }
             logger.info(
                 f"[{symbol}] MA_CLUSTER signal "
                 f"TF=4h {'LONG' if sig == 1 else 'SHORT'} "
-                f"spread={spread:.2f}% duration={int(count_arr[0])} "
+                f"spread={spread:.2f}% duration={int(duration_out[0])} "
                 f"mom={mom_val:.6f} "
                 f"SL={cfg.ma_cluster_sl*100:.0f}% TP={cfg.ma_cluster_tp*100:.0f}% "
                 f"leverage={cfg.ma_cluster_leverage:.0f}x"

@@ -1201,6 +1201,24 @@ class RubberBandScalper(
                 self.strategy._positions[sym]['is_straddle'] = pos.get(
                     'is_straddle', False
                 )
+                # v14.0: Restore per-signal fields (sl/tp/tf/max_hold/strategy_type).
+                # Without this, crash recovery defaults to VR squeeze params
+                # for ALL positions — breaking MA cluster SL/TP/max_hold/exit routing.
+                self.strategy._positions[sym]['strategy_type'] = pos.get(
+                    'strategy_type', 'vr_squeeze'
+                )
+                self.strategy._positions[sym]['sl'] = pos.get(
+                    'sl', self.strategy._positions[sym].get('sl')
+                )
+                self.strategy._positions[sym]['tp'] = pos.get(
+                    'tp', self.strategy._positions[sym].get('tp')
+                )
+                self.strategy._positions[sym]['tf'] = pos.get(
+                    'tf', self.strategy._positions[sym].get('tf')
+                )
+                self.strategy._positions[sym]['max_hold'] = pos.get(
+                    'max_hold', self.strategy._positions[sym].get('max_hold')
+                )
 
         logger.info(
             f"Restored {len(positions)} positions, "
@@ -1752,6 +1770,14 @@ def main():
             c2_btc_mom_threshold=settings.vs_c2_btc_mom_threshold,
             a3_deep_vr_threshold=settings.vs_a3_deep_vr_threshold,
             a3_long_squeeze_dur=settings.vs_a3_long_squeeze_dur,
+            # R44d V17 MA Cluster Squeeze
+            ma_cluster_enabled=settings.vs_ma_cluster_enabled,
+            ma_cluster_pct=settings.vs_ma_cluster_pct,
+            ma_cluster_min_duration=settings.vs_ma_cluster_min_duration,
+            ma_cluster_sl=settings.vs_ma_cluster_sl,
+            ma_cluster_tp=settings.vs_ma_cluster_tp,
+            ma_cluster_max_hold_4h=settings.vs_ma_cluster_max_hold_4h,
+            ma_cluster_leverage=settings.vs_ma_cluster_leverage,
         ) if args.strategy == 'vol_straddle' else None,
     )
 

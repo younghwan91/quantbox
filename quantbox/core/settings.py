@@ -292,6 +292,15 @@ class QuantBoxSettings(BaseSettings):
     # ── Symbol Whitelist (shared with RB by default) ──
     vs_symbol_whitelist: str = ''             # Empty = use RB whitelist
 
+    # ── MA Cluster Squeeze (R44d V17, 4h-only) ──
+    vs_ma_cluster_enabled: bool = True       # Enable MA cluster signals
+    vs_ma_cluster_pct: float = 0.03          # Max spread among 4 SMAs (3%)
+    vs_ma_cluster_min_duration: int = 8      # Min 4h bars in cluster (≈32h)
+    vs_ma_cluster_sl: float = 0.02           # 2% stop loss
+    vs_ma_cluster_tp: float = 0.08           # 8% take profit
+    vs_ma_cluster_max_hold_4h: int = 12      # 12 × 4h = 48h
+    vs_ma_cluster_leverage: float = 12.0     # Risk parity: 12x × 2% ≈ 25x × 1%
+
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부
