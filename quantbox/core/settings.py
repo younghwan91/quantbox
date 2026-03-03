@@ -252,7 +252,9 @@ class QuantBoxSettings(BaseSettings):
     # ── D_mom8 Parameters ──
     vs_d_vr_threshold: float = 0.50          # A1-D50: VR entry threshold (was 0.45)
     vs_d_sl: float = 0.01                    # 1% stop loss
-    vs_d_tp: float = 0.05                    # 5% take profit
+    vs_d_tp: float = 0.12                    # 12% hard TP ceiling (R43: was 5%)
+    vs_d_trail_activate: float = 0.02        # R43: trailing after +2% gain
+    vs_d_trail_distance: float = 0.003       # R43: trail 0.3% behind peak
     vs_momentum_period: int = 8              # Momentum lookback for direction
 
     # ── S_d8 Parameters (Phase 2 — requires Binance Hedge Mode) ──
