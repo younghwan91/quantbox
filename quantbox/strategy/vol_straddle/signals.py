@@ -275,3 +275,89 @@ def resample_ohlcv(
             vs += volume[k]
         v_out[i] = vs
     return c_out, h_out, l_out, v_out
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  MA Cluster Squeeze (R44d V17)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def compute_sma(close: np.ndarray, period: int) -> np.ndarray:
+    """Simple Moving Average — NaN for indices < period-1."""
+    n = len(close)
+    out = np.full(n, np.nan)
+    if n < period:
+        return out
+    s = 0.0
+    for k in range(period):
+        s += close[k]
+    out[period - 1] = s / period
+    for k in range(period, n):
+        s += close[k] - close[k - period]
+        out[k] = s / period
+    return out
+
+
+@numba.jit(nopython=True, cache=True)
+def check_ma_cluster(
+    close: np.ndarray,
+    sma20: np.ndarray,
+    sma50: np.ndarray,
+    sma100: np.ndarray,
+    sma200: np.ndarray,
+    momentum: np.ndarray,
+    cluster_pct: float,
+    min_duration: int,
+    cluster_count_arr: np.ndarray,
+    in_cooldown_arr: np.ndarray,
+) -> int:
+    """Check MA cluster squeeze signal on the LAST completed bar.
+
+    Maintains running state via cluster_count_arr and in_cooldown_arr
+    (both are 1-element arrays for mutability across calls).
+
+    Returns:
+        +1 (long), -1 (short), or 0 (no signal).
+    """
+    idx = len(close) - 1  # Last completed bar
+    if idx < 0 or np.isnan(sma200[idx]):
+        cluster_count_arr[0] = 0
+        return 0
+
+    # Compute MA band spread
+    ma_max = max(sma20[idx], max(sma50[idx], max(sma100[idx], sma200[idx])))
+    ma_min = min(sma20[idx], min(sma50[idx], min(sma100[idx], sma200[idx])))
+    if close[idx] <= 0:
+        return 0
+    spread = (ma_max - ma_min) / close[idx]
+
+    if spread <= cluster_pct:
+        cluster_count_arr[0] += 1
+    else:
+        cluster_count_arr[0] = 0
+        in_cooldown_arr[0] = 0  # Cluster dissolved → reset cooldown
+        return 0
+
+    # Duration filter
+    if cluster_count_arr[0] < min_duration:
+        return 0
+
+    # One signal per cluster episode: skip if already fired
+    if in_cooldown_arr[0] == 1:
+        return 0
+
+    # Breakout: close outside the cluster band
+    if ma_min <= close[idx] <= ma_max:
+        return 0
+
+    # Momentum direction
+    if abs(momentum[idx]) < 0.003:
+        return 0
+
+    # Mark cooldown — no more signals until cluster dissolves
+    in_cooldown_arr[0] = 1
+
+    if momentum[idx] > 0:
+        return 1
+    return -1

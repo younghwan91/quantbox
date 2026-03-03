@@ -6,6 +6,10 @@ Full 6yr validated: N=2,336 @10 slots, PF=1.351, Calmar=9.4, DD=30.0%.
 
 v13.1 changes (R43): Directional TP 5%→12% + trailing stop (activate 2%, distance 0.3%).
 Straddle exit unchanged (SL=1.5%, TP=5%).
+
+R44d V17: MA Cluster Squeeze (4h-only) as complementary strategy.
+4 SMAs (20/50/100/200) cluster → breakout + momentum direction.
+Uses 12x leverage (risk parity with VR squeeze's 25x × 1% SL).
 Do NOT change without re-running backtest validation.
 """
 from __future__ import annotations
@@ -133,6 +137,20 @@ class VolStraddleConfig:
         'USDCUSDT', 'TUSDUSDT', 'BUSDUSDT',
     ])
     min_volume_rank: int = 30
+
+    # ── MA Cluster Squeeze (R44d V17, 4h-only) ──
+    # Complementary strategy: 4 SMAs cluster → breakout.
+    # Fires when VR squeeze is idle (93.7% non-overlapping).
+    ma_cluster_enabled: bool = True          # Enable MA cluster signals
+    ma_cluster_pct: float = 0.03             # Max spread among 4 SMAs (3%)
+    ma_cluster_min_duration: int = 8         # Min 4h bars in cluster (≈32h)
+    ma_cluster_sl: float = 0.02              # 2% stop loss
+    ma_cluster_tp: float = 0.08              # 8% take profit
+    ma_cluster_max_hold_4h: int = 12         # 12 × 4h = 48h
+    ma_cluster_leverage: float = 12.0        # Risk parity: 12x × 2% ≈ 25x × 1%
+    ma_cluster_sma_periods: list[int] = field(
+        default_factory=lambda: [20, 50, 100, 200],
+    )
 
     # ── Compatibility fields (used by scalper internals) ──
     # These map vol straddle concepts to the scalper's existing interface
