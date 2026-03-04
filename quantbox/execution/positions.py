@@ -55,12 +55,21 @@ class PositionMixin:
             move_size = 1.0
 
             # Dynamic capital allocation
+            flat_per_slot = balance / vs.max_concurrent  # hard floor/ceiling
             if vs.dynamic_capital_enabled:
                 n_active = self.strategy.n_active
                 per_slot_capital = balance / max(1, n_active + 1)
                 per_slot_capital = min(per_slot_capital, balance * 0.5)
+                # Hard cap: never exceed flat sizing regardless of n_active
+                if per_slot_capital > flat_per_slot:
+                    logger.warning(
+                        f"[{symbol}] dynamic_capital capped: "
+                        f"${per_slot_capital:.2f} → ${flat_per_slot:.2f} "
+                        f"(balance/max_concurrent={vs.max_concurrent})"
+                    )
+                    per_slot_capital = flat_per_slot
             else:
-                per_slot_capital = balance / vs.max_concurrent
+                per_slot_capital = flat_per_slot
 
             # SoftTight DD Scaling (safety mechanism)
             if vs.soft_equity_scale:
