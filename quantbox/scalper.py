@@ -678,13 +678,41 @@ class RubberBandScalper(
 
         # 2. Close positions on drawdown halt
         if self._drawdown_halt:
+            # Close any remaining positions
             for pos_key in list(self.strategy.active_positions):
                 api_sym = pos_key.split(':')[0] if ':' in pos_key else pos_key
                 close = self.download_klines(api_sym, 2)
                 price = close[-1] if close is not None else 0
                 self._close_position(pos_key, 'drawdown_halt', price)
-            self._save_state()
-            return
+
+            # v14.0.1: Auto-recover when DD drops below threshold
+            # after all positions are closed.
+            if self.strategy.n_active == 0:
+                hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+                dd = (hwm - balance) / hwm if hwm > 0 else 0.0
+                if dd < self._cfg.max_drawdown_pct:
+                    logger.info(
+                        f"DD recovered to {dd*100:.1f}% "
+                        f"(threshold={self._cfg.max_drawdown_pct*100:.0f}%) "
+                        f"— resuming trading"
+                    )
+                    self.discord.send(content=(
+                        f"\u2705 **DD Recovered** — "
+                        f"{dd*100:.1f}% (below {self._cfg.max_drawdown_pct*100:.0f}% threshold). "
+                        f"Resuming trading."
+                    ))
+                    self._drawdown_halt = False
+                else:
+                    logger.info(
+                        f"DD halt active — {dd*100:.1f}% DD "
+                        f"(need <{self._cfg.max_drawdown_pct*100:.0f}% to resume). "
+                        f"All positions closed, waiting for HWM reset on restart."
+                    )
+                    self._save_state()
+                    return
+            else:
+                self._save_state()
+                return
 
         # 3. Fetch BTC klines for regime filter
         btc_close = self.download_klines('BTCUSDT', 200)
@@ -1001,7 +1029,7 @@ class RubberBandScalper(
                     if p.get('signal') == signal
                 )
                 if same_dir >= self._cfg.max_same_direction:
-                    logger.debug(
+                    logger.info(
                         f"[{sym}] DirDiversity blocked: "
                         f"{same_dir} {'LONG' if signal == 1 else 'SHORT'} "
                         f"already open (max={self._cfg.max_same_direction})"
