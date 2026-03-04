@@ -811,6 +811,8 @@ VR squeeze와 **93.7% 비중복**인 보완 전략. 4개 이동평균이 수렴�
 | `VS_MA_CLUSTER_ENABLED` | true | MA 클러스터 스퀴즈 활성화 |
 | `VS_MA_CLUSTER_PCT` | 0.03 | 3% 최대 수렴도 |
 | `VS_MA_CLUSTER_MIN_DURATION` | 8 | 최소 8바 (32h) 클러스터 지속 |
+| `VS_MA_CLUSTER_MAX_DURATION` | 24 | 최대 24바 (96h) — 좀비 시그널 필터 (R45) |
+| `VS_MA_CLUSTER_MIN_MOMENTUM` | 0.01 | 최소 |momentum| 1% (R45: was 0.003) |
 | `VS_MA_CLUSTER_SL` | 0.02 | 2% 손절 |
 | `VS_MA_CLUSTER_TP` | 0.08 | 8% 익절 |
 | `VS_MA_CLUSTER_MAX_HOLD_4H` | 12 | 12바 (48h) 최대 보유 |

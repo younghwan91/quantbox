@@ -678,13 +678,41 @@ class RubberBandScalper(
 
         # 2. Close positions on drawdown halt
         if self._drawdown_halt:
+            # Close any remaining positions
             for pos_key in list(self.strategy.active_positions):
                 api_sym = pos_key.split(':')[0] if ':' in pos_key else pos_key
                 close = self.download_klines(api_sym, 2)
                 price = close[-1] if close is not None else 0
                 self._close_position(pos_key, 'drawdown_halt', price)
-            self._save_state()
-            return
+
+            # v14.0.1: Auto-recover when DD drops below threshold
+            # after all positions are closed.
+            if self.strategy.n_active == 0:
+                hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+                dd = (hwm - balance) / hwm if hwm > 0 else 0.0
+                if dd < self._cfg.max_drawdown_pct:
+                    logger.info(
+                        f"DD recovered to {dd*100:.1f}% "
+                        f"(threshold={self._cfg.max_drawdown_pct*100:.0f}%) "
+                        f"— resuming trading"
+                    )
+                    self.discord.send(content=(
+                        f"\u2705 **DD Recovered** — "
+                        f"{dd*100:.1f}% (below {self._cfg.max_drawdown_pct*100:.0f}% threshold). "
+                        f"Resuming trading."
+                    ))
+                    self._drawdown_halt = False
+                else:
+                    logger.info(
+                        f"DD halt active — {dd*100:.1f}% DD "
+                        f"(need <{self._cfg.max_drawdown_pct*100:.0f}% to resume). "
+                        f"All positions closed, waiting for HWM reset on restart."
+                    )
+                    self._save_state()
+                    return
+            else:
+                self._save_state()
+                return
 
         # 3. Fetch BTC klines for regime filter
         btc_close = self.download_klines('BTCUSDT', 200)
@@ -727,7 +755,9 @@ class RubberBandScalper(
                 upnl_pct = 0.0
             sl_id = pos.get('server_sl_order_id')
             tp_id = pos.get('server_tp_order_id')
-            bars = pos.get('bars_held', 0)
+            # Use bars_held+1 to match the value AFTER this cycle's update,
+            # consistent with the Summary section printed later.
+            bars = pos.get('bars_held', 0) + 1
             direction = 'L' if pos.get('signal') == 1 else 'S'
             logger.info(
                 f"  [{pos_key}] {direction} entry=${entry_px:.4f} "
@@ -884,8 +914,10 @@ class RubberBandScalper(
                     c4h, h4h, l4h, _, _ = result_4h
                     self.strategy.update_htf_data(sym, c4h, h4h, l4h)
             elif self.strategy_name == 'vol_straddle':
-                # VolStraddle needs full 4h OHLCV for VR computation
-                result_4h = self.download_klines(sym, 100, interval='4h', full=True)
+                # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
+                # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
+                n_bars_4h = 300 if (self.vs_config and self.vs_config.ma_cluster_enabled) else 100
+                result_4h = self.download_klines(sym, n_bars_4h, interval='4h', full=True)
                 if result_4h is not None:
                     c4h, h4h, l4h, _, _ = result_4h
                     self.strategy.update_htf_data(sym, c4h, h4h, l4h)
@@ -967,6 +999,56 @@ class RubberBandScalper(
                         f"(of {len(moves_seen)} symbols) "
                         f"min_vr={global_min_vr:.3f} ({closest_sym})"
                     )
+
+                    # ── MA Cluster monitor (parallel to VR Squeeze monitor) ──
+                    if (self.vs_config and self.vs_config.ma_cluster_enabled
+                            and hasattr(self.strategy, '_ma_cluster_state')
+                            and self.strategy._ma_cluster_state):
+                        _mcs = self.strategy._ma_cluster_state
+                        _in_cluster = {
+                            s: d for s, d in _mcs.items() if d['duration'] > 0
+                        }
+                        _zombie = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'].startswith('zombie')
+                        )
+                        _mom_fail = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'].startswith('momentum_fail')
+                        )
+                        _cooldown = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'] == 'cooldown'
+                        )
+                        _pre_dur = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'].startswith('pre_duration')
+                        )
+                        _no_break = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'] == 'no_breakout'
+                        )
+                        _fired = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'] == 'fired'
+                        )
+                        _top3 = sorted(
+                            _in_cluster.items(),
+                            key=lambda x: x[1]['duration'], reverse=True,
+                        )[:3]
+                        _top3_str = ', '.join(
+                            f"{s}({d['duration']}bars,"
+                            f"sp={d['spread']:.1f}%,{d['rejection']})"
+                            for s, d in _top3
+                        )
+                        logger.info(
+                            f"MA Cluster monitor: {len(_in_cluster)} in cluster "
+                            f"(zombie={_zombie}, mom_fail={_mom_fail}, "
+                            f"cooldown={_cooldown}, pre_dur={_pre_dur}, "
+                            f"no_break={_no_break}, fired={_fired}) "
+                            f"(of {len(_mcs)} scanned) "
+                            f"— top: {_top3_str or 'none'}"
+                        )
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
             if candidates:
@@ -997,7 +1079,7 @@ class RubberBandScalper(
                     if p.get('signal') == signal
                 )
                 if same_dir >= self._cfg.max_same_direction:
-                    logger.debug(
+                    logger.info(
                         f"[{sym}] DirDiversity blocked: "
                         f"{same_dir} {'LONG' if signal == 1 else 'SHORT'} "
                         f"already open (max={self._cfg.max_same_direction})"
@@ -1051,7 +1133,8 @@ class RubberBandScalper(
                 f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
                 f"entry=${pos['entry_price']:.4f} "
                 f"bars={pos['bars_held']}/{pos.get('max_hold', self.config.max_hold)} "
-                f"best_pnl={pos.get('best_pnl', 0)*100:.2f}% "
+                f"MFE={pos.get('best_pnl', 0)*100:+.2f}% "
+                f"MAE={pos.get('worst_pnl', 0)*100:+.2f}% "
                 f"SL={pos.get('server_sl_order_id') or 'NONE'} "
                 f"TP={pos.get('server_tp_order_id') or 'NONE'}"
             )
@@ -1104,6 +1187,14 @@ class RubberBandScalper(
             'trade_history': self._trade_history[-100:],  # Keep last 100
             'cycle_count': self._cycle_count,
         }
+        # v14.0: Persist MA cluster cooldown for crash recovery.
+        # Without this, a restart during an active cluster episode would
+        # re-fire a duplicate signal on the same cluster.
+        if self.strategy_name == 'vol_straddle' and hasattr(self.strategy, '_ma_cluster_cooldown'):
+            state['ma_cluster_cooldown'] = {
+                sym: int(arr[0])
+                for sym, arr in self.strategy._ma_cluster_cooldown.items()
+            }
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
         try:
             _save_scalper_state(state, filepath=filepath)
@@ -1201,11 +1292,41 @@ class RubberBandScalper(
                 self.strategy._positions[sym]['is_straddle'] = pos.get(
                     'is_straddle', False
                 )
+                # v14.0: Restore per-signal fields (sl/tp/tf/max_hold/strategy_type).
+                # Without this, crash recovery defaults to VR squeeze params
+                # for ALL positions — breaking MA cluster SL/TP/max_hold/exit routing.
+                self.strategy._positions[sym]['strategy_type'] = pos.get(
+                    'strategy_type', 'vr_squeeze'
+                )
+                self.strategy._positions[sym]['sl'] = pos.get(
+                    'sl', self.strategy._positions[sym].get('sl')
+                )
+                self.strategy._positions[sym]['tp'] = pos.get(
+                    'tp', self.strategy._positions[sym].get('tp')
+                )
+                self.strategy._positions[sym]['tf'] = pos.get(
+                    'tf', self.strategy._positions[sym].get('tf')
+                )
+                self.strategy._positions[sym]['max_hold'] = pos.get(
+                    'max_hold', self.strategy._positions[sym].get('max_hold')
+                )
 
         logger.info(
             f"Restored {len(positions)} positions, "
             f"{len(self._trade_history)} trade records"
         )
+
+        # v14.0: Restore MA cluster cooldown state
+        if self.strategy_name == 'vol_straddle' and hasattr(self.strategy, '_ma_cluster_cooldown'):
+            cooldown_data = state.get('ma_cluster_cooldown', {})
+            for sym, val in cooldown_data.items():
+                arr = np.zeros(1, dtype=np.int64)
+                arr[0] = val
+                self.strategy._ma_cluster_cooldown[sym] = arr
+            if cooldown_data:
+                logger.info(
+                    f"Restored MA cluster cooldown for {len(cooldown_data)} symbols"
+                )
 
     # ==================== Entry Points ====================
 
@@ -1291,6 +1412,10 @@ class RubberBandScalper(
         self._high_water_mark = balance
         self._daily_start_balance = balance
         self._load_state()
+
+        # Refresh balance after state load (paper_balance may have been
+        # restored from saved state, overriding the settings default).
+        balance = self.get_balance()
 
         mode_str = "PAPER" if self.paper_mode else "LIVE"
         n_symbols = len(self._cfg.symbol_whitelist) if self._cfg.symbol_whitelist else 0
@@ -1495,6 +1620,14 @@ class RubberBandScalper(
                 entry_mode='vr_compression',
                 min_confidence=0.0,
                 testnet=settings.binance_testnet,
+                ma_cluster_enabled=vc.ma_cluster_enabled,
+                ma_cluster_pct=vc.ma_cluster_pct,
+                ma_cluster_min_duration=vc.ma_cluster_min_duration,
+                ma_cluster_max_duration=vc.ma_cluster_max_duration,
+                ma_cluster_min_momentum=vc.ma_cluster_min_momentum,
+                ma_cluster_sl=vc.ma_cluster_sl,
+                ma_cluster_tp=vc.ma_cluster_tp,
+                ma_cluster_leverage=vc.ma_cluster_leverage,
             )
         else:
             print_system_info(
@@ -1752,6 +1885,16 @@ def main():
             c2_btc_mom_threshold=settings.vs_c2_btc_mom_threshold,
             a3_deep_vr_threshold=settings.vs_a3_deep_vr_threshold,
             a3_long_squeeze_dur=settings.vs_a3_long_squeeze_dur,
+            # R44d V17 MA Cluster Squeeze
+            ma_cluster_enabled=settings.vs_ma_cluster_enabled,
+            ma_cluster_pct=settings.vs_ma_cluster_pct,
+            ma_cluster_min_duration=settings.vs_ma_cluster_min_duration,
+            ma_cluster_max_duration=settings.vs_ma_cluster_max_duration,
+            ma_cluster_min_momentum=settings.vs_ma_cluster_min_momentum,
+            ma_cluster_sl=settings.vs_ma_cluster_sl,
+            ma_cluster_tp=settings.vs_ma_cluster_tp,
+            ma_cluster_max_hold_4h=settings.vs_ma_cluster_max_hold_4h,
+            ma_cluster_leverage=settings.vs_ma_cluster_leverage,
         ) if args.strategy == 'vol_straddle' else None,
     )
 
