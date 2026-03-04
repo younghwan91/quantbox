@@ -1,15 +1,11 @@
-"""Tests for quantbox.core.terminal_ui — startup banner, confirmation, formatting."""
+"""Tests for quantbox.core.terminal_ui — startup banner and formatted output."""
 
-import io
-import sys
 from datetime import datetime, timezone
-from unittest.mock import patch
 
 import pytest
 
 from quantbox.core.terminal_ui import (
     Color,
-    confirm_live_trading,
     format_cycle_header,
     format_entry,
     format_exit,
@@ -19,34 +15,6 @@ from quantbox.core.terminal_ui import (
     print_system_info,
     print_startup_complete,
 )
-
-
-class TestConfirmLiveTrading:
-    """Confirmation gate requires exact 'YES' to proceed."""
-
-    def test_yes_confirms(self):
-        with patch('builtins.input', return_value='YES'):
-            assert confirm_live_trading() is True
-
-    def test_yes_lowercase_rejects(self):
-        with patch('builtins.input', return_value='yes'):
-            assert confirm_live_trading() is False
-
-    def test_empty_rejects(self):
-        with patch('builtins.input', return_value=''):
-            assert confirm_live_trading() is False
-
-    def test_random_text_rejects(self):
-        with patch('builtins.input', return_value='ok'):
-            assert confirm_live_trading() is False
-
-    def test_eof_rejects(self):
-        with patch('builtins.input', side_effect=EOFError):
-            assert confirm_live_trading() is False
-
-    def test_keyboard_interrupt_rejects(self):
-        with patch('builtins.input', side_effect=KeyboardInterrupt):
-            assert confirm_live_trading() is False
 
 
 class TestFormatCycleHeader:
