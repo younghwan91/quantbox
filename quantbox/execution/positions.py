@@ -66,12 +66,21 @@ class PositionMixin:
             if vs.soft_equity_scale:
                 hwm = self._high_water_mark if self._high_water_mark > 0 else balance
                 dd_pct = (hwm - balance) / hwm if hwm > 0 else 0.0
+                eq_scale = 1.0
                 if dd_pct >= vs.soft_eq_dd3:
-                    per_slot_capital *= vs.soft_eq_scale3
+                    eq_scale = vs.soft_eq_scale3
+                    per_slot_capital *= eq_scale
                 elif dd_pct >= vs.soft_eq_dd2:
-                    per_slot_capital *= vs.soft_eq_scale2
+                    eq_scale = vs.soft_eq_scale2
+                    per_slot_capital *= eq_scale
                 elif dd_pct >= vs.soft_eq_dd1:
-                    per_slot_capital *= vs.soft_eq_scale1
+                    eq_scale = vs.soft_eq_scale1
+                    per_slot_capital *= eq_scale
+                if eq_scale < 1.0:
+                    logger.info(
+                        f"[{symbol}] SoftTight DD Scaling: DD={dd_pct*100:.1f}% "
+                        f"→ {eq_scale:.2f}x → slot=${per_slot_capital:.2f}"
+                    )
 
             leverage = vs.base_leverage
             notional = per_slot_capital * leverage
@@ -364,15 +373,15 @@ class PositionMixin:
                 'title': f"{'🟢' if signal == 1 else '🔴'} {symbol} {_dir} | VS 진입",
                 'color': 0x00C853 if signal == 1 else 0xFF1744,
                 'fields': [
-                    {'name': '전략', 'value': f"VolStraddle {'S' if is_straddle else 'D'} ({tf_label})", 'inline': True},
+                    {'name': '전략', 'value': f"VolStraddle {'S' if is_straddle else ('MA' if strategy_type == 'ma_cluster' else 'D')} ({tf_label})", 'inline': True},
                     {'name': '진입가', 'value': f'${fill_price:.4f}', 'inline': True},
                     {'name': '포지션', 'value': f'${fill_qty * fill_price:,.2f}', 'inline': True},
                     {'name': '레버리지', 'value': f'{lev_int}x', 'inline': True},
                     {'name': '🎯 TP', 'value': f'${tp_price:.4f} ({tp_pct*100:.1f}%)', 'inline': True},
                     {'name': '🛑 SL', 'value': f'${sl_price:.4f} ({sl_pct*100:.1f}%)', 'inline': True},
-                    {'name': 'Exit', 'value': 'SL/TP' if is_straddle else f'Trail({vs.d_trail_activate*100:.0f}%/{vs.d_trail_distance*100:.1f}%)', 'inline': True},
+                    {'name': 'Exit', 'value': ('SL/TP' if (is_straddle or strategy_type == 'ma_cluster') else f'Trail({vs.d_trail_activate*100:.0f}%/{vs.d_trail_distance*100:.1f}%)'), 'inline': True},
                     {'name': 'SL 방식', 'value': _sl_tag, 'inline': True},
-                    {'name': '확신도', 'value': f'{conviction_score}/4', 'inline': True},
+                    {'name': '확신도' if strategy_type == 'vr_squeeze' else '전략타입', 'value': (f'{conviction_score}/4' if strategy_type == 'vr_squeeze' else 'MA Cluster'), 'inline': True},
                     {'name': '슬롯', 'value': f'{n_active}/{self.vs_config.max_concurrent}', 'inline': True},
                     {'name': '── 활성 포지션 ──', 'value': f'```\n{_pos_summary}\n```', 'inline': False},
                     {'name': '잔고', 'value': f'${balance_after:,.2f}', 'inline': True},
@@ -1132,6 +1141,8 @@ class PositionMixin:
                 logger.info(
                     f"[{symbol}] NO_POSITION trade recorded: {_exit_side} "
                     f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+                    f"MFE={closed_pos.get('best_pnl', 0)*100:+.2f}% "
+                    f"MAE={closed_pos.get('worst_pnl', 0)*100:+.2f}% "
                     f"exit=${fill_price:.4f} held={closed_pos['bars_held']} bars"
                 )
 
@@ -1213,13 +1224,15 @@ class PositionMixin:
                 if self.config.partial_exit_enabled:
                     new_tp_oid = None
                 else:
+                    # v14.0: Use per-position TP (not RubberBand default).
+                    retry_tp = pos.get('tp', self.config.target_retrace)
                     new_tp_oid = self._place_server_take_profit(
                         symbol=api_symbol,
                         signal=pos['signal'],
                         quantity=quantity,
                         entry_price=pos['entry_price'],
                         move_size=pos['move_size'],
-                        target_retrace=self.config.target_retrace,
+                        target_retrace=retry_tp,
                         position_side=pos.get('position_side'),
                     )
             # Update existing position's server order IDs
@@ -1311,6 +1324,8 @@ class PositionMixin:
         logger.info(
             f"[{symbol}] CLOSED ({reason}): {_exit_side} "
             f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+            f"MFE={pos.get('best_pnl', 0)*100:+.2f}% "
+            f"MAE={pos.get('worst_pnl', 0)*100:+.2f}% "
             f"held={pos['bars_held']} bars"
         )
         # Session stats for notification

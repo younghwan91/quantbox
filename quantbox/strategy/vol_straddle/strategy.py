@@ -38,6 +38,10 @@ from quantbox.strategy.vol_straddle.signals import (
 
 logger = logging.getLogger('VolStraddle')
 
+# bars_held increments per 15m cycle, so max_hold must be in 15m bars.
+# Config stores max_hold in native TF bars — multiply to convert.
+_TF_TO_15M = {'15m': 1, '1h': 4, '4h': 16}
+
 
 class VolStraddleStrategy:
     """VR compression (volatility squeeze) strategy.
@@ -83,11 +87,18 @@ class VolStraddleStrategy:
         self._btc_close: np.ndarray | None = None
 
         # ── MA Cluster Squeeze state (R44d V17) ──
-        # Per-symbol tracking for one-signal-per-episode logic.
-        # cluster_count: consecutive 4h bars where all 4 SMAs are within cluster_pct
-        # in_cooldown: True after signal fired, reset when cluster dissolves
-        self._ma_cluster_count: dict[str, np.ndarray] = {}   # 1-elem array for numba
+        # Per-symbol cooldown for one-signal-per-episode logic.
+        # Duration is computed statelessly from the 4h data (backward scan),
+        # so only the cooldown flag needs per-symbol state.
+        # in_cooldown: True after signal fired, reset when cluster dissolves.
         self._ma_cluster_cooldown: dict[str, np.ndarray] = {}  # 1-elem array for numba
+
+        # ── MA Cluster scan state (populated every scan, even when no signal) ──
+        # Used by scalper to produce "MA Cluster monitor" line parallel to
+        # "Squeeze monitor". Keys: duration, spread, momentum, rejection.
+        # rejection values: 'no_cluster', 'pre_duration', 'zombie',
+        #   'cooldown', 'no_breakout', 'momentum_fail', 'fired'
+        self._ma_cluster_state: dict[str, dict] = {}
 
     # ══════════════════════════════════════════════════════════════════
     #  Signal Generation
@@ -265,10 +276,10 @@ class VolStraddleStrategy:
 
                 # Min conviction filter (T3-Triple mode)
                 if cfg.cw_enabled and score < cfg.min_conviction_score:
-                    logger.debug(
-                        f"[{self._current_symbol}] S_d8 blocked: "
+                    logger.info(
+                        f"[{self._current_symbol}] S_d8 BLOCKED: "
                         f"conviction={score} < min={cfg.min_conviction_score} "
-                        f"TF={tf} {cond}"
+                        f"TF={tf} {cond} VR={vr_val:.3f}"
                     )
                     # Don't return — fall through to D_mom8 check
                 else:
@@ -276,7 +287,7 @@ class VolStraddleStrategy:
                         'tf': tf,
                         'sl': cfg.s_sl,
                         'tp': cfg.s_tp,
-                        'max_hold': cfg.get_max_hold(tf),
+                        'max_hold': cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
                         'vr': vr_val,
                         'momentum': 0.0,
                         'straddle': True,
@@ -325,10 +336,10 @@ class VolStraddleStrategy:
 
         # Min conviction filter (T3-Triple mode)
         if cfg.cw_enabled and score < cfg.min_conviction_score:
-            logger.debug(
-                f"[{self._current_symbol}] D_mom8 blocked: "
+            logger.info(
+                f"[{self._current_symbol}] D_mom8 BLOCKED: "
                 f"conviction={score} < min={cfg.min_conviction_score} "
-                f"TF={tf} {cond}"
+                f"TF={tf} {cond} VR={vr_val:.3f}"
             )
             return 0
 
@@ -339,7 +350,7 @@ class VolStraddleStrategy:
             'tf': tf,
             'sl': cfg.d_sl,
             'tp': cfg.d_tp,
-            'max_hold': cfg.get_max_hold(tf),
+            'max_hold': cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
             'vr': float(vr[-1]) if not np.isnan(vr[-1]) else 0.0,
             'momentum': mom_val,
             'conviction_score': score,
@@ -407,45 +418,110 @@ class VolStraddleStrategy:
         # Compute momentum(8) on 4h close
         mom = compute_momentum(close_4h, cfg.momentum_period)
 
-        # Initialize per-symbol state if needed
-        if symbol not in self._ma_cluster_count:
-            self._ma_cluster_count[symbol] = np.zeros(1, dtype=np.int64)
+        # Initialize per-symbol cooldown if needed
+        if symbol not in self._ma_cluster_cooldown:
             self._ma_cluster_cooldown[symbol] = np.zeros(1, dtype=np.int64)
 
-        count_arr = self._ma_cluster_count[symbol]
         cooldown_arr = self._ma_cluster_cooldown[symbol]
+        duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
             close_4h, sma20, sma50, sma100, sma200, mom,
             cfg.ma_cluster_pct, cfg.ma_cluster_min_duration,
-            count_arr, cooldown_arr,
+            cooldown_arr, duration_out,
+            max_duration=cfg.ma_cluster_max_duration,
+            min_momentum=cfg.ma_cluster_min_momentum,
         )
 
+        # ── Always compute metrics (needed for near-miss logging + monitor) ──
+        idx = len(close_4h) - 1
+        ma_vals = [float(sma20[idx]), float(sma50[idx]),
+                   float(sma100[idx]), float(sma200[idx])]
+        ma_max = max(ma_vals)
+        ma_min = min(ma_vals)
+        spread = (ma_max - ma_min) / close_4h[idx] * 100 if close_4h[idx] > 0 else 0.0
+        mom_val = float(mom[-1]) if len(mom) > 0 and not np.isnan(mom[-1]) else 0.0
+        dur = int(duration_out[0])
+
+        # ── Determine rejection reason (for monitor + near-miss log) ──
         if sig != 0:
-            # Store signal metadata for the scalper
-            mom_val = float(mom[-1]) if len(mom) > 0 else 0.0
+            rejection = 'fired'
+        elif dur == 0:
+            rejection = 'no_cluster'
+        elif dur < cfg.ma_cluster_min_duration:
+            rejection = f'pre_duration({dur}<{cfg.ma_cluster_min_duration})'
+        elif cfg.ma_cluster_max_duration > 0 and dur > cfg.ma_cluster_max_duration:
+            rejection = f'zombie({dur}>{cfg.ma_cluster_max_duration})'
+        elif cooldown_arr[0] == 1:
+            rejection = 'cooldown'
+        elif ma_min <= close_4h[idx] <= ma_max:
+            rejection = 'no_breakout'
+        elif abs(mom_val) < cfg.ma_cluster_min_momentum:
+            rejection = f'momentum_fail(|{mom_val:.4f}|<{cfg.ma_cluster_min_momentum:.3f})'
+        else:
+            rejection = 'unknown'
 
-            # Compute spread for logging
-            idx = len(close_4h) - 1
-            ma_vals = [sma20[idx], sma50[idx], sma100[idx], sma200[idx]]
-            spread = (max(ma_vals) - min(ma_vals)) / close_4h[idx] * 100
+        # ── Store per-symbol state for MA Cluster monitor line in scalper ──
+        self._ma_cluster_state[symbol] = {
+            'duration': dur,
+            'spread': spread,
+            'momentum': mom_val,
+            'rejection': rejection,
+        }
 
+        # ── Log near-miss: cluster forming but signal rejected ──
+        # Only log when cluster has been active long enough to be interesting
+        # (dur >= 1) and not just absent (no_cluster). Silent no_cluster is fine.
+        if sig == 0 and dur >= 1:
+            if rejection.startswith('zombie'):
+                logger.info(
+                    f"[{symbol}] MA_CLUSTER zombie(skip): "
+                    f"dur={dur}>{cfg.ma_cluster_max_duration} "
+                    f"spread={spread:.2f}% mom={mom_val:.6f}"
+                )
+            elif rejection == 'cooldown':
+                logger.info(
+                    f"[{symbol}] MA_CLUSTER cooldown(skip): "
+                    f"dur={dur} spread={spread:.2f}% mom={mom_val:.6f}"
+                )
+            elif rejection == 'no_breakout':
+                logger.info(
+                    f"[{symbol}] MA_CLUSTER forming(no breakout yet): "
+                    f"dur={dur} spread={spread:.2f}% "
+                    f"price_inside_band mom={mom_val:.6f}"
+                )
+            elif rejection.startswith('momentum_fail'):
+                logger.info(
+                    f"[{symbol}] MA_CLUSTER momentum_fail(skip): "
+                    f"dur={dur} spread={spread:.2f}% "
+                    f"|mom|={abs(mom_val):.4f}<{cfg.ma_cluster_min_momentum:.3f}"
+                )
+            elif rejection.startswith('pre_duration'):
+                # Only log if more than half the minimum duration (near-miss)
+                if dur >= cfg.ma_cluster_min_duration / 2:
+                    logger.info(
+                        f"[{symbol}] MA_CLUSTER building: "
+                        f"dur={dur}/{cfg.ma_cluster_min_duration} "
+                        f"spread={spread:.2f}% mom={mom_val:.6f}"
+                    )
+
+        if sig != 0:
             self._last_signal_meta[symbol] = {
                 'tf': '4h',
                 'sl': cfg.ma_cluster_sl,
                 'tp': cfg.ma_cluster_tp,
-                'max_hold': cfg.ma_cluster_max_hold_4h,
+                'max_hold': cfg.ma_cluster_max_hold_4h * _TF_TO_15M['4h'],
                 'vr': 0.0,  # Not a VR signal
                 'momentum': mom_val,
                 'strategy_type': 'ma_cluster',
                 'ma_cluster_spread': spread,
-                'ma_cluster_duration': int(count_arr[0]),
+                'ma_cluster_duration': dur,
                 'leverage_override': cfg.ma_cluster_leverage,
             }
             logger.info(
                 f"[{symbol}] MA_CLUSTER signal "
                 f"TF=4h {'LONG' if sig == 1 else 'SHORT'} "
-                f"spread={spread:.2f}% duration={int(count_arr[0])} "
+                f"spread={spread:.2f}% duration={dur} "
                 f"mom={mom_val:.6f} "
                 f"SL={cfg.ma_cluster_sl*100:.0f}% TP={cfg.ma_cluster_tp*100:.0f}% "
                 f"leverage={cfg.ma_cluster_leverage:.0f}x"
@@ -638,9 +714,13 @@ class VolStraddleStrategy:
             worst_gain = gain
             best_gain = gain
 
-        # Track best PnL for logging
+        # Track best PnL (MFE — Maximum Favorable Excursion)
         if best_gain > pos.get('best_pnl', 0.0):
             pos['best_pnl'] = best_gain
+
+        # Track worst gain (MAE — Maximum Adverse Excursion, stored as negative)
+        if worst_gain < pos.get('worst_pnl', 0.0):
+            pos['worst_pnl'] = worst_gain
 
         # ── Straddle: unchanged simple SL/TP/max_hold exit ──
         is_straddle = pos.get('is_straddle', False)

@@ -93,6 +93,14 @@ def print_system_info(
     entry_mode: str,
     min_confidence: int,
     testnet: bool = False,
+    ma_cluster_enabled: bool = False,
+    ma_cluster_pct: float = 0.03,
+    ma_cluster_min_duration: int = 8,
+    ma_cluster_max_duration: int = 24,
+    ma_cluster_min_momentum: float = 0.01,
+    ma_cluster_sl: float = 0.02,
+    ma_cluster_tp: float = 0.08,
+    ma_cluster_leverage: float = 12.0,
 ) -> None:
     """Print formatted system configuration table.
 
@@ -112,6 +120,14 @@ def print_system_info(
         entry_mode: Entry mode name.
         min_confidence: Minimum confidence score.
         testnet: Whether using testnet.
+        ma_cluster_enabled: Whether MA cluster strategy is active.
+        ma_cluster_pct: MA cluster spread threshold.
+        ma_cluster_min_duration: Min bars in cluster.
+        ma_cluster_max_duration: Max bars — zombie filter.
+        ma_cluster_min_momentum: Min |momentum| for entry.
+        ma_cluster_sl: MA cluster stop loss.
+        ma_cluster_tp: MA cluster take profit.
+        ma_cluster_leverage: MA cluster leverage.
     """
     C = Color
     now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
@@ -152,6 +168,17 @@ def print_system_info(
     _print_row('Base', f'{leverage_base}x')
     _print_row('Max', f'{leverage_max}x')
     print()
+
+    if ma_cluster_enabled:
+        _print_section('MA CLUSTER')
+        _print_row('Status', f'{Color.GREEN}ENABLED{Color.RESET}')
+        _print_row('Spread', f'{ma_cluster_pct * 100:.0f}%')
+        _print_row('Min Duration', f'{ma_cluster_min_duration} bars (4h)')
+        _print_row('Max Duration', f'{ma_cluster_max_duration} bars (4h)')
+        _print_row('Min Momentum', f'{ma_cluster_min_momentum * 100:.1f}%')
+        _print_row('SL / TP', f'{ma_cluster_sl * 100:.0f}% / {ma_cluster_tp * 100:.0f}%')
+        _print_row('Leverage', f'{ma_cluster_leverage:.0f}x')
+        print()
 
 
 def _print_section(title: str) -> None:
