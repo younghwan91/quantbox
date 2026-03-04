@@ -4,12 +4,12 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-v14.0.0-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-868%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-897%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-release%2Fv14.0.0-blue.svg)]()
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(25x)와 MA Cluster Squeeze(12x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
 
-> **현재 상태**: Paper Trading — Balance $1,668 | Commit `6fdd86c` | 868 tests passed
+> **현재 상태**: Paper Trading — Balance $1,668 | Commit `9432018` | 897 tests passed
 
 ## 🌟 주요 기능
 
@@ -278,7 +278,7 @@ docs/
 └── backtest_results/
     ├── 202602/             # 2026-02 백테스트 리포트 (31개)
     └── 202603/             # 2026-03 백테스트 리포트 (19개, 현재)
-tests/                      # 유닛 테스트 (868개, 43 파일)
+tests/                      # 유닛 테스트 (897개, 45 파일)
 \`\`\`
 
 ## 📈 성과 지표 (현재 v14.0.0 — Dual-Axis Squeeze)
