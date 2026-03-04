@@ -79,3 +79,4 @@ docs/backtest_results/
 | 2026-03-04 | `d4e70d8` | **R45 MA Cluster Param Sweep** | **Rank#6: PF=1.304, Calmar=18.8 — 배포** |
 | 2026-03-04 | `ef55e2e` | **v14.0.0 Strategy Report** | **Dual AnnRet+1,086%(1x), Calmar=19.4** |
 | 2026-03-04 | `6fdd86c` | **v14.0.0 Current Status** | **868 tests, Paper $1,668** |
+| 2026-03-05 | `v14.0.1` | **v14.0.1 Live 전환** | **891 tests, Live $1,982** |
