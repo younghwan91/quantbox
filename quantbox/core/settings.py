@@ -275,10 +275,10 @@ class QuantBoxSettings(BaseSettings):
     vs_enable_1h: bool = True
     vs_enable_4h: bool = True
 
-    # ── Position Sizing ──
-    vs_base_leverage: float = 25.0           # v13.0: 25x aggressive (L/N=2.5, Calmar 10.12)
-    vs_max_leverage: float = 25.0            # Hard cap (matches base_leverage)
-    vs_max_concurrent: int = 10              # v13.0: 10 slots (L/N=25/10=2.5)
+    # ── Position Sizing (Half-Kelly derived) ──
+    vs_base_leverage: float = 30.0           # Half-Kelly: f*/2=3.07%, L=30 (L/N=3.0)
+    vs_max_leverage: float = 30.0            # Hard cap (matches base_leverage)
+    vs_max_concurrent: int = 10              # 10 slots (VR L/N=3.0, MA L/N=2.1)
 
     # ── CW-Tier Conviction Sizing (R34) ──
     vs_cw_enabled: bool = True               # Enable conviction-weighted sizing
@@ -301,7 +301,7 @@ class QuantBoxSettings(BaseSettings):
     vs_ma_cluster_sl: float = 0.02           # 2% stop loss
     vs_ma_cluster_tp: float = 0.08           # 8% take profit
     vs_ma_cluster_max_hold_4h: int = 12      # 12 × 4h = 48h
-    vs_ma_cluster_leverage: float = 12.0     # Risk parity: 12x × 2% ≈ 25x × 1%
+    vs_ma_cluster_leverage: float = 21.0     # Half-Kelly: f*/2=4.33%, L=21 (L/N=2.1)
 
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부

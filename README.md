@@ -4,7 +4,7 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-v14.0.0-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-891%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-902%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-release%2Fv14.0.0-blue.svg)]()
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(25x)와 MA Cluster Squeeze(12x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
@@ -20,7 +20,7 @@
 - **S_d8 스트래들**: VR < 0.55 × 4바 지속 → 양방향 동시 진입 (Hedge Mode)
 - **파라미터**: SL=1%, 하드TP=12%, Trailing +2%/0.3%, MaxHold=48h (192/48/12바)
 - **R43 Trailing**: d_tp=12% 하드 TP + activate +2% / trail_distance 0.3%
-- **25x @10 slots** (L/N=2.5), 6년 연속 흑자, Bootstrap P(PF≥1.0)=100%
+- **30x @10 slots** (L/N=3.0, Half-Kelly), 6년 연속 흑자, Bootstrap P(PF≥1.0)=100%
 - **불변 엣지**: N=2,265 (D+S), PF=1.280, WR=43.4%, EV=+32.1bp — 레버리지/기간 무관
 - **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
 
@@ -28,7 +28,7 @@
 - **MA 클러스터 감지**: SMA(20/50/100/200) 4선 수렴도 ≤ 3% 지속 ≥ 8바 (32h) → 브레이크아웃 포착
 - **4h 전용**: 상위 타임프레임에서만 동작, VR squeeze와 ~93% 비중복
 - **Momentum(8) 방향**: 클러스터 이탈 시 모멘텀 방향으로 진입
-- **리스크 패리티**: 12x leverage × 2% SL ≈ 25x × 1% SL (동일 per-trade risk)
+- **Half-Kelly 레버리지**: 21x leverage × 2% SL → per-trade risk 4.2% (f*/2=4.33%)
 - **Simple Exit**: SL=2%, TP=8%, MaxHold=12바 (48h), 트레일링 스탑 없음
 - **R45 Zombie Filter**: `max_duration=24` 바 초과 클러스터 차단 (오래된 클러스터 제거)
 - **R45 Momentum Filter**: `abs(momentum) < 0.010` 차단 (거스름 없는 약한 신호 제거)
