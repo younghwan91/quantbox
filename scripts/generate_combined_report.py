@@ -46,7 +46,7 @@ V13_MAX_DD    = 67.9    # %
 V13_CALMAR    = 10.12
 V13_TRADES    = 2265
 V13_TPD       = 1.03    # trades per day
-V13_LEV       = 25
+V13_LEV       = 30
 V13_SLOTS     = 10
 V13_LN        = 2.5
 V13_BALANCE   = 1983    # $
@@ -523,10 +523,10 @@ td.gold{{color:#8a5a00;font-weight:bold}}
 <h2>1. 현재 운용 설정</h2>
 <div class="tw"><table>
 <tr><th>Setting</th><th class="c">값</th><th>설명</th></tr>
-<tr><td>VS_BASE_LEVERAGE</td><td class="c bold">25.0x</td><td>25×25 grid 최적화 결과</td></tr>
-<tr><td>VS_MAX_LEVERAGE</td><td class="c">25.0x</td><td>Hard cap (base와 일치)</td></tr>
-<tr><td>VS_MAX_CONCURRENT</td><td class="c bold">10</td><td>L/N=2.5 유지</td></tr>
-<tr><td>L/N Ratio</td><td class="c green bold">2.50</td><td>Calmar 최대화 경계점</td></tr>
+<tr><td>VS_BASE_LEVERAGE</td><td class="c bold">30.0x</td><td>Half-Kelly: f*/2=3.07%</td></tr>
+<tr><td>VS_MAX_LEVERAGE</td><td class="c">30.0x</td><td>Hard cap (base와 일치)</td></tr>
+<tr><td>VS_MAX_CONCURRENT</td><td class="c bold">10</td><td>VR L/N=3.0, MA L/N=2.1</td></tr>
+<tr><td>L/N Ratio (VR)</td><td class="c green bold">3.00</td><td>Half-Kelly 레버리지</td></tr>
 <tr><td>Per-slot Notional</td><td class="c">${int(V13_BALANCE / V13_SLOTS * V13_LEV):,}</td><td>잔고/슬롯 × 레버리지</td></tr>
 <tr><td>VS_STRADDLE_ENABLED</td><td class="c">true</td><td>S_d8 양방향 스트래들</td></tr>
 <tr><td>VS_HEDGE_MODE</td><td class="c">true</td><td>Binance dualSidePosition</td></tr>

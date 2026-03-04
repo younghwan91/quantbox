@@ -547,12 +547,17 @@ class RubberBandScalper(
                         )
                 except BinanceAPIException as e:
                     if '-4028' in str(e):
-                        # Leverage too high — try lower
+                        # Leverage too high for this symbol — try reduced
+                        fallback_lev = max(20, leverage // 2)
                         try:
                             resp = self.client.futures_change_leverage(
-                                symbol=symbol, leverage=min(leverage, 25),
+                                symbol=symbol, leverage=fallback_lev,
                             )
-                            actual_leverage = int(resp.get('leverage', min(leverage, 25)))
+                            actual_leverage = int(resp.get('leverage', fallback_lev))
+                            logger.warning(
+                                f"[{symbol}] Leverage {leverage}x not supported, "
+                                f"fell back to {actual_leverage}x"
+                            )
                         except Exception:
                             logger.error(
                                 f"[{symbol}] Leverage fallback also failed — "
