@@ -701,9 +701,9 @@ VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발�
 | `VS_MAX_HOLD_15M` | 192 | 15m TF 최대 보유 (=48h) |
 | `VS_MAX_HOLD_1H` | 48 | 1h TF 최대 보유 (=48h) |
 | `VS_MAX_HOLD_4H` | 12 | 4h TF 최대 보유 (=48h) |
-| `VS_BASE_LEVERAGE` | 25.0 | v13.0: 25x aggressive (L/N=2.5, Calmar 10.12) |
-| `VS_MAX_LEVERAGE` | 25.0 | Hard cap (matches base_leverage) |
-| `VS_MAX_CONCURRENT` | 10 | v13.0: 10 slots (L/N=25/10=2.5) |
+| `VS_BASE_LEVERAGE` | 30.0 | Half-Kelly: f*/2=3.07%, L=30 (L/N=3.0) |
+| `VS_MAX_LEVERAGE` | 30.0 | Hard cap (matches base_leverage) |
+| `VS_MAX_CONCURRENT` | 10 | 10 slots (VR L/N=3.0, MA L/N=2.1) |
 | `VS_STRADDLE_ENABLED` | true | S_d8 스트래들 활성화 |
 | `VS_HEDGE_MODE` | true | Binance Hedge Mode (dualSidePosition) |
 | `VS_S_VR_THRESHOLD` | 0.55 | S_d8 VR 진입 임계값 |
@@ -816,7 +816,7 @@ VR squeeze와 **93.7% 비중복**인 보완 전략. 4개 이동평균이 수렴�
 | `VS_MA_CLUSTER_SL` | 0.02 | 2% 손절 |
 | `VS_MA_CLUSTER_TP` | 0.08 | 8% 익절 |
 | `VS_MA_CLUSTER_MAX_HOLD_4H` | 12 | 12바 (48h) 최대 보유 |
-| `VS_MA_CLUSTER_LEVERAGE` | 12.0 | 12x 레버리지 (리스크 패리티) |
+| `VS_MA_CLUSTER_LEVERAGE` | 21.0 | Half-Kelly: f*/2=4.33%, L=21 (L/N=2.1) |
 | `VS_MA_CLUSTER_SMA_PERIODS` | [20,50,100,200] | SMA 기간 목록 |
 
 **Exit 방식:** Simple exit (SL/TP/MaxHold만 적용). 트레일링 스탑 없음 — R44d 백테스트와 동일.
