@@ -144,3 +144,14 @@ docs/backtest_results/YYYYMM/{YYYYMMDD}_{commit_short}_{description}.md
 - **교차 타임프레임 참조는 완성된 바만 사용.** `j = (i // ratio) - 1`.
 - 새 상위 TF 참조 추가 시: "이 바가 진행 중일 때 이 값을 알 수 있는가?" 반드시 검증.
 - **백테스트 WR이 라이브의 2배 이상이면 lookahead 즉시 의심.**
+
+### #3: Dynamic Capital 50% Cap (2026-03-05)
+
+`VolStraddleConfig.dynamic_capital_enabled=True` → `balance / max(1, n_active+1)`, 50% cap → 첫 슬롯이 잔고의 50%($991) 독점 → 나머지 9개 슬롯 전부 `-2019: Margin is insufficient`.
+
+**테스트 미검출 원인: 포지션 0개인 상태(`n_active=0`)에서 단일 진입만 검증했기 때문에, 2번째 슬롯 진입 시 마진 부족이 드러나지 않았다.**
+
+**규칙:**
+- **슬롯 sizing 테스트는 반드시 `n_active > 0` 상태(선행 포지션 보유 중)를 포함.**
+- 포지션 sizing 로직 변경 시 `max_concurrent` 개 슬롯 전체를 순서대로 열었을 때 총 margin이 잔고를 초과하지 않는지 검증.
+- **다른 전략에서 이식한 공식(RubberBand 2-slot → VolStraddle 10-slot)은 슬롯 수 역할이 바뀌므로 반드시 재검증.**
