@@ -4,7 +4,7 @@
 |-------|-------|
 | **Commit** | `29eecab` |
 | **Date** | 2026-02-26 14:58 UTC |
-| **Script** | `research/active/alpha_search_r23.py` |
+| **Script** | `research/active/r21_r30/r23_alpha_search.py` |
 | **Data** | 2190d (6yr), 50 symbols, 210,335×15m bars |
 | **Conditions** | ZERO cost, 1x leverage, zero lookahead |
 | **Runtime** | 57 seconds |
