@@ -311,6 +311,8 @@ def check_ma_cluster(
     min_duration: int,
     in_cooldown_arr: np.ndarray,
     duration_out: np.ndarray,
+    max_duration: int = 0,
+    min_momentum: float = 0.003,
 ) -> int:
     """Check MA cluster squeeze signal on the LAST completed bar.
 
@@ -330,6 +332,8 @@ def check_ma_cluster(
         min_duration: Min consecutive 4h bars in cluster.
         in_cooldown_arr: 1-elem int64 array — cooldown state (persists).
         duration_out: 1-elem int64 array — filled with cluster duration.
+        max_duration: Max consecutive bars — skip zombie signals (0=disabled).
+        min_momentum: Min |momentum| for entry (R45: 0.010 optimal).
 
     Returns:
         +1 (long), -1 (short), or 0 (no signal).
@@ -366,6 +370,10 @@ def check_ma_cluster(
     if duration < min_duration:
         return 0
 
+    # Max duration filter: skip zombie signals (R45)
+    if max_duration > 0 and duration > max_duration:
+        return 0
+
     # One signal per cluster episode: skip if already fired
     if in_cooldown_arr[0] == 1:
         return 0
@@ -377,7 +385,7 @@ def check_ma_cluster(
         return 0
 
     # Momentum direction
-    if abs(momentum[idx]) < 0.003:
+    if abs(momentum[idx]) < min_momentum:
         return 0
 
     # Mark cooldown — no more signals until cluster dissolves

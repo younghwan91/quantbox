@@ -296,6 +296,8 @@ class QuantBoxSettings(BaseSettings):
     vs_ma_cluster_enabled: bool = True       # Enable MA cluster signals
     vs_ma_cluster_pct: float = 0.03          # Max spread among 4 SMAs (3%)
     vs_ma_cluster_min_duration: int = 8      # Min 4h bars in cluster (≈32h)
+    vs_ma_cluster_max_duration: int = 24     # Max 4h bars — zombie filter (R45)
+    vs_ma_cluster_min_momentum: float = 0.01 # Min |momentum| for entry (R45)
     vs_ma_cluster_sl: float = 0.02           # 2% stop loss
     vs_ma_cluster_tp: float = 0.08           # 8% take profit
     vs_ma_cluster_max_hold_4h: int = 12      # 12 × 4h = 48h
