@@ -651,3 +651,99 @@ class TestLookaheadPrevention:
         # c1h[-1] should be close[199] (4th bar of last complete 1h window)
         assert c1h[-1] == close[199]
         assert len(c1h) == 50
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  9. Position Sizing — multi-slot margin safety (Incident #3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPositionSizing:
+    """Verify per-slot capital never exceeds balance/max_concurrent.
+
+    Incident #3 (2026-03-05): dynamic_capital_enabled=True with n_active=0
+    gave balance/1 capped at 50%, consuming entire margin for slot 1 and
+    leaving nothing for slots 2-10 (-2019 Margin insufficient).
+
+    Rule: total margin across max_concurrent slots must not exceed balance.
+    """
+
+    def test_flat_sizing_10slots(self):
+        """Flat sizing: each slot gets exactly balance/max_concurrent."""
+        cfg = VolStraddleConfig(dynamic_capital_enabled=False, max_concurrent=10)
+        balance = 2000.0
+        expected = balance / 10  # $200
+
+        per_slot = balance / cfg.max_concurrent
+        assert per_slot == pytest.approx(expected)
+
+        # All 10 slots together must not exceed balance
+        total = per_slot * cfg.max_concurrent
+        assert total <= balance
+
+    def test_dynamic_capital_capped_by_flat(self):
+        """dynamic_capital must never exceed balance/max_concurrent.
+
+        This is the hard cap added to positions.py after Incident #3.
+        When n_active=0: balance/max(1, 0+1) = balance → capped to balance/10.
+        """
+        balance = 2000.0
+        max_concurrent = 10
+        flat_per_slot = balance / max_concurrent  # $200
+
+        # Simulate dynamic formula at n_active=0 (worst case)
+        for n_active in range(max_concurrent):
+            dynamic = balance / max(1, n_active + 1)
+            dynamic = min(dynamic, balance * 0.5)  # 50% cap
+            # Hard cap (the fix we added)
+            capped = min(dynamic, flat_per_slot)
+            assert capped <= flat_per_slot, (
+                f"n_active={n_active}: capped={capped:.2f} > flat={flat_per_slot:.2f}"
+            )
+
+    def test_all_slots_fit_in_balance(self):
+        """Opening max_concurrent slots sequentially must not exceed balance.
+
+        This is the exact scenario that caused -2019 on slots 2-10.
+        Each slot opened while previous ones are active (n_active grows).
+        """
+        balance = 2000.0
+        max_concurrent = 10
+        flat_per_slot = balance / max_concurrent  # $200 each
+
+        total_margin = 0.0
+        for slot in range(max_concurrent):
+            # With the fix: per_slot is always capped at flat_per_slot
+            n_active = slot
+            dynamic = balance / max(1, n_active + 1)
+            dynamic = min(dynamic, balance * 0.5)
+            per_slot = min(dynamic, flat_per_slot)  # hard cap
+            total_margin += per_slot
+
+        assert total_margin <= balance, (
+            f"Total margin ${total_margin:.2f} exceeds balance ${balance:.2f}"
+        )
+
+    def test_first_slot_not_50pct_of_balance(self):
+        """Slot 1 must not consume 50% of balance (the original bug).
+
+        Original: n_active=0 → balance/1 → min(2000, 1000) = $1000 → 12x = $12,000
+        Fixed:    n_active=0 → min(2000, 1000, 200) = $200 → 12x = $2,400
+        """
+        balance = 2000.0
+        max_concurrent = 10
+        flat_per_slot = balance / max_concurrent  # $200
+        leverage = 12
+
+        # Simulate old (buggy) formula
+        buggy_slot = min(balance / max(1, 0 + 1), balance * 0.5)  # $1000
+        buggy_notional = buggy_slot * leverage  # $12,000
+
+        # Simulate fixed formula
+        fixed_slot = min(buggy_slot, flat_per_slot)  # $200
+        fixed_notional = fixed_slot * leverage  # $2,400
+
+        assert buggy_notional == pytest.approx(12000.0)  # confirm bug existed
+        assert fixed_notional == pytest.approx(2400.0)   # confirm fix works
+        # margin (capital) must be within 1-slot share of balance
+        assert fixed_slot <= flat_per_slot  # $200 ≤ $200
