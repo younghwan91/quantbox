@@ -304,6 +304,107 @@ class TestCheckMaCluster:
         )
         assert sig == 0  # No breakout → no signal
 
+    def test_min_momentum_filters_weak_signals(self):
+        """Signals with |momentum| below min_momentum are rejected (R45)."""
+        n = 50
+        close = np.full(n, 100.0)
+        sma20 = np.full(n, 100.3)
+        sma50 = np.full(n, 99.7)
+        sma100 = np.full(n, 100.1)
+        sma200 = np.full(n, 99.9)
+        # Weak momentum: 0.007 → above old 0.003 but below new 0.01
+        mom = np.full(n, 0.007)
+        close[-1] = 105.0  # breakout
+
+        cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
+
+        # With min_momentum=0.01, this weak signal is rejected
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            min_momentum=0.01,
+        )
+        assert sig == 0
+
+        # With default (0.003), this would fire
+        cooldown_arr[0] = 0
+        sig2 = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            min_momentum=0.003,
+        )
+        assert sig2 == 1
+
+    def test_max_duration_filters_zombie_signals(self):
+        """Signals with duration > max_duration are rejected (R45 zombie filter)."""
+        n = 100
+        close = np.full(n, 100.0)
+        # All bars clustered = duration = n
+        sma20 = np.full(n, 100.3)
+        sma50 = np.full(n, 99.7)
+        sma100 = np.full(n, 100.1)
+        sma200 = np.full(n, 99.9)
+        mom = np.full(n, 0.05)
+        close[-1] = 105.0  # breakout
+
+        cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
+
+        # With max_duration=24, duration=100 is way over → rejected
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            max_duration=24,
+        )
+        assert sig == 0
+        assert duration_out[0] == 100  # Duration correctly computed
+
+        # With max_duration=0 (disabled), it fires
+        cooldown_arr[0] = 0
+        sig2 = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            max_duration=0,
+        )
+        assert sig2 == 1
+
+    def test_max_duration_allows_fresh_cluster(self):
+        """Cluster within max_duration range fires normally."""
+        n = 50
+        close = np.full(n, 100.0)
+        # First 30 bars NOT clustered, last 20 bars clustered
+        sma20 = np.full(n, 110.0)
+        sma50 = np.full(n, 90.0)
+        sma100 = np.full(n, 100.0)
+        sma200 = np.full(n, 100.0)
+
+        for i in range(n - 20, n):
+            sma20[i] = 100.3
+            sma50[i] = 99.7
+            sma100[i] = 100.1
+            sma200[i] = 99.9
+
+        mom = np.full(n, 0.05)
+        close[-1] = 105.0
+
+        cooldown_arr = np.zeros(1, dtype=np.int64)
+        duration_out = np.zeros(1, dtype=np.int64)
+
+        # duration=20, max_duration=24 → allowed
+        sig = check_ma_cluster(
+            close, sma20, sma50, sma100, sma200, mom,
+            cluster_pct=0.03, min_duration=8,
+            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            max_duration=24,
+        )
+        assert sig == 1
+        assert duration_out[0] == 20
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Config Defaults
@@ -316,6 +417,8 @@ class TestMaClusterConfig:
         assert cfg.ma_cluster_enabled is True
         assert cfg.ma_cluster_pct == 0.03
         assert cfg.ma_cluster_min_duration == 8
+        assert cfg.ma_cluster_max_duration == 24
+        assert cfg.ma_cluster_min_momentum == 0.01
         assert cfg.ma_cluster_sl == 0.02
         assert cfg.ma_cluster_tp == 0.08
         assert cfg.ma_cluster_max_hold_4h == 12
@@ -348,6 +451,7 @@ class TestStrategyIntegration:
             enable_4h=True,
             d_vr_threshold=0.01,  # Very low → unlikely to fire
             ma_cluster_enabled=True,
+            ma_cluster_max_duration=0,  # Disable zombie filter for basic tests
         )
         defaults.update(kwargs)
         cfg = VolStraddleConfig(**defaults)
@@ -621,6 +725,7 @@ class TestMaxHoldTfConversion:
         strategy = VolStraddleStrategy(VolStraddleConfig(
             enable_15m=False, enable_1h=False, enable_4h=True,
             ma_cluster_enabled=True,
+            ma_cluster_max_duration=0,
         ))
 
         # Build data where MA cluster fires

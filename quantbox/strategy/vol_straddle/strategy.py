@@ -422,6 +422,8 @@ class VolStraddleStrategy:
             close_4h, sma20, sma50, sma100, sma200, mom,
             cfg.ma_cluster_pct, cfg.ma_cluster_min_duration,
             cooldown_arr, duration_out,
+            max_duration=cfg.ma_cluster_max_duration,
+            min_momentum=cfg.ma_cluster_min_momentum,
         )
 
         if sig != 0:
