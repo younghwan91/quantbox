@@ -84,7 +84,9 @@ class VolStraddleConfig:
     max_same_direction: int = 2
 
     # ── Dynamic Capital ──
-    dynamic_capital_enabled: bool = True
+    # Disabled: vol_straddle uses fixed balance/max_concurrent (backtest parity).
+    # Dynamic formula (balance/n_active+1) causes -2019 margin errors on 10-slot config.
+    dynamic_capital_enabled: bool = False
 
     # ── SoftTight DD Scaling (safety mechanism) ──
     soft_equity_scale: bool = True
