@@ -278,7 +278,7 @@ tests/                      # 유닛 테스트 (859개, 43 파일)
 >
 > **v12.4.1–v12.4.6 Production Hardening**: 6 hotfixes — server TP PBT qty (3 rounds), stale SL ratchet reset, missing save_state after partial, HWM/history reset on 0-position restart.
 >
-> **v12.6 Climax+ATR (Current)**: Ghost-SL 제거 (ATR 적응형 스탑). Climax filter vol×3.0으로 trade quality 극대화 (trade 수 −20%, WR +11.1pp). Calmar **1,171** (+60.8%), DD **5.8%** (6yr, 50 symbols). 841 tests.
+> **v12.6 Climax+ATR (Current)**: Ghost-SL 제거 (ATR 적응형 스탑). Climax filter vol×3.0으로 trade quality 극대화 (trade 수 −20%, WR +11.1pp). Calmar **1,171** (+60.8%), DD **5.8%** (6yr, 50 symbols). 868 tests.
 
 ## 🧪 테스트
 
