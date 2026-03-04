@@ -1,23 +1,44 @@
 # QuantBox 📈
 
-**암호화폐 Rubber Band Scalper + Elliott Wave + VolStraddle — Binance USDT-M Futures**
+**바이낸스 USDT-M 선물 VR 스퀴즈 시스템 — Dual-Axis Squeeze (VR + MA Cluster)**
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-v14.0.0-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-897%20passed-brightgreen.svg)]()
+[![Branch](https://img.shields.io/badge/branch-release%2Fv14.0.0-blue.svg)]()
 
-멀티 전략 스켈링 프레임워크 (Rubber Band 15분봉 + Elliott Wave 4h봉 + VolStraddle VR 압축 감지, Numba 가속)
+바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(25x)와 MA Cluster Squeeze(12x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
+
+> **현재 상태**: Paper Trading — Balance $1,668 | Commit `9432018` | 897 tests passed
 
 ## 🌟 주요 기능
 
-### 🎯 VolStraddle — VR Compression Detector (v13.0-VR856-25x)
+### 🎯 VolStraddle — VR Compression Detector (v14.0.0, 배포 중)
 - **Volatility Ratio (VR) 압축 감지**: `VR = ATR(8)/ATR(56) < 0.50` — 변동성 압축 후 폭발 포착
 - **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
-- **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정
+- **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정 (D_mom8)
 - **S_d8 스트래들**: VR < 0.55 × 4바 지속 → 양방향 동시 진입 (Hedge Mode)
-- **백테스트 파리티**: SL=1%, TP=5%, MaxHold=48h (타임프레임별 192/48/12바)
-- **v13.0 Aggressive**: 25x leverage @10 slots (L/N=2.5), AnnRet=+687%, DD=68%, Calmar 10.12, 6년 연속 흑자
+- **파라미터**: SL=1%, 하드TP=12%, Trailing +2%/0.3%, MaxHold=48h (192/48/12바)
+- **R43 Trailing**: d_tp=12% 하드 TP + activate +2% / trail_distance 0.3%
+- **25x @10 slots** (L/N=2.5), 6년 연속 흑자, Bootstrap P(PF≥1.0)=100%
+- **불변 엣지**: N=2,265 (D+S), PF=1.280, WR=43.4%, EV=+32.1bp — 레버리지/기간 무관
 - **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
 
-### 🔥 Rubber Band Scalper (v12.6 — ATR Stop + Climax Filter)
+### 📐 MA Cluster Squeeze — 4h SMA Convergence Breakout (V17, R45, 배포 중)
+- **MA 클러스터 감지**: SMA(20/50/100/200) 4선 수렴도 ≤ 3% 지속 ≥ 8바 (32h) → 브레이크아웃 포착
+- **4h 전용**: 상위 타임프레임에서만 동작, VR squeeze와 ~93% 비중복
+- **Momentum(8) 방향**: 클러스터 이탈 시 모멘텀 방향으로 진입
+- **리스크 패리티**: 12x leverage × 2% SL ≈ 25x × 1% SL (동일 per-trade risk)
+- **Simple Exit**: SL=2%, TP=8%, MaxHold=12바 (48h), 트레일링 스탑 없음
+- **R45 Zombie Filter**: `max_duration=24` 바 초과 클러스터 차단 (오래된 클러스터 제거)
+- **R45 Momentum Filter**: `abs(momentum) < 0.010` 차단 (거스름 없는 약한 신호 제거)
+- **불변 엣지 (R45, 6yr)**: N=1,631, PF=1.365, WR=38.1%, EV=+42.6bp
+- **결합 포트폴리오 (R45)**: N=3,748, PF=1.304, Calmar=18.8, P(PF≥1.0)=100%, 6/6년 흑자
+
+### 🔥 Rubber Band Scalper — 레거시 (v12.6, 현재 비활성화)
+
+> ⚠️ v14.0.0에서 VR Squeeze + MA Cluster로 전략 전환. 아래 내용은 참고용.
+
 - **v12.6 Climax Volume Filter + ATR Stop (R21, 2026-02-24)**:
   - **ATR-Based Stop**: `SL = clamp(2.0 × ATR_pct, 0.5%, 4.0%)` — 고정 0.382×에서 적응형 스탑으로 전환, Ghost-SL 문제 해결
   - **Climax Volume Filter**: `vol > 3.0 × vol_SMA(20)` = +1 confidence — 극단적 거래량 폭발 시에만 진입 바이어스
@@ -218,10 +239,10 @@ quantbox/
 │   │   ├── config.py       # RubberBandConfig (전략 파라미터)
 │   │   ├── signals.py      # Numba 시그널 엔진 (23개 함수)
 │   │   └── strategy.py     # RubberBandStrategy 클래스
-│   ├── vol_straddle/       # VolStraddle VR 압축 감지기 (R40-VR856-3x)
-│   │   ├── config.py       # VolStraddleConfig (R40 tournament 파라미터)
-│   │   ├── signals.py      # Numba VR/모멘텀/리샘플링 (8개 함수)
-│   │   └── strategy.py     # VolStraddleStrategy 클래스
+│   ├── vol_straddle/       # VolStraddle VR 압축 + MA 클러스터 스퀴즈
+│   │   ├── config.py       # VolStraddleConfig (VR + MA cluster 파라미터)
+│   │   ├── signals.py      # Numba VR/모멘텀/SMA/MA클러스터 (10개 함수)
+│   │   └── strategy.py     # VolStraddleStrategy 클래스 (VR + MA cluster)
 │   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
@@ -234,7 +255,7 @@ quantbox/
 │   └── diagnostics.py      # DiagnosticLogger (진단 로깅)
 └── scalper.py              # 코어 엔진 — init, cycle, scan, state (4개 Mixin 상속)
 
-scripts/                    # 리서치 & 유틸리티 스크립트
+scripts/                    # 유틸리티 스크립트
 ├── download_15m_data.py        # 15분 캔들 데이터 캐시 갱신
 ├── download_6yr_data.py        # 6년 장기 데이터 다운로드
 ├── download_extended_data.py   # 장기 과거 데이터 다운로드
@@ -244,31 +265,54 @@ scripts/                    # 리서치 & 유틸리티 스크립트
 ├── check_account.py            # 계좌 상태 점검
 ├── win_rate_check.py           # 실시간 Win Rate 검증
 ├── generate_report_pdf.py      # 단일 마크다운 → PDF (Chrome headless)
-└── generate_combined_report.py # R40×v13 종합 PDF 리포트 (9 charts)
-tests/                      # 유닛 테스트 (824개, 42 파일)
+└── generate_combined_report.py # 종합 PDF 리포트
+research/                   # 리서치 스크립트 (r번호 체계)
+├── active/
+│   ├── misc/               # 베이스라인·유틸 (번호 없음)
+│   ├── r12_r20/            # Alpha search R12-R16, leverage 실험
+│   ├── r21_r30/            # Vol straddle 아키텍처 탐색 (R22-R30)
+│   ├── r31_r40/            # 스케일링·최적화 (R31-R40, scaling_r38 canonical)
+│   └── r41_r45/            # 현재 배포 전략 (R41-R45, r45_param_sweep 최신)
+└── archive/                # 구버전 보관 (r2-r11, r_ 무번호)
+docs/
+└── backtest_results/
+    ├── 202602/             # 2026-02 백테스트 리포트 (31개)
+    └── 202603/             # 2026-03 백테스트 리포트 (19개, 현재)
+tests/                      # 유닛 테스트 (897개, 45 파일)
 \`\`\`
 
-## 📈 성과 지표 (v11.1: Critical Fixes + Pool Expansion, Top-20, 365일)
+## 📈 성과 지표 (현재 v14.0.0 — Dual-Axis Squeeze)
 
-| 지표 | v7.0 Hybrid | v8.0 DynTarget | v9.0 Fib+SRM | v10.0 Optimized | v11.1 Top-20 ★ |
-|------|-------------|----------------|--------------|--------------------|--------------------|
-| Portfolio Return | +139.8% | +139.8% | +169.2% | +982.4% | **+3384.3%** |
-| Max Drawdown | 4.3% | 4.3% | 11.0% | 19.6% | **21.8%** |
-| Calmar Ratio | 32.42 | 30.29 | 15.38 | 4.78 | **155.22** |
-| Sharpe Ratio | 5.23 | 5.23 | 5.23 | 5.23 | **5.02** |
-| Win Rate | 63.3% | 63.3% | 63.3% | 71.1% | **69.7%** |
-| Trades | 798 | 798 | 798 | 318 | **936** |
-| Profit Factor | N/A | N/A | N/A | N/A | **2.66** |
+### 불변 엣지 지표 (leversage·기간 무관)
 
-> **v12.2 핵심**: E-3Slot 필터 완화 — conf≥3→≥2, ATR 2.5×→2.0×, floor 1%→0.8%, 2→3 slots. +138% trades/day, Calmar 795 (+5.8%), Sharpe 6.41. MTF block 유지 (제거 시 Sharpe -3.11 — 비협상).
+| 지표 | VR Squeeze (D+S) | MA Cluster (R45) | 결합 (R45) |
+|------|---|---|---|
+| N (trade 수) | 2,265 | 1,631 | **3,748** |
+| PF | 1.280 | 1.365 | **1.304** |
+| WR | 43.4% | 38.1% | 40.9% |
+| EV/trade | +32.1bp | +42.6bp | +35.4bp |
+| Bootstrap P(PF≥1.0) | 100.0% | 100.0% | 100.0% |
+| 6/6년 흑자 | ✓ | ✓ | ✓ |
+
+### 레버리지 적용 수익률 (6년, 50심볼)
+
+| 지표 | v7.0 Hybrid | v13.0 VR (25x) | v14.0 Dual (R45) ★ |
+|------|-------------|----------------|--------------------|
+
+| AnnRet (backtest) | +139.8% | +687% | **+1,086% (1x) / +1,410% (L)** |
+| AnnRet (realistic 60%) | — | +412% | **+846%** |
+| Max Drawdown | 4.3% | 68% | **62%** |
+| Calmar | 32.42 | 10.12 | **18.8** |
+| Profit Factor | — | — | **1.304** |
+| N/year | — | — | **~600** |
+
+> **v14.0.0 R45 변경 (현재)**: MA Cluster min_momentum 0.003→0.010, max_duration=∞→24. 좀비·약모멘텀 트레이드 차단. Combined PF 1.278→1.304 (+2%), EV/trade +24%.
 >
-> **v12.3 T100_S38_PBT + M-2SSTSX**: R8 stress-tested exit (T100/S38/PBT) + R6 combo sizing (SteepX/SoftTight/VolAdj/DirDiv). 3 critical production safety fixes: state restore for runners, bracket repair guard, failed-partial recovery.
+> **v14.0.0 R43 Trailing**: VR Squeeze d_tp 5%→12% (하드 TP) + trailing stop (activate +2%, trail 0.3%). Calmar 대폭 개선.
 >
-> **v12.4 I-HybTight (Production)**: Reversal A/B test champion. target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3. R:R 1.64→1.91 (+16%), Calmar 792→834, 6yr return 6,300%.
+> **v13.0 → v14.0**: MA Cluster Squeeze 추가 (Dual-Axis). AnnRet +687%→+1,086% (1x compound), Calmar 10.12→18.8.
 >
-> **v12.4.1–v12.4.6 Production Hardening**: 6 hotfixes — server TP PBT qty (3 rounds), stale SL ratchet reset, missing save_state after partial, HWM/history reset on 0-position restart.
->
-> **v12.6 Climax+ATR (Current)**: Ghost-SL 제거 (ATR 적응형 스탑). Climax filter vol×3.0으로 trade quality 극대화 (trade 수 −20%, WR +11.1pp). Calmar **1,171** (+60.8%), DD **5.8%** (6yr, 50 symbols). 841 tests.
+> **레버리지 구조**: VR 25x×1%SL = MA 12x×2%SL = per-trade risk 25% (리스크 패리티). 현재 잔고 $1,668 → 현실적 1yr 기대 $13,000–$16,000 (50-60% backtest 적용).
 
 ## 🧪 테스트
 

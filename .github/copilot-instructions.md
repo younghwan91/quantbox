@@ -45,11 +45,13 @@
 
 | 브랜치 | 용도 | 머지 방식 |
 |--------|------|-----------|
-| `main` | 프로덕션. 직접 커밋 금지 | `develop` → `main` `--no-ff` |
-| `develop` | 통합. 직접 커밋 금지 | feature/fix에서만 머지 |
-| `feature/xxx` | 새 기능 | backtest 리포트 포함 → `--no-ff`, 나머지 → `--squash` |
-| `fix/xxx` | 버그 수정 | `--squash` |
-| `hotfix/xxx` | 긴급 (`main`에서 분기) | `main` + `develop` 둘 다 머지 |
+| `main` | 프로덕션. 직접 커밋 금지 | `release` → `main` `--no-ff` + 버전 태그 |
+| `develop` | 통합. 직접 커밋 금지 | feature/fix/release에서만 머지 |
+| `feature/xxx` | 새 기능 (코드) | **`--squash`** — 커밋 정리 후 단일 커밋으로 |
+| `research/xxx` | 리서치/백테스트 | **`--no-ff`** — 백테스트 리포트·탐색 이력 보존 |
+| `release/xxx` | 릴리즈 준비 | `main` + `develop` 둘 다 **`--no-ff`** |
+| `fix/xxx` | 버그 수정 | **`--squash`** |
+| `hotfix/xxx` | 긴급 (`main`에서 분기) | `main` + `develop` 둘 다 **`--no-ff`** |
 
 **반드시 develop에 머지 후 push.** 브랜치만 push하고 develop 안 건드리면 안 됨.
 
@@ -63,6 +65,33 @@
 4. **슬롯 수 명시.** 15 slots ≠ 10 slots. Production은 10 slots.
 5. **재구현 불가피 시** static params로 baseline 재현 검증을 **먼저** 실행.
 6. **베이스라인 = 배포 수치. 예외 없음.** 리서치에서 출력한 baseline이 배포 리포트와 다르면 리서치 전체가 무효.
+
+## 수익률 보고 규칙 (Performance Reporting Rules)
+
+> 버전·보고서 간 수익률 불일치의 반복된 원인. 수치 보고 시 반드시 준수.
+
+### 레버리지 모델 명시 필수
+
+`scaling_r38.py`의 `compute_metrics()`는 **1x compound** (`equity *= (1+p)`)만 계산한다. Production은 `equity *= (1 + p × L/N)`이다. **이 둘을 절대 혼동하지 말 것.**
+
+- 수익률 보고 시 **반드시 어떤 compound 모델인지 명시**: `1x` vs `L/N=2.5` vs `L/N=1.2`
+- `compute_metrics()` 출력을 production 수익률로 제시하면 **거짓말**이 된다
+- 결합 포트폴리오는 per-trade leverage (VR→L/N=2.5, MA→L/N=1.2) 적용
+
+### 데이터 기간에 따른 compound 차이
+
+동일 PF/EV라도 compound 기간이 다르면 연간수익률이 **극적으로** 달라진다:
+- VR PF≈1.31: 4.7yr → +338%, 6yr → +687% (2배 차이)
+- **버전 간 수익률 비교 시 반드시 데이터 기간을 같이 명시**
+- PF와 per-trade EV가 레버리지·기간 무관한 **불변 엣지 지표**
+
+### 체크리스트 (보고서 작성 전 확인)
+
+1. ☐ compound 모델 명시? (1x / L/N=? / per-trade leverage)
+2. ☐ 데이터 기간 명시? (몇 년, 시작~끝 날짜)
+3. ☐ 이전 버전 수치와 **같은 조건**으로 비교?
+4. ☐ `compute_metrics()` 출력을 그대로 production 수치로 쓰지 않았는가?
+5. ☐ 이전 보고서의 **데이터 기간·파라미터(TP/SL)·리서치 스크립트**가 현재와 다르면, 다른 스크립트 출력을 같은 전략이라고 비교하지 않았는가?
 
 ## 실전 교훈 (Incident-Driven Rules)
 

@@ -214,10 +214,13 @@ class ReconciliationMixin:
                         )
                     else:
                         tp_qty = quantity
+                    # v14.0: Use per-position TP (not RubberBand default).
+                    # VolStraddle stores tp in position dict (VR=12%, MA=8%).
+                    repair_tp = pos.get('tp', self.config.target_retrace)
                     new_tp = self._place_server_take_profit(
                         symbol=api_sym, signal=signal, quantity=tp_qty,
                         entry_price=entry_price, move_size=move_size,
-                        target_retrace=self.config.target_retrace,
+                        target_retrace=repair_tp,
                         position_side=pos.get('position_side'),
                     )
                     if new_tp:
