@@ -66,12 +66,21 @@ class PositionMixin:
             if vs.soft_equity_scale:
                 hwm = self._high_water_mark if self._high_water_mark > 0 else balance
                 dd_pct = (hwm - balance) / hwm if hwm > 0 else 0.0
+                eq_scale = 1.0
                 if dd_pct >= vs.soft_eq_dd3:
-                    per_slot_capital *= vs.soft_eq_scale3
+                    eq_scale = vs.soft_eq_scale3
+                    per_slot_capital *= eq_scale
                 elif dd_pct >= vs.soft_eq_dd2:
-                    per_slot_capital *= vs.soft_eq_scale2
+                    eq_scale = vs.soft_eq_scale2
+                    per_slot_capital *= eq_scale
                 elif dd_pct >= vs.soft_eq_dd1:
-                    per_slot_capital *= vs.soft_eq_scale1
+                    eq_scale = vs.soft_eq_scale1
+                    per_slot_capital *= eq_scale
+                if eq_scale < 1.0:
+                    logger.info(
+                        f"[{symbol}] SoftTight DD Scaling: DD={dd_pct*100:.1f}% "
+                        f"→ {eq_scale:.2f}x → slot=${per_slot_capital:.2f}"
+                    )
 
             leverage = vs.base_leverage
             notional = per_slot_capital * leverage
@@ -1132,6 +1141,8 @@ class PositionMixin:
                 logger.info(
                     f"[{symbol}] NO_POSITION trade recorded: {_exit_side} "
                     f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+                    f"MFE={closed_pos.get('best_pnl', 0)*100:+.2f}% "
+                    f"MAE={closed_pos.get('worst_pnl', 0)*100:+.2f}% "
                     f"exit=${fill_price:.4f} held={closed_pos['bars_held']} bars"
                 )
 
@@ -1313,6 +1324,8 @@ class PositionMixin:
         logger.info(
             f"[{symbol}] CLOSED ({reason}): {_exit_side} "
             f"PnL={pnl_pct*100:+.2f}% (${net_pnl:+.2f}) "
+            f"MFE={pos.get('best_pnl', 0)*100:+.2f}% "
+            f"MAE={pos.get('worst_pnl', 0)*100:+.2f}% "
             f"held={pos['bars_held']} bars"
         )
         # Session stats for notification

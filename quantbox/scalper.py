@@ -999,6 +999,56 @@ class RubberBandScalper(
                         f"(of {len(moves_seen)} symbols) "
                         f"min_vr={global_min_vr:.3f} ({closest_sym})"
                     )
+
+                    # ── MA Cluster monitor (parallel to VR Squeeze monitor) ──
+                    if (self.vs_config and self.vs_config.ma_cluster_enabled
+                            and hasattr(self.strategy, '_ma_cluster_state')
+                            and self.strategy._ma_cluster_state):
+                        _mcs = self.strategy._ma_cluster_state
+                        _in_cluster = {
+                            s: d for s, d in _mcs.items() if d['duration'] > 0
+                        }
+                        _zombie = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'].startswith('zombie')
+                        )
+                        _mom_fail = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'].startswith('momentum_fail')
+                        )
+                        _cooldown = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'] == 'cooldown'
+                        )
+                        _pre_dur = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'].startswith('pre_duration')
+                        )
+                        _no_break = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'] == 'no_breakout'
+                        )
+                        _fired = sum(
+                            1 for d in _in_cluster.values()
+                            if d['rejection'] == 'fired'
+                        )
+                        _top3 = sorted(
+                            _in_cluster.items(),
+                            key=lambda x: x[1]['duration'], reverse=True,
+                        )[:3]
+                        _top3_str = ', '.join(
+                            f"{s}({d['duration']}bars,"
+                            f"sp={d['spread']:.1f}%,{d['rejection']})"
+                            for s, d in _top3
+                        )
+                        logger.info(
+                            f"MA Cluster monitor: {len(_in_cluster)} in cluster "
+                            f"(zombie={_zombie}, mom_fail={_mom_fail}, "
+                            f"cooldown={_cooldown}, pre_dur={_pre_dur}, "
+                            f"no_break={_no_break}, fired={_fired}) "
+                            f"(of {len(_mcs)} scanned) "
+                            f"— top: {_top3_str or 'none'}"
+                        )
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
             if candidates:
@@ -1083,7 +1133,8 @@ class RubberBandScalper(
                 f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
                 f"entry=${pos['entry_price']:.4f} "
                 f"bars={pos['bars_held']}/{pos.get('max_hold', self.config.max_hold)} "
-                f"best_pnl={pos.get('best_pnl', 0)*100:.2f}% "
+                f"MFE={pos.get('best_pnl', 0)*100:+.2f}% "
+                f"MAE={pos.get('worst_pnl', 0)*100:+.2f}% "
                 f"SL={pos.get('server_sl_order_id') or 'NONE'} "
                 f"TP={pos.get('server_tp_order_id') or 'NONE'}"
             )
