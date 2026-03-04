@@ -149,4 +149,4 @@ Tier0.55에서 절반 사이즈 진입은 N +203%이나 EV +7.9bp (ΔEV=-31.5bp)
 
 ## 연구 스크립트
 
-`research/active/frequency_boost_r36.py` — 1,430 lines, numba JIT, 4-worker parallel
+`research/active/r31_r40/r36_frequency_boost.py` — 1,430 lines, numba JIT, 4-worker parallel

@@ -5,7 +5,7 @@
 **전략:** Dual-Axis VR Squeeze System  
 **데이터:** 50 symbols × 4.7년 (2020~2025) | 바이낸스 USDT-M 선물  
 **이전 버전:** v13.1.0 (VR Squeeze 단독, 25x leverage, 10 slots)  
-**분석 스크립트:** `research/active/ma_cluster_deep_r44e.py`, production leverage 재계산  
+**분석 스크립트:** `research/active/r41_r45/r44e_ma_cluster_deep.py`, production leverage 재계산  
 
 ---
 

@@ -4,7 +4,7 @@
 |-------|-------|
 | **Commit** | `29eecab` |
 | **Date** | 2026-02-26 14:13 UTC |
-| **Script** | `research/active/alpha_diagnostic_r22.py` |
+| **Script** | `research/active/r21_r30/r22_alpha_diagnostic.py` |
 | **Data** | 2190d (6yr), 50 symbols, 210,335 bars |
 | **Lookahead** | ZERO (MTF uses last completed 4h bar, `j = j_raw - 1`) |
 | **Capital** | $2,095 |

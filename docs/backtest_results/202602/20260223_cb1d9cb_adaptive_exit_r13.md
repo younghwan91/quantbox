@@ -3,7 +3,7 @@
 - **Commit:** `cb1d9cb`
 - **Date:** 2026-02-23 14:22 UTC
 - **Branch:** `feature/adaptive-exit-r13`
-- **Script:** `research/active/adaptive_exit_r13.py`
+- **Script:** `research/active/r12_r20/r13_adaptive_exit.py`
 - **Data:** 2190d (6yr), 50 symbols, 15m+4h
 
 ## Hypothesis
