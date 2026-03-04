@@ -3,7 +3,6 @@ QuantBox Terminal UI — Startup banner, warnings, and formatted output.
 
 Provides:
 - ASCII art startup banner with system info
-- Live trading confirmation gate (type YES to proceed)
 - Formatted cycle/trade output helpers
 - Color constants for terminal readability
 """
@@ -191,56 +190,7 @@ def _print_row(label: str, value: str) -> None:
     print(f'  {Color.DIM}{label:<16}{Color.RESET}{value}')
 
 
-# ─────────────────── Safety Gate ─────────────────────────────────────
 
-def print_live_warning() -> None:
-    """Print a prominent warning block for live trading."""
-    C = Color
-    print()
-    print(f'{C.BG_RED}{C.WHITE}{C.BOLD}{"":72}{C.RESET}')
-    print(f'{C.BG_RED}{C.WHITE}{C.BOLD}{"  ⚠  WARNING — LIVE TRADING MODE":72}{C.RESET}')
-    print(f'{C.BG_RED}{C.WHITE}{C.BOLD}{"":72}{C.RESET}')
-    print()
-    print(f'  {C.RED}{C.BOLD}This will execute REAL orders on Binance Futures.{C.RESET}')
-    print(f'  {C.RED}Real money is at risk. Losses can exceed your deposit.{C.RESET}')
-    print()
-    print(f'  {C.YELLOW}Pre-flight checklist:{C.RESET}')
-    print(f'  {C.DIM}  ├─{C.RESET} API keys have Futures permission')
-    print(f'  {C.DIM}  ├─{C.RESET} Hedge mode is OFF (one-way mode)')
-    print(f'  {C.DIM}  ├─{C.RESET} No conflicting manual positions open')
-    print(f'  {C.DIM}  ├─{C.RESET} Discord webhook configured for alerts')
-    print(f'  {C.DIM}  └─{C.RESET} Stop-loss and drawdown limits reviewed')
-    print()
-
-
-def confirm_live_trading() -> bool:
-    """Require the user to type YES to confirm live trading.
-
-    Returns:
-        True if user confirmed, False otherwise.
-    """
-    C = Color
-    print_live_warning()
-    print(f'  {C.BOLD}Type {C.RED}YES{C.RESET}{C.BOLD} to confirm live trading, '
-          f'or anything else to abort:{C.RESET}')
-    print()
-
-    try:
-        answer = input(f'  {C.YELLOW}> {C.RESET}').strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return False
-
-    if answer == 'YES':
-        print()
-        print(f'  {C.GREEN}{C.BOLD}✓ Confirmed. Starting live trading...{C.RESET}')
-        print()
-        return True
-    else:
-        print()
-        print(f'  {C.DIM}Aborted. Use --paper for simulation mode.{C.RESET}')
-        print()
-        return False
 
 
 # ─────────────────── Cycle Formatting ────────────────────────────────

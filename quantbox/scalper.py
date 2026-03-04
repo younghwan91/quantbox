@@ -52,7 +52,6 @@ from quantbox.core.limit_chaser import (
 from quantbox.core.settings import get_settings
 from quantbox.core.terminal_ui import (
     Color,
-    confirm_live_trading,
     format_cycle_header,
     format_entry,
     format_exit,
@@ -1897,11 +1896,6 @@ def main():
             ma_cluster_leverage=settings.vs_ma_cluster_leverage,
         ) if args.strategy == 'vol_straddle' else None,
     )
-
-    # ── Live trading confirmation gate ──
-    if not args.paper:
-        if not confirm_live_trading():
-            sys.exit(0)
 
     if args.once:
         scalper.run_once()
