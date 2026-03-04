@@ -246,12 +246,19 @@ def collect_vr_trades_custom(
     data_15m: dict, data_1h: dict, data_4h: dict,
     d_vr: float, d_sl: float, tp: float,
 ) -> list[tuple[str, int, int, float]]:
-    """Collect VR squeeze D_mom8 trades with custom params."""
+    """Collect VR squeeze D_mom8 + S_d8 combined trades with custom params.
+
+    Always collects both directional and straddle legs — the canonical
+    VR baseline (R38/R39/R40) is D_mom8 + S_d8 combined.
+    Straddle params (s_vr, s_sl) are inherited from cfg_base unchanged.
+    """
     cfg = dict(cfg_base)
     cfg["d_vr"] = d_vr
     cfg["d_sl"] = d_sl
     cfg["tp"] = tp
-    return r38_collect_trades(cfg, data_15m, data_1h, data_4h, "D_mom8")
+    d_trades = r38_collect_trades(cfg, data_15m, data_1h, data_4h, "D_mom8")
+    s_trades = r38_collect_trades(cfg, data_15m, data_1h, data_4h, "S_d8")
+    return d_trades + s_trades
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -294,8 +301,10 @@ def main() -> None:
     print("PHASE 1: BASELINE VALIDATION")
     print("=" * 80)
 
-    # VR Squeeze baseline
-    bl_vr_trades = r38_collect_trades(CFG_V13, data_15m, data_1h, data_4h, "D_mom8")
+    # VR Squeeze baseline — D_mom8 + S_d8 combined (canonical, R38/R39/R40)
+    bl_vr_d = r38_collect_trades(CFG_V13, data_15m, data_1h, data_4h, "D_mom8")
+    bl_vr_s = r38_collect_trades(CFG_V13, data_15m, data_1h, data_4h, "S_d8")
+    bl_vr_trades = bl_vr_d + bl_vr_s
     bl_vr_pnl = portfolio_sim(bl_vr_trades, 10)
     bl_vr = compute_metrics(bl_vr_pnl, data_years)
 
@@ -310,9 +319,12 @@ def main() -> None:
     print(f"  VR Squeeze:  N={bl_vr['N']}  PF={bl_vr['PF']:.3f}  "
           f"WR={bl_vr['WR']:.1f}%  EV={bl_vr['EV_bp']:+.1f}bp  "
           f"DD={bl_vr['max_dd_pct']:.1f}%")
-    print(f"    Report ref: N=1574, PF=1.310, WR=25.9%")
-    vr_pf_diff = abs(bl_vr['PF'] - 1.310) / 1.310 * 100
+    # Canonical ref: R39/R40 @10 slots — N=2265, PF=1.280, WR=43.4%
+    print(f"    Report ref (R39/R40 @10s): N=2265, PF=1.280, WR=43.4%")
+    vr_pf_diff = abs(bl_vr['PF'] - 1.280) / 1.280 * 100
+    vr_n_diff = abs(bl_vr['N'] - 2265) / 2265 * 100
     print(f"    PF diff: {vr_pf_diff:.1f}% {'✓ PASS' if vr_pf_diff < 1.0 else '❌ FAIL'}")
+    print(f"    N  diff: {vr_n_diff:.1f}% {'✓ PASS' if vr_n_diff < 1.0 else '❌ FAIL'}")
 
     print(f"  MA Cluster:  N={bl_ma['N']}  PF={bl_ma['PF']:.3f}  "
           f"WR={bl_ma['WR']:.1f}%  EV={bl_ma['EV_bp']:+.1f}bp  "
@@ -321,7 +333,7 @@ def main() -> None:
     ma_pf_diff = abs(bl_ma['PF'] - 1.285) / 1.285 * 100
     print(f"    PF diff: {ma_pf_diff:.1f}% {'✓ PASS' if ma_pf_diff < 1.0 else '❌ FAIL'}")
 
-    if vr_pf_diff >= 1.0 or ma_pf_diff >= 1.0:
+    if vr_pf_diff >= 1.0 or vr_n_diff >= 3.0 or ma_pf_diff >= 1.0:
         print("\n  ❌ BASELINE MISMATCH — aborting sweep.")
         print("  Check data or scripts before proceeding.")
         return
@@ -506,8 +518,7 @@ def main() -> None:
     # Select top 5 MA and top 3 VR combos
     top_ma = viable_ma[:5] if viable_ma else []
     top_vr = viable_vr[:3] if viable_vr else [(
-        "baseline", bl_vr,
-        r38_collect_trades(CFG_V13, data_15m, data_1h, data_4h, "D_mom8")
+        "baseline", bl_vr, bl_vr_trades
     )]
 
     if not top_ma:
