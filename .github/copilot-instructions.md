@@ -45,11 +45,13 @@
 
 | 브랜치 | 용도 | 머지 방식 |
 |--------|------|-----------|
-| `main` | 프로덕션. 직접 커밋 금지 | `develop` → `main` `--no-ff` |
-| `develop` | 통합. 직접 커밋 금지 | feature/fix에서만 머지 |
-| `feature/xxx` | 새 기능 | backtest 리포트 포함 → `--no-ff`, 나머지 → `--squash` |
-| `fix/xxx` | 버그 수정 | `--squash` |
-| `hotfix/xxx` | 긴급 (`main`에서 분기) | `main` + `develop` 둘 다 머지 |
+| `main` | 프로덕션. 직접 커밋 금지 | `release` → `main` `--no-ff` + 버전 태그 |
+| `develop` | 통합. 직접 커밋 금지 | feature/fix/release에서만 머지 |
+| `feature/xxx` | 새 기능 (코드) | **`--squash`** — 커밋 정리 후 단일 커밋으로 |
+| `research/xxx` | 리서치/백테스트 | **`--no-ff`** — 백테스트 리포트·탐색 이력 보존 |
+| `release/xxx` | 릴리즈 준비 | `main` + `develop` 둘 다 **`--no-ff`** |
+| `fix/xxx` | 버그 수정 | **`--squash`** |
+| `hotfix/xxx` | 긴급 (`main`에서 분기) | `main` + `develop` 둘 다 **`--no-ff`** |
 
 **반드시 develop에 머지 후 push.** 브랜치만 push하고 develop 안 건드리면 안 됨.
 
