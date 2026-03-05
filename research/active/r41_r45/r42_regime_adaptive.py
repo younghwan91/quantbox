@@ -47,14 +47,14 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     WARMUP_15m, WARMUP_1h, WARMUP_4h,
     _atr_pct, compute_vr, compute_momentum, compute_squeeze_dur,
     vol_percentile, gen_vr_signal, gen_vr_dur_signal,
     make_direction_momentum, resample_ohlcv,
     load_15m, build_resampled, precompute, pf_from_pnl,
 )
-from research.active.scaling_r38 import (
+from research.active.r31_r40.scaling_r38 import (
     compute_metrics, precompute_all_vr,
     COST_DIRECTIONAL, COST_STRADDLE, G_3TF,
     collect_trades as r38_collect_trades,

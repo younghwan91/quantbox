@@ -21,7 +21,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     COST_DIRECTIONAL,
     COST_STRADDLE,
     WARMUP_15m,
@@ -37,7 +37,7 @@ from research.active.mtf_vol_straddle_r31 import (
     pf_from_pnl,
     precompute,
 )
-from research.active.r31_overlap_audit import (
+from research.active.r31_r40.r31_overlap_audit import (
     sim_directional_trades,
     sim_straddle_trades,
 )
@@ -237,7 +237,7 @@ def per_year_dedup(
                 d_yr: dict = {}
                 for key in ("close", "high", "low", "volume"):
                     d_yr[key] = d_full[key][tf_start:tf_end].copy()
-                from research.active.mtf_vol_straddle_r31 import (
+                from research.active.r31_r40.r31_mtf_vol_straddle import (
                     compute_momentum,
                     compute_squeeze_dur,
                     compute_vr,

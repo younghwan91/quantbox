@@ -52,7 +52,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     COST_DIRECTIONAL,
     COST_STRADDLE,
     WARMUP_15m,
