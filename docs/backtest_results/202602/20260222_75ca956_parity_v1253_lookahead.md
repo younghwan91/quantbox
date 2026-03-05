@@ -45,8 +45,8 @@ close_4h[4] = historical value ← no lookahead
 
 1. **`quantbox/strategy/rubberband/signals.py`** — `apply_mtf_confirmation()`: `j = j_raw - 1` instead of `j = j_raw`
 2. **`scripts/backtest_live_period.py`** — `_find_4h_bar_idx()`: returns last completed bar
-3. **`research/active/adaptive_leverage_r15.py`** — `apply_mtf_filter()`: same fix
-4. **`research/active/wr_calibrated_leverage_r16.py`** — `apply_mtf_filter()`: same fix
+3. **`research/active/r12_r20/r15_adaptive_leverage.py`** — `apply_mtf_filter()`: same fix
+4. **`research/active/r12_r20/r16_wr_calibrated_leverage.py`** — `apply_mtf_filter()`: same fix
 
 ## Tests Added
 

@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from dotenv import load_dotenv; load_dotenv()
 
-from research.active.v1253_intrabar_6yr_backtest import (
+from research.active.misc.v1253_intrabar_6yr_backtest import (
     load_15m, load_4h, scan_entries_risk_off_only, apply_mtf_filter,
     compute_atr_pct, simulate_portfolio, simulate_portfolio_close_based,
     LOOKBACK, THRESHOLD, BTC_MOM_PERIOD, BTC_REGIME_PERIOD,

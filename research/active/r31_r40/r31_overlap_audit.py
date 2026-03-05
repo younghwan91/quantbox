@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # Import everything from R31
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     COST_DIRECTIONAL,
     COST_STRADDLE,
     WARMUP_15m,
@@ -391,7 +391,7 @@ def main() -> None:
     print("  If a new signal fires while the previous trade is still open → skip it.")
     print("  Priority: earlier entry wins (first-come-first-served).\n")
 
-    from research.active.mtf_vol_straddle_r31 import bootstrap_pf, full_stats, pf_from_pnl
+    from research.active.r31_r40.r31_mtf_vol_straddle import bootstrap_pf, full_stats, pf_from_pnl
 
     # Configs: (variant_name, tf_list)
     dedup_variants = [

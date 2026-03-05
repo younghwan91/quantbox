@@ -422,15 +422,24 @@ class TestMaClusterConfig:
         assert cfg.ma_cluster_sl == 0.02
         assert cfg.ma_cluster_tp == 0.08
         assert cfg.ma_cluster_max_hold_4h == 12
-        assert cfg.ma_cluster_leverage == 12.0
+        assert cfg.ma_cluster_leverage == 21.0
         assert cfg.ma_cluster_sma_periods == [20, 50, 100, 200]
 
-    def test_risk_parity(self):
-        """12x × 2% SL ≈ 25x × 1% SL (notional risk per trade)."""
+    def test_half_kelly_leverage(self):
+        """Leverage derived from half-Kelly criterion.
+
+        VR:  f*=6.1%, f*/2=3.07%, L=0.0307×10/0.01≈30
+        MA:  f*=8.65%, f*/2=4.33%, L=0.0433×10/0.02≈21
+        Per-trade risk = L × SL / N.
+        """
         cfg = VolStraddleConfig()
-        vr_risk = cfg.base_leverage * cfg.d_sl    # 25 × 0.01 = 0.25
-        ma_risk = cfg.ma_cluster_leverage * cfg.ma_cluster_sl  # 12 × 0.02 = 0.24
-        assert abs(vr_risk - ma_risk) < 0.02  # Within 2% of each other
+        n = cfg.max_concurrent
+        vr_risk_pct = cfg.base_leverage * cfg.d_sl / n
+        ma_risk_pct = cfg.ma_cluster_leverage * cfg.ma_cluster_sl / n
+        # VR half-Kelly ≈ 3.07%
+        assert 0.025 < vr_risk_pct < 0.035, f"VR risk {vr_risk_pct:.4f} not near half-Kelly 3.07%"
+        # MA half-Kelly ≈ 4.33%
+        assert 0.038 < ma_risk_pct < 0.048, f"MA risk {ma_risk_pct:.4f} not near half-Kelly 4.33%"
 
     def test_disable_ma_cluster(self):
         cfg = VolStraddleConfig(ma_cluster_enabled=False)
@@ -505,7 +514,7 @@ class TestStrategyIntegration:
         assert meta['sl'] == 0.02
         assert meta['tp'] == 0.08
         assert meta['tf'] == '4h'
-        assert meta['leverage_override'] == 12.0
+        assert meta['leverage_override'] == 21.0
         # max_hold should be converted: 12 bars × 16 (4h→15m) = 192
         assert meta['max_hold'] == 12 * 16
 

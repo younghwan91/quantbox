@@ -518,13 +518,13 @@ class TestMFEMAE:
 class TestPositionSizing:
     """Position sizing 공식 검증 (전략 레벨)."""
 
-    def test_vr_leverage_25x(self, cfg: VolStraddleConfig):
-        """VR squeeze: base_leverage=25x."""
-        assert cfg.base_leverage == 25.0
+    def test_vr_leverage_30x(self, cfg: VolStraddleConfig):
+        """VR squeeze: base_leverage=30x (half-Kelly)."""
+        assert cfg.base_leverage == 30.0
 
-    def test_ma_cluster_leverage_12x(self, cfg: VolStraddleConfig):
-        """MA cluster: leverage_override=12x."""
-        assert cfg.ma_cluster_leverage == 12.0
+    def test_ma_cluster_leverage_21x(self, cfg: VolStraddleConfig):
+        """MA cluster: leverage_override=21x (half-Kelly)."""
+        assert cfg.ma_cluster_leverage == 21.0
 
     def test_slot_capital_10_concurrent(self, cfg: VolStraddleConfig):
         """max_concurrent=10 → per_slot = balance / 10."""
@@ -539,8 +539,8 @@ class TestPositionSizing:
         notional_vr = per_slot * cfg.base_leverage
         notional_ma = per_slot * cfg.ma_cluster_leverage
 
-        assert notional_vr == pytest.approx(2500.0)
-        assert notional_ma == pytest.approx(1200.0)
+        assert notional_vr == pytest.approx(3000.0)
+        assert notional_ma == pytest.approx(2100.0)
 
 
 # ══════════════════════════════════════════════════════════
