@@ -432,6 +432,13 @@ class ReconciliationMixin:
                         {'name': 'Total Fills', 'value': str(len(audit_fills)), 'inline': True},
                     ],
                 })
+                # v14.0.1: Cancel orphaned counterpart algo orders.
+                # Without this, the remaining SL or TP stays on Binance
+                # and could trigger on a future position for the same symbol.
+                if sl_oid:
+                    self._cancel_server_stop_loss(api_sym, sl_oid)
+                if tp_oid:
+                    self._cancel_server_take_profit(api_sym, tp_oid)
                 self._record_server_fill(sym, fill_price, 0, 'ghost_reconcile')
                 continue
 

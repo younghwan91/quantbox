@@ -262,6 +262,45 @@ class TestCheckOrderFilled:
         assert call_args[0][1] == 'algoOrder'
         assert call_args[1]['data'] == {'algoId': 8001}
 
+    def test_finished_returns_fill(self):
+        """v14.0.1: FINISHED is the terminal status for triggered+filled
+        conditional orders. This is what Binance actually returns."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            'algoId': 4000000801865931,
+            'algoStatus': 'FINISHED',
+            'orderType': 'STOP',
+            'triggerPrice': '56.34',
+            'actualPrice': '56.34000',
+            'actualQty': '64.049',
+            'quantity': '64.049',
+            'symbol': 'LTCUSDT',
+            'side': 'SELL',
+        }
+
+        result = scalper._check_order_filled('LTCUSDT', '4000000801865931')
+
+        assert result is not None
+        assert result['status'] == 'FILLED'
+        assert float(result['avgPrice']) == 56.34
+        assert result['executedQty'] == '64.049'
+
+    def test_finished_prefers_actual_qty(self):
+        """FINISHED response has actualQty (real fill) and quantity (order).
+        Should prefer actualQty when available."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            'algoStatus': 'FINISHED',
+            'orderType': 'TAKE_PROFIT',
+            'triggerPrice': '62.09',
+            'actualPrice': '62.08',
+            'actualQty': '63.500',
+            'quantity': '64.049',
+        }
+
+        result = scalper._check_order_filled('LTCUSDT', '9999')
+        assert result['executedQty'] == '63.500'
+
     def test_triggered_zero_actual_uses_trigger(self):
         """If actualPrice is 0, use triggerPrice as fill proxy."""
         scalper = _make_scalper(paper=False)
@@ -284,6 +323,16 @@ class TestCheckOrderFilled:
         }
 
         result = scalper._check_order_filled('BTCUSDT', '5001')
+        assert result is None
+
+    def test_working_status_returns_none(self):
+        """WORKING status means not filled (alias for NEW)."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            'algoStatus': 'WORKING',
+        }
+
+        result = scalper._check_order_filled('BTCUSDT', '5002')
         assert result is None
 
     def test_paper_mode_returns_none(self):
@@ -410,6 +459,121 @@ class TestSyncServerOrders:
         )
         scalper._sync_server_orders()
         assert scalper.strategy.has_position('BTCUSDT')
+
+    def test_sl_finished_detects_fill(self):
+        """v14.0.1: Binance returns FINISHED (not TRIGGERED) for
+        conditional orders that have triggered and the sub-order
+        has filled. This is the actual production response format."""
+        scalper = _make_scalper(paper=False)
+        scalper.get_symbol_info = MagicMock(return_value={
+            'tick_size': 0.01, 'price_precision': 2,
+        })
+
+        scalper.strategy.open_position(
+            symbol='LTCUSDT', signal=1, entry_price=57.49,
+            notional=3682.18, leverage=21, move_size=1.0,
+            server_sl_order_id='4000000801865931',
+            server_tp_order_id='4000000801865937',
+        )
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'get' and data.get('algoId') == 4000000801865937:
+                return {'algoStatus': 'WORKING'}
+            if method == 'get' and data.get('algoId') == 4000000801865931:
+                # Real Binance response format for a triggered+filled SL
+                return {
+                    'algoId': 4000000801865931,
+                    'algoStatus': 'FINISHED',
+                    'orderType': 'STOP',
+                    'symbol': 'LTCUSDT',
+                    'side': 'SELL',
+                    'positionSide': 'LONG',
+                    'quantity': '64.049',
+                    'actualOrderId': 41787659476,
+                    'actualPrice': '56.34000',
+                    'actualQty': '64.049',
+                    'triggerPrice': '56.34',
+                    'price': '56.06',
+                }
+            if method == 'get':
+                return {'algoStatus': 'WORKING'}
+            return {'algoId': data.get('algoId'), 'code': '200', 'msg': 'success'}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
+
+        scalper._sync_server_orders()
+
+        # Position should be removed (SL filled)
+        assert not scalper.strategy.has_position('LTCUSDT')
+        # TP cancel should have been called
+        cancel_calls = [
+            c for c in scalper.client._request_futures_api.call_args_list
+            if c[0][0] == 'delete'
+        ]
+        assert len(cancel_calls) == 1
+        assert cancel_calls[0][1]['data'] == {'algoId': 4000000801865937}
+
+    def test_tp_finished_detects_fill(self):
+        """v14.0.1: FINISHED status for TP order also works."""
+        scalper = _make_scalper(paper=False)
+        scalper.get_symbol_info = MagicMock(return_value={
+            'tick_size': 0.01, 'price_precision': 2,
+        })
+
+        scalper.strategy.open_position(
+            symbol='AVAXUSDT', signal=1, entry_price=9.448,
+            notional=2116.35, leverage=12, move_size=1.0,
+            server_sl_order_id='sl_111',
+            server_tp_order_id='tp_222',
+        )
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == 'get' and data.get('algoId') == int('tp_222'.lstrip('tp_') or '0'):
+                pass  # won't match int conversion
+            algo_id = data.get('algoId') if data else None
+            if method == 'get' and str(algo_id) == 'tp_222':
+                return {
+                    'algoStatus': 'FINISHED',
+                    'orderType': 'TAKE_PROFIT',
+                    'triggerPrice': '10.204',
+                    'actualPrice': '10.200',
+                    'actualQty': '224.0',
+                    'quantity': '224.0',
+                }
+            if method == 'get':
+                return {'algoStatus': 'WORKING'}
+            return {'algoId': algo_id, 'code': '200', 'msg': 'success'}
+
+        # Use numeric IDs for proper int conversion
+        pos = scalper.strategy._positions.get('AVAXUSDT')
+        pos['server_sl_order_id'] = '7001'
+        pos['server_tp_order_id'] = '7002'
+
+        def mock_algo_api2(method, path, signed=True, data=None):
+            if method == 'get' and data.get('algoId') == 7002:
+                return {
+                    'algoStatus': 'FINISHED',
+                    'orderType': 'TAKE_PROFIT',
+                    'triggerPrice': '10.204',
+                    'actualPrice': '10.200',
+                    'actualQty': '224.0',
+                    'quantity': '224.0',
+                }
+            if method == 'get':
+                return {'algoStatus': 'WORKING'}
+            return {'algoId': data.get('algoId'), 'code': '200', 'msg': 'success'}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api2)
+
+        scalper._sync_server_orders()
+
+        assert not scalper.strategy.has_position('AVAXUSDT')
+        cancel_calls = [
+            c for c in scalper.client._request_futures_api.call_args_list
+            if c[0][0] == 'delete'
+        ]
+        assert len(cancel_calls) == 1
+        assert cancel_calls[0][1]['data'] == {'algoId': 7001}
 
 
 # ─────────────────────────── State Persistence ──────────────────
