@@ -9,8 +9,13 @@ Straddle exit unchanged (SL=1.5%, TP=5%).
 
 R44d V17: MA Cluster Squeeze (4h-only) as complementary strategy.
 4 SMAs (20/50/100/200) cluster → breakout + momentum direction.
-Uses 12x leverage (risk parity with VR squeeze's 25x × 1% SL).
 Do NOT change without re-running backtest validation.
+
+Half-Kelly Leverage Derivation (20260304_ef55e2e strategy report):
+  Kelly f* = WR - (1-WR)/RR,  Leverage = (f*/2) × N / SL
+  VR:  WR=25.9%, PF=1.310, RR=3.75 → f*=6.1%, f*/2=3.07% → L=30.7→30x
+  MA:  WR=38.6%, PF=1.285, RR=2.05 → f*=8.65%, f*/2=4.33% → L=21.6→21x
+  Per-trade risk: VR=3.0%, MA=4.2% of total balance.
 """
 from __future__ import annotations
 
@@ -66,13 +71,13 @@ class VolStraddleConfig:
     warmup_1h: int = 50             # ~50h of 1h bars
     warmup_4h: int = 13             # ~52h of 4h bars
 
-    # ── Position Sizing & Leverage ──
-    base_leverage: float = 25.0      # v13.0: 25x (L/N=2.5, Calmar 10.12)
-    max_leverage: float = 25.0      # Hard cap (matches base_leverage)
+    # ── Position Sizing & Leverage (Half-Kelly derived) ──
+    base_leverage: float = 30.0      # Half-Kelly: f*/2=3.07%, L=0.0307×10/0.01≈30
+    max_leverage: float = 30.0      # Hard cap (matches base_leverage)
     risk_per_trade: float = 0.01    # 1% risk per trade
 
     # ── Risk Management ──
-    max_concurrent: int = 10         # v13.0: 10 slots (L/N=25/10=2.5)
+    max_concurrent: int = 10         # 10 slots (VR L/N=30/10=3.0, MA L/N=21/10=2.1)
     max_drawdown_pct: float = 0.10  # 10% session drawdown → halt
 
     # ── Costs (conservative) ──
@@ -151,7 +156,7 @@ class VolStraddleConfig:
     ma_cluster_sl: float = 0.02              # 2% stop loss
     ma_cluster_tp: float = 0.08              # 8% take profit
     ma_cluster_max_hold_4h: int = 12         # 12 × 4h = 48h
-    ma_cluster_leverage: float = 12.0        # Risk parity: 12x × 2% ≈ 25x × 1%
+    ma_cluster_leverage: float = 21.0        # Half-Kelly: f*/2=4.33%, L=0.0433×10/0.02≈21
     ma_cluster_sma_periods: list[int] = field(
         default_factory=lambda: [20, 50, 100, 200],
     )

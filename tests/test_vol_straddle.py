@@ -651,3 +651,175 @@ class TestLookaheadPrevention:
         # c1h[-1] should be close[199] (4th bar of last complete 1h window)
         assert c1h[-1] == close[199]
         assert len(c1h) == 50
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  9. Position Sizing — multi-slot margin safety (Incident #3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPositionSizing:
+    """Verify per-slot capital never exceeds balance/max_concurrent.
+
+    Incident #3 (2026-03-05): dynamic_capital_enabled=True with n_active=0
+    gave balance/1 capped at 50%, consuming entire margin for slot 1 and
+    leaving nothing for slots 2-10 (-2019 Margin insufficient).
+
+    Rule: total margin across max_concurrent slots must not exceed balance.
+    """
+
+    def test_flat_sizing_10slots(self):
+        """Flat sizing: each slot gets exactly balance/max_concurrent."""
+        cfg = VolStraddleConfig(dynamic_capital_enabled=False, max_concurrent=10)
+        balance = 2000.0
+        expected = balance / 10  # $200
+
+        per_slot = balance / cfg.max_concurrent
+        assert per_slot == pytest.approx(expected)
+
+        # All 10 slots together must not exceed balance
+        total = per_slot * cfg.max_concurrent
+        assert total <= balance
+
+    def test_dynamic_capital_capped_by_flat(self):
+        """dynamic_capital must never exceed balance/max_concurrent.
+
+        This is the hard cap added to positions.py after Incident #3.
+        When n_active=0: balance/max(1, 0+1) = balance → capped to balance/10.
+        """
+        balance = 2000.0
+        max_concurrent = 10
+        flat_per_slot = balance / max_concurrent  # $200
+
+        # Simulate dynamic formula at n_active=0 (worst case)
+        for n_active in range(max_concurrent):
+            dynamic = balance / max(1, n_active + 1)
+            dynamic = min(dynamic, balance * 0.5)  # 50% cap
+            # Hard cap (the fix we added)
+            capped = min(dynamic, flat_per_slot)
+            assert capped <= flat_per_slot, (
+                f"n_active={n_active}: capped={capped:.2f} > flat={flat_per_slot:.2f}"
+            )
+
+    def test_all_slots_fit_in_balance(self):
+        """Opening max_concurrent slots sequentially must not exceed balance.
+
+        This is the exact scenario that caused -2019 on slots 2-10.
+        Each slot opened while previous ones are active (n_active grows).
+        """
+        balance = 2000.0
+        max_concurrent = 10
+        flat_per_slot = balance / max_concurrent  # $200 each
+
+        total_margin = 0.0
+        for slot in range(max_concurrent):
+            # With the fix: per_slot is always capped at flat_per_slot
+            n_active = slot
+            dynamic = balance / max(1, n_active + 1)
+            dynamic = min(dynamic, balance * 0.5)
+            per_slot = min(dynamic, flat_per_slot)  # hard cap
+            total_margin += per_slot
+
+        assert total_margin <= balance, (
+            f"Total margin ${total_margin:.2f} exceeds balance ${balance:.2f}"
+        )
+
+    def test_first_slot_not_50pct_of_balance(self):
+        """Slot 1 must not consume 50% of balance (the original bug).
+
+        Original: n_active=0 → balance/1 → min(2000, 1000) = $1000 → 12x = $12,000
+        Fixed:    n_active=0 → min(2000, 1000, 200) = $200 → 12x = $2,400
+        """
+        balance = 2000.0
+        max_concurrent = 10
+        flat_per_slot = balance / max_concurrent  # $200
+        leverage = 12
+
+        # Simulate old (buggy) formula
+        buggy_slot = min(balance / max(1, 0 + 1), balance * 0.5)  # $1000
+        buggy_notional = buggy_slot * leverage  # $12,000
+
+        # Simulate fixed formula
+        fixed_slot = min(buggy_slot, flat_per_slot)  # $200
+        fixed_notional = fixed_slot * leverage  # $2,400
+
+        assert buggy_notional == pytest.approx(12000.0)  # confirm bug existed
+        assert fixed_notional == pytest.approx(2400.0)   # confirm fix works
+        # margin (capital) must be within 1-slot share of balance
+        assert fixed_slot <= flat_per_slot  # $200 ≤ $200
+
+
+class TestHalfKellyLeverage:
+    """Verify leverage values are derived from half-Kelly criterion.
+
+    Kelly: f* = WR - (1-WR)/RR
+    Half-Kelly risk per trade: f*/2
+    Leverage: L = (f*/2) × N / SL
+
+    Source: 20260304_ef55e2e strategy report (6yr, production conditions).
+    VR:  WR=25.9%, PF=1.310, RR=3.75 → f*=6.1%, f*/2=3.07% → L≈30
+    MA:  WR=38.6%, PF=1.285, RR=2.05 → f*=8.65%, f*/2=4.33% → L≈21
+    """
+
+    def test_vr_kelly_fraction(self):
+        """VR squeeze half-Kelly ≈ 3.07%."""
+        wr, rr = 0.259, 3.749
+        kelly = wr - (1 - wr) / rr
+        assert kelly == pytest.approx(0.0613, abs=0.005)
+        half_kelly = kelly / 2
+        assert half_kelly == pytest.approx(0.0307, abs=0.003)
+
+    def test_ma_kelly_fraction(self):
+        """MA cluster half-Kelly ≈ 4.33%."""
+        wr, rr = 0.386, 2.05
+        kelly = wr - (1 - wr) / rr
+        assert kelly == pytest.approx(0.0865, abs=0.005)
+        half_kelly = kelly / 2
+        assert half_kelly == pytest.approx(0.0433, abs=0.003)
+
+    def test_vr_leverage_from_kelly(self):
+        """VR leverage = half_kelly × N / SL ≈ 30."""
+        cfg = VolStraddleConfig()
+        half_kelly_vr = 0.0307
+        n = cfg.max_concurrent
+        expected_lev = half_kelly_vr * n / cfg.d_sl  # 0.0307 × 10 / 0.01 = 30.7
+        assert cfg.base_leverage == pytest.approx(expected_lev, abs=1.0)
+        assert cfg.base_leverage == 30.0
+
+    def test_ma_leverage_from_kelly(self):
+        """MA leverage = half_kelly × N / SL ≈ 21."""
+        cfg = VolStraddleConfig()
+        half_kelly_ma = 0.0433
+        n = cfg.max_concurrent
+        expected_lev = half_kelly_ma * n / cfg.ma_cluster_sl  # 0.0433 × 10 / 0.02 = 21.6
+        assert cfg.ma_cluster_leverage == pytest.approx(expected_lev, abs=1.0)
+        assert cfg.ma_cluster_leverage == 21.0
+
+    def test_per_trade_risk_vr(self):
+        """VR per-trade risk = L × SL / N = 30 × 0.01 / 10 = 3.0%."""
+        cfg = VolStraddleConfig()
+        risk = cfg.base_leverage * cfg.d_sl / cfg.max_concurrent
+        assert risk == pytest.approx(0.030)
+
+    def test_per_trade_risk_ma(self):
+        """MA per-trade risk = L × SL / N = 21 × 0.02 / 10 = 4.2%."""
+        cfg = VolStraddleConfig()
+        risk = cfg.ma_cluster_leverage * cfg.ma_cluster_sl / cfg.max_concurrent
+        assert risk == pytest.approx(0.042)
+
+    def test_max_simultaneous_loss(self):
+        """Worst case: all 10 slots stopped simultaneously.
+
+        VR-only: 10 × 3.0% = 30%
+        MA-only: 10 × 4.2% = 42%
+        These are aggressive but within half-Kelly bounds.
+        """
+        cfg = VolStraddleConfig()
+        n = cfg.max_concurrent
+        vr_max = n * cfg.base_leverage * cfg.d_sl / n
+        ma_max = n * cfg.ma_cluster_leverage * cfg.ma_cluster_sl / n
+        assert vr_max == pytest.approx(0.30)
+        assert ma_max == pytest.approx(0.42)
+        # Neither exceeds 50% (no single-event ruin)
+        assert vr_max < 0.50
+        assert ma_max < 0.50

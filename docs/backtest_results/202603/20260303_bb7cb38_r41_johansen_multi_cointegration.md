@@ -3,7 +3,7 @@
 **Date:** 2026-03-03  
 **Baseline:** v13.0.1 (tag)  
 **Branch:** `feature/multi-cointegration`  
-**Script:** `research/active/johansen_vecm_r41.py`  
+**Script:** `research/archive/r41_johansen_vecm.py`  
 **Objective:** 수수료보다 큰 수익을 만들어라 — VR squeeze 보완 전략으로 저변동 구간 수익 확보
 
 ## 실험 설계

@@ -261,9 +261,9 @@ class TestConfigDefaults:
         # Straddle unchanged
         assert cfg.s_tp == 0.05
         assert cfg.s_sl == 0.015
-        # Leverage production
-        assert cfg.base_leverage == 25.0
-        assert cfg.max_leverage == 25.0
+        # Leverage production (half-Kelly)
+        assert cfg.base_leverage == 30.0
+        assert cfg.max_leverage == 30.0
         assert cfg.max_concurrent == 10
 
 

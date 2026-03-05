@@ -32,25 +32,25 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     WARMUP_15m, WARMUP_1h, WARMUP_4h,
     _atr_pct, compute_vr, compute_momentum, compute_squeeze_dur,
     vol_percentile, gen_vr_signal, gen_vr_dur_signal,
     make_direction_momentum,
     load_15m, build_resampled, precompute, pf_from_pnl,
 )
-from research.active.scaling_r38 import (
+from research.active.r31_r40.scaling_r38 import (
     compute_metrics, precompute_all_vr, portfolio_sim,
     portfolio_sim_with_details,
     collect_trades as r38_collect_trades,
     sim_straddle_trades, sim_directional_trades,
     COST_DIRECTIONAL, COST_STRADDLE, G_3TF, CFG_V13,
 )
-from research.active.exit_improvement_r43 import (
+from research.active.r41_r45.r43_exit_improvement import (
     sim_directional_trailing, year_metrics, get_year_boundaries,
     symbol_performance, collect_trades_variant,
 )
-from research.active.exit_improvement_r43b import (
+from research.active.r41_r45.r43b_exit_improvement import (
     split_data_temporal, make_split_vr,
 )
 
