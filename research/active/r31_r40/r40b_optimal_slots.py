@@ -19,12 +19,12 @@ import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import numpy as np
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     load_15m, build_resampled, precompute,
     pf_from_pnl,
 )
-from research.active.scaling_r38 import precompute_all_vr
-from research.active.tournament_r40 import (
+from research.active.r31_r40.scaling_r38 import precompute_all_vr
+from research.active.r31_r40.r40d_tournament import (
     collect_trades_custom,
     portfolio_sim_levered_with_details,
     BARS_PER_YEAR,

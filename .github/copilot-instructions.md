@@ -29,10 +29,39 @@
 
 > ⚠️ `pydantic-settings`는 `.env` 값이 `settings.py` 기본값보다 항상 우선. `settings.py`만 바꾸고 `.env` 안 바꾸면 **적용 안 됨**.
 
+## 문서 배치 규칙 (파일이 떠돌지 않게)
+
+```
+프로젝트 루트
+├── README.md              # 프로젝트 개요, 퀵스타트 (루트에만)
+├── MANUAL.md              # 운영 매뉴얼 (루트에만)
+├── .github/
+│   ├── copilot-instructions.md   # 에이전트 지침
+│   ├── agents.md                 # 아키텍처/모듈 설명
+│   └── winning_strategy.md       # 핵심 전략 원칙
+└── docs/
+    └── backtest_results/
+        ├── README.md             # 인덱스 (이것만 루트에)
+        ├── 202602/               # YYYYMM 폴더 안에만
+        └── 202603/               # 신규 월 생기면 폴더 먼저
+```
+
+**배치 원칙:**
+- 백테스트 리포트는 **반드시** `docs/backtest_results/YYYYMM/` 안에. 루트나 `docs/` 직하위 금지.
+- 월이 바뀌면 폴더 **먼저** 만들고 파일 생성.
+- `docs/backtest_results/` 루트에는 `README.md` 하나만 허용.
+- `.github/`에는 에이전트·개발 지침만. 전략 결과 문서 금지.
+
+**네이밍 규칙** (백테스트 리포트):
+```
+docs/backtest_results/YYYYMM/{YYYYMMDD}_{commit_short}_{description}.md
+예: docs/backtest_results/202603/20260304_d4e70d8_r45_param_sweep.md
+```
+
 ## 커밋 추적
 
 모든 출력물(로그, 백테스트, Discord)에 커밋 SHA 포함. 이미 `_setup_logging()`에 구현됨.
-백테스트 결과: `docs/backtest_results/{commit}_{date}_{desc}.md` 형식.
+백테스트 결과는 위 **문서 배치 규칙**의 네이밍 형식으로 YYYYMM 폴더에 저장.
 
 ## 코딩 컨벤션
 
@@ -115,3 +144,26 @@
 - **교차 타임프레임 참조는 완성된 바만 사용.** `j = (i // ratio) - 1`.
 - 새 상위 TF 참조 추가 시: "이 바가 진행 중일 때 이 값을 알 수 있는가?" 반드시 검증.
 - **백테스트 WR이 라이브의 2배 이상이면 lookahead 즉시 의심.**
+
+### #3: Dynamic Capital 50% Cap (2026-03-05)
+
+`VolStraddleConfig.dynamic_capital_enabled=True` → `balance / max(1, n_active+1)`, 50% cap → 첫 슬롯이 잔고의 50%($991) 독점 → 나머지 9개 슬롯 전부 `-2019: Margin is insufficient`.
+
+**테스트 미검출 원인: 포지션 0개인 상태(`n_active=0`)에서 단일 진입만 검증했기 때문에, 2번째 슬롯 진입 시 마진 부족이 드러나지 않았다.**
+
+**규칙:**
+- **슬롯 sizing 테스트는 반드시 `n_active > 0` 상태(선행 포지션 보유 중)를 포함.**
+- 포지션 sizing 로직 변경 시 `max_concurrent` 개 슬롯 전체를 순서대로 열었을 때 총 margin이 잔고를 초과하지 않는지 검증.
+- **다른 전략에서 이식한 공식(RubberBand 2-slot → VolStraddle 10-slot)은 슬롯 수 역할이 바뀌므로 반드시 재검증.**
+
+### #4: Algo Order FINISHED Status (2026-03-06)
+
+`_check_order_filled()`가 `algoStatus == 'TRIGGERED'`만 검사 → 바이낸스 API는 조건부 주문이 트리거+체결 완료 후 `'FINISHED'`를 반환 → 모든 서버 SL/TP 체결을 감지 못함 → `_reconcile_positions()` 고스트 감지에 의존 → 대응 알고 주문(반대편 SL/TP) 미취소.
+
+**바이낸스 조건부 주문 상태 전이:** `WORKING` → `TRIGGERED`(순간) → `FINISHED`(최종)
+
+**규칙:**
+- **바이낸스 API 상태값은 반드시 실제 API 응답으로 검증.** 문서/추측 금지.
+- **`_check_order_filled()`는 `TRIGGERED`와 `FINISHED` 모두 체결로 처리.**
+- **고스트 감지 시** `_reconcile_positions()`에서 **반드시 반대편 알고 주문도 취소**. 고아 주문 방치 시 다음 포지션에 영향.
+- **서버 체결 감지 로그**는 `DEBUG` 아닌 `INFO` 레벨. 프로덕션에서 진단 가능해야 함.

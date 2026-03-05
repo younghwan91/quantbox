@@ -201,11 +201,11 @@ D_TP = 0.12              # 12% hard cap
 
 ## Files
 
-- `research/active/exit_improvement_r43.py` — Initial 6-vector exploration
-- `research/active/exit_improvement_r43b.py` — IS/OOS validation, walk-forward
-- `research/active/exit_improvement_r43c.py` — Partial TP, wide TP discovery
-- `research/active/exit_improvement_r43d.py` — Dense grid, bootstrap, slot sensitivity
-- `research/active/exit_improvement_r43e.py` — Production config validation
+- `research/active/r41_r45/r43_exit_improvement.py` — Initial 6-vector exploration
+- `research/active/r41_r45/r43b_exit_improvement.py` — IS/OOS validation, walk-forward
+- `research/active/r41_r45/r43c_exit_improvement.py` — Partial TP, wide TP discovery
+- `research/active/r41_r45/r43d_exit_improvement.py` — Dense grid, bootstrap, slot sensitivity
+- `research/active/r41_r45/r43e_exit_improvement.py` — Production config validation
 
 ## Data
 
