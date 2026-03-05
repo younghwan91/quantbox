@@ -361,11 +361,18 @@ class BracketMixin:
         return None
 
     def _check_order_filled(self, symbol: str, order_id: str) -> dict | None:
-        """Check if a server-side algo order has been filled (TRIGGERED).
+        """Check if a server-side algo order has been filled.
 
         Uses Binance Algo Order API (GET /fapi/v1/algoOrder).
-        Algo orders transition to algoStatus='TRIGGERED' when filled,
-        then an actual order is placed. We check for TRIGGERED status.
+        Conditional algo orders transition through these states:
+          WORKING → TRIGGERED (brief) → FINISHED (terminal, filled)
+        We check for both TRIGGERED and FINISHED status.
+
+        v14.0.1: Fixed — Binance returns algoStatus='FINISHED' (not
+        'TRIGGERED') for conditional orders that have triggered AND
+        the resulting sub-order has filled. The old code only checked
+        for 'TRIGGERED', causing ALL server-side fills to be missed
+        and detected only by the fallback _reconcile_positions().
 
         Returns a dict with 'avgPrice' and 'executedQty' if filled,
         None otherwise.
@@ -379,20 +386,26 @@ class BracketMixin:
                 data={'algoId': int(order_id)},
             )
             algo_status = resp.get('algoStatus', '')
-            logger.debug(
+            logger.info(
                 f"[{symbol}] Algo order check: algoId={order_id} "
                 f"status={algo_status} type={resp.get('orderType', '?')}"
             )
 
-            if algo_status == 'TRIGGERED':
-                # When triggered, the algo order creates an actual order.
+            # v14.0.1: FINISHED is the terminal state for a conditional
+            # order that has triggered and whose sub-order has filled.
+            # TRIGGERED is a brief intermediate state (trigger fired,
+            # sub-order placed but not yet filled). Both mean "filled".
+            if algo_status in ('TRIGGERED', 'FINISHED'):
                 # Extract fill info from the algo order response.
+                # FINISHED provides actualPrice/actualQty from the
+                # actual sub-order fill; TRIGGERED may only have
+                # triggerPrice as a proxy.
                 actual_price = resp.get('actualPrice', '0')
-                actual_qty = resp.get('quantity', '0')
+                actual_qty = resp.get('actualQty') or resp.get('quantity', '0')
                 trigger_price = resp.get('triggerPrice', '0')
 
                 logger.info(
-                    f"[{symbol}] Algo order TRIGGERED: algoId={order_id} "
+                    f"[{symbol}] Algo order {algo_status}: algoId={order_id} "
                     f"type={resp.get('orderType')} "
                     f"triggerPrice={trigger_price} "
                     f"actualPrice={actual_price} qty={actual_qty}"
