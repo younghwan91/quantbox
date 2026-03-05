@@ -23,23 +23,23 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     compute_vr, compute_momentum,
     load_15m, build_resampled, precompute, pf_from_pnl,
 )
-from research.active.scaling_r38 import (
+from research.active.r31_r40.scaling_r38 import (
     compute_metrics, precompute_all_vr, portfolio_sim,
     portfolio_sim_with_details,
     collect_trades as r38_collect_trades,
     CFG_V13,
 )
-from research.active.exit_improvement_r43 import (
+from research.active.r41_r45.r43_exit_improvement import (
     year_metrics, get_year_boundaries, symbol_performance,
 )
-from research.active.exit_improvement_r43c import (
+from research.active.r41_r45.r43c_exit_improvement import (
     collect_d_widetp_trail,
 )
-from research.active.exit_improvement_r43b import (
+from research.active.r41_r45.r43b_exit_improvement import (
     split_data_temporal, make_split_vr,
 )
 

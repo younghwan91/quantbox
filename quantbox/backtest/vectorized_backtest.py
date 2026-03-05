@@ -1,15 +1,23 @@
 """
-Vectorized Backtest Engine for Single-Asset Strategies
+Signal-Array Backtest Engine — RubberBand & Pre-Baked Position Series
 
-Ultra-fast backtesting using Numba-compiled signal processing and
-PnL calculation. Designed for rapid strategy iteration.
+Fast backtesting for strategies that embed ALL entry/exit logic in a
+pre-computed signal array (±1/0 position series).  Uses close-to-close
+PnL — **no intra-bar SL/TP resolution**.
 
-Features:
-  - Numba-compiled inner loop (~100K bars/second)
-  - Realistic cost model (fee + slippage + funding)
-  - Position sizing with risk management
-  - Multi-asset portfolio aggregation
-  - Walk-forward testing support
+Best suited for:
+  - RubberBand strategy (compute_signals → ±1 array with internal TP/SL)
+  - Any strategy that outputs a continuous position series
+
+NOT suited for:
+  - Strategies with explicit SL/TP (use quantbox.backtest.trade_sim)
+  - Cross-symbol slot contention modeling (each symbol runs independently)
+  - Intra-bar exit resolution (this uses close-to-close only)
+
+For VolStraddle (VR Squeeze) backtesting, use:
+    from quantbox.backtest.trade_sim import (
+        collect_trades, portfolio_sim, compute_metrics
+    )
 
 Usage:
     from quantbox.backtest.vectorized_backtest import (

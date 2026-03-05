@@ -4,12 +4,12 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-v14.0.0-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-902%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-946%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-release%2Fv14.0.0-blue.svg)]()
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(25x)와 MA Cluster Squeeze(12x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
 
-> **현재 상태**: Live Trading | Commit `v14.0.1` | 891 tests passed
+> **현재 상태**: Live Trading | Commit `v14.0.1` | 946 tests passed
 
 ## 🌟 주요 기능
 
@@ -162,9 +162,13 @@
 - **Discord Bot**: 원격 모니터링 및 명령 (포지션 조회, 강제 청산 등)
 - **Log Rotation**: 50MB/5파일 로테이션 (디스크 무한 성장 방지)
 
-### 백테스팅
+### 백테스팅 (Dual-Engine)
+- **Signal-Array Engine** (`vectorized_backtest.py`): RubberBand/Elliott 등 ±1 포지션 어레이 기반. Close-to-close PnL. 단일자산 신속 스캔용.
+- **Trade-Event Engine** (`trade_sim.py`): VolStraddle/MA Cluster 등 이산 트레이드 시뮬레이션. High/Low 기반 인트라바 SL/TP. N-slot 포트폴리오 경합. Numba 가속.
+  - `sim_directional_trades()` / `sim_straddle_trades()` → `collect_trades()` → `portfolio_sim()` → `compute_metrics()` 파이프라인
+  - 리서치 스크립트의 canonical source (`scaling_r38.py`가 re-export)
 - **롤링 윈도우**: Formation/Trading 기간 시뮬레이션
-- **종합 지표**: Sharpe, Sortino, Calmar, Profit Factor 등
+- **종합 지표**: Sharpe, Sortino, Calmar, Profit Factor, Bootstrap CI 등
 
 ## 📦 설치
 
@@ -246,8 +250,9 @@ quantbox/
 │   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   └── vol_selector.py     # 변동성 기반 심볼 선택기
-├── backtest/               # 백테스팅 프레임워크
-│   └── vectorized_backtest.py  # 벡터화 백테스트 (단일 자산, Numba)
+├── backtest/               # 듀얼 엔진 백테스팅 프레임워크
+│   ├── vectorized_backtest.py  # Signal-Array 엔진 (RubberBand, close-to-close)
+│   └── trade_sim.py            # Trade-Event 엔진 (VolStraddle, intra-bar SL/TP, slot 경합)
 ├── notifications/          # 알림 시스템
 │   ├── bot.py              # Discord Bot (양방향)
 │   └── discord.py          # Discord Webhook (단방향)
@@ -278,7 +283,7 @@ docs/
 └── backtest_results/
     ├── 202602/             # 2026-02 백테스트 리포트 (31개)
     └── 202603/             # 2026-03 백테스트 리포트 (19개, 현재)
-tests/                      # 유닛 테스트 (897개, 45 파일)
+tests/                      # 유닛 테스트 (946개, 47 파일)
 \`\`\`
 
 ## 📈 성과 지표 (현재 v14.0.0 — Dual-Axis Squeeze)

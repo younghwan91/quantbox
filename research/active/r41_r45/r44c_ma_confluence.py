@@ -41,16 +41,16 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     WARMUP_15m, WARMUP_1h, WARMUP_4h,
     load_15m, build_resampled, precompute, pf_from_pnl,
 )
-from research.active.scaling_r38 import (
+from research.active.r31_r40.scaling_r38 import (
     compute_metrics, precompute_all_vr, portfolio_sim,
     collect_trades as r38_collect_trades,
     COST_DIRECTIONAL, G_3TF, CFG_V13,
 )
-from research.active.high_vol_complement_r44 import (
+from research.active.r41_r45.r44_high_vol_complement import (
     _dedup_sym_trades,
 )
 

@@ -80,3 +80,4 @@ docs/backtest_results/
 | 2026-03-04 | `ef55e2e` | **v14.0.0 Strategy Report** | **Dual AnnRet+1,086%(1x), Calmar=19.4** |
 | 2026-03-04 | `6fdd86c` | **v14.0.0 Current Status** | **868 tests, Paper $1,668** |
 | 2026-03-05 | `v14.0.1` | **v14.0.1 Live 전환** | **891 tests, Live $1,982** |
+| 2026-03-05 | `a79c422` | **v14.0.0 6년 백테스트 재검증** | **VR PF=1.280, MA PF=1.365, Combined PF=1.304, 6/6yr ✓** |
