@@ -22,18 +22,18 @@ import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import numpy as np
-from research.active.mtf_vol_straddle_r31 import (
+from research.active.r31_r40.r31_mtf_vol_straddle import (
     load_15m, build_resampled, precompute,
     compute_vr, compute_momentum, compute_squeeze_dur,
     gen_vr_signal, gen_vr_dur_signal, make_direction_momentum,
     pf_from_pnl,
 )
-from research.active.scaling_r38 import (
+from research.active.r31_r40.scaling_r38 import (
     compute_metrics, precompute_all_vr,
     sim_straddle_trades, sim_directional_trades,
     COST_DIRECTIONAL, COST_STRADDLE, G_3TF,
 )
-from research.active.tournament_r40 import (
+from research.active.r31_r40.r40d_tournament import (
     collect_trades_custom,
     portfolio_sim_levered,
     portfolio_sim_levered_with_details,

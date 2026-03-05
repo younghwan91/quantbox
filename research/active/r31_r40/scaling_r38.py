@@ -28,37 +28,49 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from research.active.mtf_vol_straddle_r31 import (
+# ── Canonical imports from quantbox.backtest.trade_sim ──
+# All sim/portfolio/metrics functions live there now.
+# Do NOT reimplement — see quantbox/backtest/trade_sim.py.
+from quantbox.backtest.trade_sim import (
+    COST_DIRECTIONAL,
+    COST_STRADDLE,
+    G_3TF,
+    TF_15m,
+    TF_1h,
+    TF_4h,
     WARMUP_15m,
     WARMUP_1h,
     WARMUP_4h,
+    bootstrap_pf,
     build_resampled,
+    collect_trades,
+    compute_metrics,
+    pf_from_pnl,
+    portfolio_sim,
+    portfolio_sim_with_details,
+    precompute,
+    precompute_all_vr,
+    sim_directional_trades,
+    sim_straddle_trades,
+)
+
+# ── Signal generators (canonical source) ──
+from quantbox.strategy.vol_straddle.signals import (
     compute_momentum,
     compute_squeeze_dur,
     compute_vr,
     gen_vr_dur_signal,
     gen_vr_signal,
-    load_15m,
     make_direction_momentum,
-    pf_from_pnl,
-    bootstrap_pf,
-    precompute,
+)
+
+# ── Data loader (still in research, not yet extracted) ──
+from research.active.r31_r40.r31_mtf_vol_straddle import (
+    load_15m,
     vol_percentile,
 )
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Constants
-# ══════════════════════════════════════════════════════════════════════════════
-
-COST_DIRECTIONAL = 0.0008   # 2 × 0.04%
-COST_STRADDLE = 0.0016      # 4 × 0.04%
-
-TF_15m = ("15m", 1, WARMUP_15m, 192, 384)
-TF_1h  = ("1h",  4, WARMUP_1h,  48,  96)
-TF_4h  = ("4h", 16, WARMUP_4h,  12,  24)
-G_3TF  = [TF_15m, TF_1h, TF_4h]
 
 # A-VR5_35 config (selected from R37)
 CFG_A = {"sp": 5, "lp": 35, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 8,
@@ -86,304 +98,10 @@ def get_commit_short() -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Sim (from R37, unchanged)
+#  NOTE: sim/collect/portfolio/metrics functions are now imported from
+#  quantbox.backtest.trade_sim.  The canonical source lives there.
+#  DO NOT redefine them here — that was the old pattern before extraction.
 # ══════════════════════════════════════════════════════════════════════════════
-
-@numba.jit(nopython=True, cache=True)
-def sim_straddle_trades(
-    close: np.ndarray, high: np.ndarray, low: np.ndarray,
-    sig: np.ndarray, sl: float, tp: float, max_hold: int, cost: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    n = len(close)
-    cap = n // 2 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
-    cnt = 0
-    i = 0
-    while i < n - 1:
-        if sig[i] == 0:
-            i += 1
-            continue
-        entry = close[i]
-        if entry <= 0:
-            i += 1
-            continue
-        l_sl = entry * (1.0 - sl)
-        l_tp = entry * (1.0 + tp)
-        s_sl = entry * (1.0 + sl)
-        s_tp = entry * (1.0 - tp)
-        la = True
-        sa = True
-        le = 0.0
-        se = 0.0
-        eb = i
-        end = min(i + 1 + max_hold, n)
-        for j in range(i + 1, end):
-            if la:
-                if low[j] <= l_sl:
-                    le = -sl
-                    la = False
-                elif high[j] >= l_tp:
-                    le = tp
-                    la = False
-            if sa:
-                if high[j] >= s_sl:
-                    se = -sl
-                    sa = False
-                elif low[j] <= s_tp:
-                    se = tp
-                    sa = False
-            if not la and not sa:
-                eb = j
-                break
-        else:
-            eb = end - 1
-        if la:
-            le = (close[eb] - entry) / entry
-        if sa:
-            se = (entry - close[eb]) / entry
-        net = le + se - cost
-        if cnt < cap:
-            pnl[cnt] = net
-            ent[cnt] = i
-            ext[cnt] = eb
-            cnt += 1
-        i = eb + 1
-    return pnl[:cnt], ent[:cnt], ext[:cnt]
-
-
-@numba.jit(nopython=True, cache=True)
-def sim_directional_trades(
-    close: np.ndarray, high: np.ndarray, low: np.ndarray,
-    sig: np.ndarray, dire: np.ndarray,
-    sl: float, tp: float, max_hold: int, cost: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    n = len(close)
-    cap = n // 2 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
-    cnt = 0
-    i = 0
-    while i < n - 1:
-        if sig[i] == 0 or dire[i] == 0:
-            i += 1
-            continue
-        entry = close[i]
-        if entry <= 0:
-            i += 1
-            continue
-        d = dire[i]
-        end = min(i + 1 + max_hold, n)
-        eb = end - 1
-        trade_pnl = 0.0
-        for j in range(i + 1, end):
-            if d == 1:
-                if low[j] <= entry * (1.0 - sl):
-                    trade_pnl = -sl
-                    eb = j
-                    break
-                if high[j] >= entry * (1.0 + tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-            else:
-                if high[j] >= entry * (1.0 + sl):
-                    trade_pnl = -sl
-                    eb = j
-                    break
-                if low[j] <= entry * (1.0 - tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-        else:
-            if d == 1:
-                trade_pnl = (close[eb] - entry) / entry
-            else:
-                trade_pnl = (entry - close[eb]) / entry
-        if cnt < cap:
-            pnl[cnt] = trade_pnl - cost
-            ent[cnt] = i
-            ext[cnt] = eb
-            cnt += 1
-        i = eb + 1
-    return pnl[:cnt], ent[:cnt], ext[:cnt]
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Trade Collection (with symbol + timing info for portfolio sim)
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-def collect_trades(
-    cfg: dict,
-    data_15m: dict, data_1h: dict, data_4h: dict,
-    strat: str,
-) -> list[tuple[str, int, int, float]]:
-    """Collect all trades as (symbol, entry_15m, exit_15m, pnl).
-
-    Unlike R37 _run_variant which returns flat pnl array,
-    this preserves symbol and timing for portfolio simulation.
-    """
-    sp = cfg["sp"]
-    lp = cfg["lp"]
-    vr_key = f"vr_{sp}_{lp}"
-    tf_data_map = {1: data_15m, 4: data_1h, 16: data_4h}
-    is_straddle = (strat == "S_d8")
-
-    d_sl = cfg["d_sl"]
-    s_sl = cfg["s_sl"]
-    tp = cfg["tp"]
-    d_vr = cfg["d_vr"]
-    s_vr = cfg["s_vr"]
-    s_dur = cfg["s_dur"]
-
-    all_trades: list[tuple[str, int, int, float]] = []
-
-    for sym in sorted(data_15m.keys()):
-        sym_trades: list[tuple[int, int, float]] = []
-
-        for tf_label, ratio, warmup, mh_d, mh_s in G_3TF:
-            d_tf = tf_data_map.get(ratio)
-            if d_tf is None or sym not in d_tf:
-                continue
-            d = d_tf[sym]
-            c = d["close"]
-            h = d["high"]
-            lo = d["low"]
-            vr = d.get(vr_key)
-            if vr is None:
-                continue
-
-            sl = s_sl if is_straddle else d_sl
-            mh = mh_s if is_straddle else mh_d
-
-            if is_straddle:
-                sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
-                p, e, x = sim_straddle_trades(c, h, lo, sig, sl, tp, mh, COST_STRADDLE)
-            else:
-                sig = gen_vr_signal(vr, d_vr, warmup)
-                dire = make_direction_momentum(sig, d["mom_8"])
-                p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, COST_DIRECTIONAL)
-
-            for k in range(len(p)):
-                entry_15m = int(e[k]) * ratio
-                exit_15m = int(x[k]) * ratio + (ratio - 1)
-                sym_trades.append((entry_15m, exit_15m, float(p[k])))
-
-        # Per-symbol time dedup
-        sym_trades.sort(key=lambda x: x[0])
-        accepted: list[tuple[int, int]] = []
-        for entry_15m, exit_15m, pnl_val in sym_trades:
-            conflict = False
-            for ae, ax in accepted:
-                if entry_15m <= ax and exit_15m >= ae:
-                    conflict = True
-                    break
-            if not conflict:
-                all_trades.append((sym, entry_15m, exit_15m, pnl_val))
-                accepted.append((entry_15m, exit_15m))
-
-    return all_trades
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Portfolio Simulation (max_concurrent filtering)
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-def portfolio_sim(
-    all_trades: list[tuple[str, int, int, float]],
-    max_concurrent: int,
-) -> np.ndarray:
-    """Filter trades by max concurrent positions, no same-symbol overlap."""
-    trades = sorted(all_trades, key=lambda x: x[1])
-    accepted_pnl: list[float] = []
-    active: list[tuple[str, int]] = []  # (symbol, exit_bar)
-
-    for sym, entry, exit_b, pnl_val in trades:
-        active = [(s, e) for s, e in active if e > entry]
-        sym_active = any(s == sym for s, _ in active)
-        if sym_active:
-            continue
-        if len(active) >= max_concurrent:
-            continue
-        active.append((sym, exit_b))
-        accepted_pnl.append(pnl_val)
-
-    return np.array(accepted_pnl) if accepted_pnl else np.empty(0)
-
-
-def portfolio_sim_with_details(
-    all_trades: list[tuple[str, int, int, float]],
-    max_concurrent: int,
-) -> tuple[np.ndarray, list[tuple[str, int, int, float]]]:
-    """Portfolio sim that also returns accepted trades with metadata."""
-    trades = sorted(all_trades, key=lambda x: x[1])
-    accepted: list[tuple[str, int, int, float]] = []
-    active: list[tuple[str, int]] = []
-
-    for sym, entry, exit_b, pnl_val in trades:
-        active = [(s, e) for s, e in active if e > entry]
-        sym_active = any(s == sym for s, _ in active)
-        if sym_active:
-            continue
-        if len(active) >= max_concurrent:
-            continue
-        active.append((sym, exit_b))
-        accepted.append((sym, entry, exit_b, pnl_val))
-
-    pnl = np.array([t[3] for t in accepted]) if accepted else np.empty(0)
-    return pnl, accepted
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Metrics (enhanced from R37)
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-def compute_metrics(pnl: np.ndarray, data_years: float) -> dict:
-    n = len(pnl)
-    if n < 2:
-        return {"N": n, "PF": 0.0, "EV_bp": 0.0, "t": 0.0, "WR": 0.0,
-                "RR": 0.0, "ret_pct": 0.0, "max_dd_pct": 0.0, "tpd": 0.0,
-                "ann_ret_pct": 0.0, "calmar": 0.0}
-    wins = pnl[pnl > 0]
-    losses = pnl[pnl < 0]
-    wr = len(wins) / n * 100
-    avg_win = float(np.mean(wins)) * 100 if len(wins) > 0 else 0.0
-    avg_loss = abs(float(np.mean(losses))) * 100 if len(losses) > 0 else 1e-9
-    rr = avg_win / avg_loss if avg_loss > 0 else 999.0
-    pf = pf_from_pnl(pnl)
-    ev = float(np.mean(pnl)) * 10000
-    se = float(np.std(pnl) / np.sqrt(n)) * 10000
-    t_stat = ev / se if se > 0 else 0.0
-
-    equity = 1.0
-    peak = 1.0
-    max_dd = 0.0
-    for p in pnl:
-        equity *= (1.0 + p)
-        if equity > peak:
-            peak = equity
-        dd = (peak - equity) / peak
-        if dd > max_dd:
-            max_dd = dd
-
-    total_ret = (equity - 1.0) * 100
-    tpd = n / (data_years * 365) if data_years > 0 else 0.0
-    ann_ret = (equity ** (1.0 / data_years) - 1.0) * 100 if data_years > 0 else 0.0
-    calmar = ann_ret / (max_dd * 100) if max_dd > 0 else 0.0
-
-    return {
-        "N": n, "PF": round(pf, 3), "EV_bp": round(ev, 1),
-        "t": round(t_stat, 2), "WR": round(wr, 1), "RR": round(rr, 2),
-        "avg_win_pct": round(avg_win, 3), "avg_loss_pct": round(avg_loss, 3),
-        "ret_pct": round(total_ret, 1), "max_dd_pct": round(max_dd * 100, 1),
-        "tpd": round(tpd, 2), "ann_ret_pct": round(ann_ret, 1),
-        "calmar": round(calmar, 1),
-    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -425,17 +143,6 @@ def _extract_days(path: Path) -> int:
         if part.endswith("d") and part[:-1].isdigit():
             return int(part[:-1])
     return 0
-
-
-def precompute_all_vr(datasets: list[dict], pairs: list[tuple[int, int]]) -> None:
-    """Precompute VR for all ATR pairs in all datasets."""
-    for dataset in datasets:
-        for sym, d in dataset.items():
-            c, h, lo = d["close"], d["high"], d["low"]
-            for sp, lp in pairs:
-                key = f"vr_{sp}_{lp}"
-                if key not in d:
-                    d[key] = compute_vr(c, h, lo, sp, lp)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
