@@ -69,6 +69,7 @@ class VolStraddleStrategy:
         self._high_data: dict[str, np.ndarray] = {}
         self._low_data: dict[str, np.ndarray] = {}
         self._volume_data: dict[str, np.ndarray] = {}
+        self._taker_buy_data: dict[str, np.ndarray] = {}  # F5 TBR gate
 
         # ── HTF data (from update_htf_data) ──
         self._htf_4h: dict[str, dict[str, np.ndarray]] = {}
@@ -317,6 +318,20 @@ class VolStraddleStrategy:
         direction = int(dire[-1])
         if direction == 0:
             return 0
+
+        # ── F5: TBR z-score Gate (R46 validated, D_mom8 only) ──
+        if self.config.f5_tbr_enabled:
+            tbr_z = self._compute_tbr_zscore(self._current_symbol)
+            is_long = (direction == 1)
+            blocked = (is_long and tbr_z > self.config.f5_tbr_z_threshold) or \
+                      (not is_long and tbr_z < -self.config.f5_tbr_z_threshold)
+            if blocked:
+                logger.info(
+                    f"[{self._current_symbol}] D_mom8 BLOCKED by F5-TBR: "
+                    f"tbr_z={tbr_z:.3f} thresh={self.config.f5_tbr_z_threshold} "
+                    f"dir={'LONG' if is_long else 'SHORT'} TF={tf}"
+                )
+                return 0
 
         # ── R34 Conviction Score for D_mom8 ──
         # B3: Check if S_d8 would also fire (reverse overlap)
@@ -611,6 +626,42 @@ class VolStraddleStrategy:
                     score += 1
 
         return score, conditions
+
+    def _compute_tbr_zscore(self, symbol: str) -> float:
+        """Compute TBR z-score at the PREVIOUS bar (no lookahead).
+
+        Uses window of f5_tbr_z_window bars EXCLUDING the current bar,
+        matching R46b backtest logic: z[entry] = zscore of [i-w, i-1].
+
+        Args:
+            symbol: Trading symbol.
+
+        Returns:
+            TBR z-score float. Returns 0.0 if data insufficient.
+        """
+        cfg = self.config
+        w = cfg.f5_tbr_z_window
+        tb = self._taker_buy_data.get(symbol)
+        vol = self._volume_data.get(symbol)
+        if tb is None or vol is None or len(tb) < w + 1:
+            return 0.0  # Insufficient data → pass filter (don't block)
+
+        # Exclude current bar [−1] to match backtest: window = [−w−1 : −1]
+        tb_window = tb[-(w + 1):-1]
+        vol_window = vol[-(w + 1):-1]
+        current_tb = tb[-1]
+        current_vol = vol[-1]
+
+        safe_vol = np.where(vol_window > 0, vol_window, 1.0)
+        tbr_window = tb_window / safe_vol
+
+        mu = float(np.mean(tbr_window))
+        sigma = float(np.std(tbr_window))
+        if sigma < 1e-9:
+            return 0.0
+
+        current_tbr = current_tb / current_vol if current_vol > 0 else 0.5
+        return (current_tbr - mu) / sigma
 
     # ══════════════════════════════════════════════════════════════════
     #  Signal Metadata Query
@@ -976,6 +1027,7 @@ class VolStraddleStrategy:
         self._high_data[symbol] = high
         self._low_data[symbol] = low
         self._volume_data[symbol] = volume
+        self._taker_buy_data[symbol] = taker_buy  # F5 TBR gate (R46)
 
     def update_htf_data(
         self, symbol: str,
