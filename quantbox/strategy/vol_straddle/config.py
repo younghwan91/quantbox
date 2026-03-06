@@ -138,6 +138,17 @@ class VolStraddleConfig:
     a3_deep_vr_threshold: float = 0.35   # D_mom8 deep compression
     a3_long_squeeze_dur: int = 16        # S_d8 extended squeeze duration
 
+    # ── F5: TBR z-score Gate (R46 validated, D_mom8 only) ──
+    # Taker Buy Ratio z-score computed over lookback 15m bars.
+    # Removes crowded-flow trades: skip LONG if z > thresh (retail FOMO),
+    # skip SHORT if z < -thresh (retail panic selling).
+    # Backtest result (6yr, 46 symbols): PF 1.306→1.348 (+0.042),
+    # WR 42.6%→46.4% (+3.8%), N -14.8%, p=0.029.
+    # IMPORTANT: Applied to D_mom8 only. S_d8 straddle is direction-neutral.
+    f5_tbr_enabled: bool = False        # Set True after live validation
+    f5_tbr_z_threshold: float = 0.5    # R46b optimal (lb=192, p=0.029)
+    f5_tbr_z_window: int = 192         # Lookback bars (~2 days of 15m)
+
     # ── Symbol Selection ──
     symbol_whitelist: list[str] = field(default_factory=list)
     exclude_symbols: list[str] = field(default_factory=lambda: [
