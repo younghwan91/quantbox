@@ -303,6 +303,11 @@ class QuantBoxSettings(BaseSettings):
     vs_ma_cluster_max_hold_4h: int = 12      # 12 × 4h = 48h
     vs_ma_cluster_leverage: float = 21.0     # Half-Kelly: f*/2=4.33%, L=21 (L/N=2.1)
 
+    # ── R46 F5 TBR Z-Score Gate (D_mom8 only) ──
+    vs_f5_tbr_enabled: bool = False          # Block counter-TBR D_mom8 entries
+    vs_f5_tbr_z_threshold: float = 0.5       # R46b optimal (p=0.029)
+    vs_f5_tbr_z_window: int = 192            # Lookback bars (~2 days of 15m)
+
     # ── Regime Protection ──
     z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
     vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부
