@@ -1899,6 +1899,10 @@ def main():
             ma_cluster_tp=settings.vs_ma_cluster_tp,
             ma_cluster_max_hold_4h=settings.vs_ma_cluster_max_hold_4h,
             ma_cluster_leverage=settings.vs_ma_cluster_leverage,
+            # R46 F5 TBR Z-Score Gate
+            f5_tbr_enabled=settings.vs_f5_tbr_enabled,
+            f5_tbr_z_threshold=settings.vs_f5_tbr_z_threshold,
+            f5_tbr_z_window=settings.vs_f5_tbr_z_window,
         ) if args.strategy == 'vol_straddle' else None,
     )
 
