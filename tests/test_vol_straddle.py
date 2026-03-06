@@ -823,3 +823,152 @@ class TestHalfKellyLeverage:
         # Neither exceeds 50% (no single-event ruin)
         assert vr_max < 0.50
         assert ma_max < 0.50
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  TBR z-score Gate (F5, R46 validated)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestTBRZscore:
+    """Unit tests for _compute_tbr_zscore() — no lookahead."""
+
+    def test_returns_zero_when_insufficient_data(self):
+        """Returns 0.0 (pass) when fewer than w+1 bars available."""
+        cfg = VolStraddleConfig(f5_tbr_enabled=True, f5_tbr_z_window=192)
+        strat = VolStraddleStrategy(cfg)
+        sym = 'TESTUSDT'
+        # Only 10 bars — well below window+1=193
+        strat._taker_buy_data[sym] = np.ones(10) * 50.0
+        strat._volume_data[sym] = np.ones(10) * 100.0
+        assert strat._compute_tbr_zscore(sym) == 0.0
+
+    def test_returns_zero_when_no_data(self):
+        """Returns 0.0 when symbol not in data dicts."""
+        cfg = VolStraddleConfig(f5_tbr_enabled=True)
+        strat = VolStraddleStrategy(cfg)
+        assert strat._compute_tbr_zscore('MISSINGUSDT') == 0.0
+
+    def test_neutral_tbr_gives_near_zero_z(self):
+        """Flat TBR (constant 0.5) → z ≈ 0."""
+        cfg = VolStraddleConfig(f5_tbr_z_window=192)
+        strat = VolStraddleStrategy(cfg)
+        sym = 'TESTUSDT'
+        n = 300
+        strat._volume_data[sym] = np.ones(n) * 1000.0
+        strat._taker_buy_data[sym] = np.ones(n) * 500.0  # TBR = 0.5 always
+        z = strat._compute_tbr_zscore(sym)
+        # std ≈ 0 → returns 0.0 guard
+        assert z == 0.0
+
+    def test_extreme_buy_pressure_gives_positive_z(self):
+        """Current bar has extreme taker buy → z >> 0."""
+        cfg = VolStraddleConfig(f5_tbr_z_window=50)
+        strat = VolStraddleStrategy(cfg)
+        sym = 'TESTUSDT'
+        n = 200
+        rng = np.random.default_rng(42)
+        vol = np.ones(n) * 1000.0
+        tb = rng.normal(500, 30, n)  # Normal TBR ≈ 0.5
+        tb[-1] = 950.0               # Current bar: extreme buy (TBR ≈ 0.95)
+        strat._volume_data[sym] = vol
+        strat._taker_buy_data[sym] = tb
+        z = strat._compute_tbr_zscore(sym)
+        assert z > 3.0, f"Expected z>3.0 for extreme buy, got {z:.2f}"
+
+    def test_extreme_sell_pressure_gives_negative_z(self):
+        """Current bar has extreme taker sell → z << 0."""
+        cfg = VolStraddleConfig(f5_tbr_z_window=50)
+        strat = VolStraddleStrategy(cfg)
+        sym = 'TESTUSDT'
+        n = 200
+        rng = np.random.default_rng(7)
+        vol = np.ones(n) * 1000.0
+        tb = rng.normal(500, 30, n)
+        tb[-1] = 50.0  # Current bar: extreme sell (TBR ≈ 0.05)
+        strat._volume_data[sym] = vol
+        strat._taker_buy_data[sym] = tb
+        z = strat._compute_tbr_zscore(sym)
+        assert z < -3.0, f"Expected z<-3.0 for extreme sell, got {z:.2f}"
+
+    def test_uses_previous_bars_not_current(self):
+        """Z-score window excludes current bar (no lookahead parity)."""
+        cfg = VolStraddleConfig(f5_tbr_z_window=10)
+        strat = VolStraddleStrategy(cfg)
+        sym = 'TESTUSDT'
+        n = 30
+        vol = np.ones(n) * 1000.0
+        # Uniform normal in window [−11:−1], then extreme current bar
+        tb = np.ones(n) * 500.0
+        tb[-1] = 9999.0  # Extreme current bar
+
+        strat._volume_data[sym] = vol
+        strat._taker_buy_data[sym] = tb
+
+        z = strat._compute_tbr_zscore(sym)
+        # Window [−11:−1] = all 0.5 → std=0 → returns 0.0 guard (not affected by extreme bar)
+        assert z == 0.0
+
+    def test_taker_buy_stored_by_update_market_data(self):
+        """update_market_data() stores taker_buy for F5 gate."""
+        strat = VolStraddleStrategy()
+        sym = 'TESTUSDT'
+        vol = np.ones(50) * 1000.0
+        tb = np.ones(50) * 600.0
+        high = np.ones(50)
+        low = np.ones(50)
+        strat.update_market_data(sym, vol, tb, high, low)
+        assert sym in strat._taker_buy_data
+        np.testing.assert_array_equal(strat._taker_buy_data[sym], tb)
+
+
+class TestTBRGateBlocking:
+    """Integration test: F5 gate blocks D_mom8 on crowded-flow bars."""
+
+    def _inject_crowded_long(self, strat: VolStraddleStrategy, sym: str, n: int = 300) -> None:
+        """Inject taker_buy data where current bar is extreme FOMO buy (z>>0.5)."""
+        rng = np.random.default_rng(0)
+        vol = np.ones(n) * 1000.0
+        tb = rng.normal(500, 30, n)  # Normal window: TBR≈0.5, std≈0.03
+        tb[-1] = 900.0               # Current bar: extreme buy pressure
+        strat._volume_data[sym] = vol
+        strat._taker_buy_data[sym] = tb
+
+    def _inject_crowded_short(self, strat: VolStraddleStrategy, sym: str, n: int = 300) -> None:
+        """Inject taker_buy data where current bar is extreme panic sell (z<<-0.5)."""
+        rng = np.random.default_rng(1)
+        vol = np.ones(n) * 1000.0
+        tb = rng.normal(500, 30, n)
+        tb[-1] = 100.0  # Current bar: extreme sell pressure
+        strat._volume_data[sym] = vol
+        strat._taker_buy_data[sym] = tb
+
+    def test_gate_blocks_directional_when_enabled(self):
+        """With f5_tbr_enabled=True, _compute_tbr_zscore triggers block path."""
+        cfg = VolStraddleConfig(f5_tbr_enabled=True, f5_tbr_z_threshold=0.5, f5_tbr_z_window=100)
+        strat = VolStraddleStrategy(cfg)
+        sym = 'TESTUSDT'
+        self._inject_crowded_long(strat, sym, n=500)
+        # Manually verify z > threshold
+        z = strat._compute_tbr_zscore(sym)
+        assert z > cfg.f5_tbr_z_threshold, f"Test setup error: z={z:.2f} not > 0.5"
+
+    def test_gate_disabled_does_not_block(self):
+        """With f5_tbr_enabled=False (default), gate is skipped."""
+        cfg = VolStraddleConfig(f5_tbr_enabled=False)
+        assert not cfg.f5_tbr_enabled
+
+    def test_gate_short_side_uses_negative_z(self):
+        """Crowded short (extreme sell) blocked: z < -threshold."""
+        cfg = VolStraddleConfig(f5_tbr_enabled=True, f5_tbr_z_threshold=0.5, f5_tbr_z_window=100)
+        strat = VolStraddleStrategy(cfg)
+        sym = 'TESTUSDT'
+        self._inject_crowded_short(strat, sym, n=500)
+        z = strat._compute_tbr_zscore(sym)
+        assert z < -cfg.f5_tbr_z_threshold, f"Test setup error: z={z:.2f} not < -0.5"
+
+    def test_default_config_f5_disabled(self):
+        """F5 is off by default — no impact on existing live behavior."""
+        cfg = VolStraddleConfig()
+        assert cfg.f5_tbr_enabled is False
+        assert cfg.f5_tbr_z_threshold == 0.5
+        assert cfg.f5_tbr_z_window == 192
