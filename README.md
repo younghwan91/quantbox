@@ -3,13 +3,13 @@
 **바이낸스 USDT-M 선물 VR 스퀴즈 시스템 — Dual-Axis Squeeze (VR + MA Cluster)**
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-v14.3.0-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-946%20passed-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-v14.4.2-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-994%20passed-brightgreen.svg)]()
 [![Branch](https://img.shields.io/badge/branch-main-blue.svg)]()
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(30x)와 MA Cluster Squeeze(21x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
 
-> **현재 상태**: Live Trading | Tag `v14.3.0` | 946 tests passed
+> **현재 상태**: Live Trading | Tag `v14.4.2` | 994 tests passed
 
 ## 🌟 주요 기능
 
@@ -36,88 +36,10 @@
 - **불변 엣지 (R45, 4.73yr)**: N=1,631, PF=1.365, WR=38.1%, EV=+42.6bp
 - **결합 포트폴리오 (v14.3.0)**: N=3,713, PF=1.324, Calmar=24.7, P(PF≥1.0)=100%, 6/6년 흑자
 
-### 🔥 Rubber Band Scalper — 레거시 (v12.6, 현재 비활성화)
+### 🔥 레거시 전략 (v14.0.0 이전, 비프로덕션)
 
-> ⚠️ v14.0.0에서 VR Squeeze + MA Cluster로 전략 전환. 아래 내용은 참고용.
-
-- **v12.6 Climax Volume Filter + ATR Stop (R21, 2026-02-24)**:
-  - **ATR-Based Stop**: `SL = clamp(2.0 × ATR_pct, 0.5%, 4.0%)` — 고정 0.382×에서 적응형 스탑으로 전환, Ghost-SL 문제 해결
-  - **Climax Volume Filter**: `vol > 3.0 × vol_SMA(20)` = +1 confidence — 극단적 거래량 폭발 시에만 진입 바이어스
-  - Stoch/MACD 비활성화 (노이즈 제거), 전체 컨피던스 체계 단순화
-  - 결과: Calmar **1,171** (+60.8% vs v12.5.3), DD **5.8%** (−24.7%), WR **62.2%** (+11.1pp), Sharpe **6.37**
-  - commit `15b94d9` (feature) + `14feeeb` (fixes: param wiring + diagnose_bar parity)
-- **v12.4 I-HybTight**: Reversal A/B test champion — deeper target + tighter trail + longer runner
-  - target_retrace=1.5 (150% move), stop_mult=0.382, max_hold=25 → R:R 1.91
-  - **PBT Exit**: 50% partial at TP1 → breakeven floor → ATR trailing runner
-  - Runner exits via `trail_runner` (ATR×1.0 tighter trailing) or `time_runner` (3× max_hold)
-  - Server TP as safety net; client-side trailing for precision
-- **v12.3 M-2SSTSX**: R6 champion combo (2slt + SoftTight + SteepX + DirDiversity)
-  - **SteepX Sizing**: conf2→0.3×, conf3→0.5×, conf4→1.5×, conf5+→2.0× — rewards conviction
-  - **SoftTight DD Scaling**: 2%DD→0.8×, 4%DD→0.6×, 6%DD→0.4× — automatic position reduction during drawdowns
-  - **Vol-Adjusted Sizing**: median_atr/current_atr clamped [0.4, 2.0] — normalizes position size by current volatility
-  - **Direction Diversity**: max 2 same-direction positions — prevents cascade losses
-  - min_confidence=3, max_concurrent=2
-- **v12.3 Production Safety** (3 critical bug fixes):
-  - State restore preserves runner `trail_floor` + `highest_since_tp1` across bot restarts
-  - Bracket repair skips server TP for runners (prevents instant kill)
-  - Failed partial close clears stale order IDs to trigger bracket repair
-- **v12.4.1–v12.4.6 Production Hardening** (6 hotfixes):
-  - v12.4.1: Server TP respects PBT mode — 50% qty at TP1, not 100%
-  - v12.4.2: Runner-phase server TP guard — skip TP placement when trailing
-  - v12.4.3: Remaining 4 call-sites TP qty audit (sync/repair/failover/recovery)
-  - v12.4.4: Stale `_server_sl_pct` reset after runner SL re-placed at breakeven
-  - v12.4.5: Missing `_save_state()` after successful partial close
-  - v12.4.6: HWM + trade history reset on restart with 0 positions (prevents phantom DD halt)
-- **Alpha**: ATR 기반 적응형 임계값으로 시장 변동성에 실시간 대응하는 단일 자산 평균회귀 전략
-- **v11.4 Adaptive Threshold**: 고정 3.2% → ATR(48)×2.5 적응형 (OOS Sharpe 8.23, OOS/IS 1.09, 제로 과적합)
-  - 공식: `threshold = clip(2.5 × ATR%(48), 1%, 6%)` — 변동성 높으면 넓고, 낮으면 타이트
-  - Walk-forward 검증: 18개 변형 × 20개 심볼, IS/OOS 분리, 모든 변형에서 OOS/IS ≥ 1.04
-  - 레버리지 최적화: 1×~5× 그리드 → Sharpe 단조 감소, 현행 3.75× 유지 결정
-- **v10.0 Entry Optimization**: threshold fallback 0.032 (ATR NaN 시), min_confidence 2 (v12.2 E-3Slot quality gate)
-- **v10.0 Extended Hold**: max_hold 10→20 (+24% ret, strictly better)
-- **v10.0 Faster Stochastic**: stoch_k 5→3 (+5% Calmar)
-- **v11.1 Server-Side Stop-Loss**: 바이난스 STOP 주문으로 클라이언트 크래시 방어 + 레버리지 설정 검증
-- **v12.2 E-3Slot Universe**: Top-50 (4 tiers) + 필터 완화 (conf≥2, ATR 2.0×, floor 0.8%, 3 slots)
-- **v10.0 Symbol Whitelist**: Top-50 검증된 심볼만 거래 (E-3Slot config, RB_MAX_CONCURRENT=3)
-- **v10.0 Dynamic Capital**: balance / max(1, n_active+1) — 유휴 자본 최소화, 50% cap 안전장치
-- **Fibonacci Exit Levels (v9.0)**: 피보나치 기반 정밀 목표/손절 — target 0.382 (golden ratio), stop 0.786 (deep correction)
-  - R:R 0.444→0.486 (+9.5%), Calmar +29% vs 기존 0.4/0.9
-  - Dynamic Target 비활성화: 타이트한 Fib 스탑(0.786)에서 고정 0.382가 동적 스케일링보다 우수
-- **MACD Histogram Evidence (v9.0)**: MACD(12,26,14) 히스토그램 기울기 방향 일치 시 +1 컨피던스
-  - 단독 +7.6% Calmar 개선
-- **Stochastic Cross Evidence (v9.0)**: 스토캐스틱(3,3) %K/%D 크로스 방향 일치 시 +1 컨피던스
-  - Very fast 설정(3,3) — 스캘핑 최적 (v10.0: 5→3으로 가속), high/low 캔들 데이터 사용
-- **S+R+M Confluence 종합**: Calmar 15.38 (+33.6% vs v8.0), DD 11.0% (-8.5% vs v8.0)
-- **MTF Confirmation (v7.0)**: 4h SMA(12) 트렌드 필터로 15m 역추세 진입 차단
-  - MDD 16.5% → 4.3% (-74%), Calmar 8.65 → 32.42 (+275%), Sharpe 2.07 → 5.23 (+153%)
-  - Walk-forward Q3 (worst quarter) DD 16.5% → 3.0% (-82%)
-- **Independent 4H Rubber Band (v7.0)**: 4h 타임프레임 독립 평균회귀 트레이딩
-  - 4h-only: Ret +52.2%, DD 4.8%, Calmar 10.87
-  - 15m + 4h 하이브리드: Ret +139.8%, DD 4.3%, Calmar 32.42
-- **MTF Leverage Boost (v7.0)**: MTF 확인 통과 트레이드에 2.0x 레버리지 부스트 (실효 3.0x)
-- **Confidence-Scored Entry (v6.0)**: 멀티 증거 기반 컨피던스 필터링 + 졸업 레버리지
-  - RSI, 거래량 스파이크, 테이커 매수/매도 비율, SMA 거리, BTC 모멘텀, MACD 히스토그램(v9.0), 스토캐스틱 크로스(v9.0) — 최대 7가지 증거
-  - min_confidence=2: v12.2 E-3Slot 최적 필터 (Sharpe 6.41, Calmar 795, +138% trades/day)
-  - 선택적 졸업 레버리지: 증거 많을수록 포지션 확대
-- **Regime-Switch Dual Entry (v5.0 base)**: BTC 레짐에 따라 다른 진입 알고리즘 사용
-  - Risk-On (BTC > SMA96): Classic Pullback — 자산 자체 상승추세에서 조정 시 매수
-  - Risk-Off (BTC < SMA96): Sympathy Pullback — BTC 하락 시 동반 하락하는 자산 매수
-- **Fibonacci Stop/Target (v9.0→v12.4)**: stop=0.382× (v12.3), target=1.5× (v12.4 HybTight) → R:R 1.91
-- **Flat 1.5x Leverage**: R:R 1.25로 레버리지 정당화
-  - R:R ≥ 0.30 안전 게이트 유지
-- **Dynamic Leverage**: Move-confidence 기반 동적 레버리지 (R:R 게이트와 연동)
-- **MTF (v7.0)**: 4h SMA(12) 트렌드 확인 활성화 — MDD -74%, Calmar +275%
-- **Live/Backtest Parity (v7.0)**: volume/taker 데이터 _scan_entries() 연결 + 4h kline 다운로드 + main() v7.0 설정 전달
-- **365-Day Validated**: 50 심볼 × 35,040봉, 7/7 견고성 점수, 9/10 롤링 윈도우 수익
-- **v7.0 MTF Numba 함수**: `apply_mtf_confirmation()`, `apply_mtf_leverage()`, `compute_signals_4h_independent()` (Numba 가속)
-- **v9.0 S+R+M Numba 함수**: `_compute_ema_inline()`, `_compute_stochastic_inline()`, `_compute_macd_inline()`, `compute_signals_v9()` (Numba 가속)
-- **Volatility Selection**: 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일마다 리밸런싱)
-- **DD-Managed Portfolio**: 역변동성 가중 + 포트폴리오 DD 기반 노출 축소
-- **Numba 가속**: 신호 생성, 백테스트, 레버리지 스케일링, 변동성 계산 모두 `@numba.jit(nopython=True)` 컴파일
-- **Alpha Engine**: 멀티팩터 신호 엔진 (볼륨, 모멘텀, ATR 적응, 트레일링 스탑, 테이커 비율)
-- **LimitChaser 실행**: maker-only 체결로 슬리피지 최소화
-- **위험 관리**: Max DD 차단기, 일일 손실 제한, 포지션 사이징 (1% risk/trade)
-- **상태 복구**: 크래시 후 포지션 자동 복구 (atomic JSON write)
+- **Rubber Band Scalper (v12.6)**: ATR 적응형 평균회귀, Climax Volume Filter. v14.0.0에서 VolStraddle로 전략 전환.
+- **Elliott Wave (v11.6)**: ZigZag ABC 패턴 + Timing Alpha. 레거시 보존.
 
 ### 핵심 아키텍처
 - **실거래/백테스트 일체형**: 동일한 Frozen z-score 로직이 백테스트와 실거래에서 동작
@@ -186,38 +108,19 @@ pip install -e .
 
 ## 🚀 빠른 시작
 
-### Rubber Band Scalper (권장)
-
 ```bash
-# Rubber Band (기본 전략)
-python -m quantbox.scalper --paper
-
-# Elliott Wave 전략
-python -m quantbox.scalper --strategy elliott --paper
+# Paper trading (시뮬레이션)
+python -m quantbox.scalper --strategy vol_straddle --paper
 
 # 한 사이클만 실행
-python -m quantbox.scalper --paper --once
+python -m quantbox.scalper --strategy vol_straddle --paper --once
 
 # LIVE trading (실거래!)
-python -m quantbox.scalper
-python -m quantbox.scalper --strategy elliott
+python -m quantbox.scalper --strategy vol_straddle
 ```
 
-```python
-# 백테스트
-from quantbox.strategy.rubberband import compute_signals, RubberBandConfig
-from quantbox.backtest.vectorized_backtest import VectorizedBacktest, BacktestConfig
-
-bt = VectorizedBacktest(BacktestConfig())
-signals = compute_signals(close_prices, lookback=8, threshold=0.025,
-                          target_retrace=0.5, stop_mult=1.0, max_hold=8)
-result = bt.run_single(close_prices, signals, symbol="BTCUSDT")
-print(f"Return: {result.total_return_pct:+.2f}%, Sharpe: {result.sharpe:.2f}")
-```
-
-### 페어 트레이딩 (레거시)
-
-> 페어 트레이딩 코드는 `quantbox-pairs` 별도 프로젝트로 분리되었습니다.
+> ⚠️ 실거래 전 `.env`에 `BINANCE_API_KEY/SECRET` 설정 및 Binance Hedge Mode 활성화 필요.  
+> 자세한 설정: `MANUAL.md` 참조.
 
 ## 📁 프로젝트 구조
 
@@ -284,42 +187,24 @@ docs/
 └── backtest_results/
     ├── 202602/             # 2026-02 백테스트 리포트 (31개)
     └── 202603/             # 2026-03 백테스트 리포트 (22개, 현재)
-tests/                      # 유닛 테스트 (946개, 47 파일)
+tests/                      # 유닛 테스트 (994개, 47 파일)
 \`\`\`
 
-## 📈 성과 지표 (현재 v14.3.0 — Dual-Axis Squeeze + F5 TBR)
+## 📈 성과 지표 (v14.4.x — Dual-Axis Squeeze, r47 exit)
 
 ### 불변 엣지 지표 (leverage·기간 무관)
 
-| 지표 | VR Squeeze v14.3.0 | MA Cluster R45 | 결합 v14.3.0 |
+| 지표 | VR Squeeze | MA Cluster R45 | 결합 (프로덕션) |
 |------|---|---|---|
-| N (trade 수) | 2,229 | 1,631 | **3,713** |
-| PF | 1.308 | 1.365 | **1.324** |
-| WR | 49.5% | 38.1% | 44.6% |
-| EV/trade | +36.7bp | +42.6bp | +38.5bp |
-| t-stat | 5.91 | 4.94 | **7.38** |
-| Bootstrap P(PF≥1.0) | 100.0% | 100.0% | 100.0% |
-| 6/6년 흑자 | ✓ | ✓ | ✓ |
+| N (trade 수) | ~2,466 | ~1,631 | **~4,097** |
+| PF | ~1.31 | ~1.37 | **~1.521** |
+| WR | ~50% | ~38% | ~45% |
+| Sharpe (L/N) | — | — | **~5.06** |
+| Bootstrap P(PF≥1.0) | 100% | 100% | 100% |
+| 연속 흑자 (6년) | ✓ | ✓ | ✓ |
 
-### 레버리지 적용 수익률 (4.73년, 50심볼)
-
-| 지표 | v7.0 Hybrid | v13.0 VR (25x) | v14.3.0 Dual ★ |
-|------|-------------|----------------|-----------------|
-| AnnRet (1x compound) | +139.8% | +687% | **+1,281.7%** |
-| Max Drawdown (1x) | 4.3% | 68% | **52.0%** |
-| Calmar (1x) | 32.42 | 10.12 | **24.7** |
-| Profit Factor | — | — | **1.324** |
-| Sharpe (Prod L/N) | — | — | **3.39** |
-| Sortino (Prod L/N) | — | — | **12.43** |
-| N/year | — | — | **~785** |
-
-> **v14.3.0 F5 TBR Gate**: D_mom8에 Taker Buy Ratio z-score 게이트 추가. 30.9% 신호 차단, PF +0.04, t-stat +0.7. S_d8 스트래들 미적용.
->
-> **v14.0.0 R43 Trailing**: VR Squeeze d_tp 5%→12% (하드 TP) + trailing stop (activate +2%, trail 0.3%). 엣지 대폭 개선.
->
-> **v13.0 → v14.0**: MA Cluster Squeeze 추가 (Dual-Axis). Calmar 10.12→24.7.
->
-> **레버리지 구조**: VR 30x×1%SL = per-trade risk 3.0% | MA 21x×2%SL = per-trade risk 4.2% (Half-Kelly 유도값).
+> 정확한 수치는 최신 리포트 참조: `docs/backtest_results/202603/20260308_52c16b4_r47_exit_ab_test.md`  
+> **레버리지 구조**: VR 30x×1%SL → L/N=3.0 | MA 21x×2%SL → L/N=2.1 (Half-Kelly)
 
 ## 🧪 테스트
 

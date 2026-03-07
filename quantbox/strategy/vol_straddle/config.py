@@ -84,7 +84,7 @@ class VolStraddleConfig:
 
     # ── Risk Management ──
     max_concurrent: int = 10         # 10 slots (VR L/N=30/10=3.0, MA L/N=21/10=2.1)
-    max_drawdown_pct: float = 0.10  # 10% session drawdown → halt
+    max_drawdown_pct: float = 0.30  # 30% session drawdown → halt (r48 analysis: P99 session DD)
 
     # ── Costs (conservative) ──
     fee_rate: float = 0.0002        # 0.02% maker fee per side

@@ -1,6 +1,6 @@
 # QuantBox 운영 매뉴얼
 
-**v14.3.0 — Dual-Axis Squeeze (VR + MA Cluster)**
+**v14.4.2 — Dual-Axis Squeeze (VR + MA Cluster)**
 
 > 전략 설계·파라미터: `.github/agents.md` 참조  
 > 파라미터 source of truth: `quantbox/strategy/vol_straddle/config.py`
@@ -52,7 +52,7 @@ BINANCE_TESTNET=false           # 테스트넷 사용 시 true
 
 ## 3. 실행
 
-### 3.1 VolStraddle (현재 프로덕션 — v14.3.0)
+### 3.1 VolStraddle (현재 프로덕션 — v14.4.2)
 
 ```bash
 # Paper trading (시뮬레이션, 실제 주문 없음)
