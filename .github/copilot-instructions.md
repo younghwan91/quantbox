@@ -116,7 +116,7 @@ docs/backtest_results/YYYYMM/{YYYYMMDD}_{commit_short}_{description}.md
 
 - 수익률 보고 시 **반드시 어떤 compound 모델인지 명시**: `1x` vs `L/N=2.5` vs `L/N=1.2`
 - `compute_metrics()` 출력을 production 수익률로 제시하면 **거짓말**이 된다
-- 결합 포트폴리오는 per-trade leverage (VR→L/N=2.5, MA→L/N=1.2) 적용
+- 결합 포트폴리오는 per-trade leverage (VR→L/N=3.0, MA→L/N=2.1) 적용
 
 ### 데이터 기간에 따른 compound 차이
 
