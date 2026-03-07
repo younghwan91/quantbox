@@ -45,7 +45,8 @@
 ├── .github/
 │   ├── copilot-instructions.md   # 에이전트 지침
 │   ├── agents.md                 # 아키텍처/모듈 설명
-│   └── winning_strategy.md       # 핵심 전략 원칙
+│   └── skills/
+│       └── backtesting.md        # 백테스트 수행 절차·체크리스트 (AI 에이전트용)
 └── docs/
     └── backtest_results/
         ├── README.md             # 인덱스 (이것만 루트에)
