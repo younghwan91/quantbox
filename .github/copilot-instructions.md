@@ -10,6 +10,13 @@
 1. **No Mock Data** — 백테스트에 실제 바이낸스 데이터만 사용. `np.random` 합성 데이터 금지.
 
 2. **Backtest-Live Parity** — 백테스트 로직 = 실거래 로직. 백테스트에만 유리한 조건 금지. **룩어헤드/미래 데이터 누수 절대 금지.**
+   - **파라미터는 반드시 `config.py`를 직접 읽어서 사용.** 하드코딩 또는 기억에서 쓰지 말 것.
+   - **체크리스트** — 백테스트 작성 전 반드시 `config.py`에서 확인:
+     - exit 로직: flat TP vs trailing stop? (`d_tp`, `d_trail_activate`, `d_trail_distance`)
+     - L/N: `base_leverage / max_concurrent` (VR=30/10=3.0, MA=21/10=2.1) — 하드코딩 금지
+     - SL 값, 슬리피지/수수료 (round-trip = 0.0008)
+   - **위반 선례 (2026-03-07):** `backtest_v14_3_0.py`가 `tp=0.05`(flat) + `VR_LN=2.5`, `MA_LN=1.2` 사용 →
+     실제 프로덕션은 `tp=0.12` + trailing stop + `VR_LN=3.0`, `MA_LN=2.1`. N/PF/CAGR 전부 틀린 수치 보고.
 
 3. **Test-Code Parity** — 모든 기능에 `pytest` 테스트 필수. 짧고 효과적인 테스트 우선. 테스트 없는 코드 = 미완성.
 
@@ -23,9 +30,9 @@
 
 코드 변경 시 **요청 없이** 동기화:
 - **README.md**: 기능 목록, 프로젝트 구조, 테스트 수
-- **MANUAL.md**: 환경변수, 전략 파라미터, 모듈 추가/변경
+- **MANUAL.md**: 환경변수·실행 커맨드 변경 시만 (인프라 변경에만 해당; 전략 파라미터는 `config.py`가 source of truth)
 - **.env.example + .env**: 새 환경변수 추가 시 3곳(`settings.py`, `.env`, `.env.example`) 동시 수정
-- **agents.md**: 아키텍처/모듈/안전장치 변경 시 동기화
+- **agents.md**: 아키텍처/모듈/안전장치/트레이딩 흐름 변경 시 동기화
 
 > ⚠️ `pydantic-settings`는 `.env` 값이 `settings.py` 기본값보다 항상 우선. `settings.py`만 바꾸고 `.env` 안 바꾸면 **적용 안 됨**.
 

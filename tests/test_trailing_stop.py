@@ -250,13 +250,13 @@ class TestPeakGainTracking:
 
 
 class TestConfigDefaults:
-    """Verify config defaults match R43 P1 conservative."""
+    """Verify config defaults match r47 exit params."""
 
     def test_default_config(self):
         cfg = VolStraddleConfig()
         assert cfg.d_tp == 0.12
-        assert cfg.d_trail_activate == 0.02
-        assert cfg.d_trail_distance == 0.003
+        assert cfg.d_trail_activate == 0.005  # r47: was 0.02
+        assert cfg.d_trail_distance == 0.002  # r47: was 0.003
         assert cfg.d_sl == 0.01
         # Straddle unchanged
         assert cfg.s_tp == 0.05

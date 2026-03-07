@@ -1897,6 +1897,8 @@ def main():
             ma_cluster_min_momentum=settings.vs_ma_cluster_min_momentum,
             ma_cluster_sl=settings.vs_ma_cluster_sl,
             ma_cluster_tp=settings.vs_ma_cluster_tp,
+            ma_cluster_trail_activate=settings.vs_ma_cluster_trail_activate,
+            ma_cluster_trail_distance=settings.vs_ma_cluster_trail_distance,
             ma_cluster_max_hold_4h=settings.vs_ma_cluster_max_hold_4h,
             ma_cluster_leverage=settings.vs_ma_cluster_leverage,
             # R46 F5 TBR Z-Score Gate

@@ -20,7 +20,19 @@ docs/backtest_results/
 
 파일 이름의 날짜 순으로 `ls | sort`만 해도 시간 순 정렬 완성.
 
-## 불변 베이스라인 (변경 금지)
+## 현재 정식 배포 수치 (v14.3.0 — 2026-03-07)
+
+> **canonical 리포트:** `20260307_2542664_v14_3_0_corrected_parity.md` (202603/)  
+> 이전 `05631f4` 리포트는 flat-TP + 잘못된 L/N 사용 → 폐기. 아래 수치가 공식 기준.
+
+| 파트 | 핵심 수치 |
+|---|---|
+| **VR (D+S, F5 TBR)** | N=2,229, PF=1.308, WR=49.5%, EV=+36.7bp, Sharpe=2.72, Prod CAGR=+2,805% |
+| **MA Cluster R45** | N=1,631, PF=1.365, WR=38.1%, EV=+42.6bp, Sharpe=2.27, Prod CAGR=+813% |
+| **Combined v14.3.0** | N=3,713, PF=1.324, WR=44.6%, EV=+38.5bp, Sharpe=3.39, Sortino=12.43, Calmar=237.2 |
+| Phase 1 Baseline (trailing, no TBR) | N=2,336, PF=1.351 ← config.py 도큐스트링과 정확히 일치 |
+
+## 불변 베이스라인 (변경 금지 — 시뮬레이션 엔진 일관성 기준)
 
 | 파트 | 레퍼런스 파일 | 핵심 수치 |
 |---|---|---|
@@ -80,4 +92,5 @@ docs/backtest_results/
 | 2026-03-04 | `ef55e2e` | **v14.0.0 Strategy Report** | **Dual AnnRet+1,086%(1x), Calmar=19.4** |
 | 2026-03-04 | `6fdd86c` | **v14.0.0 Current Status** | **868 tests, Paper $1,668** |
 | 2026-03-05 | `v14.0.1` | **v14.0.1 Live 전환** | **891 tests, Live $1,982** |
-| 2026-03-05 | `a79c422` | **v14.0.0 6년 백테스트 재검증** | **VR PF=1.280, MA PF=1.365, Combined PF=1.304, 6/6yr ✓** |
+| 2026-03-07 | `05631f4` | v14.3.0 F5 TBR backtest (1차, L/N 오기입) | ⚠️ 폐기 — flat-TP + VR_LN=2.5 오류 |
+| 2026-03-07 | `2542664` | **v14.3.0 수정 백테스트 (parity 완전 일치)** | **N=3,713, PF=1.324, Sharpe=3.39 — 현재 공식 수치** |
