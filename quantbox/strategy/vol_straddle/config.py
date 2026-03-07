@@ -1,5 +1,11 @@
 """VolStraddle strategy configuration dataclass.
 
+r47-Exit (2026-03-07): Exit param overhaul validated vs v14.3.0 (N=3713, PF=1.324).
+  Option D chosen: r47 best exits + TBR OFF (N=4097, PF=1.521, Sharpe=5.06, MaxDD=83.3%).
+  D_mom8: trail_activate 2%→0.5%, trail_distance 0.3%→0.2%, F5 TBR disabled.
+  MA Cluster: flat TP=8% → trailing stop (activate=4%, distance=0.5%).
+  All 6 years profitable. Bootstrap CI [1.418, 1.634], P(PF≥1)=100%.
+
 R43-Exit: VR compression detector with trailing stop exit (R43 validated).
 Full 6yr validated: N=2,336 @10 slots, PF=1.351, Calmar=9.4, DD=30.0%.
 6 consecutive profitable years (2020-2025). 0 losing years.
@@ -42,8 +48,8 @@ class VolStraddleConfig:
     # Once unrealized gain reaches trail_activate, a trailing stop
     # follows at trail_distance below peak. Hard TP at d_tp (12%).
     # Mechanism: lets VR squeeze explosive releases run beyond fixed TP.
-    d_trail_activate: float = 0.02  # Activate trailing after +2% gain
-    d_trail_distance: float = 0.003 # Trail 0.3% behind peak
+    d_trail_activate: float = 0.005 # Activate trailing after +0.5% gain (r47: was 0.02)
+    d_trail_distance: float = 0.002 # Trail 0.2% behind peak (r47: was 0.003)
 
     # ── S_d8: Straddle (requires Binance Hedge Mode) ──
     s_vr_threshold: float = 0.55    # S VR entry threshold
@@ -145,7 +151,7 @@ class VolStraddleConfig:
     # Backtest result (6yr, 46 symbols): PF 1.306→1.348 (+0.042),
     # WR 42.6%→46.4% (+3.8%), N -14.8%, p=0.029.
     # IMPORTANT: Applied to D_mom8 only. S_d8 straddle is direction-neutral.
-    f5_tbr_enabled: bool = True         # R46 validated, activated v14.3.0
+    f5_tbr_enabled: bool = False        # r47: disabled — trail_activate=0.5% handles bad trades directly
     f5_tbr_z_threshold: float = 0.5    # R46b optimal (lb=192, p=0.029)
     f5_tbr_z_window: int = 192         # Lookback bars (~2 days of 15m)
 
@@ -165,7 +171,9 @@ class VolStraddleConfig:
     ma_cluster_max_duration: int = 24        # Max 4h bars in cluster (R45: zombie filter)
     ma_cluster_min_momentum: float = 0.01    # Min |momentum| for entry (R45: was 0.003)
     ma_cluster_sl: float = 0.02              # 2% stop loss
-    ma_cluster_tp: float = 0.08              # 8% take profit
+    ma_cluster_tp: float = 0.08              # 8% hard TP ceiling (safety; r47: trailing fires first)
+    ma_cluster_trail_activate: float = 0.04  # r47: activate trailing at +4% gain
+    ma_cluster_trail_distance: float = 0.005 # r47: trail 0.5% behind peak
     ma_cluster_max_hold_4h: int = 12         # 12 × 4h = 48h
     ma_cluster_leverage: float = 21.0        # Half-Kelly: f*/2=4.33%, L=0.0433×10/0.02≈21
     ma_cluster_sma_periods: list[int] = field(
