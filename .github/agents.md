@@ -219,14 +219,14 @@ MaxHold:     48h (192바 @15m)
 
 ---
 
-## 7. 테스트 현황 (991+ tests)
+## 7. 테스트 현황 (994+ tests)
 
 **VolStraddle 핵심 테스트:**
 
 | 테스트 파일 | 검증 대상 |
 |------------|----------|
 | `test_vol_straddle` | Config/VR/신호/리샘플링/SL/TP/max_hold/멀티TF/상태 직렬화 (34개) |
-| `test_hedge_mode` | Hedge mode 진입/청산/compound key 파싱 (`TestLoadStateCompoundKeyBug`) |
+| `test_hedge_mode` | Hedge mode 진입/청산/compound key 파싱 (`TestLoadStateCompoundKeyBug`, `TestHedgeCloseNoLeverageChange`) |
 | `test_bracket_repair` | SL/TP 자동 배치, bracket repair 재시도 |
 | `test_backtest_live_parity` | 신호/비용/사이징 일치 |
 
@@ -245,32 +245,11 @@ MaxHold:     48h (192바 @15m)
 
 ---
 
-## 8. 에이전트 행동 규칙
-
-### 8.1 코드 수정 전 필수 확인
-
-1. **패리티 위반 금지**: 신호/비용/사이징 로직을 한쪽만 수정하면 안 된다. `scalper.py` ↔ 백테스트 양쪽을 반드시 동기화.
-2. **안전장치 제거 금지**: 섹션 4의 체크리스트 항목을 제거하거나 완화하는 코드는 사용자 명시 승인 없이 작성하지 않는다.
-3. **테스트 동반 필수**: 새 함수/버그 수정 시 pytest 테스트 함께 작성. 테스트 없는 코드 = 미완성.
-4. **실제 데이터만 사용**: `np.random` 합성 가격 데이터 금지. 테스트 mock은 구조적 mock(API 응답 형태)만 허용.
-
-### 8.2 수정 시 영향 범위 체크
-
-코드 수정 후 반드시:
-1. 섹션 5의 영향 범위 매트릭스를 확인하여 관련 파일 모두 업데이트
-2. 관련 테스트를 실행하여 통과 확인 (`python -m pytest tests/ -x -q`)
-3. `copilot-instructions.md`의 문서 자동 관리 규칙에 따라 README.md, MANUAL.md, .env.example 갱신
-
-### 8.3 문서 동기화
-
-- 개발 원칙/워크플로우 변경 → `copilot-instructions.md` 갱신
-- 아키텍처/모듈/안전장치/파라미터/트레이딩 흐름 변경 → `agents.md` 갱신
-
-### 8.4 위험 수준별 대응
+## 8. 수정 시 위험 수준
 
 | 위험 수준 | 예시 | 에이전트 행동 |
 |----------|------|-------------|
-| 🟢 낮음 | 로그 메시지 변경, docstring 수정 | 즉시 실행 |
-| 🟡 중간 | 새 필터 추가, 알림 메시지 변경 | 실행 + 테스트 확인 |
-| 🔴 높음 | 신호/청산 로직, 비용 계산, 포지션 사이징 변경 | 사용자 확인 후 실행. 패리티 검증 필수 |
-| ⛔ 금지 | 안전장치 제거, 실데이터 규칙 위반, 패리티 파괴 | 절대 실행 불가. 위험성 경고 |
+| 🟢 낮음 | 로그 메시지, docstring | 즉시 실행 |
+| 🟡 중간 | 새 필터, 알림 변경 | 실행 + 테스트 확인 |
+| 🔴 높음 | 신호/청산/비용/사이징 로직 | 사용자 확인 + 패리티 검증 필수 |
+| ⛔ 금지 | 안전장치 제거, mock 데이터, 패리티 파괴 | 절대 실행 불가 |

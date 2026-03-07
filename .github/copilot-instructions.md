@@ -97,84 +97,25 @@ docs/backtest_results/YYYYMM/{YYYYMMDD}_{commit_short}_{description}.md
 
 **main에 머지할 때는 반드시 버전 태그 생성 및 push.** `git tag -a vX.Y.Z -m "..."`
 
-## 리서치 베이스라인 규칙
+## 리서치·수익률 보고 규칙
 
-1. **Sim 함수 재구현 금지.** baseline은 반드시 `scaling_r38.py`의 `collect_trades()` + `portfolio_sim()`을 import. 새로 짜면 momentum=0 처리, squeeze 카운터 리셋 등 미묘한 차이로 수치가 틀어진다.
-2. **Config는 `CFG_V13` import.** 하드코딩 금지.
-3. **Phase 1에서 N, PF가 `docs/backtest_results/` 내 최신 정식 리포트와 ±1% 이내인지 확인.** 불일치 시 즉시 중단.
-4. **슬롯 수 명시.** 15 slots ≠ 10 slots. Production은 10 slots.
-5. **재구현 불가피 시** static params로 baseline 재현 검증을 **먼저** 실행.
-6. **베이스라인 = 배포 수치. 예외 없음.** 리서치에서 출력한 baseline이 배포 리포트와 다르면 리서치 전체가 무효.
+> 상세 절차: `.github/instructions/backtesting.instructions.md` (research/**/*.py 자동 로드)
 
-## 수익률 보고 규칙 (Performance Reporting Rules)
+**핵심 3가지 — 위반 시 보고서 전체 무효:**
+1. **Sim 재구현 금지** — `quantbox/backtest/trade_sim.py`의 `collect_trades()` + `portfolio_sim()` import 필수
+2. **파라미터 하드코딩 금지** — 반드시 `VolStraddleConfig()` 읽어서 사용 (`VR_LN = cfg.base_leverage / cfg.max_concurrent`)
+3. **compound 모델 명시** — `compute_metrics()` 출력(1x)을 production 수익률(L/N=3.0)로 제시 금지
 
-> 버전·보고서 간 수익률 불일치의 반복된 원인. 수치 보고 시 반드시 준수.
+## 실전 인시던트 규칙 (Incident-Driven Rules)
 
-### 레버리지 모델 명시 필수
+> 상세 진단: `.github/instructions/debugging.instructions.md` (quantbox/**/*.py 자동 로드)
 
-`scaling_r38.py`의 `compute_metrics()`는 **1x compound** (`equity *= (1+p)`)만 계산한다. Production은 `equity *= (1 + p × L/N)`이다. **이 둘을 절대 혼동하지 말 것.**
+실제 자금 손실에서 도출된 규칙. **위반 절대 금지.**
 
-- 수익률 보고 시 **반드시 어떤 compound 모델인지 명시**: `1x` vs `L/N=2.5` vs `L/N=1.2`
-- `compute_metrics()` 출력을 production 수익률로 제시하면 **거짓말**이 된다
-- 결합 포트폴리오는 per-trade leverage (VR→L/N=3.0, MA→L/N=2.1) 적용
-
-### 데이터 기간에 따른 compound 차이
-
-동일 PF/EV라도 compound 기간이 다르면 연간수익률이 **극적으로** 달라진다:
-- VR PF≈1.31: 4.7yr → +338%, 6yr → +687% (2배 차이)
-- **버전 간 수익률 비교 시 반드시 데이터 기간을 같이 명시**
-- PF와 per-trade EV가 레버리지·기간 무관한 **불변 엣지 지표**
-
-### 체크리스트 (보고서 작성 전 확인)
-
-1. ☐ compound 모델 명시? (1x / L/N=? / per-trade leverage)
-2. ☐ 데이터 기간 명시? (몇 년, 시작~끝 날짜)
-3. ☐ 이전 버전 수치와 **같은 조건**으로 비교?
-4. ☐ `compute_metrics()` 출력을 그대로 production 수치로 쓰지 않았는가?
-5. ☐ 이전 보고서의 **데이터 기간·파라미터(TP/SL)·리서치 스크립트**가 현재와 다르면, 다른 스크립트 출력을 같은 전략이라고 비교하지 않았는가?
-
-## 실전 교훈 (Incident-Driven Rules)
-
-> 실제 자금 손실에서 비롯된 규칙. 절대 반복 금지.
-
-### #1: Reduce-Only Leverage Crash (2026-02-21)
-
-`reduce_only=True` 주문에서 `futures_change_leverage()` 호출 → API -2028 → TP1 실패 → 수익 확정 기회 상실.
-
-**규칙:**
-- **reduce_only 주문은 leverage/margin 변경 금지.** 감산만 수행.
-- **돈이 오가는 함수** (`_place_order`, `_close_position` 등)는 `reduce_only` 양쪽 경로 모두 테스트.
-- **안전장치 실패 시** ERROR 로그 + Discord 즉시 알림. 반복 경고는 3회 후 요약 전환.
-- **포지션 변경 API** (`futures_change_leverage` 등)는 **신규 진입 시에만** 호출.
-
-### #2: 4h MTF Lookahead Bias (2026-02-26)
-
-`i // ratio`가 developing bar의 final close 참조 → 백테스트 WR 83% (실제 36%).
-
-**규칙:**
-- **교차 타임프레임 참조는 완성된 바만 사용.** `j = (i // ratio) - 1`.
-- 새 상위 TF 참조 추가 시: "이 바가 진행 중일 때 이 값을 알 수 있는가?" 반드시 검증.
-- **백테스트 WR이 라이브의 2배 이상이면 lookahead 즉시 의심.**
-
-### #3: Dynamic Capital 50% Cap (2026-03-05)
-
-`VolStraddleConfig.dynamic_capital_enabled=True` → `balance / max(1, n_active+1)`, 50% cap → 첫 슬롯이 잔고의 50%($991) 독점 → 나머지 9개 슬롯 전부 `-2019: Margin is insufficient`.
-
-**테스트 미검출 원인: 포지션 0개인 상태(`n_active=0`)에서 단일 진입만 검증했기 때문에, 2번째 슬롯 진입 시 마진 부족이 드러나지 않았다.**
-
-**규칙:**
-- **슬롯 sizing 테스트는 반드시 `n_active > 0` 상태(선행 포지션 보유 중)를 포함.**
-- 포지션 sizing 로직 변경 시 `max_concurrent` 개 슬롯 전체를 순서대로 열었을 때 총 margin이 잔고를 초과하지 않는지 검증.
-- **다른 전략에서 이식한 공식(RubberBand 2-slot → VolStraddle 10-slot)은 슬롯 수 역할이 바뀌므로 반드시 재검증.**
-
-### #4: Algo Order FINISHED Status (2026-03-06)
-
-`_check_order_filled()`가 `algoStatus == 'TRIGGERED'`만 검사 → 바이낸스 API는 조건부 주문이 트리거+체결 완료 후 `'FINISHED'`를 반환 → 모든 서버 SL/TP 체결을 감지 못함 → `_reconcile_positions()` 고스트 감지에 의존 → 대응 알고 주문(반대편 SL/TP) 미취소.
-
-**바이낸스 조건부 주문 상태 전이:** `WORKING` → `TRIGGERED`(순간) → `FINISHED`(최종)
-
-**규칙:**
-- **바이낸스 API 상태값은 반드시 실제 API 응답으로 검증.** 문서/추측 금지.
-- **`_check_order_filled()`는 `TRIGGERED`와 `FINISHED` 모두 체결로 처리.**
-- **고스트 감지 시** `_reconcile_positions()`에서 **반드시 반대편 알고 주문도 취소**. 고아 주문 방치 시 다음 포지션에 영향.
-- **서버 체결 감지 로그**는 `DEBUG` 아닌 `INFO` 레벨. 프로덕션에서 진단 가능해야 함.
+| # | 날짜 | 핵심 규칙 |
+|---|------|-----------|
+| #1 | 2026-02-21 | `futures_change_leverage()` 는 **신규 진입 시에만**. close/reduce_only 경로에서 호출 금지 |
+| #2 | 2026-02-26 | 교차 TF 참조는 **완성된 바만** (`j = (i // ratio) - 1`). WR이 라이브의 2배면 lookahead 의심 |
+| #3 | 2026-03-05 | slot sizing 테스트는 반드시 **`n_active > 0` 상태** 포함. 전체 10슬롯 마진 합계 검증 |
+| #4 | 2026-03-06 | `_check_order_filled()` — `TRIGGERED` **+ `FINISHED`** 둘 다 체결 처리. ghost 발견 시 반대편 주문도 취소 |
+| #5 | 2026-03-08 | Hedge Mode close는 `reduce_only=False` → leverage guard는 **`if not reduce_only and leverage > 1:`** |
