@@ -76,8 +76,100 @@ def _compute_max_streaks(is_loss: np.ndarray, n_sims: int, n_trades: int) -> np.
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Monte Carlo core
+#  Multi-horizon summary table
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _sim_horizon(
+    pnl_arr: np.ndarray,
+    ln_arr: np.ndarray,
+    n_trades: int,
+    initial_capital: float,
+    n_sims: int,
+    rng: np.random.Generator,
+) -> dict:
+    """Run MC for a single horizon (n_trades), return key percentile stats."""
+    idx = rng.integers(0, len(pnl_arr), size=(n_sims, n_trades))
+    sampled_pnl = pnl_arr[idx]
+    sampled_ln  = ln_arr[idx]
+    growth = 1.0 + sampled_pnl * sampled_ln
+    cum_eq = initial_capital * np.cumprod(growth, axis=1)
+    finals = cum_eq[:, -1]
+    ret_pct = (finals / initial_capital - 1.0) * 100
+    running_max = np.maximum.accumulate(cum_eq, axis=1)
+    max_dd = np.max((running_max - cum_eq) / running_max, axis=1)
+    ruin = np.mean(np.any(cum_eq < initial_capital * 0.5, axis=1)) * 100
+    return {
+        "p5":       np.percentile(ret_pct, 5),
+        "p25":      np.percentile(ret_pct, 25),
+        "p50":      np.percentile(ret_pct, 50),
+        "p75":      np.percentile(ret_pct, 75),
+        "p95":      np.percentile(ret_pct, 95),
+        "p_profit": np.mean(ret_pct > 0) * 100,
+        "dd_p50":   np.percentile(max_dd, 50) * 100,
+        "dd_p95":   np.percentile(max_dd, 95) * 100,
+        "ruin":     ruin,
+    }
+
+
+def multi_horizon_table(
+    pnl_arr: np.ndarray,
+    ln_arr: np.ndarray,
+    initial_capital: float,
+    n_sims: int,
+    trades_per_year: int,
+) -> None:
+    """Print a single-glance table: return distribution across daily/weekly/monthly/yearly horizons."""
+    rng = np.random.default_rng(seed=SEED)
+
+    tpd = max(1, round(trades_per_year / 365))   # trades per day
+    tpw = max(1, round(trades_per_year / 52))     # trades per week
+    tpm = max(1, round(trades_per_year / 12))     # trades per month
+    tpy = trades_per_year                          # trades per year
+
+    horizons = [
+        ("1 Day",   tpd),
+        ("1 Week",  tpw),
+        ("1 Month", tpm),
+        ("1 Year",  tpy),
+    ]
+
+    results = {}
+    for label, n in horizons:
+        results[label] = _sim_horizon(pnl_arr, ln_arr, n, initial_capital, n_sims, rng)
+
+    # ── Header ────────────────────────────────────────────────────────────
+    H = f"{'=' * 100}"
+    print(f"\n{H}")
+    print(f"  MULTI-HORIZON MONTE CARLO  |  v14.3.0 Combined  |  "
+          f"Capital: ${initial_capital:,.0f}  |  "
+          f"{n_sims:,} paths  |  blended L/N={np.mean(ln_arr):.3f}")
+    print(f"  Trade rate: ~{tpd}/day  ~{tpw}/week  ~{tpm}/month  ~{tpy}/year")
+    print(H)
+
+    # ── Return distribution table ─────────────────────────────────────────
+    col = 13
+    print(f"\n  {'Return Distribution (%)':}")
+    print(f"  {'Horizon':<10} {'Trades':>7}  {'P5':>{col}}  {'P25':>{col}}  "
+          f"{'P50':>{col}}  {'P75':>{col}}  {'P95':>{col}}  {'P(+)':>6}")
+    print(f"  {'─'*90}")
+    for label, n in horizons:
+        r = results[label]
+        def fmt(v: float) -> str:
+            return f"{v:+.1f}%" if abs(v) < 9_999 else f"{v:+,.0f}%"
+        print(f"  {label:<10} {n:>7}  "
+              f"{fmt(r['p5']):>{col}}  {fmt(r['p25']):>{col}}  "
+              f"{fmt(r['p50']):>{col}}  {fmt(r['p75']):>{col}}  "
+              f"{fmt(r['p95']):>{col}}  {r['p_profit']:>5.1f}%")
+
+    # ── Risk table ────────────────────────────────────────────────────────
+    print(f"\n  {'Risk Metrics':}")
+    print(f"  {'Horizon':<10} {'Trades':>7}  {'MDD P50':>9}  {'MDD P95':>9}  {'Ruin<50%':>10}")
+    print(f"  {'─'*55}")
+    for label, n in horizons:
+        r = results[label]
+        print(f"  {label:<10} {n:>7}  {r['dd_p50']:>8.1f}%  {r['dd_p95']:>8.1f}%  {r['ruin']:>9.2f}%")
+
+    print(f"\n{H}\n")
 
 def run_monte_carlo(
     pnl_arr: np.ndarray,
@@ -298,6 +390,15 @@ def main() -> None:
 
     # ── Run Monte Carlo ───────────────────────────────────────────────────
     run_monte_carlo(
+        pnl_arr=pnl_arr,
+        ln_arr=ln_arr,
+        initial_capital=INITIAL_CAPITAL,
+        n_sims=N_SIMS,
+        trades_per_year=trades_per_year,
+    )
+
+    # ── Multi-horizon summary table ───────────────────────────────────────
+    multi_horizon_table(
         pnl_arr=pnl_arr,
         ln_arr=ln_arr,
         initial_capital=INITIAL_CAPITAL,
