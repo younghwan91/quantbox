@@ -87,8 +87,8 @@ class TestConfig:
     def test_sl_tp(self, cfg):
         assert cfg.d_sl == 0.01   # 1% SL
         assert cfg.d_tp == 0.12   # 12% hard TP ceiling (R43: was 5%)
-        assert cfg.d_trail_activate == 0.02   # R43: trail after +2%
-        assert cfg.d_trail_distance == 0.003  # R43: 0.3% behind peak
+        assert cfg.d_trail_activate == 0.005  # r47: trail after +0.5%
+        assert cfg.d_trail_distance == 0.002  # r47: 0.2% behind peak
 
     def test_momentum_period(self, cfg):
         assert cfg.momentum_period == 8
@@ -382,7 +382,7 @@ class TestPositionManagement:
         assert result == 'stop_loss'
 
     def test_take_profit_exit(self, strategy):
-        """R43: LONG $100, trail activates at +2%, fires on 0.3% retrace."""
+        """r47: LONG $100, trail activates at +0.5%, fires on 0.2% retrace."""
         sym = 'ETHUSDT'
         strategy.open_position(
             sym, 1, 100.0, notional=150.0,
@@ -390,21 +390,21 @@ class TestPositionManagement:
             sl=0.01, tp=0.12, tf='15m', max_hold=192,
         )
 
-        # Below trail activation threshold → hold
+        # Below trail activation threshold (0.3% gain) → hold
         result = strategy.update_position(
-            sym, 101.5, current_high=101.9, current_low=101.0,
+            sym, 100.3, current_high=100.3, current_low=100.28,
         )
         assert result is None
 
-        # Trail activates (+3%), tight range → hold
+        # Trail activates (0.7% gain), tight range → hold
         result = strategy.update_position(
-            sym, 103.0, current_high=103.0, current_low=102.8,
+            sym, 100.7, current_high=100.7, current_low=100.65,
         )
         assert result is None
 
-        # Retraces >0.3% from peak → trailing_stop
+        # Retraces >0.2% from peak → trailing_stop
         result = strategy.update_position(
-            sym, 102.0, current_high=103.5, current_low=102.5,
+            sym, 100.45, current_high=100.7, current_low=100.45,
         )
         assert result == 'trailing_stop'
 
@@ -423,7 +423,7 @@ class TestPositionManagement:
         assert result == 'stop_loss'
 
     def test_short_tp_exit(self, strategy):
-        """R43: SHORT $100, trail activates at +3%, fires on 0.3% retrace."""
+        """r47: SHORT $100, trail activates at +0.5%, fires on 0.2% retrace."""
         sym = 'BTCUSDT'
         strategy.open_position(
             sym, -1, 100.0, notional=150.0,
@@ -431,15 +431,17 @@ class TestPositionManagement:
             sl=0.01, tp=0.12, tf='15m', max_hold=192,
         )
 
-        # Trail activates (+3% gain), tight range → hold
+        # Trail activates (0.55% gain), tight bar → hold
+        # SHORT: best_gain = (entry - low) / entry
         result = strategy.update_position(
-            sym, 97.2, current_high=97.3, current_low=97.0,
+            sym, 99.45, current_high=99.5, current_low=99.45,
         )
         assert result is None
 
-        # Retraces >0.3% from peak → trailing_stop
+        # Retraces >0.2% from peak → trailing_stop
+        # peak_gain = 0.55%, trail_stop = 0.35%, worst_gain = (100-99.7)/100 = 0.3% ≤ 0.35% → fires
         result = strategy.update_position(
-            sym, 98.0, current_high=98.0, current_low=96.5,
+            sym, 99.7, current_high=99.7, current_low=99.65,
         )
         assert result == 'trailing_stop'
 
@@ -967,8 +969,8 @@ class TestTBRGateBlocking:
         assert z < -cfg.f5_tbr_z_threshold, f"Test setup error: z={z:.2f} not < -0.5"
 
     def test_default_config_f5_enabled(self):
-        """F5 is on by default since v14.3.0 (R46 validated)."""
+        """r47: F5 TBR disabled by default (trail_activate=0.5% handles bad trades)."""
         cfg = VolStraddleConfig()
-        assert cfg.f5_tbr_enabled is True
+        assert cfg.f5_tbr_enabled is False
         assert cfg.f5_tbr_z_threshold == 0.5
         assert cfg.f5_tbr_z_window == 192
