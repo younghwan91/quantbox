@@ -30,9 +30,9 @@
 
 코드 변경 시 **요청 없이** 동기화:
 - **README.md**: 기능 목록, 프로젝트 구조, 테스트 수
-- **MANUAL.md**: 환경변수, 전략 파라미터, 모듈 추가/변경
+- **MANUAL.md**: 환경변수·실행 커맨드 변경 시만 (인프라 변경에만 해당; 전략 파라미터는 `config.py`가 source of truth)
 - **.env.example + .env**: 새 환경변수 추가 시 3곳(`settings.py`, `.env`, `.env.example`) 동시 수정
-- **agents.md**: 아키텍처/모듈/안전장치 변경 시 동기화
+- **agents.md**: 아키텍처/모듈/안전장치/트레이딩 흐름 변경 시 동기화
 
 > ⚠️ `pydantic-settings`는 `.env` 값이 `settings.py` 기본값보다 항상 우선. `settings.py`만 바꾸고 `.env` 안 바꾸면 **적용 안 됨**.
 
