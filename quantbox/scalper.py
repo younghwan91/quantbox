@@ -532,7 +532,15 @@ class RubberBandScalper(
             # -2028 "insufficient margin balance" if the new leverage
             # is lower than what the position requires.  reduce_only
             # orders don't change margin requirements.
-            if not reduce_only:
+            #
+            # v14.4.2: Also skip leverage change when leverage==1 (default).
+            # In Hedge Mode, close orders pass reduce_only=False (positionSide
+            # is used instead), so reduce_only alone is not a sufficient guard.
+            # Close / partial-close / add-to-position calls do NOT pass
+            # leverage explicitly, so it defaults to 1.  Attempting to set
+            # leverage=1 on a live 30x position triggers -2028.
+            # Only entry orders pass leverage > 1 explicitly.
+            if not reduce_only and leverage > 1:
                 # Set leverage — v11.1: verify it was applied correctly
                 actual_leverage = leverage
                 try:
