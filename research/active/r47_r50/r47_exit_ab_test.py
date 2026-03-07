@@ -1180,6 +1180,87 @@ def phase3_straddle_flatness_exit(
     return pass_cases
 
 
+def phase4_combination(
+    cfg: dict,
+    data_15m: dict, data_1h: dict, data_4h: dict,
+    s_trades: list,
+    avg_bars: int,
+    data_years: float,
+    bl_N: int,
+    bl_oos50_pf: float,
+    bl_oos33_pf: float,
+) -> list[tuple]:
+    """Phase 4: Best combination — D_mom8(lower trail) + MA_cluster(trailing).
+
+    Tests the top picks from Phase 1A and Phase 2 together in a single
+    portfolio_sim to verify improvements are additive (no slot-contention
+    artefact or interaction degradation).
+
+    Combos:
+      D: ta=0.5%, td=0.2% (best 1A OOS50)
+      MA: ta∈[3,4,5]%, td=0.5% (best C1 td=0.5% row)
+    S_d8 baseline unchanged.
+    """
+    print(f"\n{'─' * 78}")
+    print("  Phase 4: Best Combination  (D lower trail + MA trailing)")
+    print(f"  D: ta=0.5%, td=0.2%  |  MA: td=0.5%, ta∈[3,4,5]%")
+    print(f"  Baseline OOS50={bl_oos50_pf:.3f}  OOS33={bl_oos33_pf:.3f}")
+    print(f"{'─' * 78}")
+
+    split50 = avg_bars // 2
+    split67 = int(avg_bars * 0.67)
+    n_floor = int(bl_N * N_FLOOR_FRAC)
+
+    # Collect D trades with best 1A params (ta=0.5%, td=0.2%) once
+    d_opt = collect_d_trades_custom_trail(
+        cfg, data_15m, data_1h, data_4h,
+        trail_activate=0.005, trail_distance=0.002,
+    )
+
+    rows = []
+    pass_cases = []
+
+    for ma_ta in [0.03, 0.04, 0.05]:
+        label = f"COMBO_D0.5_MA{int(ma_ta*100)}"
+        t0 = time.time()
+
+        ma_opt = collect_ma_cluster_trailing(
+            data_15m, data_1h, data_4h,
+            cluster_pct=MA_CLUSTER_PCT,
+            min_duration=MA_MIN_DURATION,
+            max_duration=MA_MAX_DURATION,
+            min_momentum=MA_MIN_MOMENTUM,
+            sl=MA_SL, tp=MA_TP,
+            tf_restriction=MA_TF_RESTRICTION,
+            trail_activate=ma_ta, trail_distance=0.005,
+        )
+        combined = d_opt + s_trades + ma_opt
+        full_pnl = portfolio_sim(combined, MAX_CONCURRENT)
+        full_m = compute_metrics(full_pnl, data_years)
+        is50_m, oos50_m = compute_is_oos_metrics(combined, split50, data_years, 0.50)
+        is67_m, oos33_m = compute_is_oos_metrics(combined, split67, data_years, 0.67)
+
+        elapsed = time.time() - t0
+        d50 = f"{oos50_m['PF'] - bl_oos50_pf:+.3f}"
+        d33 = f"{oos33_m['PF'] - bl_oos33_pf:+.3f}"
+        v50 = _verdict(oos50_m, full_m["N"], n_floor)
+        print(f"  [{elapsed:4.1f}s] {label:<32} N={full_m['N']:>4}  PF={full_m['PF']:.3f}  "
+              f"OOS50={oos50_m['PF']:.3f}({d50})  OOS33={oos33_m['PF']:.3f}({d33})  {v50}")
+        row = _row(label, full_m, is50_m, oos50_m, is67_m, oos33_m, n_floor)
+        rows.append(row)
+        if "PASS" in v50:
+            pass_cases.append((label, full_m, oos50_m, oos33_m))
+
+    _print_table(TABLE_HEADERS, rows, "Phase 4 Combination Results:")
+    if pass_cases:
+        print(f"\n  ✓ Phase 4 PASS cases ({len(pass_cases)}):")
+        for lbl, fm, o50, o33 in pass_cases:
+            print(f"    {lbl}: PF={fm['PF']:.3f}  OOS50_PF={o50['PF']:.3f}  OOS33_PF={o33['PF']:.3f}")
+    else:
+        print("\n  — No Phase 4 combination passed IS/OOS filter")
+    return pass_cases
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Main
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1266,8 +1347,17 @@ def main() -> None:
         d_trades, ma_trades, avg_bars, data_years, bl_N,
     )
 
+    # ── Phase 4: Best combination ──────────────────────────────────────────
+    pass_4 = phase4_combination(
+        CFG_V13, data_15m, data_1h, data_4h,
+        s_trades,
+        avg_bars, data_years, bl_N,
+        bl_oos50_pf=bl_oos50["PF"],
+        bl_oos33_pf=bl_oos33["PF"],
+    )
+
     # ── Final summary ─────────────────────────────────────────────────────
-    total_pass = pass_1a + pass_1b + pass_2 + pass_3
+    total_pass = pass_1a + pass_1b + pass_2 + pass_3 + pass_4
     total_time = time.time() - t_start
 
     print(f"\n{'=' * 78}")
@@ -1280,6 +1370,7 @@ def main() -> None:
     print(f"    Phase 1B (time-flatness)    : {len(pass_1b)} PASS")
     print(f"    Phase 2  (MA trail C1)      : {len(pass_2)} PASS")
     print(f"    Phase 3  (straddle flat B1) : {len(pass_3)} PASS")
+    print(f"    Phase 4  (combination)      : {len(pass_4)} PASS")
     print(f"    Total                       : {len(total_pass)} PASS")
 
     if total_pass:
