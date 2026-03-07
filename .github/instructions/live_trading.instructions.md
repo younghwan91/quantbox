@@ -271,3 +271,21 @@ grep "Summary"                    $LOG | tail -5    # 잔고/WR 요약
 | 배포 | `git push origin main && git push origin vX.Y.Z` |
 
 **main 머지 = 즉시 라이브 배포.** 머지 후 세션 재시작 필수.
+
+---
+
+## 9. DD Halt 임계값 검증 (r48 학습)
+
+`max_drawdown_pct`는 **반드시 백테스트로 검증**. 직관으로 설정하면 정상 운영 중 반복 발동.
+
+**적정값 기준:** 세션 단위 DD P99 (100세션에 1번 발동 수준)
+
+```python
+# r48 결과 (Option D, 2020-2025, L/N=2.60):
+# Session P50=10.5%, P90=19.9%, P99=28.4% → halt=30% (round up to 5%)
+# halt=10%: 51.7% 세션에서 발동 (정상 운영 차단)
+# halt=30%: 0.5% 세션에서 발동 (이상 구간만)
+```
+
+검증 스크립트: `research/active/r47_r50/r48_dd_halt_analysis.py`  
+설정 위치: `config.py:max_drawdown_pct` + `.env:MAX_DRAWDOWN_PCT` (둘 다 변경 필수)
