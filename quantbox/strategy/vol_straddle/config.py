@@ -145,7 +145,7 @@ class VolStraddleConfig:
     # Backtest result (6yr, 46 symbols): PF 1.306→1.348 (+0.042),
     # WR 42.6%→46.4% (+3.8%), N -14.8%, p=0.029.
     # IMPORTANT: Applied to D_mom8 only. S_d8 straddle is direction-neutral.
-    f5_tbr_enabled: bool = False        # Set True after live validation
+    f5_tbr_enabled: bool = True         # R46 validated, activated v14.3.0
     f5_tbr_z_threshold: float = 0.5    # R46b optimal (lb=192, p=0.029)
     f5_tbr_z_window: int = 192         # Lookback bars (~2 days of 15m)
 
