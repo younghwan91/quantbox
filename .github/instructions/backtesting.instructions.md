@@ -1,3 +1,6 @@
+---
+applyTo: "research/**/*.py,scripts/**/*.py,quantbox/research/**/*.py"
+---
 # Backtesting Skill — QuantBox VR Squeeze
 
 > **목적:** AI 에이전트가 이 문서를 읽고 독립적으로 올바른 백테스트를 수행할 수 있도록.
