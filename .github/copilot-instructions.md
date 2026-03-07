@@ -34,6 +34,19 @@
 - **.env.example + .env**: 새 환경변수 추가 시 3곳(`settings.py`, `.env`, `.env.example`) 동시 수정
 - **agents.md**: 아키텍처/모듈/안전장치/트레이딩 흐름 변경 시 동기화
 
+### Skills 자율 업데이트 (요청 불필요)
+
+목표: 백테스팅·디버깅·세션 관리가 반복할수록 더 안정적으로 실행되도록 skills를 점진적으로 다듬는다.
+
+| 상황 | 업데이트 대상 |
+|------|-------------|
+| 버그 수정 / 인시던트 발생 | `debugging.instructions.md` + `copilot-instructions.md` 인시던트 테이블 |
+| 백테스트에서 새 주의사항 발견 | `backtesting.instructions.md` |
+| 세션 시작/종료 절차 변경 | `live_trading.instructions.md` |
+| 포지션 사이징 공식 변경 | `position_sizing.instructions.md` |
+
+**업데이트 기준:** 같은 실수를 두 번 하지 않을 만한 내용. 일회성 특이사항은 추가하지 않는다.
+
 > ⚠️ `pydantic-settings`는 `.env` 값이 `settings.py` 기본값보다 항상 우선. `settings.py`만 바꾸고 `.env` 안 바꾸면 **적용 안 됨**.
 
 ## 문서 배치 규칙 (파일이 떠돌지 않게)
