@@ -7,11 +7,11 @@
 
 ## 1. 시스템 개요
 
-QuantBox v13.0는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
+QuantBox v14.3.0는 **바이낸스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스퀴즈 시스템**이다.
 세 가지 전략을 지원한다:
-1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
+1. **Rubber Band Scalper** (레거시): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
 2. **Elliott Wave Strategy** (v11.6): ZigZag ABC 패턴 + Fibonacci 검증 + Timing Alpha Filter (4h)
-3. **VolStraddle** (v13.0-VR856-25x): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**, ATR 8/56, 25x leverage, max_concurrent=10)
+3. **VolStraddle** (v14.3.0, 30x, L/N=3.0): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**, ATR 8/56, 30x leverage, max_concurrent=10) + **F5 TBR Gate**
 **v11.4: Adaptive Threshold + Leverage Optimization** — ATR 기반 적응형 임계값 (`clip(2.5 × ATR%(48), 1%, 6%)`). 18-variant walk-forward sweep + 14-variant leverage grid → 2.5x_f1 선택. OOS Return +5069%, MDD 19.0%, Calmar 266.6. MTF 레버리지 2.0→2.5× (실효 3.75×).
 **v11.6: Elliott Wave Timing Alpha** — 97패턴 리서치 기반 3중 타이밍 필터 (impulse_accel≥0, corr_ratio≥0.20, w3w1≤2.5). Calmar 1.51→5.10, Sharpe 1.07→1.69. 파라미터 비감응 (-0.3~+0.3 동일 결과).
 **v11.4: Elliott Wave Strategy** — ZigZag ABC 패턴 인식, 2단계 포지셔닝 (2% 탐색적 → 8% 확인), 50% 부분 익절 + 브레이크이븐 스탑, BTC 매크로 바이어스, Numba 가속 지표.
@@ -27,6 +27,8 @@ QuantBox v13.0는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 
 **v12.9: R40 Tournament-Grade Aggression** — 3x leverage (63% Kelly, optimal 4.8x) + 15 slots. AnnRet=+922.5%, DD=77.2%, 6년 연속 흑자. 연도별: 2020 +4838%, 2021 +749%, 2022 +3036%, 2023 +54%, 2024 +2606%, 2025 +109%.
 **v13.0: Aggressive Deployment** — 25x leverage + 10 slots (L/N=2.5). 25×25 fine grid + 4 adaptive model 분석. Fixed L/N이 최적 (adaptive 전패). AnnRet=+687%, DD=68%, Calmar=10.12, 0 losing years. Scalper fallback min(lev,25).
+**v14.0.0: Dual-Axis Squeeze** — VolStraddle **전략 전환** (RubberBand 중단). MA Cluster Squeeze 추가. R43 Trailing Stop (d_tp=12%, activate=+2%, trail=0.3%) 도입. VR 30x, MA 21x. Calmar 10.12→24.7.
+**v14.3.0: F5 TBR Gate** — D_mom8에 Taker Buy Ratio z-score 필터(z>±0.5, window=192) 추가. 30.9% 신호 차단, PF +0.04, t-stat +0.7. **현재 프로덕션 버전.** VR N=2,229, PF=1.308, L/N=3.0; MA N=1,631, PF=1.365, L/N=2.1; Combined PF=1.324, Sharpe=3.39.
 **v12.7: Hedge Mode + S_d8 Straddle** — Binance dualSidePosition 모드 전환. `positionSide` 파라미터 전체 주문 경로 적용. S_d8 스트래들 (VR<0.55, 8바 이상 스퀴즈) 양방향 동시 진입. 복합 포지션 키 (`BTCUSDT:LONG`/`BTCUSDT:SHORT`) 지원.
 **v12.6.1: 4h MTF Lookahead Fix** — `apply_mtf_confirmation()`이 진행 중인 4h 바의 최종 종가(미래 데이터)를 사용하던 버그 수정. 마지막 완성된 4h 바만 참조하도록 변경. 백테스트 WR 83%→43%로 정상화, 라이브(36%)와 근접. **R22 결과: lookahead가 전체 알파의 원천이었음. 수정 후 PF=0.877 (zero cost, 6yr, 436K trades). 15m 러버밴드 평균회귀 시그널에 이론적 엣지 없음.**
 **v12.4: I-HybTight** — Reversal A/B champion: target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3.0. R:R 1.91, Calmar 834, 6yr return 6,300%.
@@ -37,7 +39,7 @@ QuantBox v13.0는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 | **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산. `--strategy` CLI로 전략 선택 (rubberband/elliott/vol_straddle). v11.1: 서버사이드 STOP 손절 + 레버리지 검증 |
 | **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 3.2%+ 급등/급락 포착) + Fibonacci Exit (v9.0) + MACD/Stochastic Confluence (v9.0) + MTF 확인 + 독립 4H 트레이딩 + Symbol Whitelist (v10.0) |
 | **ElliottStrategy** (`elliott.py`) | Elliott Wave ABC 패턴 전략 (Numba 가속). ZigZag 피봇 → ABC Fibonacci 검증 → 탐색적/확인 2단계 포지셔닝 → 50% 부분 익절 → 브레이크이븐 → 트레일링 (3×ATR). BTC 매크로 바이어스 (200/500 EMA) |
-| **VolStraddleStrategy** (`vol_straddle/`) | VR 압축 감지 + D_mom8 방향 진입 + **S_d8 스트래들** (양방향 동시). 15m/1h/4h 멀티TF. **Hedge Mode** (`positionSide` LONG/SHORT). 복합 키: `SYM:LONG`/`SYM:SHORT`. SL=1%, TP=5%, MaxHold=48h |
+| **VolStraddleStrategy** (`vol_straddle/`) | VR 압축 감지 + D_mom8 방향 진입 + **S_d8 스트래들** (양방향 동시). 15m/1h/4h 멀티TF. **Hedge Mode** (`positionSide` LONG/SHORT). 복합 키: `SYM:LONG`/`SYM:SHORT`. SL=1%, hard TP=12%, trailing +2%/0.3%, MaxHold=48h. **F5 TBR Gate**: D_mom8 z-score 필터 (v14.3.0). **현재 프로덕션** |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -46,7 +48,26 @@ QuantBox v13.0는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 | **Drawdown / Daily Loss Breaker** | 세션 HWM 10% / 당일 5% 초과 시 자동 포지션 청산 + 일시정지 |
 | **Discord Bot/Notifier** (`bot.py`, `discord.py`) | 원격 제어(!status, !close all 등) 및 실시간 알림 |
 
-### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
+### 1.1 프로덕션 전략 구성 (v14.3.0 — VolStraddle, 현재 Live)
+
+> ⚠️ **현재 프로덕션은 VolStraddle v14.3.0** (RubberBand 아님).  
+> 파라미터 source of truth = `quantbox/strategy/vol_straddle/config.py`.  
+> 아래 RubberBand 구성은 레거시 히스토리 참고용.
+
+**VolStraddle v14.3.0 핵심 파라미터:**
+```
+전략:        VolStraddle (--strategy vol_straddle)
+레버리지:    VR base_leverage=30, MA ma_cluster_leverage=21, max_concurrent=10
+L/N:         VR=3.0, MA=2.1
+엣지 지표:   VR N=2,229, PF=1.308; MA N=1,631, PF=1.365; Combined PF=1.324, Sharpe=3.39
+SL:          VR d_sl=1%, MA ma_cluster_sl=2%
+Exit (VR):   hard TP=12%, trailing activate=+2%, trail_distance=0.3%
+TBR Gate:    f5_tbr_enabled=True, threshold=0.5, window=192
+MaxHold:     48h (192바 @15m)
+비용 (RT):   0.08% (0.04%/side × 2)
+```
+
+**RubberBand v12.4.6 구성 (레거시, 비활성):**
 
 ```
 전략:     RB_original (v12.4.6 I-HybTight + M-2SSTSX: PBT Exit + SteepX/SoftTight/VolAdj/DirDiv)
