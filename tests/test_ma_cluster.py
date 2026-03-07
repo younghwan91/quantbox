@@ -590,7 +590,12 @@ class TestStrategyIntegration:
         assert result == 'stop_loss'
 
     def test_ma_cluster_take_profit(self):
-        """MA cluster position hits TP at 8%."""
+        """MA cluster hard TP ceiling at 8% (safety rail; r47 trailing fires first normally).
+
+        Use tight bars (current_high = current_low + 0.05) so trailing stop
+        never fires — worst_gain stays 0.05% above trail_stop on each bar.
+        Hard TP at 8% still triggers as 'target'.
+        """
         strategy = self._make_strategy()
 
         strategy.open_position(
@@ -602,12 +607,62 @@ class TestStrategyIntegration:
         key = 'ETHUSDT:SHORT'
         strategy._positions[key]['strategy_type'] = 'ma_cluster'
 
-        # Price drops 8.1% — SHORT TP hit
+        # Gradual drop with tight bars — trail never fires
+        for p in [98, 96, 94]:
+            result = strategy.update_position(
+                key, p,
+                current_high=p + 0.05, current_low=p,
+            )
+            assert result is None, f"Premature exit at {p}: {result}"
+
+        # Hit hard TP at 8% drop with tight bar
+        tp_price = 92.0  # 8% drop from 100
         result = strategy.update_position(
-            key, 91.9,
-            current_high=100.0, current_low=91.5,
+            key, tp_price,
+            current_high=tp_price + 0.05, current_low=tp_price,
         )
-        assert result == 'target'
+        assert result == 'target', f"Expected hard TP 'target', got {result}"
+
+    def test_ma_cluster_trailing_stop(self):
+        """MA cluster trailing stop fires after 4% gain retraces 0.5% (r47).
+
+        trail_activate=4%, trail_distance=0.5%.
+        """
+        strategy = self._make_strategy()
+
+        strategy.open_position(
+            symbol='ETHUSDT', signal=-1, entry_price=100.0,
+            notional=1200.0, leverage=12.0, move_size=1.0,
+            sl=0.02, tp=0.08, tf='4h',
+            max_hold=12, position_side='SHORT',
+        )
+        key = 'ETHUSDT:SHORT'
+        cfg = strategy.config
+        strategy._positions[key]['strategy_type'] = 'ma_cluster'
+
+        trail_activate = cfg.ma_cluster_trail_activate  # 0.04
+        trail_distance = cfg.ma_cluster_trail_distance  # 0.005
+
+        # Phase 1: Drop to activate with tight bar (tight high)
+        peak = 100.0 * (1.0 - trail_activate - 0.005)  # ~95.5
+        result = strategy.update_position(
+            key, peak,
+            current_high=peak * 1.001, current_low=peak,
+        )
+        assert result is None, f"Should activate trail but not exit, got {result}"
+        pos = strategy._positions[key]
+        assert pos['trail_active'] is True
+
+        # Phase 2: Bounce past trail distance → exit
+        peak_gain = pos['peak_gain']
+        # For SHORT: worst_gain = (entry - high)/entry; trail fires when worst_gain <= trail_stop_gain
+        trail_stop_gain = peak_gain - trail_distance
+        high_breach = 100.0 * (1.0 - trail_stop_gain) + 0.5
+        result = strategy.update_position(
+            key, high_breach - 1,
+            current_high=high_breach, current_low=peak * 0.995,
+        )
+        assert result == 'trailing_stop', f"Expected trailing_stop, got {result}"
 
     def test_ma_cluster_max_hold(self):
         """MA cluster position exits at max_hold (12 bars)."""
