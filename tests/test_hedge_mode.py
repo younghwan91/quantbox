@@ -181,8 +181,168 @@ class TestEnsurePositionMode:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  CRITICAL #2: Reconciliation Compound Keys
+#  CRITICAL #3: _load_state Compound Key Bug (Incident 2026-03-08)
 # ══════════════════════════════════════════════════════════════════════════
+
+
+class TestLoadStateCompoundKeyBug:
+    """Ensure _load_state correctly parses compound keys from state file.
+
+    Bug: _load_state passed 'SUIUSDT:LONG' as `symbol` to open_position,
+    which set pos['symbol'] = 'SUIUSDT:LONG'. Any subsequent Binance API
+    call using that symbol failed with -1022 (invalid signature) because
+    ':' is not a valid character in a Binance symbol.
+
+    Fix: _load_state now strips the position_side suffix from the key
+    and passes symbol='SUIUSDT', position_side='LONG' separately.
+    """
+
+    def test_load_state_strips_long_suffix(self, mock_vs_scalper, tmp_path):
+        """After _load_state, pos['symbol'] must be the pure Binance symbol."""
+        scalper = mock_vs_scalper
+        scalper.paper_mode = False
+
+        # Simulate a corrupted state file where keys have :LONG/:SHORT suffix
+        import json
+        state = {
+            'saved_at': '2026-03-08T03:00:00',
+            'paper_balance': 1000.0,
+            'initial_balance': 1000.0,
+            'high_water_mark': 1000.0,
+            'trade_history': [],
+            'positions': {
+                'SUIUSDT:LONG': {
+                    'symbol': 'SUIUSDT:LONG',  # corrupted field (pre-fix state)
+                    'signal': 1,
+                    'entry_price': 0.9015,
+                    'notional': 6589.0,
+                    'leverage': 30,
+                    'move_size': 1.0,
+                    'bars_held': 5,
+                    'server_sl_order_id': None,
+                    'server_tp_order_id': None,
+                    'sl': 0.01,
+                    'tp': 0.12,
+                    'tf': '15m',
+                    'max_hold': 48,
+                    'is_straddle': False,
+                    'position_side': None,  # also corrupted (pre-fix)
+                    'trail_active': False,
+                    'peak_gain': 0.0,
+                },
+            },
+            'strategy_name': 'vol_straddle',
+        }
+        state_file = tmp_path / 'scalper_state.json'
+        state_file.write_text(json.dumps(state))
+
+        import quantbox.scalper as scalper_module
+        from pathlib import Path
+        original_state_file = scalper_module.STATE_FILE
+        scalper_module.STATE_FILE = Path(state_file)
+        try:
+            scalper._load_state()
+        finally:
+            scalper_module.STATE_FILE = original_state_file
+
+        pos = scalper.strategy._positions.get('SUIUSDT:LONG')
+        assert pos is not None, "Position should be restored under compound key"
+        assert pos['symbol'] == 'SUIUSDT', (
+            f"pos['symbol'] must be pure Binance symbol, got: {pos['symbol']}"
+        )
+        assert pos['position_side'] == 'LONG', (
+            f"position_side must be 'LONG', got: {pos['position_side']}"
+        )
+
+    def test_load_state_strips_short_suffix(self, mock_vs_scalper, tmp_path):
+        """SHORT compound key also correctly parsed."""
+        scalper = mock_vs_scalper
+        scalper.paper_mode = False
+
+        import json
+        state = {
+            'saved_at': '2026-03-08T03:00:00',
+            'paper_balance': 1000.0,
+            'initial_balance': 1000.0,
+            'high_water_mark': 1000.0,
+            'trade_history': [],
+            'positions': {
+                'COMPUSDT:SHORT': {
+                    'symbol': 'COMPUSDT:SHORT',
+                    'signal': -1,
+                    'entry_price': 50.0,
+                    'notional': 1500.0,
+                    'leverage': 30,
+                    'move_size': 1.0,
+                    'bars_held': 2,
+                    'server_sl_order_id': '999',
+                    'server_tp_order_id': '888',
+                    'sl': 0.01,
+                    'tp': 0.12,
+                    'tf': '15m',
+                    'max_hold': 48,
+                    'is_straddle': False,
+                    'position_side': None,
+                    'trail_active': False,
+                    'peak_gain': 0.0,
+                },
+            },
+            'strategy_name': 'vol_straddle',
+        }
+        state_file = tmp_path / 'scalper_state.json'
+        state_file.write_text(json.dumps(state))
+
+        import quantbox.scalper as scalper_module
+        from pathlib import Path
+        original_state_file = scalper_module.STATE_FILE
+        scalper_module.STATE_FILE = Path(state_file)
+        try:
+            scalper._load_state()
+        finally:
+            scalper_module.STATE_FILE = original_state_file
+
+        pos = scalper.strategy._positions.get('COMPUSDT:SHORT')
+        assert pos is not None
+        assert pos['symbol'] == 'COMPUSDT'
+        assert pos['position_side'] == 'SHORT'
+        assert pos['server_sl_order_id'] == '999'
+
+    def test_reconcile_api_sym_strips_compound_suffix(self, mock_vs_scalper):
+        """_reconcile_positions must not use compound key as Binance symbol.
+
+        If pos['symbol'] is 'SUIUSDT:LONG' (corrupted), the exchange lookup
+        must still find 'SUIUSDT:LONG' in exchange_map correctly (using
+        the defensive split in reconciliation.py).
+        """
+        scalper = mock_vs_scalper
+
+        # Simulate corrupted state where symbol has compound suffix
+        scalper.strategy._positions = {
+            'SUIUSDT:LONG': {
+                'symbol': 'SUIUSDT:LONG',  # corrupted
+                'signal': 1,
+                'entry_price': 0.9015,
+                'notional': 6589.0,
+                'bars_held': 5,
+                'position_side': 'LONG',
+                'server_sl_order_id': None,
+                'server_tp_order_id': None,
+            },
+        }
+
+        # Exchange has the position (SUIUSDT LONG)
+        scalper.client.futures_position_information.return_value = [
+            {'symbol': 'SUIUSDT', 'positionAmt': '7309.8', 'positionSide': 'LONG'},
+            {'symbol': 'SUIUSDT', 'positionAmt': '0', 'positionSide': 'SHORT'},
+        ]
+
+        scalper._reconcile_positions()
+
+        # Should NOT report ghost (position exists on exchange)
+        assert not any(
+            'Ghost' in str(c) for c in scalper.discord.send.call_args_list
+        )
+
 
 
 class TestReconciliationHedgeMode:
