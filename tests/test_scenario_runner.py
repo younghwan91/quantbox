@@ -191,7 +191,7 @@ class TestStopLoss:
     ):
         """SL check is skipped when trailing stop is active (R43 parity).
 
-        Config: trail_activate=2%, trail_distance=0.3%, SL=1%.
+        Config: trail_activate=r47 value, trail_distance=r47 value, SL=1%.
         Trail fires as trailing_stop, never as stop_loss.
         """
         pos_key = _open_vr_long(strategy, entry_price=100.0)
@@ -225,9 +225,8 @@ class TestTakeProfit:
     def test_long_tp_hit(self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig):
         """LONG entry=100, TP=12% → high=112.1 triggers TP.
 
-        trail_activate=2%, trail_distance=0.3%: after trail activation,
-        each bar's low must stay within 0.3% of entry from peak to avoid
-        premature trail stop. Use low = close - 0.05 (~0.05%).
+        r47: trail_activate=0.5%, trail_distance=0.2%. Tight bars (low=close-0.05)
+        keep worst_gain above trail_stop so trail never fires before TP.
         """
         pos_key = _open_vr_long(strategy, entry_price=100.0)
         tp_pct = cfg.d_tp  # 0.12
@@ -245,7 +244,7 @@ class TestTakeProfit:
     def test_short_tp_hit(self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig):
         """SHORT entry=100, TP=12% → low=87.9 triggers TP.
 
-        Same tight-bar approach: high = close + 0.05.
+        r47: tight-bar approach (high=close+0.05) keeps worst_gain above trail_stop.
         """
         pos_key = _open_vr_short(strategy, entry_price=100.0)
         tp_pct = cfg.d_tp
@@ -273,13 +272,13 @@ class TestTrailingStop:
     ):
         """LONG: price rises to activate → retraces → trail_stop hit.
 
-        trail_activate=2%, trail_distance=0.3%.
+        r47: trail_activate=0.5%, trail_distance=0.2%.
         Activation bar must have tight low (close to high) to avoid
         same-bar trail trigger.
         """
         pos_key = _open_vr_long(strategy, entry_price=100.0)
-        trail_activate = cfg.d_trail_activate  # 0.02
-        trail_distance = cfg.d_trail_distance  # 0.003
+        trail_activate = cfg.d_trail_activate
+        trail_distance = cfg.d_trail_distance
 
         # Phase 1: Rise to activate with tight bar
         peak = 100.0 * (1.0 + trail_activate + 0.005)  # 102.5
@@ -308,12 +307,12 @@ class TestTrailingStop:
     ):
         """SHORT: price drops to activate → bounces → trail_stop hit.
 
-        trail_activate=2%, trail_distance=0.3%.
+        r47: trail_activate=0.5%, trail_distance=0.2%.
         Activation bar must have tight high.
         """
         pos_key = _open_vr_short(strategy, entry_price=100.0)
-        trail_activate = cfg.d_trail_activate  # 0.02
-        trail_distance = cfg.d_trail_distance  # 0.003
+        trail_activate = cfg.d_trail_activate
+        trail_distance = cfg.d_trail_distance
 
         # Phase 1: Drop to activate with tight bar
         trough = 100.0 * (1.0 - trail_activate - 0.005)  # 97.5
@@ -420,36 +419,42 @@ class TestMACluster:
     def test_ma_cluster_tp_hit(
         self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
     ):
-        """MA Cluster LONG, TP=8% → high=108.1 → target."""
+        """MA Cluster LONG hard TP ceiling at 8% (r47: trailing fires first normally).
+
+        Tight bars (high=p+0.05, low=p) keep worst_gain above trail_stop,
+        so hard TP ceiling is reached first.
+        """
         pos_key = _open_ma_cluster(strategy, signal=1, entry_price=100.0)
         tp = cfg.ma_cluster_tp  # 0.08
 
-        # Approach
+        # Approach with tight bars — trail never fires
         for p in [102, 104, 106]:
-            reason = _tick(strategy, pos_key, p, high=p + 0.5, low=p - 0.5)
-            assert reason is None
+            reason = _tick(strategy, pos_key, p, high=p + 0.05, low=p)
+            assert reason is None, f"Premature exit at {p}: {reason}"
 
-        # Hit TP
+        # Hit hard TP ceiling
         tp_price = 100.0 * (1.0 + tp)
-        reason = _tick(strategy, pos_key, tp_price, high=tp_price + 0.5, low=tp_price - 1)
+        reason = _tick(strategy, pos_key, tp_price, high=tp_price + 0.05, low=tp_price)
         assert reason == 'target', f"Expected target, got {reason}"
 
-    def test_ma_cluster_no_trailing_stop(
+    def test_ma_cluster_uses_ma_trail_params(
         self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
     ):
-        """MA Cluster uses _exit_simple (no trailing stop)."""
-        pos_key = _open_ma_cluster(strategy, signal=1, entry_price=100.0)
-        trail_activate = cfg.d_trail_activate
+        """MA Cluster uses ma_cluster_trail_activate (4%), not d_trail_activate (0.5%).
 
-        # Rise past trail_activate threshold (would activate trail on VR)
-        peak = 100.0 * (1.0 + trail_activate + 0.02)
-        reason = _tick(strategy, pos_key, peak, high=peak, low=100.0)
+        A gain just below ma_cluster_trail_activate should NOT activate trailing.
+        """
+        pos_key = _open_ma_cluster(strategy, signal=1, entry_price=100.0)
+        ma_trail_activate = cfg.ma_cluster_trail_activate  # 0.04
+
+        # Rise to just below MA trail threshold (but well above d_trail_activate=0.5%)
+        below_ma = 100.0 * (1.0 + ma_trail_activate * 0.9)  # 3.6% — above D threshold, below MA
+        reason = _tick(strategy, pos_key, below_ma, high=below_ma, low=below_ma * 0.999)
         assert reason is None
 
         pos = strategy._positions[pos_key]
-        # trail_active should remain False or not apply
-        # MA Cluster goes through _exit_simple not _exit_trail
-        assert pos.get('trail_active', False) is False
+        assert pos.get('trail_active', False) is False, \
+            "MA cluster should NOT activate trail below ma_cluster_trail_activate"
 
     def test_ma_cluster_max_hold(
         self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
@@ -576,15 +581,20 @@ class TestExitPriority:
     def test_sl_and_tp_same_bar_ma_cluster(
         self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
     ):
-        """MA Cluster _exit_simple: SL checked before TP."""
-        pos_key = _open_ma_cluster(strategy, signal=1, entry_price=100.0)
-        sl_pct = cfg.ma_cluster_sl
-        tp_pct = cfg.ma_cluster_tp
+        """MA Cluster r47: trailing stop checked before SL.
 
-        extreme_low = 100.0 * (1.0 - sl_pct) - 1.0
-        extreme_high = 100.0 * (1.0 + tp_pct) + 1.0
-        reason = _tick(strategy, pos_key, 100.0, high=extreme_high, low=extreme_low)
-        assert reason == 'stop_loss'
+        When trail is NOT yet active (gain below ma_cluster_trail_activate),
+        SL fires on extreme low. When trail IS active, trailing_stop fires instead.
+        This test verifies SL fires when trail has not yet activated.
+        """
+        pos_key = _open_ma_cluster(strategy, signal=1, entry_price=100.0)
+        sl_pct = cfg.ma_cluster_sl  # 2%
+
+        # Bar that hits SL but NOT trail_activate (price dips -3%, never rises above +4%)
+        sl_low = 100.0 * (1.0 - sl_pct) - 1.0   # 97 — breaches SL
+        below_trail_high = 100.0 * 1.03           # 103 — 3% gain, below ma_cluster_trail_activate (4%)
+        reason = _tick(strategy, pos_key, sl_low, high=below_trail_high, low=sl_low)
+        assert reason == 'stop_loss', f"Expected stop_loss when trail not active, got {reason}"
 
 
 # ══════════════════════════════════════════════════════════
