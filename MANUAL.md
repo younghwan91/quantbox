@@ -683,10 +683,11 @@ VolStraddle은 **변동성 압축(Volatility Squeeze)**을 감지하여 폭발�
 - **Momentum(8)** 방향으로 진입 (양수 → LONG, 음수 → SHORT)
 - **멀티 타임프레임**: 15m / 1h / 4h 독립 스캔, 높은 TF 우선
 
-### 3.6.2 파라미터 (v13.0 Aggressive, 6yr 검증)
+### 3.6.2 파라미터 (v14.3.0, 4.73yr 검증)
 
-**v13.0 검증 결과:** N=2,265 @25x leverage ×10 slots (L/N=2.5), AnnRet=+687%, DD=68%, Calmar 10.12, 6년 연속 흑자.
-25×25 Fine Grid + 4 Adaptive Model 분석 결과, 고정 L/N=2.5가 최적. Adaptive leverage는 고정 대비 열위.
+**v13.0 역사 기록 (참고 전용):** N=2,265 @25x leverage ×10 slots (L/N=2.5), 6yr AnnRet=+687% — 이 수치는 flat TP·구 L/N 기준이며, v14.3.0 공식 수치가 아님.
+
+**v14.3.0 현재 공식 수치 (F5 TBR 활성, trailing stop, 4.73yr):** VR N=2,229, PF=1.308, L/N=3.0 (30x÷10슬롯), Prod CAGR=+2,805%; MA N=1,631, PF=1.365, L/N=2.1 (21x÷10슬롯), Prod CAGR=+813%. 25×25 Fine Grid 분석 결과, 고정 L/N이 Adaptive 대비 우위.
 
 | 파라미터 | 값 | 설명 |
 |---------|-----|------|

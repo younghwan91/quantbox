@@ -3,25 +3,26 @@
 **바이낸스 USDT-M 선물 VR 스퀴즈 시스템 — Dual-Axis Squeeze (VR + MA Cluster)**
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-v14.0.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-v14.3.0-green.svg)]()
 [![Tests](https://img.shields.io/badge/tests-946%20passed-brightgreen.svg)]()
-[![Branch](https://img.shields.io/badge/branch-release%2Fv14.0.0-blue.svg)]()
+[![Branch](https://img.shields.io/badge/branch-main-blue.svg)]()
 
-바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(25x)와 MA Cluster Squeeze(12x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
+바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(30x)와 MA Cluster Squeeze(21x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
 
-> **현재 상태**: Live Trading | Commit `v14.0.1` | 946 tests passed
+> **현재 상태**: Live Trading | Tag `v14.3.0` | 946 tests passed
 
 ## 🌟 주요 기능
 
-### 🎯 VolStraddle — VR Compression Detector (v14.0.0, 배포 중)
+### 🎯 VolStraddle — VR Compression Detector (v14.3.0, 배포 중)
 - **Volatility Ratio (VR) 압축 감지**: `VR = ATR(8)/ATR(56) < 0.50` — 변동성 압축 후 폭발 포착
 - **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
 - **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정 (D_mom8)
 - **S_d8 스트래들**: VR < 0.55 × 4바 지속 → 양방향 동시 진입 (Hedge Mode)
 - **파라미터**: SL=1%, 하드TP=12%, Trailing +2%/0.3%, MaxHold=48h (192/48/12바)
 - **R43 Trailing**: d_tp=12% 하드 TP + activate +2% / trail_distance 0.3%
+- **F5 TBR Gate (v14.3.0)**: Taker Buy Ratio z>±0.5 → D_mom8 30.9% 차단 (PF +0.04)
 - **30x @10 slots** (L/N=3.0, Half-Kelly), 6년 연속 흑자, Bootstrap P(PF≥1.0)=100%
-- **불변 엣지**: N=2,265 (D+S), PF=1.280, WR=43.4%, EV=+32.1bp — 레버리지/기간 무관
+- **불변 엣지 (v14.3.0, 4.73yr, F5 TBR 활성)**: N=2,229 (D+S), PF=1.308, WR=49.5%, EV=+36.7bp
 - **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
 
 ### 📐 MA Cluster Squeeze — 4h SMA Convergence Breakout (V17, R45, 배포 중)
@@ -32,8 +33,8 @@
 - **Simple Exit**: SL=2%, TP=8%, MaxHold=12바 (48h), 트레일링 스탑 없음
 - **R45 Zombie Filter**: `max_duration=24` 바 초과 클러스터 차단 (오래된 클러스터 제거)
 - **R45 Momentum Filter**: `abs(momentum) < 0.010` 차단 (거스름 없는 약한 신호 제거)
-- **불변 엣지 (R45, 6yr)**: N=1,631, PF=1.365, WR=38.1%, EV=+42.6bp
-- **결합 포트폴리오 (R45)**: N=3,748, PF=1.304, Calmar=18.8, P(PF≥1.0)=100%, 6/6년 흑자
+- **불변 엣지 (R45, 4.73yr)**: N=1,631, PF=1.365, WR=38.1%, EV=+42.6bp
+- **결합 포트폴리오 (v14.3.0)**: N=3,713, PF=1.324, Calmar=24.7, P(PF≥1.0)=100%, 6/6년 흑자
 
 ### 🔥 Rubber Band Scalper — 레거시 (v12.6, 현재 비활성화)
 
@@ -282,42 +283,43 @@ research/                   # 리서치 스크립트 (r번호 체계)
 docs/
 └── backtest_results/
     ├── 202602/             # 2026-02 백테스트 리포트 (31개)
-    └── 202603/             # 2026-03 백테스트 리포트 (19개, 현재)
+    └── 202603/             # 2026-03 백테스트 리포트 (22개, 현재)
 tests/                      # 유닛 테스트 (946개, 47 파일)
 \`\`\`
 
-## 📈 성과 지표 (현재 v14.0.0 — Dual-Axis Squeeze)
+## 📈 성과 지표 (현재 v14.3.0 — Dual-Axis Squeeze + F5 TBR)
 
-### 불변 엣지 지표 (leversage·기간 무관)
+### 불변 엣지 지표 (leverage·기간 무관)
 
-| 지표 | VR Squeeze (D+S) | MA Cluster (R45) | 결합 (R45) |
+| 지표 | VR Squeeze v14.3.0 | MA Cluster R45 | 결합 v14.3.0 |
 |------|---|---|---|
-| N (trade 수) | 2,265 | 1,631 | **3,748** |
-| PF | 1.280 | 1.365 | **1.304** |
-| WR | 43.4% | 38.1% | 40.9% |
-| EV/trade | +32.1bp | +42.6bp | +35.4bp |
+| N (trade 수) | 2,229 | 1,631 | **3,713** |
+| PF | 1.308 | 1.365 | **1.324** |
+| WR | 49.5% | 38.1% | 44.6% |
+| EV/trade | +36.7bp | +42.6bp | +38.5bp |
+| t-stat | 5.91 | 4.94 | **7.38** |
 | Bootstrap P(PF≥1.0) | 100.0% | 100.0% | 100.0% |
 | 6/6년 흑자 | ✓ | ✓ | ✓ |
 
-### 레버리지 적용 수익률 (6년, 50심볼)
+### 레버리지 적용 수익률 (4.73년, 50심볼)
 
-| 지표 | v7.0 Hybrid | v13.0 VR (25x) | v14.0 Dual (R45) ★ |
-|------|-------------|----------------|--------------------|
+| 지표 | v7.0 Hybrid | v13.0 VR (25x) | v14.3.0 Dual ★ |
+|------|-------------|----------------|-----------------|
+| AnnRet (1x compound) | +139.8% | +687% | **+1,281.7%** |
+| Max Drawdown (1x) | 4.3% | 68% | **52.0%** |
+| Calmar (1x) | 32.42 | 10.12 | **24.7** |
+| Profit Factor | — | — | **1.324** |
+| Sharpe (Prod L/N) | — | — | **3.39** |
+| Sortino (Prod L/N) | — | — | **12.43** |
+| N/year | — | — | **~785** |
 
-| AnnRet (backtest) | +139.8% | +687% | **+1,086% (1x) / +1,410% (L)** |
-| AnnRet (realistic 60%) | — | +412% | **+846%** |
-| Max Drawdown | 4.3% | 68% | **62%** |
-| Calmar | 32.42 | 10.12 | **18.8** |
-| Profit Factor | — | — | **1.304** |
-| N/year | — | — | **~600** |
-
-> **v14.0.0 R45 변경 (현재)**: MA Cluster min_momentum 0.003→0.010, max_duration=∞→24. 좀비·약모멘텀 트레이드 차단. Combined PF 1.278→1.304 (+2%), EV/trade +24%.
+> **v14.3.0 F5 TBR Gate**: D_mom8에 Taker Buy Ratio z-score 게이트 추가. 30.9% 신호 차단, PF +0.04, t-stat +0.7. S_d8 스트래들 미적용.
 >
-> **v14.0.0 R43 Trailing**: VR Squeeze d_tp 5%→12% (하드 TP) + trailing stop (activate +2%, trail 0.3%). Calmar 대폭 개선.
+> **v14.0.0 R43 Trailing**: VR Squeeze d_tp 5%→12% (하드 TP) + trailing stop (activate +2%, trail 0.3%). 엣지 대폭 개선.
 >
-> **v13.0 → v14.0**: MA Cluster Squeeze 추가 (Dual-Axis). AnnRet +687%→+1,086% (1x compound), Calmar 10.12→18.8.
+> **v13.0 → v14.0**: MA Cluster Squeeze 추가 (Dual-Axis). Calmar 10.12→24.7.
 >
-> **레버리지 구조**: VR 25x×1%SL = MA 12x×2%SL = per-trade risk 25% (리스크 패리티). 현재 잔고 $1,668 → 현실적 1yr 기대 $13,000–$16,000 (50-60% backtest 적용).
+> **레버리지 구조**: VR 30x×1%SL = per-trade risk 3.0% | MA 21x×2%SL = per-trade risk 4.2% (Half-Kelly 유도값).
 
 ## 🧪 테스트
 
