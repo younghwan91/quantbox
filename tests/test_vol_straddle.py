@@ -966,9 +966,9 @@ class TestTBRGateBlocking:
         z = strat._compute_tbr_zscore(sym)
         assert z < -cfg.f5_tbr_z_threshold, f"Test setup error: z={z:.2f} not < -0.5"
 
-    def test_default_config_f5_disabled(self):
-        """F5 is off by default — no impact on existing live behavior."""
+    def test_default_config_f5_enabled(self):
+        """F5 is on by default since v14.3.0 (R46 validated)."""
         cfg = VolStraddleConfig()
-        assert cfg.f5_tbr_enabled is False
+        assert cfg.f5_tbr_enabled is True
         assert cfg.f5_tbr_z_threshold == 0.5
         assert cfg.f5_tbr_z_window == 192
