@@ -7,37 +7,18 @@
 
 ## 1. 시스템 개요
 
-QuantBox v13.0는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스켈핑 시스템**이다.
+QuantBox v14.3.0는 **바이낸스 USDT-M 선물** 위에서 동작하는 **멀티 전략 스퀴즈 시스템**이다.
 세 가지 전략을 지원한다:
-1. **Rubber Band Scalper** (기본): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
+1. **Rubber Band Scalper** (레거시): 단일 자산 평균회귀 — 급등/급락 후 스냅백 포착 (15m)
 2. **Elliott Wave Strategy** (v11.6): ZigZag ABC 패턴 + Fibonacci 검증 + Timing Alpha Filter (4h)
-3. **VolStraddle** (v13.0-VR856-25x): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**, ATR 8/56, 25x leverage, max_concurrent=10)
-**v11.4: Adaptive Threshold + Leverage Optimization** — ATR 기반 적응형 임계값 (`clip(2.5 × ATR%(48), 1%, 6%)`). 18-variant walk-forward sweep + 14-variant leverage grid → 2.5x_f1 선택. OOS Return +5069%, MDD 19.0%, Calmar 266.6. MTF 레버리지 2.0→2.5× (실효 3.75×).
-**v11.6: Elliott Wave Timing Alpha** — 97패턴 리서치 기반 3중 타이밍 필터 (impulse_accel≥0, corr_ratio≥0.20, w3w1≤2.5). Calmar 1.51→5.10, Sharpe 1.07→1.69. 파라미터 비감응 (-0.3~+0.3 동일 결과).
-**v11.4: Elliott Wave Strategy** — ZigZag ABC 패턴 인식, 2단계 포지셔닝 (2% 탐색적 → 8% 확인), 50% 부분 익절 + 브레이크이븐 스탑, BTC 매크로 바이어스, Numba 가속 지표.
-**v11.3: 1-Minute Polling Loop** — 15분 대기 대신 60초 간격 폴링으로 반응성 개선.
-**v11.1: Critical Fixes + Pool Expansion** — 서버사이드 손절(STOP 주문), 레버리지 검증, Top-20 심볼 화이트리스트 (A/B validated: +130% return vs Top-15).
-**v11.0: BTC Directional Alignment** — btc_directional_period=48 (12h BTC momentum).
-**v10.0: Entry Optimization + Symbol Whitelist** — threshold 0.032 (3.2%), min_confidence=1 (MTF as gate), max_hold=20, stoch_k=3. 동적 자본 배분.
-**v9.0: Fibonacci + S+R+M Confluence** — target 0.382, stop 0.786, MACD(12,26,14), Stochastic(3,3).
-**v12.3: T100_S38_PBT + M-2SSTSX** — R8 stress-tested exit + R6 combo sizing. Production safety fixes.
-**v12.4.6: Production Hardening** — 6 hotfixes: Server TP PBT qty audit (v12.4.1–3), stale SL ratchet reset (v12.4.4), missing save_state after partial (v12.4.5), HWM/history reset on 0-position restart (v12.4.6).
-**v12.6: Climax Volume Filter + ATR Dynamic Stop** — climax_ratio≥3.0 진입 차단, ATR 기반 동적 손절.
-**v12.8: R39-VR856 Frequency Boost** — ATR(7)/ATR(50) → ATR(8)/ATR(56)로 변경. 132 배리언트 그리드 서치에서 연간 수익률 × Calmar 최적화. 6년 연속 흑자, AnnRet=+187.2%, DD=32.4%, Calmar=5.8. s_squeeze_dur 8→4, max_concurrent 2→10. TPD=1.03.
-
-**v12.9: R40 Tournament-Grade Aggression** — 3x leverage (63% Kelly, optimal 4.8x) + 15 slots. AnnRet=+922.5%, DD=77.2%, 6년 연속 흑자. 연도별: 2020 +4838%, 2021 +749%, 2022 +3036%, 2023 +54%, 2024 +2606%, 2025 +109%.
-**v13.0: Aggressive Deployment** — 25x leverage + 10 slots (L/N=2.5). 25×25 fine grid + 4 adaptive model 분석. Fixed L/N이 최적 (adaptive 전패). AnnRet=+687%, DD=68%, Calmar=10.12, 0 losing years. Scalper fallback min(lev,25).
-**v12.7: Hedge Mode + S_d8 Straddle** — Binance dualSidePosition 모드 전환. `positionSide` 파라미터 전체 주문 경로 적용. S_d8 스트래들 (VR<0.55, 8바 이상 스퀴즈) 양방향 동시 진입. 복합 포지션 키 (`BTCUSDT:LONG`/`BTCUSDT:SHORT`) 지원.
-**v12.6.1: 4h MTF Lookahead Fix** — `apply_mtf_confirmation()`이 진행 중인 4h 바의 최종 종가(미래 데이터)를 사용하던 버그 수정. 마지막 완성된 4h 바만 참조하도록 변경. 백테스트 WR 83%→43%로 정상화, 라이브(36%)와 근접. **R22 결과: lookahead가 전체 알파의 원천이었음. 수정 후 PF=0.877 (zero cost, 6yr, 436K trades). 15m 러버밴드 평균회귀 시그널에 이론적 엣지 없음.**
-**v12.4: I-HybTight** — Reversal A/B champion: target_retrace 1.0→1.5, max_hold 20→25, trail_atr_mult 1.5→1.0, runner_max_hold_mult 2→3.0. R:R 1.91, Calmar 834, 6yr return 6,300%.
-**v7.0: Multi-Timeframe Confirmation + Independent 4H Trading** — 4h SMA(12) 트렌드 필터 + 독립 4h 평균회귀 + MTF 레버리지 부스트.
+3. **VolStraddle** (v14.3.0, 30x, L/N=3.0): VR 압축 감지 → 모멘텀 방향 진입 + **S_d8 스트래들** (15m/1h/4h 멀티TF, **Hedge Mode**, ATR 8/56, 30x leverage, max_concurrent=10) + **F5 TBR Gate**
 
 | 구성 요소 | 역할 |
 |-----------|------|
 | **RubberBandScalper** (`scalper.py`) | 실거래 오케스트레이터. 15분 사이클로 신호 → 진입 → 모니터링 → 청산. `--strategy` CLI로 전략 선택 (rubberband/elliott/vol_straddle). v11.1: 서버사이드 STOP 손절 + 레버리지 검증 |
 | **RubberBandStrategy** (`rubberband.py`) | 기본 평균회귀 신호 생성기 (Numba 가속, 3.2%+ 급등/급락 포착) + Fibonacci Exit (v9.0) + MACD/Stochastic Confluence (v9.0) + MTF 확인 + 독립 4H 트레이딩 + Symbol Whitelist (v10.0) |
 | **ElliottStrategy** (`elliott.py`) | Elliott Wave ABC 패턴 전략 (Numba 가속). ZigZag 피봇 → ABC Fibonacci 검증 → 탐색적/확인 2단계 포지셔닝 → 50% 부분 익절 → 브레이크이븐 → 트레일링 (3×ATR). BTC 매크로 바이어스 (200/500 EMA) |
-| **VolStraddleStrategy** (`vol_straddle/`) | VR 압축 감지 + D_mom8 방향 진입 + **S_d8 스트래들** (양방향 동시). 15m/1h/4h 멀티TF. **Hedge Mode** (`positionSide` LONG/SHORT). 복합 키: `SYM:LONG`/`SYM:SHORT`. SL=1%, TP=5%, MaxHold=48h |
+| **VolStraddleStrategy** (`vol_straddle/`) | VR 압축 감지 + D_mom8 방향 진입 + **S_d8 스트래들** (양방향 동시). 15m/1h/4h 멀티TF. **Hedge Mode** (`positionSide` LONG/SHORT). 복합 키: `SYM:LONG`/`SYM:SHORT`. SL=1%, hard TP=12%, trailing +2%/0.3%, MaxHold=48h. **F5 TBR Gate**: D_mom8 z-score 필터 (v14.3.0). **현재 프로덕션** |
 | **AlphaEngine** (`alpha_engine.py`) | 멀티팩터 신호 엔진 (볼륨/모멘텀/ATR/트레일링스탑 필터 토글) |
 | **VolatilitySelector** (`vol_selector.py`) | 30일 실현변동성 기준 Top-N 심볼 동적 선택 (10일 리밸런싱) |
 | **VectorizedBacktest** (`vectorized_backtest.py`) | Numba 가속 백테스트, 비용/펀딩비 반영 |
@@ -46,82 +27,28 @@ QuantBox v13.0는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 | **Drawdown / Daily Loss Breaker** | 세션 HWM 10% / 당일 5% 초과 시 자동 포지션 청산 + 일시정지 |
 | **Discord Bot/Notifier** (`bot.py`, `discord.py`) | 원격 제어(!status, !close all 등) 및 실시간 알림 |
 
-### 1.1 프로덕션 전략 구성 (Walk-Forward 검증 완료)
+### 1.1 프로덕션 전략 구성 (v14.3.0 — VolStraddle, 현재 Live)
 
+> ⚠️ **현재 프로덕션은 VolStraddle v14.3.0** (RubberBand 아님).  
+> 파라미터 source of truth = `quantbox/strategy/vol_straddle/config.py`.  
+> 아래 RubberBand 구성은 레거시 히스토리 참고용.
+
+**VolStraddle v14.3.0 핵심 파라미터:**
 ```
-전략:     RB_original (v12.4.6 I-HybTight + M-2SSTSX: PBT Exit + SteepX/SoftTight/VolAdj/DirDiv)
-심볼선택: Top-50 whitelist (4 tiers, E-3Slot config)
-파라미터: lookback=8, threshold=0.032 (adaptive fallback), target=1.5, stop=0.382, max_hold=25
-         stop_decay=0.0
-         entry_mode='confidence'
-         min_confidence=3 (v12.3 M-2SSTSX quality gate)
-         max_concurrent=10 (v13.0 aggressive 10-slot)
-         btc_regime_period=96 (24h SMA for regime detection)
-         asset_trend_period=192 (48h SMA for classic pullback)
-         btc_directional_period=48 (12h BTC momentum for sympathy)
-         base_leverage=25.0, leverage_scale=0.0, max_leverage=25.0 (v13.0 aggressive 25x, L/N=2.5)
-         # v11.4 Adaptive Threshold (2.5x_f1 variant, walk-forward validated)
-         atr_period=48 (12h ATR lookback)
-         atr_multiplier=2.0 (ATR × 2.0, v12.2 E-3Slot A/B validated)
-         threshold_floor=0.008 (0.8% minimum, v12.2)
-         threshold_cap=0.06 (6% maximum)
-         partial_exit_enabled=true (v12.3 PBT: 50% partial → BE → ATR trail)
-         breakeven_after_partial=true
-         trail_atr_mult=1.0 (v12.4 tighter ATR trail)
-         runner_max_hold_mult=3.0 (runner holds 75 bars = 3× max_hold)
-         dynamic_capital_enabled=true (balance / max(1, n_active+1))
-         # v12.4 I-HybTight Exit (Reversal A/B champion)
-         target_retrace=1.5 (150% move, deeper reversal capture)
-         stop_mult=0.382 (Fibonacci, preserved from v12.3)
-         trail_atr_mult=1.0 (tighter ATR trail locks gains faster)
-         runner_max_hold_mult=3.0 (runner holds 75 bars = 3× max_hold)
-         # v8.0 Dynamic Target (DISABLED in v9.0)
-         dynamic_target_enabled=false
-         target_conf3=0.45, target_conf4=0.50, target_conf5=0.55  # 유지되나 비활성
-         # v9.0 MACD Histogram Evidence
-         macd_enabled=true
-         macd_fast=12, macd_slow=26, macd_signal_period=14
-         # v9.0 Stochastic Cross Evidence
-         stoch_enabled=true
-         stoch_k_period=3, stoch_d_period=3  # v10.0: faster stochastic
-         # v7.0 MTF Confirmation
-         mtf_confirmation_enabled=true
-         mtf_sma_period=12 (4h SMA, 2일)
-         mtf_leverage_mult=2.5 (MTF 확인 시 실효 3.75x, v11.4 leverage grid validated)
-         # v7.0 Independent 4H Rubber Band
-         htf_independent_enabled=true
-         htf_rb_lookback=3, htf_rb_threshold=0.10
-         htf_rb_target_retrace=0.5, htf_rb_stop_mult=0.8
-         htf_rb_max_hold=12, htf_rb_btc_sma_period=48
-비용:     0.04%/side + 펀딩비
-
-성과 (365일, v11.4 Adaptive Threshold 2.5x_f1, Top-20 유니버스):
-  ── Per-Symbol Independent (5 slots, $10K reference) ──
-  ΣReturn:   +79,523% (OOS walk-forward)
-  Max DD:    18.9%
-  Sharpe:    8.23 (OOS), OOS/IS Ratio: 1.09
-  Trades:    5,670
-  Win Rate:  67.6%
-
-  ── Portfolio-Level ($2,280, 2 slots, flat sizing, no reinvest) ──
-  Return:    +1,165% annual
-  Max DD:    12.5%
-  Sharpe:    6.55
-  Calmar:    93.4
-  Trades:    2,391
-  Win Rate:  65.2%
-  Profit Factor: 2.11
-  Avg PnL/Trade: +1.125% on margin ($12.82)
-  Avg Win: +3.28%  |  Avg Loss: -2.93%
-  Trades/day: 6.6  |  Avg hold: 6.7 bars (~1.7h)
-  Conservative (50% live discount): +582% → ~$13,300/yr
-  Dynamic Capital: balance / max(1, n_active+1), 50% cap
-  안전장치: 서버사이드 Algo Order 손절 (클라이언트 크래시 방어), v11.4.2 Bracket Repair (복원 시 누락 SL/TP 자동 복구), 레버리지 검증
+전략:        VolStraddle (--strategy vol_straddle)
+레버리지:    VR base_leverage=30, MA ma_cluster_leverage=21, max_concurrent=10
+L/N:         VR=3.0, MA=2.1
+엣지 지표:   VR N=2,229, PF=1.308; MA N=1,631, PF=1.365; Combined PF=1.324, Sharpe=3.39
+SL:          VR d_sl=1%, MA ma_cluster_sl=2%
+Exit (VR):   hard TP=12%, trailing activate=+2%, trail_distance=0.3%
+TBR Gate:    f5_tbr_enabled=True, threshold=0.5, window=192
+MaxHold:     48h (192바 @15m)
+비용 (RT):   0.08% (0.04%/side × 2)
 ```
 
 ---
 
-## 2. 라이브 트레이딩 전체 흐름 (RubberBandScalper._cycle)
+## 2. 라이브 트레이딩 전체 흐름 (VolStraddleStrategy._cycle)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -129,130 +56,31 @@ QuantBox v13.0는 **바이난스 USDT-M 선물** 위에서 동작하는 **멀티
 │  1. _check_risk_limits(balance)                                 │
 │     → HWM 대비 DD ≥ 10% → _drawdown_halt (전체 청산)           │
 │  2. If drawdown_halt: close ALL positions → return              │
-│  3. BTC klines 다운로드 (regime filter용)                       │
-│  3b. 4h klines 다운로드 (MTF confirmation + 독립 4H 트레이딩)   │
-│  4. 기존 포지션 관리:                                            │
-│     ∀ active position:                                          │
-│       → update_position(symbol, price) → exit?                  │
-│       → TARGET / STOP_LOSS / TRAILING / MAX_HOLD                │
-│  5. 신규 진입 스캔 (_scan_entries):                              │
-│     ∀ symbol in universe (not already held):                    │
-│       → download_klines(symbol, full=True) → on_bar(symbol, close, btc, high, low) │
-│       → MACD/Stochastic 활성화 시 compute_signals_v9() 디스패치 (v9.0) │
-│       → MTF confirmation: 4h SMA(12) 트렌드 필터 적용 (v7.0)   │
-│       → 신호 +1/-1 → candidates 수집 → move 크기 정렬          │
-│       → MTF 확인 트레이드: 2.0x 레버리지 부스트 (v7.0)          │
-│     ∀ symbol: on_bar_4h(symbol, close_4h, btc_4h) (v7.0)       │
-│       → 독립 4H 러버밴드 신호 → 4h candidates 추가              │
-│       → 상위 N개까지 _open_position()                           │
-│  6. _save_state() — 원자적 JSON 저장                            │
-│  7. 매 4사이클마다 _log_summary() → 시간별 요약                  │
+│  3. 기존 포지션 관리:                                            │
+│     ∀ active position (SYM:LONG / SYM:SHORT):                  │
+│       → update_position() → SL / hard TP / trailing / MaxHold  │
+│       → FINISHED/TRIGGERED 알고 주문 감지 → 반대편 주문 취소    │
+│  4. 신규 진입 스캔:                                              │
+│     ∀ TF in [4h, 1h, 15m] (높은 TF 우선):                     │
+│       ∀ symbol:                                                 │
+│         → klines 다운로드 → compute_vr() → gen_vr_signal()     │
+│         → D_mom8: VR<0.50 → 방향 결정 → open LONG or SHORT     │
+│         → S_d8: VR<0.55 × 4바 → LONG+SHORT 동시 진입 (Hedge)  │
+│         → F5 TBR Gate: tbr_zscore > 0.5 → D_mom8 차단         │
+│         → MA Cluster: SMA20/50/100/200 수렴 ≤3%, 8바 → 브레이크아웃 |
+│     → max_concurrent=10 슬롯 공유, dir_diversity max_same_direction=2 │
+│  5. _save_state() — 원자적 JSON 저장                            │
+│  6. 매 사이클 _log_summary() + Discord 알림                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 신호 생성 (RubberBandStrategy.on_bar)
-
-단일 자산의 15m close/volume/taker_buy 배열과 BTC close, 그리고 선택적 high/low 배열을 받아 신호를 생성한다. MACD 또는 Stochastic 활성화 시 `compute_signals_v9()` (Numba 컴파일)로 디스패치하고, 그렇지 않으면 `compute_signals_confidence()` (Numba 컴파일)로 신호를 생성한다.
-
-**v11.4 Adaptive Threshold:**
-- `atr_period > 0` 이면 per-bar 적응형 임계값 활성화: `thr[i] = clip(atr_multiplier × ATR%(atr_period)[i], threshold_floor, threshold_cap)`
-- ATR%는 EMA-smoothed ATR / close 비율 (`compute_atr_pct()` Numba 함수)
-- 고변동 구간에서 자동으로 임계값 상승 → 노이즈 필터링, 저변동 구간에서 하락 → 민감도 증가
-- `atr_period=0` 이면 기존 고정 threshold 사용 (backward compatible):
-
-**Confidence-Scored Multi-Evidence Entry (v6.0):**
-
-| BTC 레짐 | 감지 방법 | 알고리즘 | 진입 조건 |
-|----------|----------|---------|----------|
-| **Risk-On** (BTC > SMA96) | BTC price > SMA(96) | Classic Pullback | 자산 dip + 자산 uptrend (price > SMA192) + ≥min_confidence |
-| **Risk-Off** (BTC < SMA96) | BTC price < SMA(96) | Sympathy Pullback | 자산 dip + BTC 단기 하락 (btc_mom < 0) + ≥min_confidence |
-
-**컨피던스 증거 (5가지, 레짐별 임계값 다름):**
-- +1: BTC 레짐 확인 (기본 1점)
-- +1: RSI 과매도/과매수 (Risk-On: RSI<40, Risk-Off: RSI<35)
-- +1: 거래량 > 1.5x 평균 (청산 캐스케이드 감지)
-- +1: 테이커 매도 압력 (Risk-On: ratio<0.45, Risk-Off: ratio<0.42)
-- +1: SMA 지지 근접 (Risk-On) / BTC 모멘텀 강도 (Risk-Off)
-- +1: MACD 히스토그램 기울기 방향 일치 (v9.0, `macd_enabled=true`)
-- +1: 스토캐스틱 %K/%D 크로스 방향 일치 (v9.0, `stoch_enabled=true`)
-- **BTC crash gate**: BTC 15m close로 `check_regime_filter()` → 급변 시 차단
-- 기존 포지션 보유 심볼은 중복 신호 무시
-
-**v7.0 MTF Confirmation (apply_mtf_confirmation):**
-- 4h SMA(12)로 15m 신호 필터링: long 시 close_4h > SMA_4h, short 시 close_4h < SMA_4h
-- 역추세 트레이드 차단 → MDD 16.5% → 4.3% (-74%)
-- MTF 확인된 트레이드에 `apply_mtf_leverage()` 적용 (2.0x 부스트, 실효 3.0x)
-
-**v7.0 Independent 4H Rubber Band (compute_signals_4h_independent):**
-- 4h 타임프레임에서 독립적으로 평균회귀 신호 생성
-- lookback=3, threshold=0.10, target=0.5, stop=0.8, max_hold=12
-- BTC SMA(48) 레짐 필터 적용
-- `on_bar_4h()` → `update_htf_data()` → 4h 데이터 저장 및 신호 생성
-
-### 2.2 청산 조건 (update_position)
-
-| 조건 | 판정 | 비고 |
-|------|------|------|
-| **Target 도달** | unrealized PnL ≥ target_retrace × move_size | 150% 되돌림 (v12.4 I-HybTight) |
-| **Stop Loss** | unrealized PnL < -stop_mult × move_size × time_factor | time_factor = 1 - stop_decay × (bars_held / max_hold) |
-| **Trailing Stop** | best_pnl > 0 && PnL < best_pnl × (1 - trail_pct) | 이익 확보 후 역전 방어 |
-| **Max Hold** | bars_held ≥ max_hold | 타임아웃 강제 청산 (8 bars = 2h) |
-| **Partial Close (v4.3, 비활성)** | gain > 0 && not partial_closed | v4.4에서 비활성화 (tighter stop이 DD 억제) |
-| **Break-even Stop (v4.3, 비활성)** | partial_closed && gain ≤ 0 | v4.4에서 비활성화 |
-
-### 2.3 주문 실행 (LimitOrderChaser)
-
-```
-1. get_best_price() → BBO (best bid/ask)
-2. 지정가 POST_ONLY 주문 제출
-3. chase_interval(1초)마다 체결 확인
-4. 미체결 시 취소 → 새 BBO로 재제출 (최대 10회)
-5. timeout(30초) 초과 시 → 시장가 폴백
-6. 시장가 폴백 후 5회까지 체결 검증 (ACK 응답 대응)
-```
-
-### 2.4 포지션 사이징 (calculate_position_size + R:R-Gated Leverage)
-
-```python
-per_slot_capital = balance / max_concurrent   # 균등 배분 (5슬롯)
-
-# ── R:R-Gated Leverage (v4.3) ──
-# 손익비(R:R)가 충분히 높을 때만 레버리지 적용
-if rr_leverage_enabled:
-    expected_gain = move_size * target_retrace - 2 * cost_per_side
-    expected_loss = move_size * stop_mult + 2 * cost_per_side
-    rr = expected_gain / expected_loss
-    if rr < min_rr_for_leverage:  # 기본 0.30
-        leverage = 1.0  # 레버리지 비활성화
-    else:
-        excess = (move_size - threshold) / threshold
-        leverage = base_leverage + leverage_scale * max(excess, 0)
-        leverage = min(leverage, max_leverage)
-    notional = per_slot_capital × leverage
-else:
-    # Fallback: 리스크 역산 방식
-    stop_distance = move_size × stop_mult
-    risk_amount = per_slot_capital × risk_per_trade
-    position_size = risk_amount / stop_distance
-    leverage = min(position_size / per_slot_capital, max_leverage)
-    notional = per_slot_capital × leverage
-```
-
-> **핵심 발견 (v6.0)**: Confidence-Scored Entry가 v5.0 대비 Calmar 8.76 (vs 8.03). min_confidence=2로 34개 저품질 트레이드 필터링 → 동일 DD(16.9%)에서 Sharpe 2.05, WR 63.3%. 모멘텀 전략 5종 테스트 결과 15m 크립토에서 모멘텀은 비효과적임을 확인. 졸업 레버리지(base=1.0, step=1.0, max=2.0) 적용 시 Calmar 9.99까지 상승 가능하나 DD 22.4%로 상승. 보수적 flat 1.5x가 라이브 트레이딩 기본값.
-
-> **핵심 발견 (v7.0)**: MTF Confirmation(4h SMA12)이 v6.0 대비 MDD 16.5% → 4.3% (-74%), Calmar 32.42 (+275%), Sharpe 5.23 (+153%). 수익률은 -2.2% 소폭 감소하나 위험조정 수익 극적 개선. Walk-forward Q3 DD 16.5% → 3.0% (-82%). 독립 4H 트레이딩 단독으로 Ret +52.2%, DD 4.8%, Calmar 10.87. 15m+4h 하이브리드가 최적 구성.
-
-> **핵심 발견 (v8.0)**: Dynamic Target — 컨피던스 ≥3일 때 타겟을 40%→45/50/55%로 확대하여 비대칭 R:R 확보. DD 불변(4.3%), Calmar +9.3% (27.71→30.29), Sharpe 안정. 10000% 대회 우승자의 "확실할 때 파도를 타라" 원칙 적용. **v9.0에서 비활성화** — 타이트한 Fib 스탑(0.786)에서 고정 0.382 타겟이 동적 스케일링보다 우수. **A/B 테스트 후 기각된 전략**: RSI Divergence, Volatility Squeeze, Reversal Confirmation — 15m 크립토에서 데이터가 지지하지 않음. 이 3가지를 재테스트하지 말 것.
-
-> **핵심 발견 (v9.0)**: Fibonacci + S+R+M Confluence — target 0.4→0.382 (Fib golden ratio, +29% Calmar), stop 0.9→0.786 (Fib deep correction, DD -8.5%). R:R 0.444→0.486 (+9.5%). MACD(12,26,14) 히스토그램 기울기 증거 단독 +7.6% Calmar. Stochastic(5,3) 크로스 증거 (high/low 캔들 데이터 필요). `compute_signals_v9()` Numba 함수로 통합. **v9.0 A/B 테스트 후 기각**: EMA Regime(모든 기간 50/96/200) -4~-9% Calmar, Capital Preservation(50% 부분 청산) -32% Calmar, Confluence Gate(RSI+Stoch+MACD 동시 필수) -90% Calmar(트레이드 252→41). 이 3가지를 재테스트하지 말 것.
-
-### 2.5 비용 모델
+### 2.1 비용 모델
 
 | 비용 항목 | 값 | 비고 |
 |-----------|---|------|
 | **수수료** | 0.02%/side (메이커) | LimitChaser로 메이커 체결 목표 |
 | **슬리피지** | 0.02%/side | 보수적 추정 |
-| **펀딩비** | 0.01%/8h | 15m 바 기준 1/32 |
+| **펀딩비** | 0.01%/8h | 48h 포지션 기준 약 0.06% |
 | **왕복 비용** | ~0.08% + 펀딩비 | 트레이드당 고정 차감 |
 
 ---
@@ -376,7 +204,7 @@ else:
 
 | 수정 대상 | 반드시 함께 확인 |
 |----------|-----------------|
-| `settings.py` 파라미터 추가 | `.env.example`, `.env`, `MANUAL.md` |
+| `settings.py` 파라미터 추가 | `.env.example`, `.env` |
 | `rubberband.py` 신호 로직 변경 | `scalper.py`, `vectorized_backtest.py`, `test_rubberband.py` |
 | `alpha_engine.py` 수정 | `test_alpha_engine.py`, `vectorized_backtest.py` |
 | `vol_selector.py` 수정 | `test_vol_selector.py`, 백테스트 스크립트들 |
@@ -391,63 +219,34 @@ else:
 
 ## 6. 핵심 상수 & 기본값 참조
 
-### 6.1 Rubber Band 전략 파라미터
+### 6.1 VolStraddle 전략 파라미터
 
-| 파라미터 | 기본값 | 소스 | 용도 |
-|---------|--------|------|------|
-| `lookback` | 8 bars (2h) | `RubberBandConfig` | 급등/급락 측정 기간 |
-| `threshold` | 0.045 (4.5%) | `RubberBandConfig` | 최소 무브 크기 |
-| `target_retrace` | 1.5 (150%) | `RubberBandConfig` | 이익 실현 목표 (v12.4 I-HybTight, deeper reversal) |
-| `stop_mult` | 0.382 | `RubberBandConfig` | 손절 배수 (무브 크기 대비, v12.3) |
-| `max_hold` | 25 bars (6.25h) | `RubberBandConfig` | 최대 보유 기간 (v12.4 I-HybTight patience) |
-| `trail_atr_mult` | 1.0 | `RubberBandConfig` | 러너 ATR 트레일링 배수 (v12.4 tighter trail) |
-| `runner_max_hold_mult` | 3.0 | `RubberBandConfig` | 러너 최대 보유 배수 (max_hold × 3.0 = 75봉, v12.4) |
-| `stop_decay` | 0.0 | `RubberBandConfig` | 시간감쇠 계수 (0=비활성) |
-| `htf_period` | 0 (비활성) | `RubberBandConfig` | MTF SMA lookback (0=비활성) |
-| `htf_block_threshold` | 0.01 (1%) | `RubberBandConfig` | HTF 트렌드 차단 임계값 |
-| `htf_agree_discount` | 0.85 | `RubberBandConfig` | HTF 동의 시 threshold 배수 (15% 낮춤) |
-| `htf_agree_stop_mult` | 0.95 | `RubberBandConfig` | HTF 동의 시 stop 배수 (5% 타이트) |
-| `dynamic_leverage_enabled` | True | `RubberBandConfig` | Move-confidence 동적 레버리지 활성화 |
-| `base_leverage` | 1.5 | `RubberBandConfig` | flat 1.5x 레버리지 |
-| `leverage_scale` | 0.0 | `RubberBandConfig` | 컨피던스 스케일링 비활성화 |
-| `max_leverage` | 1.5 | `RubberBandConfig` | 레버리지 안전 상한 |
-| `btc_directional_enabled` | True | `RubberBandConfig` | BTC 방향 정렬 필터 활성화 (Risk-Off에서 사용) |
-| `btc_directional_period` | 48 (12h) | `RubberBandConfig` | BTC 모멘텀 lookback (봉 수) |
-| `entry_mode` | 'confidence' | `RubberBandConfig` | 진입 모드: confidence / regime_switch / btc_directional / raw |
-| `btc_regime_period` | 96 (24h) | `RubberBandConfig` | BTC SMA period for regime detection |
-| `asset_trend_period` | 192 (48h) | `RubberBandConfig` | Asset SMA period for classic pullback |
-| `min_confidence` | 2 | `RubberBandConfig` | 최소 증거 점수 (1-5, 2=최적) |
-| `confidence_leverage_step` | 0.0 | `RubberBandConfig` | 컨피던스당 추가 레버리지 (0=고정) |
-| `rsi_period` | 14 | `RubberBandConfig` | RSI 계산 기간 |
-| `vol_period` | 20 | `RubberBandConfig` | 거래량 SMA 기간 |
-| `btc_regime_period` | 96 (24h) | `RubberBandConfig` | BTC SMA period for regime detection |
-| `asset_trend_period` | 192 (48h) | `RubberBandConfig` | Asset SMA period for classic pullback |
-| `partial_exit_enabled` | False | `RubberBandConfig` | 부분 청산 비활성화 (v4.4) |
-| `partial_exit_fraction` | 0.5 (50%) | `RubberBandConfig` | 부분 청산 비율 |
-| `rr_leverage_enabled` | True | `RubberBandConfig` | R:R-Gated 레버리지 활성화 |
-| `min_rr_for_leverage` | 0.30 | `RubberBandConfig` | 레버리지 허용 최소 R:R 값 |
-| `mtf_confirmation_enabled` | True | `RubberBandConfig` | **v7.0** 4h 트렌드 확인 활성화 |
-| `mtf_sma_period` | 12 (2일) | `RubberBandConfig` | **v7.0** 4h SMA 기간 |
-| `mtf_leverage_mult` | 2.5 | `RubberBandConfig` | **v7.0** MTF 확인 시 레버리지 배수 (실효 3.75x, v11.4 leverage grid) |
-| `htf_independent_enabled` | True | `RubberBandConfig` | **v7.0** 독립 4시간 트레이딩 활성화 |
-| `htf_rb_lookback` | 3 (12h) | `RubberBandConfig` | **v7.0** 4h lookback |
-| `htf_rb_threshold` | 0.10 (10%) | `RubberBandConfig` | **v7.0** 4h 최소 무브 크기 |
-| `htf_rb_target_retrace` | 0.5 (50%) | `RubberBandConfig` | **v7.0** 4h 되돌림 목표 |
-| `htf_rb_stop_mult` | 0.8 | `RubberBandConfig` | **v7.0** 4h 손절 배수 |
-| `htf_rb_max_hold` | 12 (2일) | `RubberBandConfig` | **v7.0** 4h 최대 보유 기간 |
-| `htf_rb_btc_sma_period` | 48 (8일) | `RubberBandConfig` | **v7.0** 4h BTC SMA 기간 |
-| `dynamic_target_enabled` | False | `RubberBandConfig` | 비활성화 (v9.0: Fib 0.382 고정 > 동적 스케일링) |
-| `macd_enabled` | True | `RubberBandConfig` | **v9.0** MACD 히스토그램 컨피던스 증거 활성화 |
-| `macd_fast` | 12 | `RubberBandConfig` | **v9.0** MACD fast EMA 기간 |
-| `macd_slow` | 26 | `RubberBandConfig` | **v9.0** MACD slow EMA 기간 |
-| `macd_signal_period` | 14 | `RubberBandConfig` | **v9.0** MACD signal EMA 기간 |
-| `stoch_enabled` | True | `RubberBandConfig` | **v9.0** 스토캐스틱 크로스 컨피던스 증거 활성화 |
-| `stoch_k_period` | 5 | `RubberBandConfig` | **v9.0** 스토캐스틱 %K 기간 (very fast) |
-| `stoch_d_period` | 3 | `RubberBandConfig` | **v9.0** 스토캐스틱 %D 기간 |
-| `atr_period` | 48 (12h) | `RubberBandConfig` | **v11.4** 적응형 임계값 ATR lookback (0=비활성, 고정 threshold 사용) |
-| `atr_multiplier` | 2.5 | `RubberBandConfig` | **v11.4** ATR × 배수 (walk-forward sweep 최적) |
-| `threshold_floor` | 0.01 (1%) | `RubberBandConfig` | **v11.4** 적응형 임계값 하한 |
-| `threshold_cap` | 0.06 (6%) | `RubberBandConfig` | **v11.4** 적응형 임계값 상한 |
+> Source of truth: `quantbox/strategy/vol_straddle/config.py` (`VolStraddleConfig`)
+
+| 파라미터 | 기본값 | 용도 |
+|---------|--------|------|
+| `vr_short` | 8 | VR 단기 ATR 기간 |
+| `vr_long` | 56 | VR 장기 ATR 기간 |
+| `d_vr_threshold` | 0.50 | D_mom8 진입 VR 임계값 |
+| `d_sl` | 0.01 (1%) | D 손절 |
+| `d_tp` | 0.12 (12%) | D 하드 TP |
+| `d_trail_activate` | 0.02 (+2%) | 트레일링 활성화 수익 |
+| `d_trail_distance` | 0.003 (0.3%) | 트레일링 거리 |
+| `s_vr_threshold` | 0.55 | S_d8 스트래들 VR 임계값 |
+| `s_squeeze_dur` | 4 bars | 스트래들 최소 지속 기간 |
+| `s_sl` | 0.015 (1.5%) | 스트래들 손절 (per leg) |
+| `s_tp` | 0.05 (5%) | 스트래들 TP (per leg) |
+| `momentum_period` | 8 | 방향 결정 모멘텀 lookback |
+| `max_hold_15m` | 192 bars (48h) | 최대 보유 (15m TF) |
+| `max_hold_1h` | 48 bars (48h) | 최대 보유 (1h TF) |
+| `max_hold_4h` | 12 bars (48h) | 최대 보유 (4h TF) |
+| `base_leverage` | 30.0 | VR Half-Kelly 레버리지 |
+| `max_concurrent` | 10 | 최대 동시 포지션 (VR L/N=3.0, MA L/N=2.1) |
+| `max_drawdown_pct` | 0.10 (10%) | 세션 DD 서킷 브레이커 |
+| `fee_rate` | 0.0002 (0.02%) | 메이커 수수료/side |
+| `slippage_rate` | 0.0002 (0.02%) | 슬리피지/side |
+| `dir_diversity_enabled` | True | 방향 다양성 (max_same_direction=2) |
+| `dynamic_capital_enabled` | False | 동적 자본 배분 비활성 (마진 부족 방지) |
 
 ### 6.2 Alpha Engine 파라미터
 
@@ -489,7 +288,7 @@ else:
 
 ---
 
-## 7. 테스트 현황 (36파일, 775개)
+## 7. 테스트 현황
 
 | 테스트 파일 | 검증 대상 | 핵심 관점 |
 |------------|----------|----------|

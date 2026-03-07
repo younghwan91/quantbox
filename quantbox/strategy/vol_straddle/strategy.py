@@ -779,15 +779,14 @@ class VolStraddleStrategy:
             return self._exit_simple(pos, symbol, worst_gain, best_gain,
                                      sl_pct, tp_pct, max_hold)
 
-        # ── MA Cluster: simple SL/TP/max_hold exit (no trailing stop) ──
+        # ── Select trail params based on strategy type (r47) ──
         strategy_type = pos.get('strategy_type', 'vr_squeeze')
         if strategy_type == 'ma_cluster':
-            return self._exit_simple(pos, symbol, worst_gain, best_gain,
-                                     sl_pct, tp_pct, max_hold)
-
-        # ── VR Squeeze Directional: Trailing Stop (R43) ──
-        trail_activate = self.config.d_trail_activate
-        trail_distance = self.config.d_trail_distance
+            trail_activate = self.config.ma_cluster_trail_activate
+            trail_distance = self.config.ma_cluster_trail_distance
+        else:
+            trail_activate = self.config.d_trail_activate
+            trail_distance = self.config.d_trail_distance
 
         # Update peak gain tracking
         peak_gain = pos.get('peak_gain', 0.0)
