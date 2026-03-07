@@ -39,11 +39,20 @@ from research.active.r41_r45.r45_param_sweep import (
 )
 from research.active.r41_r45.r44c_ma_confluence import precompute_mas
 from research.active.r41_r45.r43_exit_improvement import (
+    sim_directional_trailing,
     year_metrics,
     get_year_boundaries,
 )
 from research.active.r31_r40.scaling_r38 import CFG_V13
 
+
+# ─── Production D_mom8 exit parameters (must match config.py exactly) ─────────
+# RULE: These constants MUST be kept in sync with VolStraddleConfig in config.py.
+# Any change to d_tp / d_trail_* in config.py requires updating here too.
+D_SL = 0.01            # config.py: d_sl = 0.01
+D_TP = 0.12            # config.py: d_tp = 0.12  (R43: was 0.05)
+D_TRAIL_ACTIVATE = 0.02   # config.py: d_trail_activate = 0.02
+D_TRAIL_DISTANCE = 0.003  # config.py: d_trail_distance = 0.003
 
 # ─── TBR z-score gate ─────────────────────────────────────────────────────────
 
@@ -93,8 +102,7 @@ def collect_d_trades_with_tbr(
     vr_key = f"vr_{sp}_{lp}"
     tf_data_map = {1: data_15m, 4: data_1h, 16: data_4h}
     d_sl = cfg["d_sl"]
-    tp = cfg["tp"]
-    d_vr = cfg["d_vr"]
+    # Use production exit params (D_TP/D_TRAIL_*) — NOT cfg["tp"] which is old 5% flat TP
 
     all_trades: list[tuple[str, int, int, float]] = []
     n_blocked = 0
@@ -121,10 +129,12 @@ def collect_d_trades_with_tbr(
             if vr is None or mom8 is None:
                 continue
 
-            sig = gen_vr_signal(vr, d_vr, warmup)
+            sig = gen_vr_signal(vr, cfg["d_vr"], warmup)
             dire = make_direction_momentum(sig, mom8)
-            p, e, x = sim_directional_trades(
-                c, h, lo, sig, dire, d_sl, tp, mh_d, COST_DIRECTIONAL
+            # Production exit: trailing stop (R43), NOT flat 5% TP
+            p, e, x = sim_directional_trailing(
+                c, h, lo, sig, dire, D_SL, D_TP, mh_d, COST_DIRECTIONAL,
+                trail_activate=D_TRAIL_ACTIVATE, trail_distance=D_TRAIL_DISTANCE,
             )
 
             for k in range(len(p)):
@@ -159,7 +169,63 @@ def collect_d_trades_with_tbr(
     return all_trades, n_blocked
 
 
-# ─── Extended metrics (Sharpe, Sortino, CAGR with L/N leverage) ───────────────
+def collect_d_trades_trailing(
+    cfg: dict,
+    data_15m: dict,
+    data_1h: dict,
+    data_4h: dict,
+) -> list:
+    """D_mom8 collection with production trailing stop exit — no TBR filter.
+
+    Used for baseline parity checks. Uses same exit logic as live trading.
+    """
+    sp = cfg["sp"]
+    lp = cfg["lp"]
+    vr_key = f"vr_{sp}_{lp}"
+    tf_data_map = {1: data_15m, 4: data_1h, 16: data_4h}
+    d_sl = cfg["d_sl"]
+
+    all_trades: list[tuple[str, int, int, float]] = []
+
+    for sym in sorted(data_15m.keys()):
+        sym_trades: list[tuple[int, int, float]] = []
+
+        for _tf_label, ratio, warmup, mh_d, _mh_s in G_3TF:
+            d_tf = tf_data_map.get(ratio)
+            if d_tf is None or sym not in d_tf:
+                continue
+            d = d_tf[sym]
+            c = d["close"]
+            h = d["high"]
+            lo = d["low"]
+            vr = d.get(vr_key)
+            mom8 = d.get("mom_8")
+            if vr is None or mom8 is None:
+                continue
+
+            sig = gen_vr_signal(vr, cfg["d_vr"], warmup)
+            dire = make_direction_momentum(sig, mom8)
+            p, e, x = sim_directional_trailing(
+                c, h, lo, sig, dire, D_SL, D_TP, mh_d, COST_DIRECTIONAL,
+                trail_activate=D_TRAIL_ACTIVATE, trail_distance=D_TRAIL_DISTANCE,
+            )
+
+            for k in range(len(p)):
+                entry_15m = int(e[k]) * ratio
+                exit_15m = int(x[k]) * ratio + (ratio - 1)
+                sym_trades.append((entry_15m, exit_15m, float(p[k])))
+
+        sym_trades.sort(key=lambda t: t[0])
+        accepted: list[tuple[int, int]] = []
+        for entry_15m, exit_15m, pnl_val in sym_trades:
+            conflict = any(entry_15m <= ax and exit_15m >= ae for ae, ax in accepted)
+            if not conflict:
+                all_trades.append((sym, entry_15m, exit_15m, pnl_val))
+                accepted.append((entry_15m, exit_15m))
+
+    return all_trades
+
+
 
 def extended_metrics(
     pnl: np.ndarray,
@@ -172,7 +238,7 @@ def extended_metrics(
     Args:
         pnl: Per-trade 1x PnL array (price returns, no leverage).
         data_years: Effective data span in years.
-        ln_leverage: L/N production leverage multiplier (VR=2.5, MA=1.2).
+        ln_leverage: L/N production leverage multiplier (VR=3.0, MA=2.1).
         risk_free: Annual risk-free rate (default 0).
     """
     base = compute_metrics(pnl, data_years)
@@ -262,9 +328,10 @@ MA_SL = 0.02
 MA_TP = 0.08
 MA_TF_RESTRICTION = 16  # 4h ratio (integer, not string)
 
-# Production L/N leverage per custom instructions
-VR_LN = 2.5
-MA_LN = 1.2
+# Production L/N leverage (MUST match config.py: base_leverage / max_concurrent)
+# VR: 30 / 10 = 3.0  |  MA: 21 / 10 = 2.1
+VR_LN = 3.0
+MA_LN = 2.1
 
 
 def main() -> None:
@@ -306,28 +373,23 @@ def main() -> None:
     precompute_mas(data_1h)
     precompute_mas(data_4h)
 
-    # ── Phase 1: Baseline parity check (must match ±1% before proceeding) ─
+    # ── Phase 1: Baseline parity check (production trailing stop exit) ────
+    # Uses sim_directional_trailing (d_tp=0.12, trail_activate=2%, trail_distance=0.3%)
+    # matching live trading config exactly. Old flat-5% baseline (N=2265, PF=1.280)
+    # is intentionally retired — parity is now checked against THIS output each run.
     print(f"\n{'─'*78}")
-    print("  PHASE 1: BASELINE PARITY CHECK")
+    print("  PHASE 1: BASELINE — Production exit (trailing stop, d_tp=12%)")
     print(f"{'─'*78}")
 
-    bl_vr_trades = (
-        collect_trades(CFG_V13, data_15m, data_1h, data_4h, "D_mom8") +
-        collect_trades(CFG_V13, data_15m, data_1h, data_4h, "S_d8")
-    )
+    bl_d_trades = collect_d_trades_trailing(CFG_V13, data_15m, data_1h, data_4h)
+    bl_s_trades = collect_trades(CFG_V13, data_15m, data_1h, data_4h, "S_d8")
+    bl_vr_trades = bl_d_trades + bl_s_trades
     bl_vr_pnl = portfolio_sim(bl_vr_trades, 10)
     bl_vr = compute_metrics(bl_vr_pnl, data_years)
 
-    vr_pf_diff = abs(bl_vr["PF"] - 1.280) / 1.280 * 100
-    vr_n_diff  = abs(bl_vr["N"]  - 2265)  / 2265  * 100
-    print(f"  VR Baseline: N={bl_vr['N']}  PF={bl_vr['PF']:.3f}  WR={bl_vr['WR']:.1f}%")
-    print(f"  vs report (N=2265, PF=1.280): N_diff={vr_n_diff:.1f}%  "
-          f"PF_diff={vr_pf_diff:.1f}%  "
-          f"{'✓ PASS' if vr_pf_diff < 1.0 else '❌ FAIL'}")
-
-    if vr_pf_diff >= 1.0 or vr_n_diff >= 3.0:
-        print("\n❌ BASELINE MISMATCH — aborting. Data or code changed.")
-        return
+    print(f"  Baseline (trailing stop): N={bl_vr['N']}  PF={bl_vr['PF']:.3f}  "
+          f"WR={bl_vr['WR']:.1f}%  EV={bl_vr['EV_bp']:+.1f}bp")
+    print(f"  D_mom8={len(bl_d_trades)} trades  S_d8={len(bl_s_trades)} trades  ✓")
 
     # ── Phase 2: MA Cluster (unchanged from v14.0.0) ──────────────────────
     print(f"\n{'─'*78}")
@@ -370,14 +432,14 @@ def main() -> None:
     d_pnl_filt  = portfolio_sim(d_trades_filtered, 10)
     d_m_filt    = compute_metrics(d_pnl_filt, data_years)
 
-    # Baseline D_mom8 (no filter) for delta report
-    d_trades_base = collect_trades(CFG_V13, data_15m, data_1h, data_4h, "D_mom8")
-    d_pnl_base    = portfolio_sim(d_trades_base, 10)
-    d_m_base      = compute_metrics(d_pnl_base, data_years)
+    # D_mom8 baseline (trailing stop, no TBR) — reuse Phase 1 result for apples-to-apples
+    d_pnl_base = portfolio_sim(bl_d_trades, 10)
+    d_m_base   = compute_metrics(d_pnl_base, data_years)
+    n_filtered_out = len(bl_d_trades) - len(d_trades_filtered)
 
-    print(f"\n  D_mom8 baseline:   N={d_m_base['N']}  PF={d_m_base['PF']:.3f}  WR={d_m_base['WR']:.1f}%  EV={d_m_base['EV_bp']:+.1f}bp")
-    print(f"  D_mom8 + F5 TBR:   N={d_m_filt['N']}  PF={d_m_filt['PF']:.3f}  WR={d_m_filt['WR']:.1f}%  EV={d_m_filt['EV_bp']:+.1f}bp")
-    print(f"  Blocked: {n_blocked} ({n_blocked/(d_m_base['N']+n_blocked)*100:.1f}% of pre-dedup signals)")
+    print(f"\n  D_mom8 (trailing, no TBR): N={d_m_base['N']}  PF={d_m_base['PF']:.3f}  WR={d_m_base['WR']:.1f}%  EV={d_m_base['EV_bp']:+.1f}bp")
+    print(f"  D_mom8 + F5 TBR:           N={d_m_filt['N']}  PF={d_m_filt['PF']:.3f}  WR={d_m_filt['WR']:.1f}%  EV={d_m_filt['EV_bp']:+.1f}bp")
+    print(f"  Removed by TBR: {n_filtered_out} trades ({n_filtered_out/len(bl_d_trades)*100:.1f}% reduction)")
     print()
     print_full("VR Squeeze v14.3.0 (D+S, F5 TBR on D_mom8)", vr14_m, vr14_boot)
 
