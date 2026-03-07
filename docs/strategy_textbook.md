@@ -1,6 +1,6 @@
 # QuantBox 전략 교과서 — 듀얼 축 스퀴즈 시스템 완전 해설
 
-**버전:** v14.1.0 (Half-Kelly + F5 TBR Gate, commit `f9f1bb4`)  
+**버전:** v14.2.0 (Half-Kelly + F5 TBR Gate, commit `f9f1bb4`)  
 **대상:** 코딩은 할 줄 알지만 실전 퀀트 트레이딩은 처음인 개발자  
 **목적:** QuantBox가 왜 이렇게 생겼는지, 각 부품이 왜 있는지, 하나도 빠짐없이 설명
 
@@ -34,7 +34,7 @@ QuantBox는 바이낸스 USDT-M 선물에서 **변동성이 극도로 줄어든 
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│               QuantBox v14.1.0                        │
+│               QuantBox v14.2.0                        │
 │          Dual-Axis Squeeze System                     │
 ├─────────────────────┬────────────────────────────────┤
 │  Axis 1: VR Squeeze │  Axis 2: MA Cluster Squeeze    │
@@ -865,5 +865,5 @@ if status == 'TRIGGERED':  # FINISHED를 놓침!
 
 ---
 
-*이 문서는 QuantBox v14.1.0 (commit `f9f1bb4`, 2026-03-07) 기준으로 작성되었습니다.*  
+*이 문서는 QuantBox v14.2.0 (commit `f9f1bb4`, 2026-03-07) 기준으로 작성되었습니다.*  
 *전략 파라미터가 변경되면 이 문서도 업데이트해야 합니다.*
