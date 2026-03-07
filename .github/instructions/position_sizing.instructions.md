@@ -1,3 +1,6 @@
+---
+applyTo: "quantbox/execution/**/*.py,quantbox/strategy/**/*.py,quantbox/**/*config*.py"
+---
 # Position Sizing Skill — QuantBox Slot Margin & Capital Validation
 
 > **목적:** AI 에이전트가 포지션 사이징 계산을 정확히 검증할 수 있도록.
