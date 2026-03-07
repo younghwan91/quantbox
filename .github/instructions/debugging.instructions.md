@@ -86,21 +86,38 @@ c.futures_account()['availableBalance']
 
 ### -2028: Insufficient margin balance
 
-**증상:** reduce_only 주문 + leverage 변경 실패 ← Incident #1 (2026-02-21)
+**증상 A — One-Way close (Incident #1, 2026-02-21):**
 ```
 APIError(code=-2028): Insufficient margin balance.
 ```
+`reduce_only=True` 경로에서 `futures_change_leverage()` 호출. 레버리지 낮추면 포지션 유지 마진 증가 → 에러.
+**규칙:** reduce_only 주문에서 절대 leverage/margin 변경 금지.
 
-**원인:** `reduce_only=True` 주문 경로에서 `futures_change_leverage()` 호출
-- 레버리지 낮추면 포지션 유지 마진 증가 → 에러
+---
+
+**증상 B — Hedge Mode close trail exit abort (Incident #5, 2026-03-08):**
+```
+[SUIUSDT] Leverage set failed: APIError(code=-2028) — ABORTING order
+```
+trail hit 후 포지션이 미청산 상태로 유지됨.
+
+**원인 체인:**
+1. trail hit → SL/TP 취소 → `_close_position()` 호출
+2. Hedge Mode: `reduce_only=(pos_side is None)` → `pos_side='LONG'` → `reduce_only=False`
+3. `_place_order()` guard `if not reduce_only:` → 통과 (leverage=1 기본값)
+4. `futures_change_leverage(symbol, leverage=1)` 실행 → 30x 포지션에 1x 설정 → -2028
+
+**Fix (v14.4.2):** `scalper.py L535: if not reduce_only and leverage > 1:`
+- Entry만 `leverage=lev_int(30)` 명시 → 변경 실행
+- Close/partial-close는 기본값 `leverage=1` → 변경 스킵
+
+**자동복구:** SL/TP 취소 후 bracket repair가 다음 사이클에 자동 재배치.
 
 **코드 확인:**
 ```bash
-grep -n "futures_change_leverage\|reduce_only" quantbox/execution/positions.py | head -10
-# L535: if not reduce_only: 가 레버리지 변경 guard
+grep -n "futures_change_leverage\|leverage > 1" quantbox/scalper.py | head -5
+# should show: if not reduce_only and leverage > 1:
 ```
-
-**규칙:** reduce_only 주문에서 절대 leverage/margin 변경 금지.
 
 ---
 
