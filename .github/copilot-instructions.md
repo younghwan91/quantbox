@@ -46,7 +46,10 @@
 │   ├── copilot-instructions.md   # 에이전트 지침
 │   ├── agents.md                 # 아키텍처/모듈 설명
 │   └── skills/
-│       └── backtesting.md        # 백테스트 수행 절차·체크리스트 (AI 에이전트용)
+│       ├── backtesting.md        # 백테스트 수행 절차·체크리스트 (AI 에이전트용)
+│       ├── live_trading.md       # 세션 시작/종료/재시작 절차 (AI 에이전트용)
+│       ├── debugging.md          # API 에러 코드 대응표 (AI 에이전트용)
+│       └── position_sizing.md    # 포지션 사이징·마진 검증 (AI 에이전트용)
 └── docs/
     └── backtest_results/
         ├── README.md             # 인덱스 (이것만 루트에)
