@@ -1,3 +1,6 @@
+---
+applyTo: "quantbox/scalper.py,quantbox/execution/**/*.py"
+---
 # Live Trading Skill — QuantBox Session Management
 
 > **목적:** AI 에이전트가 라이브 세션을 안전하게 시작, 재시작, 종료할 수 있도록.
