@@ -490,3 +490,89 @@ class TestReconciliationHedgeMode:
         # Should NOT report qty mismatch (LONG matches)
         pos = scalper.strategy._positions['BTCUSDT:LONG']
         assert pos['notional'] == 100.0  # unchanged
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  CRITICAL #5: Hedge Mode close must NOT trigger leverage change (v14.4.2)
+#  Incident: trail exit passed reduce_only=False (hedge mode), leverage=1
+#  → futures_change_leverage(leverage=1) → -2028 → ABORTING order
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestHedgeCloseNoLeverageChange:
+    """_place_order must NOT call futures_change_leverage for close orders.
+
+    In Hedge Mode, close orders use positionSide instead of reduceOnly,
+    so reduce_only=False is passed. The guard must also check leverage > 1
+    to distinguish entry (explicit leverage) from close (default leverage=1).
+    """
+
+    def test_close_order_skips_leverage_change(self, mock_vs_scalper):
+        """Hedge mode close: leverage change must NOT be called."""
+        scalper = mock_vs_scalper
+
+        scalper.client.futures_orderbook_ticker.return_value = {
+            'askPrice': '1.000', 'bidPrice': '0.999',
+        }
+        scalper.client.futures_create_algo_order.return_value = {
+            'algoId': 9999, 'clientAlgoId': 'test',
+            'code': '200', 'msg': 'success',
+        }
+        # Simulate LimitOrderChaser fill
+        scalper._chaser = MagicMock()
+        scalper._chaser.chase_limit_order.return_value = MagicMock(
+            filled=True,
+            avg_price=0.999,
+            filled_qty=100.0,
+            maker_fill=True,
+        )
+
+        # close order: hedge mode → reduce_only=False, leverage defaults to 1
+        result = scalper._place_order(
+            'SUIUSDT', 'SELL', 100.0,
+            reduce_only=False,       # hedge mode close
+            position_side='LONG',
+            # leverage not passed → defaults to 1
+        )
+
+        scalper.client.futures_change_leverage.assert_not_called()
+
+    def test_entry_order_does_set_leverage(self, mock_vs_scalper):
+        """Entry order with explicit leverage MUST change leverage."""
+        scalper = mock_vs_scalper
+
+        scalper.client.futures_change_leverage.return_value = {'leverage': 30}
+        scalper._chaser = MagicMock()
+        scalper._chaser.chase_limit_order.return_value = MagicMock(
+            filled=True,
+            avg_price=1.000,
+            filled_qty=3000.0,
+            maker_fill=True,
+        )
+
+        scalper._place_order(
+            'SUIUSDT', 'BUY', 3000.0,
+            leverage=30,             # explicit entry leverage
+            reduce_only=False,
+            position_side='LONG',
+        )
+
+        scalper.client.futures_change_leverage.assert_called_once_with(
+            symbol='SUIUSDT', leverage=30,
+        )
+
+    def test_one_way_close_still_skips_leverage(self, mock_vs_scalper):
+        """One-Way mode close (reduce_only=True) must also skip leverage change."""
+        scalper = mock_vs_scalper
+
+        scalper._chaser = MagicMock()
+        scalper._chaser.chase_limit_order.return_value = MagicMock(
+            filled=True, avg_price=1.0, filled_qty=10.0, maker_fill=True,
+        )
+
+        scalper._place_order(
+            'BTCUSDT', 'SELL', 10.0,
+            reduce_only=True,  # one-way close
+        )
+
+        scalper.client.futures_change_leverage.assert_not_called()
