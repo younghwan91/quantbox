@@ -800,10 +800,10 @@ VR squeeze와 **93.7% 비중복**인 보완 전략. 4개 이동평균이 수렴�
 - momentum(8) 방향으로 LONG/SHORT 진입
 - **One-Signal-Per-Episode**: 클러스터가 해소될 때까지 재진입 차단 (쿨다운)
 
-**리스크 패리티:**
-- VR squeeze: 25x × 1% SL = 25% 명목 리스크
-- MA cluster: 12x × 2% SL = 24% 명목 리스크
-- → per-trade risk 거의 동일
+**리스크 구조 (Half-Kelly 유도):**
+- VR squeeze: 30x × 1% SL = per-trade risk 30% of slot capital (L/N=3.0)
+- MA cluster: 21x × 2% SL = per-trade risk 42% of slot capital (L/N=2.1)
+- 각각 독립 Half-Kelly 유도값 — `config.py` docstring 참고
 
 **CW-Tier 적용 안 됨** — MA cluster는 VR 기반 신호가 아니므로 conviction sizing이 별도 적용되지 않습니다.
 
