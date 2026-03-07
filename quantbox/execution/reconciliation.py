@@ -32,8 +32,11 @@ class ReconciliationMixin:
             if not pos:
                 continue
 
-            # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT)
-            api_sym = pos.get('symbol', sym.split(':')[0])
+            # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT).
+            # pos['symbol'] may itself be a compound key if loaded from a corrupted
+            # state file — always strip the suffix defensively.
+            raw_sym = pos.get('symbol', sym)
+            api_sym = raw_sym.split(':')[0] if ':' in raw_sym else raw_sym
 
             tp_oid = pos.get('server_tp_order_id')
             sl_oid = pos.get('server_sl_order_id')
@@ -284,8 +287,10 @@ class ReconciliationMixin:
             if not pos:
                 continue
 
-            # Build lookup key: compound (BTCUSDT:LONG) or plain (BTCUSDT)
-            api_sym = pos.get('symbol', sym.split(':')[0])
+            # Build lookup key: compound (BTCUSDT:LONG) or plain (BTCUSDT).
+            # Strip any compound suffix from pos['symbol'] defensively.
+            raw_sym = pos.get('symbol', sym)
+            api_sym = raw_sym.split(':')[0] if ':' in raw_sym else raw_sym
             pos_side = pos.get('position_side')
             if pos_side in ('LONG', 'SHORT'):
                 lookup_key = f"{api_sym}:{pos_side}"
