@@ -486,8 +486,10 @@ class BracketMixin:
         if improvement < 0.005:  # 0.5% minimum step to avoid API spam
             return
 
-        # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT)
-        api_sym = pos.get('symbol', symbol.split(':')[0])
+        # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT).
+        # Strip defensively in case pos['symbol'] was corrupted by old _load_state.
+        raw_sym = pos.get('symbol', symbol)
+        api_sym = raw_sym.split(':')[0] if ':' in raw_sym else raw_sym
 
         entry_price = pos['entry_price']
         signal = pos['signal']
