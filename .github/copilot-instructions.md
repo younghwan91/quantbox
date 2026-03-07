@@ -43,13 +43,13 @@
 ├── README.md              # 프로젝트 개요, 퀵스타트 (루트에만)
 ├── MANUAL.md              # 운영 매뉴얼 (루트에만)
 ├── .github/
-│   ├── copilot-instructions.md   # 에이전트 지침
+│   ├── copilot-instructions.md   # 에이전트 지침 (repo-wide, 자동 로드)
 │   ├── agents.md                 # 아키텍처/모듈 설명
-│   └── skills/
-│       ├── backtesting.md        # 백테스트 수행 절차·체크리스트 (AI 에이전트용)
-│       ├── live_trading.md       # 세션 시작/종료/재시작 절차 (AI 에이전트용)
-│       ├── debugging.md          # API 에러 코드 대응표 (AI 에이전트용)
-│       └── position_sizing.md    # 포지션 사이징·마진 검증 (AI 에이전트용)
+│   └── instructions/             # Path-specific instructions (Copilot CLI 공식, 자동 로드)
+│       ├── backtesting.instructions.md      # research/**/*.py 에 자동 적용
+│       ├── live_trading.instructions.md     # scalper.py, execution/**/*.py 에 자동 적용
+│       ├── debugging.instructions.md        # quantbox/**/*.py, tests/**/*.py 에 자동 적용
+│       └── position_sizing.instructions.md  # execution/**, strategy/**, *config* 에 자동 적용
 └── docs/
     └── backtest_results/
         ├── README.md             # 인덱스 (이것만 루트에)

@@ -1,3 +1,6 @@
+---
+applyTo: "quantbox/**/*.py,tests/**/*.py"
+---
 # Debugging Skill — QuantBox API Error & Live Issue Guide
 
 > **목적:** AI 에이전트가 라이브 트레이딩 중 발생하는 에러를 즉시 진단하고 대응할 수 있도록.
