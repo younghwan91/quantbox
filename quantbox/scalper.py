@@ -1243,8 +1243,20 @@ class RubberBandScalper(
             )
 
         for sym, pos in positions.items():
+            # Parse compound key (e.g. 'SUIUSDT:LONG') to extract the clean
+            # Binance API symbol and position_side separately.
+            # Without this, open_position stores the compound key as 'symbol',
+            # causing -1022 signature errors when it's sent to the Binance API.
+            parts = sym.rsplit(':', 1)
+            if len(parts) == 2 and parts[1] in ('LONG', 'SHORT'):
+                api_sym = parts[0]
+                restored_position_side = parts[1]
+            else:
+                api_sym = sym
+                restored_position_side = pos.get('position_side')
+
             self.strategy.open_position(
-                symbol=sym,
+                symbol=api_sym,
                 signal=pos['signal'],
                 entry_price=pos['entry_price'],
                 notional=pos['notional'],
@@ -1253,6 +1265,7 @@ class RubberBandScalper(
                 entry_stop_mult=pos.get('entry_stop_mult'),
                 server_sl_order_id=pos.get('server_sl_order_id'),
                 server_tp_order_id=pos.get('server_tp_order_id'),
+                position_side=restored_position_side,
             )
             # Restore bars_held and PBT runner state
             if sym in self.strategy._positions:
