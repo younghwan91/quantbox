@@ -253,8 +253,8 @@ class QuantBoxSettings(BaseSettings):
     vs_d_vr_threshold: float = 0.50          # A1-D50: VR entry threshold (was 0.45)
     vs_d_sl: float = 0.01                    # 1% stop loss
     vs_d_tp: float = 0.12                    # 12% hard TP ceiling (R43: was 5%)
-    vs_d_trail_activate: float = 0.02        # R43: trailing after +2% gain
-    vs_d_trail_distance: float = 0.003       # R43: trail 0.3% behind peak
+    vs_d_trail_activate: float = 0.005       # r47: trailing after +0.5% gain (was 0.02)
+    vs_d_trail_distance: float = 0.002       # r47: trail 0.2% behind peak (was 0.003)
     vs_momentum_period: int = 8              # Momentum lookback for direction
 
     # ── S_d8 Parameters (Phase 2 — requires Binance Hedge Mode) ──
@@ -299,12 +299,14 @@ class QuantBoxSettings(BaseSettings):
     vs_ma_cluster_max_duration: int = 24     # Max 4h bars — zombie filter (R45)
     vs_ma_cluster_min_momentum: float = 0.01 # Min |momentum| for entry (R45)
     vs_ma_cluster_sl: float = 0.02           # 2% stop loss
-    vs_ma_cluster_tp: float = 0.08           # 8% take profit
+    vs_ma_cluster_tp: float = 0.08           # 8% hard TP ceiling (safety)
+    vs_ma_cluster_trail_activate: float = 0.04   # r47: activate trailing at +4% gain
+    vs_ma_cluster_trail_distance: float = 0.005  # r47: trail 0.5% behind peak
     vs_ma_cluster_max_hold_4h: int = 12      # 12 × 4h = 48h
     vs_ma_cluster_leverage: float = 21.0     # Half-Kelly: f*/2=4.33%, L=21 (L/N=2.1)
 
     # ── R46 F5 TBR Z-Score Gate (D_mom8 only) ──
-    vs_f5_tbr_enabled: bool = True           # Block counter-TBR D_mom8 entries
+    vs_f5_tbr_enabled: bool = False          # r47: disabled (trail_activate=0.5% handles bad trades)
     vs_f5_tbr_z_threshold: float = 0.5       # R46b optimal (p=0.029)
     vs_f5_tbr_z_window: int = 192            # Lookback bars (~2 days of 15m)
 
