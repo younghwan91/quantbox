@@ -25,15 +25,26 @@ Half-Kelly Leverage Derivation (20260304_ef55e2e strategy report):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import os
+
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-@dataclass
-class VolStraddleConfig:
+class VolStraddleConfig(BaseSettings):
     """VolStraddle (VR compression) strategy configuration.
 
     All values match R39-VR856 exactly for backtest-live parity.
+    Reads from .env / environment via env_prefix='VS_'.
     """
+
+    model_config = SettingsConfigDict(
+        env_prefix='VS_',
+        env_file='.env',
+        env_file_encoding='utf-8',
+        env_list_separator=',',
+        extra='ignore',
+    )
 
     # ── VR Computation ──
     vr_short: int = 8               # Short ATR period for VR (R39: was 7)
@@ -116,7 +127,7 @@ class VolStraddleConfig:
     # T3-Triple: optional high-conviction filter (score ≥ min_conviction_score).
     cw_enabled: bool = True          # Enable conviction-weighted sizing
     min_conviction_score: int = 0    # Min score to enter (0=all, 3=T3-Triple)
-    cw_multipliers: list[float] = field(default_factory=lambda: [
+    cw_multipliers: list[float] = Field(default_factory=lambda: [
         0.5,   # score 0 → 0.5x
         1.0,   # score 1 → 1.0x (baseline)
         1.5,   # score 2 → 1.5x
@@ -158,8 +169,8 @@ class VolStraddleConfig:
     f5_tbr_z_window: int = 192         # Lookback bars (~2 days of 15m)
 
     # ── Symbol Selection ──
-    symbol_whitelist: list[str] = field(default_factory=list)
-    exclude_symbols: list[str] = field(default_factory=lambda: [
+    symbol_whitelist: list[str] = Field(default_factory=list)
+    exclude_symbols: list[str] = Field(default_factory=lambda: [
         'USDCUSDT', 'TUSDUSDT', 'BUSDUSDT',
     ])
     min_volume_rank: int = 30
@@ -178,7 +189,7 @@ class VolStraddleConfig:
     ma_cluster_trail_distance: float = 0.005 # r47: trail 0.5% behind peak
     ma_cluster_max_hold_4h: int = 12         # 12 × 4h = 48h
     ma_cluster_leverage: float = 21.0        # Half-Kelly: f*/2=4.33%, L=0.0433×10/0.02≈21
-    ma_cluster_sma_periods: list[int] = field(
+    ma_cluster_sma_periods: list[int] = Field(
         default_factory=lambda: [20, 50, 100, 200],
     )
 
@@ -188,6 +199,23 @@ class VolStraddleConfig:
     lookback: int = 8               # Used for move calc in logging — not for signal
     threshold: float = 0.0          # Not used — signal is VR-based
     bar_interval_minutes: int = 15
+
+    @model_validator(mode='after')
+    def _populate_symbol_whitelist(self) -> 'VolStraddleConfig':
+        if not self.symbol_whitelist:
+            rb_whitelist = os.environ.get('RB_SYMBOL_WHITELIST', '')
+            if not rb_whitelist:
+                # pydantic-settings reads .env for VS_* fields but doesn't set
+                # os.environ — fall back to reading .env directly for RB_ fields.
+                try:
+                    from dotenv import dotenv_values
+                    rb_whitelist = dotenv_values('.env').get('RB_SYMBOL_WHITELIST', '')
+                except Exception:
+                    pass
+            if rb_whitelist:
+                object.__setattr__(self, 'symbol_whitelist',
+                    [s.strip() for s in rb_whitelist.split(',') if s.strip()])
+        return self
 
     @property
     def cost_per_side(self) -> float:
