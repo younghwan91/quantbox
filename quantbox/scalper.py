@@ -1881,6 +1881,8 @@ def main():
             s_squeeze_dur=settings.vs_s_squeeze_dur,
             s_sl=settings.vs_s_sl,
             s_tp=settings.vs_s_tp,
+            s_trail_activate=settings.vs_s_trail_activate,
+            s_trail_distance=settings.vs_s_trail_distance,
             straddle_enabled=settings.vs_straddle_enabled,
             max_hold_15m=settings.vs_max_hold_15m,
             max_hold_1h=settings.vs_max_hold_1h,

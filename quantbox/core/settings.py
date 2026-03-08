@@ -261,7 +261,9 @@ class QuantBoxSettings(BaseSettings):
     vs_s_vr_threshold: float = 0.55          # S VR entry threshold
     vs_s_squeeze_dur: int = 4                # Min squeeze duration (R39: was 8)
     vs_s_sl: float = 0.015                   # 1.5% SL per straddle leg
-    vs_s_tp: float = 0.05                    # 5% TP per straddle leg
+    vs_s_tp: float = 0.05                    # 5% hard TP ceiling per straddle leg
+    vs_s_trail_activate: float = 0.015       # r53: activate trail after +1.5% gain per leg
+    vs_s_trail_distance: float = 0.002       # r53: trail 0.2% behind peak
     vs_straddle_enabled: bool = True         # Straddle mode enabled
     vs_hedge_mode: bool = True               # Binance Hedge Mode (dualSidePosition=true)
 
