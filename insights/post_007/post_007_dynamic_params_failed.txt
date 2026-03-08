@@ -1,0 +1,27 @@
+I Tried Dynamic Parameters. Static Won.
+
+The idea made intuitive sense: classify the market into low, mid, and high volatility regimes based on BTC realized volatility percentile, then use different entry thresholds and stop sizes in each regime. Markets are clearly different across regimes — why use the same parameters for all of them?
+
+We ran 224 variants across a 6-year period, sweeping entry thresholds and stop sizes independently for each of the three volatility regimes. The data covered 50 symbols, 210,000+ bars, with regime classification applied in real time based on a 250-bar rolling percentile.
+
+The result was mixed in a specific way. Adaptive parameters improved EV per trade in 4 of 7 years — including 2024 (+18.1bp) and 2025 (+10.0bp), the years where static params had underperformed. But they degraded 2022 (−6.2bp) and produced a large miss in early 2026 (−24.5bp).
+
+In portfolio terms:
+
+EV per trade: +3.6bp improvement
+Profit factor: 1.280 → 1.311
+Annual return: 187.2% → 134.0% (−53pp)
+Max drawdown: 32.4% → 42.6%
+Calmar ratio: 5.8 → 3.1
+
+Better trades, fewer of them, with higher drawdown. The adaptive system found higher-quality setups in some conditions but removed 637 trades (28% of the total) in the process. At 10 portfolio slots, that reduction in trade frequency more than offset the per-trade improvement.
+
+The underlying reason seems to be that the signal itself already performs a form of regime filtering — in low-volatility conditions, fewer setups qualify naturally. Adding an explicit regime gate on top of that didn't improve selectivity meaningfully; it mostly reduced participation.
+
+The complexity cost is also real: 3 regimes × 6 parameters = 18 variables to monitor, with regime thresholds that are themselves a free parameter.
+
+Static params held a Calmar of 5.8 across all six years without a losing year. That kind of consistency is harder to improve than it looks.
+
+224 variants (Low/Mid/High vol sweep) · 6yr live Binance data · 50 USDT-M perpetuals
+
+#AlgoTrading #QuantFinance #CryptoTrading #Backtesting #MarketStructure

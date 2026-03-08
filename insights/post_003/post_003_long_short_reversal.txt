@@ -1,0 +1,21 @@
+The Long Bias That Took Six Years to Show Up
+
+Crypto has generally been a long-biased market, and most backtests reflect that. But looking at direction-specific performance over a longer window revealed something worth noting.
+
+We broke down 17,165 trades across 6 years of Binance perpetual futures — 50 symbols, long and short separately, year by year.
+
+In 2020-21, long positions averaged 6.54% expected value per trade. Short positions averaged 4.71%. That's a meaningful gap — longs were consistently earning more per trade, and the difference held across the full year.
+
+Over time, that gap narrowed steadily. By 2023-24, it had compressed to 2.83% vs 2.11%. In 2024-25, the lines almost crossed. In 2025-26, they did: shorts averaged 2.59% EV per trade, longs 2.35%.
+
+Win rate followed a similar pattern. Long win rate fell from 66.4% in 2020-21 to 51.5% in 2025-26 — a drop of nearly 15 percentage points over six years. Short win rate fell too, but only 9.2pp, and has partially recovered in recent periods.
+
+The 2020-2022 period saw a lot of aggressive upward momentum across crypto — conditions where holding longs through volatile moves generated outsized wins. The market structure after 2022 shifted: more range-bound, more liquidation-driven, assets moving more symmetrically in both directions.
+
+Strategies built primarily on 2020-2022 data may carry a long bias that no longer reflects current conditions. The aggregate 6-year numbers still show a slight long advantage, but the trend over the most recent years points the other way.
+
+It's probably worth checking long vs short performance separately in any multi-year backtest, especially if the data window includes 2020-2022.
+
+50 USDT-M perpetuals · 6yr live Binance data · 17,165 trades · 8,452 long / 8,713 short
+
+#AlgoTrading #QuantFinance #CryptoTrading #Backtesting #MarketStructure
