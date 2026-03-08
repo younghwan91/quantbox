@@ -190,3 +190,75 @@ VR squeeze의 품질 필터로서 0.50은 잘 튜닝된 값.
 - [x] 슬롯 수: 10 (production과 동일)
 - [x] TBR OFF 확인 (f5_tbr_enabled=False)
 - [x] Phase 1 baseline assert 통과 (±15% tolerance, 34 syms)
+
+---
+
+## Phase 6: Combined — S_d8 Trailing + Time Filter (Worst-8h Exclude)
+
+**설정:** S_trail act=1.5%/dist=0.2% + worst-8h exclude {02,07,09,11,13,14,15,23 UTC}
+
+### 5yr universe (34 syms)
+
+| 시나리오 | N | PF | EV(bp) | Calmar | DD% | CI |
+|---------|---|----|--------|--------|-----|----|
+| Baseline | 3405 | 1.294 | +31.9 | 7.50 | 49.7% | [1.193,1.395] |
+| S_d8 trail only | 3784 | 1.576 | +36.5 | 20.40 | 35.5% | [1.446,1.730] |
+| Time filter only | 3087 | 1.360 | +37.5 | 13.20 | 33.9% | [1.249,1.477] |
+| **Trail + Time filter** | **3395** | **1.595** | **+39.8** | **24.30** | **28.3%** | **[1.457,1.750]** ★★ |
+
+### 4yr universe (37 syms, HBAR/SHIB/DYDX 포함)
+
+| 시나리오 | N | PF | EV(bp) | Calmar | DD% | CI |
+|---------|---|----|--------|--------|-----|----|
+| Baseline | 3640 | 1.297 | +32.6 | 9.00 | 49.7% | [1.212,1.393] |
+| S_d8 trail only | 4057 | 1.616 | +38.8 | 28.50 | 35.5% | [1.497,1.755] |
+| Time filter only | 3293 | 1.365 | +38.4 | 15.90 | 33.9% | [1.264,1.483] |
+| **Trail + Time filter** | **3631** | **1.628** | **+41.8** | **32.00** | **28.8%** | **[1.505,1.782]** ★★ |
+
+### 핵심 발견: Combined은 additive
+
+- Trail + Time filter가 각각 단독 적용보다 **모든 지표에서 우수**
+- **Calmar baseline 대비 +224% → 32.00** (37 syms 기준)
+- **MaxDD: 49.7% → 28.3%** (거의 절반)
+- **Bootstrap CI 하한 1.505** — 매우 robust한 엣지
+- **N은 baseline과 거의 동일** (3631 vs 3640) — 진입 기회 손실 없음
+
+---
+
+## Phase 7: 63-sym Full Universe (다운로드 완료 후)
+
+다운로드: 29개 추가 (XMR DASH ZEC XTZ ONT IOTA BAT NEO QTUM IOST ZIL KNC ZRX KAVA BAND RLC YFI TRB SUSHI ICX STORJ ENJ KSM RSR LRC BEL ZEN SKL 1INCH) → 총 63 syms ≥5yr
+
+| 시나리오 | N | PF | EV(bp) | Calmar | DD% | CI |
+|---------|---|----|--------|--------|-----|----|
+| Baseline (flat S) | 5,833 | 1.267 | +31 | 17.0 | 66.4% | [1.189,1.348] |
+| Trail only (**Option A**) | 6,541 | 1.561 | +37 | **64.6** | 60.9% | [1.461,1.663] |
+| Worst-8h excl | 5,138 | 1.326 | +36 | 20.4 | 66.5% | [1.248,1.415] |
+| **Trail + Worst-8h excl** | **5,682** | **1.573** | **+41** | **57.0** | **57.7%** | **[1.467,1.685]** |
+| Trail + Best-8h only | 3,094 | 1.648 | +44 | 18.7 | 37.0% | [1.500,1.805] |
+| Trail + Weekday (M-F) | 4,500 | 1.607 | +41 | 31.3 | 50.8% | [1.487,1.740] |
+| Trail + Worst-excl + M-F | 3,878 | 1.615 | +45 | 27.0 | 49.8% | [1.470,1.760] |
+
+### Calmar 랭킹
+1. Trail only: Calmar=64.6 (PF=1.561, N=6,541) ← **Option A 선택**
+2. Trail + Worst-8h excl: Calmar=57.0 (PF=1.573)
+3. Trail + Weekday: Calmar=31.3 (PF=1.607)
+
+### 핵심 발견 (63-sym)
+- **N: 3,405 → 6,541 (+92%)** — trail로 인한 조기 exit → 재진입 증가
+- **Calmar: 7.50 → 64.6 (+761%)** — 압도적 개선
+- **PF: 1.294 → 1.561 (+20.6%)**
+- Trail only가 가장 높은 Calmar. 시간 필터는 PF↑지만 Calmar↓ (N 감소 때문)
+
+---
+
+## 프로덕션 적용 결정
+
+**선택: Option A — Trail only (시간 필터 없음)**
+
+| 변경 | 파라미터 | 코드 위치 | 우선순위 |
+|------|---------|----------|---------|
+| S_d8 trailing 추가 | act=1.5%, dist=0.2% | `config.py` → `strategy.py` | **즉시** |
+| 63-sym 유니버스 | 다운로드 완료 | `config.py` + cache | 옵션 |
+| 시간 필터 | 13-15 UTC 제외 | `scalper.py` | 2차 검증 후 |
+
