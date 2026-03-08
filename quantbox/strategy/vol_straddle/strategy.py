@@ -773,15 +773,14 @@ class VolStraddleStrategy:
         if worst_gain < pos.get('worst_pnl', 0.0):
             pos['worst_pnl'] = worst_gain
 
-        # ── Straddle: unchanged simple SL/TP/max_hold exit ──
+        # ── Select trail params based on position type ──
         is_straddle = pos.get('is_straddle', False)
-        if is_straddle:
-            return self._exit_simple(pos, symbol, worst_gain, best_gain,
-                                     sl_pct, tp_pct, max_hold)
-
-        # ── Select trail params based on strategy type (r47) ──
         strategy_type = pos.get('strategy_type', 'vr_squeeze')
-        if strategy_type == 'ma_cluster':
+        if is_straddle:
+            # r53 Option A: per-leg trailing for S_d8 straddle
+            trail_activate = self.config.s_trail_activate
+            trail_distance = self.config.s_trail_distance
+        elif strategy_type == 'ma_cluster':
             trail_activate = self.config.ma_cluster_trail_activate
             trail_distance = self.config.ma_cluster_trail_distance
         else:

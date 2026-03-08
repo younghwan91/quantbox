@@ -1,7 +1,8 @@
-"""Tests for R43 Trailing Stop exit logic.
+"""Tests for trailing stop exit logic.
 
 Validates that directional trades use trail (activate→distance→hard TP),
-and straddle trades use unchanged simple SL/TP exit.
+straddle trades use s_trail params (r53 Option A: act=1.5%/dist=0.2%),
+and MA cluster uses ma_cluster_trail params.
 """
 from __future__ import annotations
 
@@ -188,29 +189,62 @@ class TestHardTP:
 class TestStraddleUnchanged:
     """Straddle legs use simple SL/TP exit (no trail)."""
 
-    def test_straddle_tp_at_5pct(self, strat: VolStraddleStrategy):
-        """Straddle TP fires at 5% (unchanged from baseline)."""
+    def test_straddle_trail_activates(self, strat: VolStraddleStrategy):
+        """Straddle trailing stop activates at s_trail_activate (1.5%)."""
         _open_long(strat, symbol='ETHUSDT', entry=100.0, is_straddle=True)
-        result = strat.update_position('ETHUSDT', 105.0,
-                                       current_high=105.5, current_low=104.0)
-        assert result == 'target'
+        result = strat.update_position('ETHUSDT', 101.6,
+                                       current_high=101.6, current_low=101.5)
+        pos = strat._positions['ETHUSDT']
+        assert pos['trail_active'] is True
+        assert result is None  # activated but not yet hit
 
-    def test_straddle_sl_at_1_5pct(self, strat: VolStraddleStrategy):
-        """Straddle SL fires at 1.5%."""
+    def test_straddle_trail_hits(self, strat: VolStraddleStrategy):
+        """Straddle trail exit: gain reaches 1.5%, then retraces 0.2%."""
+        _open_long(strat, symbol='ETHUSDT', entry=100.0, is_straddle=True)
+        # Push to +2% to activate and set peak
+        strat.update_position('ETHUSDT', 102.0,
+                               current_high=102.0, current_low=101.8)
+        pos = strat._positions['ETHUSDT']
+        assert pos['trail_active'] is True
+        assert pos['peak_gain'] == pytest.approx(0.02, abs=1e-4)
+        # Trail stop = peak(2%) - dist(0.2%) = 1.8% → retrace to 1.7% triggers
+        result = strat.update_position('ETHUSDT', 101.5,
+                                       current_high=101.9, current_low=101.7)
+        assert result == 'trailing_stop'
+
+    def test_straddle_no_trail_before_activate(self, strat: VolStraddleStrategy):
+        """Straddle trailing does NOT trigger before s_trail_activate threshold."""
+        _open_long(strat, symbol='ETHUSDT', entry=100.0, is_straddle=True)
+        # +1.0% — below activate threshold of 1.5%
+        result = strat.update_position('ETHUSDT', 101.0,
+                                       current_high=101.0, current_low=100.8)
+        pos = strat._positions['ETHUSDT']
+        assert pos.get('trail_active', False) is False
+        assert result is None
+
+    def test_straddle_sl_fires_without_trail(self, strat: VolStraddleStrategy):
+        """Straddle SL fires at s_sl when trail not active."""
         _open_long(strat, symbol='ETHUSDT', entry=100.0, is_straddle=True)
         result = strat.update_position('ETHUSDT', 98.0,
                                        current_high=100.2, current_low=98.4)
         assert result == 'stop_loss'
 
-    def test_straddle_no_trail(self, strat: VolStraddleStrategy):
-        """Straddle does NOT activate trailing stop."""
+    def test_straddle_hard_tp_ceiling(self, strat: VolStraddleStrategy):
+        """Straddle hard TP ceiling fires at s_tp=5% when trail doesn't retrace enough."""
         _open_long(strat, symbol='ETHUSDT', entry=100.0, is_straddle=True)
-        # Push to +3% — still no trail (straddle uses simple SL/TP)
-        result = strat.update_position('ETHUSDT', 103.0,
-                                       current_high=103.0, current_low=102.0)
-        pos = strat._positions['ETHUSDT']
-        assert pos.get('trail_active', False) is False
-        assert result is None  # 3% < TP=5%, no exit
+        # high=105.5 (+5.5%), low=105.4 (+5.4%) — trail_stop=5.5-0.2=5.3%, worst=5.4%>5.3%
+        # → trail NOT triggered; hard TP=5% fires via best_gain=5.5%
+        result = strat.update_position('ETHUSDT', 105.4,
+                                       current_high=105.5, current_low=105.4)
+        assert result == 'target'
+
+    def test_straddle_uses_s_trail_params(self, strat: VolStraddleStrategy):
+        """Straddle uses s_trail_activate/s_trail_distance, not d_trail params."""
+        cfg = strat.config
+        assert cfg.s_trail_activate == pytest.approx(0.015)
+        assert cfg.s_trail_distance == pytest.approx(0.002)
+        # Ensure they differ from D_mom8 params
+        assert cfg.s_trail_activate != cfg.d_trail_activate
 
 
 class TestMaxHold:
