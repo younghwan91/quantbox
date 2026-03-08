@@ -1,0 +1,19 @@
+The Slot Count Sweet Spot
+
+Running more simultaneous positions tends to feel like a straightforward way to generate more return. More setups, more compounding. But there's a point where adding slots starts to work against you on a risk-adjusted basis.
+
+We swept 1 through 15 simultaneous positions on the same strategy across 6 years of Binance USDT-M data, tracking return, drawdown, and Calmar ratio (annual return / max drawdown) at each level.
+
+Calmar improved steadily from 1 slot (2.2) through 10 slots (5.8). But at 12 slots, it dropped to 5.4 — and the reason is visible in the data: drawdown jumped from 32.4% to 35.3% while incremental return gains were small. At 15 slots, return climbed further but drawdown stayed elevated, keeping Calmar at 5.5.
+
+The mechanism behind this is portfolio correlation. Each added slot runs a signal independently, but during volatile periods — the ones that determine max drawdown — many of those signals fire in the same direction at the same time. The drawdown at 15 slots isn't the average of 15 independent drawdowns; it reflects periods where many positions are simultaneously underwater.
+
+There's also a diminishing opportunity effect. Going from 1 to 5 slots gives a large jump in trade frequency (0.45 → 0.97 trades/day) because there are genuinely more qualifying setups available. Going from 10 to 15 slots adds only 0.01 trades/day — the strategy is largely saturated.
+
+The aggression score (annual return × Calmar) captures this trade-off: it peaked at 10 slots (1,086) and fell at 12 (1,024) despite higher raw return.
+
+Whether the right slot count is exactly 10 depends on the strategy and time period. But the shape of the curve — fast gains early, plateau then degradation in risk-adjusted terms — tends to appear consistently. Worth mapping out for any multi-position system.
+
+132 variants · 1–15 slot sweep · 6yr live Binance data · USDT-M perpetuals
+
+#AlgoTrading #QuantFinance #CryptoTrading #RiskManagement #Backtesting

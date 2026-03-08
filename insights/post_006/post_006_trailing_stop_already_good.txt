@@ -1,0 +1,19 @@
+Your Trailing Stop Is Probably Already Good Enough
+
+There's a tempting assumption that trailing stop logic is something you can meaningfully improve through complex mechanics — dynamic tightening, step-up phases, volume-weighted floors. We spent a research cycle testing 24 variants to see if that was true.
+
+The baseline used a simple volatility-based stop that kicked in after a partial take-profit. We then tested: step-up triggers, multi-phase tightening, time-based linear relaxation, volume-weighted floors, gain-adaptive widths, extended max holds, POC-based floors, and combinations.
+
+Out of 24 variants, the best improvement was +1.8% Calmar (baseline 1004 → 1022). Most variants landed within 1% of the baseline. Several — step-up triggers, max hold extensions, VWMA floors — had exactly zero effect.
+
+The reason the step-up and hold-extension variants did nothing is instructive: after hitting the first profit target, the average position exited in 6.9 bars under baseline conditions. It never reached the step-up trigger levels. Extending max hold had no effect because exactly zero positions were hitting the time limit anyway — they were exiting naturally through the trail.
+
+This points to a mathematical ceiling for trailing-only improvements. Positions that hit the runner phase (post-TP1) represent 14.7% of total trades, and their win rate is already 99.9%. Making those exits 10% more profitable shifts overall R:R by roughly 0.01. The loss side of the equation — 70.6% of trades — is determined by the entry stop logic, not the trailing mechanism.
+
+The one variant that actually helped was a tighter trail distance (0.7× the baseline width). Counterintuitively, exiting runners faster (4.6 bars vs 6.9) freed slots for new entries, generating 190 additional trades and +1.6% total return. The mechanism was slot turnover, not better per-runner exits.
+
+If you're spending optimization time on trailing stop complexity, it may be worth checking how much of your trade population actually reaches the runner phase — and what's determining exits on the majority that don't.
+
+24 trailing stop variants · 6yr live Binance data · 50 USDT-M perpetuals · 16,584 base trades
+
+#AlgoTrading #QuantFinance #CryptoTrading #Backtesting #SystematicTrading
