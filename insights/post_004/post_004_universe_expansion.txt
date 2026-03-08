@@ -1,0 +1,29 @@
+More Symbols, More Alpha?
+
+We ran the same strategy on 20 symbols for 3 years, then repeated it on 30, 40, and 50.
+
+The 50-symbol run returned more than double what the 20-symbol run did. The drawdown increased by 0.3 percentage points.
+
+The starting assumption was that a larger watchlist would introduce more noise — lower-quality signals diluting the good ones. What we found was the opposite.
+
+When the universe expands from 20 to 50 symbols, the selection filter has more candidates to evaluate. It doesn't lower the bar — the same criteria apply — it just has more material to work with, and in practice it consistently found setups with slightly better characteristics.
+
+The numbers across all three years:
+
+Total return: +3,160% (20 symbols) → +6,812% (50 symbols), a +116% increase
+Max drawdown: 9.6% → 9.9%, essentially flat
+Average PnL per trade: 1.21% → 1.34%
+Sharpe ratio: 5.98 → 7.34
+Trade frequency: 5.4 → 10.6 trades/day
+
+The pattern held across different market conditions. In the strongest year, the 50-symbol run outperformed by +47%. In the weakest year, the gap was +56% — the larger universe didn't become fragile when conditions got harder.
+
+Trade frequency nearly doubling matters for compounding. More frequent, similarly-quality trades compounds faster over the same period.
+
+This doesn't mean a larger universe always helps — it likely depends on whether the selection filter is actually filtering. If every symbol passes through indiscriminately, adding symbols probably would add noise. The key question is whether your criteria are strict enough that more candidates genuinely improve the pool being selected from.
+
+Worth testing if you haven't run this comparison.
+
+3yr live Binance data · 20 / 30 / 40 / 50 USDT-M perpetuals · same strategy, same slot count, same logic
+
+#AlgoTrading #QuantFinance #CryptoTrading #Backtesting #SystematicTrading
