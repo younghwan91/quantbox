@@ -1,0 +1,21 @@
+Your 3-Year Backtest Might Be Missing the Hardest Part
+
+One thing that keeps coming up in longer backtests: strategies that look clean on 3 years can behave very differently once crash regimes are included.
+
+We ran 19 variants through 6 years of Binance perpetuals — COVID (Mar 2020), the China mining ban (May 2021), Luna (May 2022), and FTX (Nov 2022) all included.
+
+The variant that ranked best on the 3-year window had 6.7% max drawdown. Solid numbers. Add the crash years and that same variant reached 13.2% — nearly double.
+
+What's behind the gap? During severe market stress, correlation across crypto assets spikes sharply. Assets that move somewhat independently in normal conditions tend to fall together. A strategy holding multiple open positions in that environment ends up with more correlated exposure than the backtest history suggests.
+
+The variant that held up best across all four crash periods was running just 2 simultaneous positions instead of 4. Its drawdown grew by only 0.6 percentage points. Meanwhile others reached 13–25%.
+
+It wasn't the highest-performing variant on the 3-year window. It gave up some upside in calm markets in exchange for a smaller correlated exposure during the periods that mattered most.
+
+Profit factor dropped for all 19 variants when extending from 3 to 6 years — roughly from 2.0–2.3 down to 1.26–1.35. That's expected when you add genuinely hard regimes. The more useful question turned out to be which configs degraded the least, and whether the edge held at all.
+
+Worth checking in any backtest: what happens to drawdown when you include at least one period where most of your assets fall at the same time.
+
+50 USDT-M perpetuals · 6yr live Binance data · 19 variants · COVID / China ban / Luna / FTX included
+
+#AlgoTrading #QuantFinance #CryptoTrading #Backtesting #RiskManagement

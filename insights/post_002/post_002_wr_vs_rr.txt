@@ -1,0 +1,21 @@
+Win Rate Tells Half the Story
+
+Win rate tends to get a lot of attention when evaluating strategies. Higher feels safer. But there's a related number that's worth looking at alongside it: the breakeven win rate.
+
+Breakeven WR is simply 1 / (1 + R:R). It's the win rate at which the strategy stops making money. The gap between your actual win rate and that breakeven point is your real buffer — how much your win rate can deteriorate before the edge disappears.
+
+We compared 5 exit configurations across 6 years of Binance data, tested through bull, choppy sideways, and bear market regimes.
+
+The baseline had the highest win rate: 68.5%. But its R:R was 0.6, which put the breakeven at 62.5%. That's a safety margin of just 6 percentage points. In choppy or mean-reverting conditions, win rates can compress quickly — and 6pp doesn't leave much room.
+
+The other configurations ran lower win rates (57–67%) but higher R:R ratios (1.2–1.7). Their breakeven win rates fell to 38–45%, giving safety margins of 19–22 percentage points.
+
+Across all three market regimes — bull, chop, and bear — the lower-WR configurations showed more stable profit factors. The high-WR config performed well in trending conditions, but its buffer shrank considerably when the market regime shifted.
+
+The reason is structural: win rate is sensitive to market conditions. A strategy that wins 68% of the time in trending markets might win 58% in choppy ones. R:R, on the other hand, is determined by exit logic and doesn't shift as dramatically with regime changes.
+
+Breakeven win rate = 1 / (1 + R:R). Worth calculating for any strategy before sizing up.
+
+50 USDT-M perpetuals · 6yr live Binance data · 5 exit configurations · Bull / Chop / Bear regime classification
+
+#AlgoTrading #QuantFinance #CryptoTrading #RiskManagement #Backtesting
