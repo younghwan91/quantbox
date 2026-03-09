@@ -388,7 +388,7 @@ class ReconciliationMixin:
                             f"time={ts_str}"
                         )
                 else:
-                    logger.error(f"  [NO MATCHING FILLS FOUND in last 50 trades]")
+                    logger.error("  [NO MATCHING FILLS FOUND in last 50 trades]")
 
                 if algo_audit:
                     logger.error(
