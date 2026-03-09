@@ -48,9 +48,7 @@ class TestBtcDirectionalNumba:
         """Long entry when alt crashes AND BTC falling → should trigger."""
         close = _make_crash(100, 50, 0.06)
         btc = _make_btc(100, 50, -0.02)  # BTC falling
-        sigs = compute_signals_with_btc_directional(
-            close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32
-        )
+        sigs = compute_signals_with_btc_directional(close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32)
         # Should have a long entry around bar 49
         assert np.any(sigs > 0), "Should enter long when BTC also falling"
 
@@ -58,9 +56,7 @@ class TestBtcDirectionalNumba:
         """Long entry when alt crashes but BTC rising → should block."""
         close = _make_crash(100, 50, 0.06)
         btc = _make_btc(100, 50, +0.02)  # BTC rising
-        sigs = compute_signals_with_btc_directional(
-            close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32
-        )
+        sigs = compute_signals_with_btc_directional(close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32)
         # No signal at crash bar — BTC rising blocks long
         assert sigs[49] == 0, "Should NOT enter long when BTC is rising"
 
@@ -68,18 +64,14 @@ class TestBtcDirectionalNumba:
         """Short entry when alt surges AND BTC rising → should trigger."""
         close = _make_crash(100, 50, -0.06)  # Negative crash = surge
         btc = _make_btc(100, 50, +0.02)  # BTC rising
-        sigs = compute_signals_with_btc_directional(
-            close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32
-        )
+        sigs = compute_signals_with_btc_directional(close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32)
         assert np.any(sigs < 0), "Should enter short when BTC also rising"
 
     def test_short_blocked_btc_falling(self):
         """Short entry when alt surges but BTC falling → should block."""
         close = _make_crash(100, 50, -0.06)  # Surge
         btc = _make_btc(100, 50, -0.02)  # BTC falling
-        sigs = compute_signals_with_btc_directional(
-            close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32
-        )
+        sigs = compute_signals_with_btc_directional(close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32)
         assert sigs[49] == 0, "Should NOT enter short when BTC is falling"
 
     def test_exit_conditions_unchanged(self):
@@ -97,9 +89,7 @@ class TestBtcDirectionalNumba:
         for i in range(55, 200):
             close[i] = target_price * 1.1
 
-        sigs = compute_signals_with_btc_directional(
-            close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32
-        )
+        sigs = compute_signals_with_btc_directional(close, btc, 8, 0.045, 0.3, 1.0, 10, 0.0, 32)
         # Should exit within max_hold bars
         held = 0
         entered = False
@@ -115,8 +105,9 @@ class TestBtcDirectionalNumba:
     def test_no_btc_data_returns_flat(self):
         """When btc_close is too short, on_bar returns 0."""
         cfg = RubberBandConfig(
-            entry_mode='btc_directional',
-            btc_directional_enabled=True, btc_directional_period=32,
+            entry_mode="btc_directional",
+            btc_directional_enabled=True,
+            btc_directional_period=32,
         )
         strategy = RubberBandStrategy(cfg)
         close = _make_crash(100, 50, 0.06)
@@ -131,8 +122,9 @@ class TestOnBarRouting:
     def test_enabled_uses_btc_directional(self):
         """When enabled + btc data available, uses BTC directional."""
         cfg = RubberBandConfig(
-            entry_mode='btc_directional',
-            btc_directional_enabled=True, btc_directional_period=32,
+            entry_mode="btc_directional",
+            btc_directional_enabled=True,
+            btc_directional_period=32,
         )
         strategy = RubberBandStrategy(cfg)
         close = _make_crash(100, 50, 0.06)
@@ -147,7 +139,7 @@ class TestOnBarRouting:
 
     def test_disabled_ignores_btc_direction(self):
         """When disabled, falls back to plain compute_signals."""
-        cfg = RubberBandConfig(entry_mode='raw', btc_directional_enabled=False)
+        cfg = RubberBandConfig(entry_mode="raw", btc_directional_enabled=False)
         strategy = RubberBandStrategy(cfg)
         close = _make_crash(100, 50, 0.06)
         btc_rising = _make_btc(100, 50, +0.02)
@@ -157,7 +149,7 @@ class TestOnBarRouting:
 
     def test_no_btc_data_falls_through(self):
         """When btc_close is None, uses plain compute_signals."""
-        cfg = RubberBandConfig(entry_mode='btc_directional', btc_directional_enabled=True)
+        cfg = RubberBandConfig(entry_mode="btc_directional", btc_directional_enabled=True)
         strategy = RubberBandStrategy(cfg)
         close = _make_crash(100, 50, 0.06)
 
@@ -171,7 +163,7 @@ class TestConfigDefaults:
     def test_default_confidence(self):
         """Default entry_mode is confidence (v6.0)."""
         cfg = RubberBandConfig()
-        assert cfg.entry_mode == 'confidence'
+        assert cfg.entry_mode == "confidence"
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_enabled is True

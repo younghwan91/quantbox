@@ -32,6 +32,7 @@ from quantbox.backtest.trade_sim import (
 #  Helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def _flat_price(n: int, base: float = 100.0) -> tuple:
     """Flat price series (no movement)."""
     close = np.full(n, base)
@@ -62,7 +63,15 @@ class TestSimDirectionalTrades:
         sig = np.zeros(100, dtype=np.int8)
         dire = np.zeros(100, dtype=np.int8)
         pnl, ent, ext = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 50, 0.0008,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            50,
+            0.0008,
         )
         assert len(pnl) == 0
 
@@ -81,7 +90,15 @@ class TestSimDirectionalTrades:
         high[5] = 106.0  # +6% from entry
 
         pnl, ent, ext = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            50,
+            0.0,
         )
         assert len(pnl) == 1
         assert ent[0] == 0
@@ -102,7 +119,15 @@ class TestSimDirectionalTrades:
         low[3] = 98.0  # -2% from entry
 
         pnl, ent, ext = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            50,
+            0.0,
         )
         assert len(pnl) == 1
         assert pnl[0] == pytest.approx(-0.01, abs=1e-9)  # SL = -1%
@@ -122,7 +147,15 @@ class TestSimDirectionalTrades:
         low[4] = 94.0
 
         pnl, ent, ext = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            50,
+            0.0,
         )
         assert len(pnl) == 1
         assert pnl[0] == pytest.approx(0.05, abs=1e-9)
@@ -141,7 +174,15 @@ class TestSimDirectionalTrades:
         high[2] = 102.0
 
         pnl, ent, ext = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            50,
+            0.0,
         )
         assert len(pnl) == 1
         assert pnl[0] == pytest.approx(-0.01, abs=1e-9)
@@ -156,7 +197,15 @@ class TestSimDirectionalTrades:
         dire[0] = 1
 
         pnl, ent, ext = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 5, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            5,
+            0.0,
         )
         assert len(pnl) == 1
         # Flat price → PnL ≈ 0 (close-based exit)
@@ -175,7 +224,15 @@ class TestSimDirectionalTrades:
         cost = 0.001
 
         pnl, _, _ = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 5, cost,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            5,
+            cost,
         )
         assert pnl[0] == pytest.approx(-cost, abs=1e-9)
 
@@ -189,7 +246,15 @@ class TestSimDirectionalTrades:
         # dire[0] = 0 → should be skipped
 
         pnl, _, _ = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            50,
+            0.0,
         )
         assert len(pnl) == 0
 
@@ -211,7 +276,15 @@ class TestSimDirectionalTrades:
         low[12] = 98.0
 
         pnl, ent, ext = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            50,
+            0.0,
         )
         assert len(pnl) == 2
         assert pnl[0] == pytest.approx(0.05)
@@ -228,12 +301,20 @@ class TestSimDirectionalTrades:
         dire = np.zeros(n, dtype=np.int8)
         dire[0] = 1
         # Bar 1: both SL and TP could trigger
-        low[1] = 98.0   # SL hit
+        low[1] = 98.0  # SL hit
         high[1] = 106.0  # TP hit
         # SL is checked first → trade should end with -1%
 
         pnl, _, _ = sim_directional_trades(
-            close, high, low, sig, dire, 0.01, 0.05, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            0.01,
+            0.05,
+            50,
+            0.0,
         )
         assert len(pnl) == 1
         assert pnl[0] == pytest.approx(-0.01)
@@ -251,7 +332,14 @@ class TestSimStraddleTrades:
         close, high, low = _flat_price(100)
         sig = np.zeros(100, dtype=np.int8)
         pnl, _, _ = sim_straddle_trades(
-            close, high, low, sig, 0.015, 0.05, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            0.015,
+            0.05,
+            50,
+            0.0,
         )
         assert len(pnl) == 0
 
@@ -263,7 +351,14 @@ class TestSimStraddleTrades:
         sig[0] = 1
 
         pnl, _, _ = sim_straddle_trades(
-            close, high, low, sig, 0.015, 0.05, 5, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            0.015,
+            0.05,
+            5,
+            0.0,
         )
         assert len(pnl) == 1
         # Both legs exit at same price → long = 0%, short = 0%, net = 0
@@ -278,7 +373,14 @@ class TestSimStraddleTrades:
         cost = COST_STRADDLE
 
         pnl, _, _ = sim_straddle_trades(
-            close, high, low, sig, 0.015, 0.05, 5, cost,
+            close,
+            high,
+            low,
+            sig,
+            0.015,
+            0.05,
+            5,
+            cost,
         )
         assert pnl[0] == pytest.approx(-cost, abs=1e-9)
 
@@ -291,13 +393,20 @@ class TestSimStraddleTrades:
         sig = np.zeros(n, dtype=np.int8)
         sig[0] = 1
         # Price goes up → long TP, short SL
-        high[3] = 106.0   # long TP at +5%
+        high[3] = 106.0  # long TP at +5%
         # Short SL triggers at entry*(1+sl) = 100*1.015 = 101.5
         # high[3]=106 > 101.5 → short SL also fires
 
         sl, tp = 0.015, 0.05
         pnl, _, _ = sim_straddle_trades(
-            close, high, low, sig, sl, tp, 50, 0.0,
+            close,
+            high,
+            low,
+            sig,
+            sl,
+            tp,
+            50,
+            0.0,
         )
         assert len(pnl) == 1
         # Long TP = +5%, Short SL = -1.5%, net = 3.5%
@@ -379,7 +488,7 @@ class TestPortfolioSim:
         """Trades are processed in entry-time order regardless of input order."""
         trades = [
             ("ETHUSDT", 10, 20, 0.02),
-            ("BTCUSDT", 0, 5, 0.01),   # earlier but listed second
+            ("BTCUSDT", 0, 5, 0.01),  # earlier but listed second
         ]
         pnl = portfolio_sim(trades, 5)
         assert len(pnl) == 2
@@ -461,7 +570,7 @@ class TestComputeMetrics:
         pnl = np.array([0.30, 0.30, 0.30])  # each +30%
         m = compute_metrics(pnl, 2.0)
         expected_equity = 1.3 * 1.3 * 1.3  # = 2.197
-        expected_ann = (expected_equity ** 0.5 - 1.0) * 100
+        expected_ann = (expected_equity**0.5 - 1.0) * 100
         assert m["ann_ret_pct"] == pytest.approx(expected_ann, abs=0.5)
 
 
@@ -534,7 +643,9 @@ class TestCollectTrades:
         vr[250] = 0.30  # trigger
         mom = np.full(n, 0.001, dtype=np.float64)  # positive momentum
         return {
-            "close": close, "high": high, "low": low,
+            "close": close,
+            "high": high,
+            "low": low,
             "volume": np.ones(n, dtype=np.float64),
             "vr_8_56": vr,
             "mom_8": mom,
@@ -542,15 +653,13 @@ class TestCollectTrades:
         }
 
     def test_empty_data(self):
-        cfg = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55,
-               "s_dur": 4, "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
+        cfg = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 4, "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
         trades = collect_trades(cfg, {}, {}, {}, "D_mom8")
         assert trades == []
 
     def test_15m_only_directional(self):
         """Collect trades from 15m data only (1h/4h empty)."""
-        cfg = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55,
-               "s_dur": 4, "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
+        cfg = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 4, "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
         data_15m = {"BTCUSDT": self._make_symbol_data()}
         trades = collect_trades(cfg, data_15m, {}, {}, "D_mom8")
         # Should find at least 1 trade from the VR trigger at bar 250
@@ -560,8 +669,7 @@ class TestCollectTrades:
 
     def test_no_overlap_per_symbol(self):
         """Per-symbol dedup prevents overlapping trades."""
-        cfg = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55,
-               "s_dur": 4, "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
+        cfg = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 4, "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
         d = self._make_symbol_data(1000)
         # Multiple VR triggers close together
         d["vr_8_56"][250] = 0.30
@@ -576,14 +684,11 @@ class TestCollectTrades:
                 e1, x1 = btc_trades[i]
                 e2, x2 = btc_trades[j]
                 # Should not overlap
-                assert not (e1 <= x2 and e2 <= x1), (
-                    f"Overlap detected: ({e1},{x1}) vs ({e2},{x2})"
-                )
+                assert not (e1 <= x2 and e2 <= x1), f"Overlap detected: ({e1},{x1}) vs ({e2},{x2})"
 
     def test_trade_tuple_format(self):
         """Each trade is (symbol, entry_bar, exit_bar, pnl)."""
-        cfg = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55,
-               "s_dur": 4, "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
+        cfg = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 4, "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
         data_15m = {"BTCUSDT": self._make_symbol_data()}
         trades = collect_trades(cfg, data_15m, {}, {}, "D_mom8")
         if trades:
@@ -607,11 +712,11 @@ class TestPipelineIntegration:
         """Synthetic but complete pipeline test."""
         # Create trades manually
         trades = [
-            ("BTCUSDT", 0, 10, 0.05),     # win
-            ("ETHUSDT", 5, 15, -0.01),     # loss (overlaps with BTC)
-            ("BTCUSDT", 20, 30, -0.01),    # loss
-            ("SOLUSDT", 25, 35, 0.03),     # win (overlaps with BTC#2)
-            ("ETHUSDT", 40, 50, 0.02),     # win
+            ("BTCUSDT", 0, 10, 0.05),  # win
+            ("ETHUSDT", 5, 15, -0.01),  # loss (overlaps with BTC)
+            ("BTCUSDT", 20, 30, -0.01),  # loss
+            ("SOLUSDT", 25, 35, 0.03),  # win (overlaps with BTC#2)
+            ("ETHUSDT", 40, 50, 0.02),  # win
         ]
         # With max_concurrent=2
         pnl = portfolio_sim(trades, 2)

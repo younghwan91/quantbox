@@ -20,15 +20,15 @@ from quantbox.strategy.vol_straddle.signals import (
 from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy
 
 __all__ = [
-    'VolStraddleConfig',
-    'VolStraddleStrategy',
-    'check_ma_cluster',
-    'compute_momentum',
-    'compute_sma',
-    'compute_squeeze_dur',
-    'compute_vr',
-    'gen_vr_dur_signal',
-    'gen_vr_signal',
-    'make_direction_momentum',
-    'resample_ohlcv',
+    "VolStraddleConfig",
+    "VolStraddleStrategy",
+    "check_ma_cluster",
+    "compute_momentum",
+    "compute_sma",
+    "compute_squeeze_dur",
+    "compute_vr",
+    "gen_vr_dur_signal",
+    "gen_vr_signal",
+    "make_direction_momentum",
+    "resample_ohlcv",
 ]

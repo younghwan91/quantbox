@@ -42,9 +42,7 @@ def test_mid_bar_uses_previous_completed_bar():
 
     filtered = apply_mtf_confirmation(signals, close_4h, sma_period_4h=3, ratio=16)
     # j=4 is in uptrend → LONG should PASS
-    assert filtered[84] == 1.5, (
-        "LONG at start of 4h downtrend bar should pass using PREVIOUS bar's uptrend"
-    )
+    assert filtered[84] == 1.5, "LONG at start of 4h downtrend bar should pass using PREVIOUS bar's uptrend"
 
 
 def test_4h_boundary_also_uses_previous():
@@ -65,9 +63,7 @@ def test_4h_boundary_also_uses_previous():
 
     filtered = apply_mtf_confirmation(signals, close_4h, sma_period_4h=3, ratio=16)
     # j=9 is in uptrend → LONG should pass (not blocked by j=10 downtrend)
-    assert filtered[160] == 1.5, (
-        "LONG at 4h boundary should use PREVIOUS completed bar"
-    )
+    assert filtered[160] == 1.5, "LONG at 4h boundary should use PREVIOUS completed bar"
 
 
 def test_trend_reversal_no_leakage():
@@ -85,7 +81,7 @@ def test_trend_reversal_no_leakage():
     n_15m = n_4h * 16
     signals = np.zeros(n_15m)
     # Several 15m bars during 4h period j=6
-    signals[96] = -1.5   # SHORT at start of 4h bar 6
+    signals[96] = -1.5  # SHORT at start of 4h bar 6
     signals[100] = -1.5  # SHORT mid-bar
     signals[110] = -1.5  # SHORT near end
 

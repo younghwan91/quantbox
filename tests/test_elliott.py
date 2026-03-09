@@ -152,11 +152,13 @@ class TestZigZagPivots:
         """A clear up-down-up pattern should produce pivots."""
         n = 60
         # Build a clear triangle: up → peak → down → valley → up
-        prices = np.concatenate([
-            np.linspace(100, 120, 20),  # Up 20%
-            np.linspace(120, 95, 20),   # Down to 95
-            np.linspace(95, 115, 20),   # Back up
-        ])
+        prices = np.concatenate(
+            [
+                np.linspace(100, 120, 20),  # Up 20%
+                np.linspace(120, 95, 20),  # Down to 95
+                np.linspace(95, 115, 20),  # Back up
+            ]
+        )
         high = prices + 0.5
         low = prices - 0.5
 
@@ -165,18 +167,20 @@ class TestZigZagPivots:
 
     def test_alternating_types(self):
         """Pivots must alternate between +1 and -1."""
-        prices = np.concatenate([
-            np.linspace(100, 130, 15),
-            np.linspace(130, 90, 15),
-            np.linspace(90, 125, 15),
-            np.linspace(125, 85, 15),
-        ])
+        prices = np.concatenate(
+            [
+                np.linspace(100, 130, 15),
+                np.linspace(130, 90, 15),
+                np.linspace(90, 125, 15),
+                np.linspace(125, 85, 15),
+            ]
+        )
         high = prices + 0.2
         low = prices - 0.2
 
         pidx, pprice, ptype, n_piv = zigzag_pivots(high, low, 0.03)
         for i in range(1, n_piv):
-            assert ptype[i] != ptype[i - 1], f"Pivots {i-1} and {i} same type"
+            assert ptype[i] != ptype[i - 1], f"Pivots {i - 1} and {i} same type"
 
     def test_flat_market_few_pivots(self):
         """Flat market with 3% threshold → very few pivots."""
@@ -257,7 +261,7 @@ class TestDivergence:
 
         rsi = np.full(n, 50.0)
         rsi[25] = 80.0
-        rsi[41] = 75.0   # Lower high in RSI
+        rsi[41] = 75.0  # Lower high in RSI
 
         result = detect_bearish_divergence(close, rsi, 30)
         assert result is True
@@ -331,15 +335,15 @@ class TestABCPatternDetection:
           total_impulse=150, fib618=157.3, c_fib_dist=0.051
         """
         sequence = [
-            (100.0, -1),   # W0 (low)
-            (150.0, 1),    # W1 (high)
-            (125.0, -1),   # W2 (low — 0.50 retrace of W1)
-            (225.0, 1),    # W3 (high — 2.0x extension of W1)
-            (190.0, -1),   # W4 (low — 0.35 retrace of W3, above W1)
-            (250.0, 1),    # W5 (high)
-            (195.0, -1),   # A (low)
-            (230.0, 1),    # B (high — 0.636 retrace of A)
-            (165.0, -1),   # C (low — near 0.618 fib of impulse)
+            (100.0, -1),  # W0 (low)
+            (150.0, 1),  # W1 (high)
+            (125.0, -1),  # W2 (low — 0.50 retrace of W1)
+            (225.0, 1),  # W3 (high — 2.0x extension of W1)
+            (190.0, -1),  # W4 (low — 0.35 retrace of W3, above W1)
+            (250.0, 1),  # W5 (high)
+            (195.0, -1),  # A (low)
+            (230.0, 1),  # B (high — 0.636 retrace of A)
+            (165.0, -1),  # C (low — near 0.618 fib of impulse)
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         cfg = ElliottConfig()
@@ -347,14 +351,14 @@ class TestABCPatternDetection:
 
         assert len(patterns) >= 1
         p = patterns[0]
-        assert p['signal'] == 1  # Long
-        assert p['type'] == 'bullish_impulse_abc_long'
+        assert p["signal"] == 1  # Long
+        assert p["type"] == "bullish_impulse_abc_long"
         # TP1 = W5 (prior impulse peak), TP2 = C + 1.0 × total_impulse
-        assert p['target_1'] == pytest.approx(250.0, rel=1e-3)  # W5 price
-        assert p['target_2'] == pytest.approx(165.0 + 1.0 * 150.0, rel=1e-3)  # C + impulse
-        assert p['stop'] == pytest.approx(165.0 * 0.995, rel=1e-3)  # C × (1 - 0.5%)
-        assert 'quality' in p
-        assert p['quality'] > 0  # should have positive quality score
+        assert p["target_1"] == pytest.approx(250.0, rel=1e-3)  # W5 price
+        assert p["target_2"] == pytest.approx(165.0 + 1.0 * 150.0, rel=1e-3)  # C + impulse
+        assert p["stop"] == pytest.approx(165.0 * 0.995, rel=1e-3)  # C × (1 - 0.5%)
+        assert "quality" in p
+        assert p["quality"] > 0  # should have positive quality score
 
     def test_valid_bullish_abc_short(self):
         """Valid 5-wave bearish impulse + bullish ABC → short signal.
@@ -367,15 +371,15 @@ class TestABCPatternDetection:
           total_impulse=150, fib618=100+92.7=192.7, dist=|185-192.7|/150=0.051
         """
         sequence = [
-            (250.0, 1),    # W0 (high)
-            (200.0, -1),   # W1 (low)
-            (225.0, 1),    # W2 (high — 0.50 retrace)
-            (125.0, -1),   # W3 (low — 2.0x extension)
-            (155.0, 1),    # W4 (high — 0.40 retrace, below W1)
-            (100.0, -1),   # W5 (low)
-            (157.0, 1),    # A (high)
-            (130.0, -1),   # B (low — 0.474 retrace of A)
-            (185.0, 1),    # C (high — near 0.618 fib)
+            (250.0, 1),  # W0 (high)
+            (200.0, -1),  # W1 (low)
+            (225.0, 1),  # W2 (high — 0.50 retrace)
+            (125.0, -1),  # W3 (low — 2.0x extension)
+            (155.0, 1),  # W4 (high — 0.40 retrace, below W1)
+            (100.0, -1),  # W5 (low)
+            (157.0, 1),  # A (high)
+            (130.0, -1),  # B (low — 0.474 retrace of A)
+            (185.0, 1),  # C (high — near 0.618 fib)
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         cfg = ElliottConfig()
@@ -383,21 +387,25 @@ class TestABCPatternDetection:
 
         assert len(patterns) >= 1
         p = patterns[0]
-        assert p['signal'] == -1  # Short
-        assert p['type'] == 'bearish_impulse_abc_short'
+        assert p["signal"] == -1  # Short
+        assert p["type"] == "bearish_impulse_abc_short"
         # TP1 = W5 (prior impulse low), TP2 = C - 1.0 × total_impulse
-        assert p['target_1'] == pytest.approx(100.0, rel=1e-3)  # W5 price
-        assert p['target_2'] == pytest.approx(185.0 - 1.0 * 150.0, rel=1e-3)  # C - impulse
-        assert 'quality' in p
-        assert p['quality'] > 0  # should have positive quality score
+        assert p["target_1"] == pytest.approx(100.0, rel=1e-3)  # W5 price
+        assert p["target_2"] == pytest.approx(185.0 - 1.0 * 150.0, rel=1e-3)  # C - impulse
+        assert "quality" in p
+        assert p["quality"] > 0  # should have positive quality score
 
     def test_invalid_b_exceeds_origin(self):
         """B exceeding W5 (A origin) invalidates the pattern."""
         sequence = [
-            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
-            (190.0, -1), (250.0, 1),
+            (100.0, -1),
+            (150.0, 1),
+            (125.0, -1),
+            (225.0, 1),
+            (190.0, -1),
+            (250.0, 1),
             (195.0, -1),
-            (255.0, 1),   # B > W5(250) → INVALID
+            (255.0, 1),  # B > W5(250) → INVALID
             (165.0, -1),
         ]
         idx, prices, types, n = self._make_pivots(sequence)
@@ -408,9 +416,15 @@ class TestABCPatternDetection:
     def test_wave4_intruding_wave1_rejected(self):
         """Wave 4 entering Wave 1 territory → INVALID (cardinal rule)."""
         sequence = [
-            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
+            (100.0, -1),
+            (150.0, 1),
+            (125.0, -1),
+            (225.0, 1),
             (145.0, -1),  # W4=145 < W1=150 → INVALID overlap
-            (250.0, 1), (195.0, -1), (230.0, 1), (165.0, -1),
+            (250.0, 1),
+            (195.0, -1),
+            (230.0, 1),
+            (165.0, -1),
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         cfg = ElliottConfig()
@@ -453,9 +467,18 @@ class TestWedgeTriangle:
 
     def test_triangle_contracting(self):
         """Decreasing highs + increasing lows → triangle."""
-        prices = np.array([
-            90.0, 110.0, 92.0, 108.0, 94.0, 106.0, 96.0, 105.0,
-        ])
+        prices = np.array(
+            [
+                90.0,
+                110.0,
+                92.0,
+                108.0,
+                94.0,
+                106.0,
+                96.0,
+                105.0,
+            ]
+        )
         types = np.array([-1, 1, -1, 1, -1, 1, -1, 1], dtype=np.int64)
         result = detect_triangle(prices, types, 8)
         assert result is True
@@ -472,7 +495,7 @@ class TestElliottStrategy:
     def test_macro_bias_no_data(self):
         """Without BTC data → neutral bias."""
         s = ElliottStrategy()
-        assert s.macro_bias() == 'neutral'
+        assert s.macro_bias() == "neutral"
 
     def test_macro_bias_bullish(self):
         """BTC above both 200/500 EMA → long bias."""
@@ -480,7 +503,7 @@ class TestElliottStrategy:
         # Create uptrending BTC 4h: 600 bars, steadily climbing
         btc = np.linspace(50000, 70000, 600)
         s.update_btc_data(btc)
-        assert s.macro_bias() == 'long'
+        assert s.macro_bias() == "long"
 
     def test_macro_bias_bearish(self):
         """BTC below both 200/500 EMA → short bias."""
@@ -488,127 +511,147 @@ class TestElliottStrategy:
         # Downtrending BTC 4h
         btc = np.linspace(70000, 50000, 600)
         s.update_btc_data(btc)
-        assert s.macro_bias() == 'short'
+        assert s.macro_bias() == "short"
 
     def test_position_lifecycle_basic(self):
         """Open → update → close lifecycle."""
         s = ElliottStrategy()
         s.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=3000.0,
-            notional=100.0, leverage=20, move_size=0.03,
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=3000.0,
+            notional=100.0,
+            leverage=20,
+            move_size=0.03,
         )
-        assert s.has_position('ETHUSDT')
+        assert s.has_position("ETHUSDT")
         assert s.n_active == 1
 
         # Close
-        info = s.close_position('ETHUSDT')
+        info = s.close_position("ETHUSDT")
         assert info is not None
-        assert not s.has_position('ETHUSDT')
+        assert not s.has_position("ETHUSDT")
         assert s.n_active == 0
 
     def test_exploratory_confirmation_flow(self):
         """Exploratory → confirm_entry when divergence fires."""
         s = ElliottStrategy()
         s.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=3000.0,
-            notional=100.0, leverage=20, move_size=0.03,
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=3000.0,
+            notional=100.0,
+            leverage=20,
+            move_size=0.03,
         )
-        pos = s._positions['ETHUSDT']
-        assert pos['phase'] == 'exploratory'
+        pos = s._positions["ETHUSDT"]
+        assert pos["phase"] == "exploratory"
 
         # Simulate: no divergence data → stays exploratory, eventually cancels
         for _ in range(4):
-            result = s.update_position('ETHUSDT', 3010.0)
-            if result == 'cancel_exploration':
+            result = s.update_position("ETHUSDT", 3010.0)
+            if result == "cancel_exploration":
                 break
 
-        assert result == 'cancel_exploration'
+        assert result == "cancel_exploration"
 
     def test_stop_loss_triggers(self):
         """Price hitting stop → 'stop_loss' returned."""
         s = ElliottStrategy()
-        s._pending_patterns['ETHUSDT'] = {
-            'target_1': 3200.0,
-            'target_2': 3500.0,
-            'stop': 2900.0,
-            'impulse_size': 500.0,
+        s._pending_patterns["ETHUSDT"] = {
+            "target_1": 3200.0,
+            "target_2": 3500.0,
+            "stop": 2900.0,
+            "impulse_size": 500.0,
         }
         s.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=3000.0,
-            notional=100.0, leverage=20, move_size=0.03,
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=3000.0,
+            notional=100.0,
+            leverage=20,
+            move_size=0.03,
         )
         # Force past exploratory phase
-        s._positions['ETHUSDT']['phase'] = 'primary'
+        s._positions["ETHUSDT"]["phase"] = "primary"
 
-        result = s.update_position('ETHUSDT', 2890.0)  # Below stop
-        assert result == 'stop_loss'
+        result = s.update_position("ETHUSDT", 2890.0)  # Below stop
+        assert result == "stop_loss"
 
     def test_partial_close_at_target(self):
         """Price reaching target_1 → 'partial_close'."""
         s = ElliottStrategy()
-        s._pending_patterns['ETHUSDT'] = {
-            'target_1': 3200.0,
-            'target_2': 3500.0,
-            'stop': 2900.0,
-            'impulse_size': 500.0,
+        s._pending_patterns["ETHUSDT"] = {
+            "target_1": 3200.0,
+            "target_2": 3500.0,
+            "stop": 2900.0,
+            "impulse_size": 500.0,
         }
         s.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=3000.0,
-            notional=100.0, leverage=20, move_size=0.03,
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=3000.0,
+            notional=100.0,
+            leverage=20,
+            move_size=0.03,
         )
-        s._positions['ETHUSDT']['phase'] = 'primary'
+        s._positions["ETHUSDT"]["phase"] = "primary"
 
-        result = s.update_position('ETHUSDT', 3250.0)  # Above target_1
-        assert result == 'partial_close'
-        assert s._positions['ETHUSDT']['partial_closed'] is True
-        assert s._positions['ETHUSDT']['phase'] == 'trailing'
+        result = s.update_position("ETHUSDT", 3250.0)  # Above target_1
+        assert result == "partial_close"
+        assert s._positions["ETHUSDT"]["partial_closed"] is True
+        assert s._positions["ETHUSDT"]["phase"] == "trailing"
 
     def test_breakeven_stop_after_partial(self):
         """After partial close, price back to entry → 'breakeven_stop'."""
         s = ElliottStrategy()
-        s._pending_patterns['ETHUSDT'] = {
-            'target_1': 3200.0,
-            'target_2': 3500.0,
-            'stop': 2900.0,
-            'impulse_size': 500.0,
+        s._pending_patterns["ETHUSDT"] = {
+            "target_1": 3200.0,
+            "target_2": 3500.0,
+            "stop": 2900.0,
+            "impulse_size": 500.0,
         }
         s.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=3000.0,
-            notional=100.0, leverage=20, move_size=0.03,
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=3000.0,
+            notional=100.0,
+            leverage=20,
+            move_size=0.03,
         )
-        s._positions['ETHUSDT']['phase'] = 'primary'
+        s._positions["ETHUSDT"]["phase"] = "primary"
 
         # Partial close
-        s.update_position('ETHUSDT', 3250.0)
+        s.update_position("ETHUSDT", 3250.0)
 
         # Price returns to entry → breakeven stop
-        result = s.update_position('ETHUSDT', 2990.0)
-        assert result == 'breakeven_stop'
+        result = s.update_position("ETHUSDT", 2990.0)
+        assert result == "breakeven_stop"
 
     def test_on_bar_returns_zero_without_data(self):
         """on_bar without 4h data returns 0."""
         s = ElliottStrategy()
         close_15m = np.random.randn(200).cumsum() + 100
-        assert s.on_bar('ETHUSDT', close_15m) == 0
+        assert s.on_bar("ETHUSDT", close_15m) == 0
 
     def test_interface_compatibility(self):
         """ElliottStrategy has the same interface as RubberBandStrategy."""
         s = ElliottStrategy()
         # Check all required interface methods exist
-        assert hasattr(s, 'on_bar')
-        assert hasattr(s, 'on_bar_4h')
-        assert hasattr(s, 'update_position')
-        assert hasattr(s, 'open_position')
-        assert hasattr(s, 'close_position')
-        assert hasattr(s, 'update_market_data')
-        assert hasattr(s, 'update_htf_data')
-        assert hasattr(s, 'has_position')
-        assert hasattr(s, 'active_positions')
-        assert hasattr(s, 'n_active')
-        assert hasattr(s, 'was_mtf_confirmed')
-        assert hasattr(s, 'get_effective_stop_mult')
-        assert hasattr(s, '_positions')
-        assert hasattr(s, '_mtf_confirmed')
+        assert hasattr(s, "on_bar")
+        assert hasattr(s, "on_bar_4h")
+        assert hasattr(s, "update_position")
+        assert hasattr(s, "open_position")
+        assert hasattr(s, "close_position")
+        assert hasattr(s, "update_market_data")
+        assert hasattr(s, "update_htf_data")
+        assert hasattr(s, "has_position")
+        assert hasattr(s, "active_positions")
+        assert hasattr(s, "n_active")
+        assert hasattr(s, "was_mtf_confirmed")
+        assert hasattr(s, "get_effective_stop_mult")
+        assert hasattr(s, "_positions")
+        assert hasattr(s, "_mtf_confirmed")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -624,13 +667,14 @@ class TestBacktestSignals:
         """Load real BTC 4h data from cache."""
         try:
             from quantbox.data.real_data_loader import RealDataLoader
+
             loader = RealDataLoader()
-            df = loader.load_symbol('BTCUSDT')
+            df = loader.load_symbol("BTCUSDT")
             if df is None or len(df) < 600:
                 pytest.skip("Need 600+ bars of BTC data")
             # Normalize column names (loader may use upper-case)
             df.columns = [c.lower() for c in df.columns]
-            if 'close' not in df.columns:
+            if "close" not in df.columns:
                 pytest.skip("Data missing 'close' column")
             return df
         except Exception:
@@ -639,9 +683,9 @@ class TestBacktestSignals:
     def test_signals_shape_matches_input(self, btc_4h_data):
         """Signal array must match input length."""
         df = btc_4h_data
-        close = df['close'].values[-600:].astype(np.float64)
-        high = df['high'].values[-600:].astype(np.float64)
-        low = df['low'].values[-600:].astype(np.float64)
+        close = df["close"].values[-600:].astype(np.float64)
+        high = df["high"].values[-600:].astype(np.float64)
+        low = df["low"].values[-600:].astype(np.float64)
 
         signals, _ = compute_elliott_signals(close, high, low, close)
         assert len(signals) == len(close)
@@ -649,9 +693,9 @@ class TestBacktestSignals:
     def test_signals_are_valid_values(self, btc_4h_data):
         """Signals must be valid leverage values: 0, ±0.4, ±1.0, ±2.0."""
         df = btc_4h_data
-        close = df['close'].values[-600:].astype(np.float64)
-        high = df['high'].values[-600:].astype(np.float64)
-        low = df['low'].values[-600:].astype(np.float64)
+        close = df["close"].values[-600:].astype(np.float64)
+        high = df["high"].values[-600:].astype(np.float64)
+        low = df["low"].values[-600:].astype(np.float64)
 
         signals, _ = compute_elliott_signals(close, high, low, close)
         valid_values = {-2.0, -1.0, -0.4, 0.0, 0.4, 1.0, 2.0}
@@ -677,51 +721,67 @@ class TestV2TargetImprovements:
     def test_bullish_tp1_is_w5_not_b(self):
         """TP1 must target W5 (structural resistance), NOT B (correction bounce)."""
         sequence = [
-            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
-            (190.0, -1), (250.0, 1),  # W5 = 250
-            (195.0, -1), (230.0, 1),  # B = 230
-            (165.0, -1),              # C = 165
+            (100.0, -1),
+            (150.0, 1),
+            (125.0, -1),
+            (225.0, 1),
+            (190.0, -1),
+            (250.0, 1),  # W5 = 250
+            (195.0, -1),
+            (230.0, 1),  # B = 230
+            (165.0, -1),  # C = 165
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
         assert len(patterns) >= 1
         p = patterns[0]
         # TP1 = W5 = 250 (NOT B = 230)
-        assert p['target_1'] == pytest.approx(250.0, rel=1e-3)
-        assert p['target_1'] != pytest.approx(230.0, rel=1e-3)
+        assert p["target_1"] == pytest.approx(250.0, rel=1e-3)
+        assert p["target_1"] != pytest.approx(230.0, rel=1e-3)
 
     def test_bearish_tp1_is_w5_not_b(self):
         """Bearish TP1 must target W5 (structural support), NOT B."""
         sequence = [
-            (250.0, 1), (200.0, -1), (225.0, 1), (125.0, -1),
-            (155.0, 1), (100.0, -1),  # W5 = 100
-            (157.0, 1), (130.0, -1),  # B = 130
-            (185.0, 1),               # C = 185
+            (250.0, 1),
+            (200.0, -1),
+            (225.0, 1),
+            (125.0, -1),
+            (155.0, 1),
+            (100.0, -1),  # W5 = 100
+            (157.0, 1),
+            (130.0, -1),  # B = 130
+            (185.0, 1),  # C = 185
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
         assert len(patterns) >= 1
         p = patterns[0]
         # TP1 = W5 = 100 (NOT B = 130)
-        assert p['target_1'] == pytest.approx(100.0, rel=1e-3)
-        assert p['target_1'] != pytest.approx(130.0, rel=1e-3)
+        assert p["target_1"] == pytest.approx(100.0, rel=1e-3)
+        assert p["target_1"] != pytest.approx(130.0, rel=1e-3)
 
     def test_tp2_uses_full_impulse_not_wave1(self):
         """TP2 must use total impulse (W5-W0), not internal wave1 (W1-W0)."""
         sequence = [
-            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
-            (190.0, -1), (250.0, 1),
-            (195.0, -1), (230.0, 1), (165.0, -1),
+            (100.0, -1),
+            (150.0, 1),
+            (125.0, -1),
+            (225.0, 1),
+            (190.0, -1),
+            (250.0, 1),
+            (195.0, -1),
+            (230.0, 1),
+            (165.0, -1),
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
         p = patterns[0]
         total_impulse = 250.0 - 100.0  # W5 - W0 = 150
-        wave1_only = 150.0 - 100.0      # W1 - W0 = 50
+        wave1_only = 150.0 - 100.0  # W1 - W0 = 50
         # TP2 = C + 1.0 × total_impulse = 165 + 150 = 315
-        assert p['target_2'] == pytest.approx(165.0 + 1.0 * total_impulse, rel=1e-3)
+        assert p["target_2"] == pytest.approx(165.0 + 1.0 * total_impulse, rel=1e-3)
         # Must NOT be the old formula using wave1
-        assert p['target_2'] != pytest.approx(165.0 + 1.618 * wave1_only, rel=1e-3)
+        assert p["target_2"] != pytest.approx(165.0 + 1.618 * wave1_only, rel=1e-3)
 
     def test_pattern_lookback_bars_is_12(self):
         """Default lookback must be 12 bars (2 days at 4h), not 5."""
@@ -757,31 +817,57 @@ class TestTimingAlphaFeatures:
     def test_bullish_pattern_has_timing_fields(self):
         """Bullish pattern dict must contain all timing alpha fields."""
         sequence = [
-            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
-            (190.0, -1), (250.0, 1),
-            (195.0, -1), (230.0, 1), (165.0, -1),
+            (100.0, -1),
+            (150.0, 1),
+            (125.0, -1),
+            (225.0, 1),
+            (190.0, -1),
+            (250.0, 1),
+            (195.0, -1),
+            (230.0, 1),
+            (165.0, -1),
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
         assert len(patterns) >= 1
         p = patterns[0]
-        for key in ('impulse_accel', 'corr_impulse_ratio', 'w3_w1_time_ratio',
-                     'w1_bars', 'w3_bars', 'impulse_bars', 'correction_bars'):
+        for key in (
+            "impulse_accel",
+            "corr_impulse_ratio",
+            "w3_w1_time_ratio",
+            "w1_bars",
+            "w3_bars",
+            "impulse_bars",
+            "correction_bars",
+        ):
             assert key in p, f"Missing timing field: {key}"
 
     def test_bearish_pattern_has_timing_fields(self):
         """Bearish pattern dict must contain all timing alpha fields."""
         sequence = [
-            (250.0, 1), (200.0, -1), (225.0, 1), (125.0, -1),
-            (155.0, 1), (100.0, -1),
-            (157.0, 1), (130.0, -1), (185.0, 1),
+            (250.0, 1),
+            (200.0, -1),
+            (225.0, 1),
+            (125.0, -1),
+            (155.0, 1),
+            (100.0, -1),
+            (157.0, 1),
+            (130.0, -1),
+            (185.0, 1),
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
         assert len(patterns) >= 1
         p = patterns[0]
-        for key in ('impulse_accel', 'corr_impulse_ratio', 'w3_w1_time_ratio',
-                     'w1_bars', 'w3_bars', 'impulse_bars', 'correction_bars'):
+        for key in (
+            "impulse_accel",
+            "corr_impulse_ratio",
+            "w3_w1_time_ratio",
+            "w1_bars",
+            "w3_bars",
+            "impulse_bars",
+            "correction_bars",
+        ):
             assert key in p, f"Missing timing field: {key}"
 
     def test_impulse_accel_positive_when_w3_faster(self):
@@ -789,15 +875,21 @@ class TestTimingAlphaFeatures:
         # W1: 100→150 in 10 bars (vel=5.0)
         # W3: 125→225 in 10 bars (vel=10.0) → accel = 10/5 - 1 = 1.0
         sequence = [
-            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
-            (190.0, -1), (250.0, 1),
-            (195.0, -1), (230.0, 1), (165.0, -1),
+            (100.0, -1),
+            (150.0, 1),
+            (125.0, -1),
+            (225.0, 1),
+            (190.0, -1),
+            (250.0, 1),
+            (195.0, -1),
+            (230.0, 1),
+            (165.0, -1),
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
         p = patterns[0]
-        assert p['impulse_accel'] > 0, "W3 faster than W1 should give positive accel"
-        assert p['impulse_accel'] == pytest.approx(1.0, rel=0.01)
+        assert p["impulse_accel"] > 0, "W3 faster than W1 should give positive accel"
+        assert p["impulse_accel"] == pytest.approx(1.0, rel=0.01)
 
     def test_impulse_accel_negative_when_w3_slower(self):
         """W3 moving slower than W1 → negative acceleration → filtered out.
@@ -809,13 +901,22 @@ class TestTimingAlphaFeatures:
         cfg = ElliottConfig()
         pivot_indices = [0, 5, 10, 30, 35, 40, 50, 60, 70]
         pattern = _validate_bullish_impulse_abc(
-            W0=100.0, W1=150.0, W2=125.0, W3=225.0, W4=190.0, W5=250.0,
-            A=195.0, B=230.0, C=165.0,
-            c_idx=70, config=cfg, pivot_indices=pivot_indices,
+            W0=100.0,
+            W1=150.0,
+            W2=125.0,
+            W3=225.0,
+            W4=190.0,
+            W5=250.0,
+            A=195.0,
+            B=230.0,
+            C=165.0,
+            c_idx=70,
+            config=cfg,
+            pivot_indices=pivot_indices,
         )
         assert pattern is not None
-        assert pattern['impulse_accel'] < 0, "W3 slower than W1 should give negative accel"
-        assert pattern['impulse_accel'] == pytest.approx(-0.5, rel=0.01)
+        assert pattern["impulse_accel"] < 0, "W3 slower than W1 should give negative accel"
+        assert pattern["impulse_accel"] == pytest.approx(-0.5, rel=0.01)
 
     def test_w3_w1_time_ratio_computation(self):
         """w3_w1_time_ratio = w3_bars / w1_bars."""
@@ -823,30 +924,45 @@ class TestTimingAlphaFeatures:
         cfg = ElliottConfig()
         pivot_indices = [0, 10, 20, 50, 55, 60, 70, 80, 90]
         pattern = _validate_bullish_impulse_abc(
-            W0=100.0, W1=150.0, W2=125.0, W3=225.0, W4=190.0, W5=250.0,
-            A=195.0, B=230.0, C=165.0,
-            c_idx=90, config=cfg, pivot_indices=pivot_indices,
+            W0=100.0,
+            W1=150.0,
+            W2=125.0,
+            W3=225.0,
+            W4=190.0,
+            W5=250.0,
+            A=195.0,
+            B=230.0,
+            C=165.0,
+            c_idx=90,
+            config=cfg,
+            pivot_indices=pivot_indices,
         )
         assert pattern is not None
-        assert pattern['w3_w1_time_ratio'] == pytest.approx(3.0, rel=0.01)
-        assert pattern['w1_bars'] == 10
-        assert pattern['w3_bars'] == 30
+        assert pattern["w3_w1_time_ratio"] == pytest.approx(3.0, rel=0.01)
+        assert pattern["w1_bars"] == 10
+        assert pattern["w3_bars"] == 30
 
     def test_corr_impulse_ratio_computation(self):
         """corr_impulse_ratio = correction_bars / impulse_bars."""
         # impulse: bars 0→50 (50 bars), correction: bars 50→80 (30 bars)
         # ratio = 30/50 = 0.6
         sequence = [
-            (100.0, -1), (150.0, 1), (125.0, -1), (225.0, 1),
-            (190.0, -1), (250.0, 1),
-            (195.0, -1), (230.0, 1), (165.0, -1),
+            (100.0, -1),
+            (150.0, 1),
+            (125.0, -1),
+            (225.0, 1),
+            (190.0, -1),
+            (250.0, 1),
+            (195.0, -1),
+            (230.0, 1),
+            (165.0, -1),
         ]
         idx, prices, types, n = self._make_pivots(sequence)
         patterns = detect_impulse_abc_patterns(idx, prices, types, n, ElliottConfig())
         p = patterns[0]
-        assert p['corr_impulse_ratio'] == pytest.approx(0.6, rel=0.01)
-        assert p['impulse_bars'] == 50
-        assert p['correction_bars'] == 30
+        assert p["corr_impulse_ratio"] == pytest.approx(0.6, rel=0.01)
+        assert p["impulse_bars"] == 50
+        assert p["correction_bars"] == 30
 
     def test_config_defaults_match_research(self):
         """Default timing config values must match research best_refined variant."""
@@ -865,40 +981,67 @@ class TestTimingAlphaFeatures:
         # W3 much slower → negative accel
         pivot_indices = [0, 5, 10, 30, 35, 40, 50, 60, 70]
         pattern = _validate_bullish_impulse_abc(
-            W0=100.0, W1=150.0, W2=125.0, W3=225.0, W4=190.0, W5=250.0,
-            A=195.0, B=230.0, C=165.0,
-            c_idx=70, config=cfg, pivot_indices=pivot_indices,
+            W0=100.0,
+            W1=150.0,
+            W2=125.0,
+            W3=225.0,
+            W4=190.0,
+            W5=250.0,
+            A=195.0,
+            B=230.0,
+            C=165.0,
+            c_idx=70,
+            config=cfg,
+            pivot_indices=pivot_indices,
         )
         assert pattern is not None
         # Validation produced the pattern, but filter gate would catch it
-        assert pattern['impulse_accel'] < cfg.min_impulse_accel
+        assert pattern["impulse_accel"] < cfg.min_impulse_accel
 
     def test_timing_filter_rejects_high_w3w1_ratio(self):
         """W3 taking 3x longer than W1 → exceeds max_w3_w1_time_ratio=2.5."""
         cfg = ElliottConfig()
         pivot_indices = [0, 10, 20, 50, 55, 60, 70, 80, 90]
         pattern = _validate_bullish_impulse_abc(
-            W0=100.0, W1=150.0, W2=125.0, W3=225.0, W4=190.0, W5=250.0,
-            A=195.0, B=230.0, C=165.0,
-            c_idx=90, config=cfg, pivot_indices=pivot_indices,
+            W0=100.0,
+            W1=150.0,
+            W2=125.0,
+            W3=225.0,
+            W4=190.0,
+            W5=250.0,
+            A=195.0,
+            B=230.0,
+            C=165.0,
+            c_idx=90,
+            config=cfg,
+            pivot_indices=pivot_indices,
         )
         assert pattern is not None
-        assert pattern['w3_w1_time_ratio'] > cfg.max_w3_w1_time_ratio
+        assert pattern["w3_w1_time_ratio"] > cfg.max_w3_w1_time_ratio
 
     def test_bearish_timing_features_correct(self):
         """Bearish patterns also compute timing features correctly."""
         cfg = ElliottConfig()
         pivot_indices = [0, 10, 20, 30, 40, 50, 60, 70, 80]
         pattern = _validate_bearish_impulse_abc(
-            W0=250.0, W1=200.0, W2=225.0, W3=125.0, W4=155.0, W5=100.0,
-            A=157.0, B=130.0, C=185.0,
-            c_idx=80, config=cfg, pivot_indices=pivot_indices,
+            W0=250.0,
+            W1=200.0,
+            W2=225.0,
+            W3=125.0,
+            W4=155.0,
+            W5=100.0,
+            A=157.0,
+            B=130.0,
+            C=185.0,
+            c_idx=80,
+            config=cfg,
+            pivot_indices=pivot_indices,
         )
         assert pattern is not None
         # wave1=50 in 10 bars (vel=5), wave3=100 in 10 bars (vel=10) → accel=1.0
-        assert pattern['impulse_accel'] == pytest.approx(1.0, rel=0.01)
-        assert pattern['w3_w1_time_ratio'] == pytest.approx(1.0, rel=0.01)
-        assert pattern['corr_impulse_ratio'] == pytest.approx(0.6, rel=0.01)
+        assert pattern["impulse_accel"] == pytest.approx(1.0, rel=0.01)
+        assert pattern["w3_w1_time_ratio"] == pytest.approx(1.0, rel=0.01)
+        assert pattern["corr_impulse_ratio"] == pytest.approx(0.6, rel=0.01)
 
     def test_backtest_live_parity_timing_filter(self):
         """Timing filter uses same config params in both backtest and live paths.
@@ -907,9 +1050,9 @@ class TestTimingAlphaFeatures:
         """
         cfg = ElliottConfig()
         # These must exist and be accessed with identical names
-        assert hasattr(cfg, 'min_impulse_accel')
-        assert hasattr(cfg, 'min_corr_impulse_ratio')
-        assert hasattr(cfg, 'max_w3_w1_time_ratio')
+        assert hasattr(cfg, "min_impulse_accel")
+        assert hasattr(cfg, "min_corr_impulse_ratio")
+        assert hasattr(cfg, "max_w3_w1_time_ratio")
         # Backtest uses pattern.get() with safe defaults — verify those defaults
         # would NOT accidentally pass the filter (conservative)
         # impulse_accel default 1.0 >= 0.0 → passes (safe: old patterns pass)

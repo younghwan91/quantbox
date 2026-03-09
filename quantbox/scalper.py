@@ -40,7 +40,10 @@ from binance.exceptions import BinanceAPIException
 from dotenv import load_dotenv
 
 from quantbox.core.limit_chaser import (
-    ChaseConfig, ChaseFillStatus, ChaseResult, LimitOrderChaser,
+    ChaseConfig,
+    ChaseFillStatus,
+    ChaseResult,
+    LimitOrderChaser,
 )
 from quantbox.core.settings import get_settings
 from quantbox.core.terminal_ui import (
@@ -53,7 +56,9 @@ from quantbox.notifications.bot import (
 )
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.rubberband import (
-    RubberBandConfig, RubberBandStrategy, compute_atr_pct,
+    RubberBandConfig,
+    RubberBandStrategy,
+    compute_atr_pct,
 )
 from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
@@ -61,7 +66,10 @@ from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
 from quantbox.core.commands import CommandsMixin
 from quantbox.core.loop_mixin import LoopMixin
 from quantbox.core.scalper_state import (
-    PAPER_STATE_FILE, STATE_FILE, load_scalper_state, save_scalper_state,
+    PAPER_STATE_FILE,
+    STATE_FILE,
+    load_scalper_state,
+    save_scalper_state,
 )
 from quantbox.execution.brackets import BracketMixin
 from quantbox.execution.data_mixin import DataMixin
@@ -72,7 +80,7 @@ load_dotenv()
 
 # ──────────────────────── Logging ──────────────────────────────────────
 
-logger = logging.getLogger('Scalper')
+logger = logging.getLogger("Scalper")
 
 
 # ──────────────── Diagnostic Logger ─────────────────────
@@ -80,8 +88,14 @@ from quantbox.utils.diagnostics import _diag_logger  # noqa: E402
 
 # ──────────────────────── Scalper Class ────────────────────────────────
 
+
 class RubberBandScalper(
-    LoopMixin, DataMixin, BracketMixin, ReconciliationMixin, PositionMixin, CommandsMixin,
+    LoopMixin,
+    DataMixin,
+    BracketMixin,
+    ReconciliationMixin,
+    PositionMixin,
+    CommandsMixin,
 ):
     """Live rubber band scalper for Binance USDT-M Futures.
 
@@ -101,7 +115,7 @@ class RubberBandScalper(
         self,
         paper_mode: bool = False,
         config: RubberBandConfig | None = None,
-        strategy_name: str = 'rubberband',
+        strategy_name: str = "rubberband",
         elliott_config: ElliottConfig | None = None,
         vs_config: VolStraddleConfig | None = None,
     ):
@@ -109,10 +123,10 @@ class RubberBandScalper(
         self.config = config or RubberBandConfig()
         self.strategy_name = strategy_name
 
-        if strategy_name == 'elliott':
+        if strategy_name == "elliott":
             self.elliott_config = elliott_config or ElliottConfig()
             self.strategy = ElliottStrategy(self.elliott_config)
-        elif strategy_name == 'vol_straddle':
+        elif strategy_name == "vol_straddle":
             self.vs_config = vs_config or VolStraddleConfig()
             self.strategy = VolStraddleStrategy(self.vs_config)
         else:
@@ -158,9 +172,9 @@ class RubberBandScalper(
         self._drawdown_halt: bool = False
 
         # Daily loss circuit breaker
-        self._daily_realized_pnl: float = 0.0   # cumulative today's closed pnl (USD)
-        self._daily_loss_date: str = ''          # UTC date when tracking started (YYYY-MM-DD)
-        self._daily_loss_blocked: bool = False   # True = new entries blocked for today
+        self._daily_realized_pnl: float = 0.0  # cumulative today's closed pnl (USD)
+        self._daily_loss_date: str = ""  # UTC date when tracking started (YYYY-MM-DD)
+        self._daily_loss_blocked: bool = False  # True = new entries blocked for today
 
         # Symbol info cache (avoid repeated exchange_info calls)
         self._symbol_info_cache: dict[str, dict] = {}
@@ -176,19 +190,22 @@ class RubberBandScalper(
 
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"RubberBandScalper initialized ({mode_str}) strategy={strategy_name}")
-        if strategy_name == 'vol_straddle':
+        if strategy_name == "vol_straddle":
             vs = self.vs_config
             logger.info(
                 f"Config: VR({vs.vr_short}/{vs.vr_long}) "
                 f"D_threshold={vs.d_vr_threshold}, "
-                f"SL={vs.d_sl*100:.1f}%, TP={vs.d_tp*100:.1f}%, "
+                f"SL={vs.d_sl * 100:.1f}%, TP={vs.d_tp * 100:.1f}%, "
                 f"TF={'15m' if vs.enable_15m else ''}"
                 f"{'|1h' if vs.enable_1h else ''}"
                 f"{'|4h' if vs.enable_4h else ''}"
             )
         else:
-            _sl_str = (f"ATR×{self.config.atr_stop_mult}[{self.config.atr_stop_floor*100:.1f}%-{self.config.atr_stop_cap*100:.0f}%]"
-                       if self.config.atr_stop_enabled else f"{self.config.stop_mult}×move")
+            _sl_str = (
+                f"ATR×{self.config.atr_stop_mult}[{self.config.atr_stop_floor * 100:.1f}%-{self.config.atr_stop_cap * 100:.0f}%]"
+                if self.config.atr_stop_enabled
+                else f"{self.config.stop_mult}×move"
+            )
             logger.info(
                 f"Config: lookback={self.config.lookback}, "
                 f"threshold={self.config.threshold}, "
@@ -202,7 +219,7 @@ class RubberBandScalper(
     @property
     def _cfg(self):
         """Active strategy config for shared fields."""
-        if self.strategy_name == 'vol_straddle':
+        if self.strategy_name == "vol_straddle":
             return self.vs_config
         return self.config
 
@@ -213,17 +230,14 @@ class RubberBandScalper(
         try:
             balances = self.client.futures_account_balance()
             for b in balances:
-                if b['asset'] == 'USDT':
-                    return float(b['balance'])
+                if b["asset"] == "USDT":
+                    return float(b["balance"])
         except Exception as e:
             logger.error(f"Balance fetch failed: {e}")
         # v12.5.1: Return last known balance instead of 0.0 to prevent
         # false drawdown halt on transient API failures.
-        if hasattr(self, '_last_known_balance') and self._last_known_balance > 0:
-            logger.warning(
-                f"Using last known balance ${self._last_known_balance:.2f} "
-                f"due to API failure"
-            )
+        if hasattr(self, "_last_known_balance") and self._last_known_balance > 0:
+            logger.warning(f"Using last known balance ${self._last_known_balance:.2f} due to API failure")
             return self._last_known_balance
         return 0.0
 
@@ -246,15 +260,11 @@ class RubberBandScalper(
             if dd >= self._cfg.max_drawdown_pct:
                 if not self._drawdown_halt:
                     logger.critical(
-                        f"DRAWDOWN HALT: {dd*100:.1f}% DD "
-                        f"(HWM=${self._high_water_mark:.2f}, "
-                        f"now=${balance:.2f})"
+                        f"DRAWDOWN HALT: {dd * 100:.1f}% DD (HWM=${self._high_water_mark:.2f}, now=${balance:.2f})"
                     )
-                    self.discord.send(content=(
-                        f"🚨 **DRAWDOWN HALT** — "
-                        f"{dd*100:.1f}% drawdown triggered. "
-                        f"Closing all positions."
-                    ))
+                    self.discord.send(
+                        content=(f"🚨 **DRAWDOWN HALT** — {dd * 100:.1f}% drawdown triggered. Closing all positions.")
+                    )
                     self._drawdown_halt = True
                 return True
 
@@ -263,8 +273,12 @@ class RubberBandScalper(
     # ==================== Order Execution ====================
 
     def _place_order(
-        self, symbol: str, side: str, quantity: float,
-        leverage: int = 1, reduce_only: bool = False,
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        leverage: int = 1,
+        reduce_only: bool = False,
         position_side: str | None = None,
     ) -> dict | None:
         """Place order via LimitOrderChaser.
@@ -286,16 +300,14 @@ class RubberBandScalper(
             # Simulate fill at current market price
             try:
                 book = self.client.futures_orderbook_ticker(symbol=symbol)
-                price = float(
-                    book['askPrice'] if side == 'BUY' else book['bidPrice']
-                )
+                price = float(book["askPrice"] if side == "BUY" else book["bidPrice"])
             except Exception:
                 return None
             return {
-                'avgPrice': str(price),
-                'executedQty': str(quantity),
-                'status': 'FILLED',
-                'makerFill': True,
+                "avgPrice": str(price),
+                "executedQty": str(quantity),
+                "status": "FILLED",
+                "makerFill": True,
             }
 
         try:
@@ -317,44 +329,41 @@ class RubberBandScalper(
                 actual_leverage = leverage
                 try:
                     resp = self.client.futures_change_leverage(
-                        symbol=symbol, leverage=leverage,
+                        symbol=symbol,
+                        leverage=leverage,
                     )
-                    actual_leverage = int(resp.get('leverage', leverage))
+                    actual_leverage = int(resp.get("leverage", leverage))
                     if actual_leverage != leverage:
                         logger.warning(
-                            f"[{symbol}] Leverage mismatch: requested={leverage}x, "
-                            f"actual={actual_leverage}x"
+                            f"[{symbol}] Leverage mismatch: requested={leverage}x, actual={actual_leverage}x"
                         )
                 except BinanceAPIException as e:
-                    if '-4028' in str(e):
+                    if "-4028" in str(e):
                         # Leverage too high for this symbol — try reduced
                         fallback_lev = max(20, leverage // 2)
                         try:
                             resp = self.client.futures_change_leverage(
-                                symbol=symbol, leverage=fallback_lev,
+                                symbol=symbol,
+                                leverage=fallback_lev,
                             )
-                            actual_leverage = int(resp.get('leverage', fallback_lev))
+                            actual_leverage = int(resp.get("leverage", fallback_lev))
                             logger.warning(
-                                f"[{symbol}] Leverage {leverage}x not supported, "
-                                f"fell back to {actual_leverage}x"
+                                f"[{symbol}] Leverage {leverage}x not supported, fell back to {actual_leverage}x"
                             )
                         except Exception:
                             logger.error(
-                                f"[{symbol}] Leverage fallback also failed — "
-                                f"ABORTING order to prevent unknown leverage"
+                                f"[{symbol}] Leverage fallback also failed — ABORTING order to prevent unknown leverage"
                             )
                             return None
                     else:
-                        logger.error(
-                            f"[{symbol}] Leverage set failed: {e} — ABORTING order"
-                        )
+                        logger.error(f"[{symbol}] Leverage set failed: {e} — ABORTING order")
                         return None
 
             info = self.get_symbol_info(symbol)
-            tick_size = info.get('tick_size', 0.01)
-            price_precision = info.get('price_precision', 2)
-            step_size = info.get('step_size', 0.001)
-            qty_precision = info.get('quantity_precision', 3)
+            tick_size = info.get("tick_size", 0.01)
+            price_precision = info.get("price_precision", 2)
+            step_size = info.get("step_size", 0.001)
+            qty_precision = info.get("quantity_precision", 3)
 
             result: ChaseResult = self._chaser.chase_limit_order(
                 symbol=symbol,
@@ -369,19 +378,12 @@ class RubberBandScalper(
             )
 
             if result.status == ChaseFillStatus.NO_POSITION:
-                logger.warning(
-                    f"[{symbol}] NO POSITION on exchange — "
-                    f"reduceOnly rejected. Position already closed."
-                )
-                return {'status': 'NO_POSITION'}
+                logger.warning(f"[{symbol}] NO POSITION on exchange — reduceOnly rejected. Position already closed.")
+                return {"status": "NO_POSITION"}
 
-            if result.status in (
-                ChaseFillStatus.FILLED, ChaseFillStatus.FALLBACK_MARKET
-            ):
+            if result.status in (ChaseFillStatus.FILLED, ChaseFillStatus.FALLBACK_MARKET):
                 if result.avg_price <= 0:
-                    logger.error(
-                        f"[{symbol}] FILLED but avg_price=0 → treating as FAILED"
-                    )
+                    logger.error(f"[{symbol}] FILLED but avg_price=0 → treating as FAILED")
                     return None
                 fill_type = "MAKER" if result.maker_fill else "TAKER"
                 logger.info(
@@ -390,16 +392,13 @@ class RubberBandScalper(
                     f"(chase={result.chase_count})"
                 )
                 return {
-                    'avgPrice': str(result.avg_price),
-                    'executedQty': str(result.filled_quantity),
-                    'status': 'FILLED',
-                    'makerFill': result.maker_fill,
+                    "avgPrice": str(result.avg_price),
+                    "executedQty": str(result.filled_quantity),
+                    "status": "FILLED",
+                    "makerFill": result.maker_fill,
                 }
             else:
-                logger.error(
-                    f"[{symbol}] Order FAILED: {side} {quantity:.6f} "
-                    f"(status={result.status.value})"
-                )
+                logger.error(f"[{symbol}] Order FAILED: {side} {quantity:.6f} (status={result.status.value})")
                 return None
 
         except Exception as e:
@@ -409,8 +408,8 @@ class RubberBandScalper(
     def _round_qty(self, qty: float, symbol: str) -> float:
         """Round quantity to exchange step_size."""
         info = self.get_symbol_info(symbol)
-        step = info.get('step_size', 0.001)
-        prec = info.get('quantity_precision', 3)
+        step = info.get("step_size", 0.001)
+        prec = info.get("quantity_precision", 3)
         rounded = math.floor(qty / step) * step
         return round(rounded, prec)
 
@@ -444,7 +443,7 @@ class RubberBandScalper(
         # ── Enhanced cycle header with HWM / DD / cum PnL ──
         hwm = self._high_water_mark if self._high_water_mark > 0 else balance
         dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
-        cum_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        cum_pnl = sum(t["pnl_usd"] for t in self._trade_history)
         n_trades = len(self._trade_history)
         logger.info(
             f"Cycle #{self._cycle_count} | "
@@ -464,10 +463,10 @@ class RubberBandScalper(
         if self._drawdown_halt:
             # Close any remaining positions
             for pos_key in list(self.strategy.active_positions):
-                api_sym = pos_key.split(':')[0] if ':' in pos_key else pos_key
+                api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
                 close = self.download_klines(api_sym, 2)
                 price = close[-1] if close is not None else 0
-                self._close_position(pos_key, 'drawdown_halt', price)
+                self._close_position(pos_key, "drawdown_halt", price)
 
             # v14.0.1: Auto-recover when DD drops below threshold
             # after all positions are closed.
@@ -476,20 +475,22 @@ class RubberBandScalper(
                 dd = (hwm - balance) / hwm if hwm > 0 else 0.0
                 if dd < self._cfg.max_drawdown_pct:
                     logger.info(
-                        f"DD recovered to {dd*100:.1f}% "
-                        f"(threshold={self._cfg.max_drawdown_pct*100:.0f}%) "
+                        f"DD recovered to {dd * 100:.1f}% "
+                        f"(threshold={self._cfg.max_drawdown_pct * 100:.0f}%) "
                         f"— resuming trading"
                     )
-                    self.discord.send(content=(
-                        f"\u2705 **DD Recovered** — "
-                        f"{dd*100:.1f}% (below {self._cfg.max_drawdown_pct*100:.0f}% threshold). "
-                        f"Resuming trading."
-                    ))
+                    self.discord.send(
+                        content=(
+                            f"\u2705 **DD Recovered** — "
+                            f"{dd * 100:.1f}% (below {self._cfg.max_drawdown_pct * 100:.0f}% threshold). "
+                            f"Resuming trading."
+                        )
+                    )
                     self._drawdown_halt = False
                 else:
                     logger.info(
-                        f"DD halt active — {dd*100:.1f}% DD "
-                        f"(need <{self._cfg.max_drawdown_pct*100:.0f}% to resume). "
+                        f"DD halt active — {dd * 100:.1f}% DD "
+                        f"(need <{self._cfg.max_drawdown_pct * 100:.0f}% to resume). "
                         f"All positions closed, waiting for HWM reset on restart."
                     )
                     self._save_state()
@@ -499,20 +500,20 @@ class RubberBandScalper(
                 return
 
         # 3. Fetch BTC klines for regime filter
-        btc_close = self.download_klines('BTCUSDT', 200)
+        btc_close = self.download_klines("BTCUSDT", 200)
 
         # 3b. v7.0: Fetch BTC 4h klines for MTF / Elliott macro bias
         btc_close_4h = None
-        if self.strategy_name == 'elliott':
+        if self.strategy_name == "elliott":
             # Elliott needs 600+ bars of BTC 4h for 200/500 EMA macro bias
-            btc_close_4h = self.download_klines('BTCUSDT', 600, interval='4h')
+            btc_close_4h = self.download_klines("BTCUSDT", 600, interval="4h")
             if btc_close_4h is not None:
                 self.strategy.update_btc_data(btc_close_4h)
-        elif self.strategy_name == 'vol_straddle':
+        elif self.strategy_name == "vol_straddle":
             # VolStraddle doesn't use BTC as filter — skip 4h BTC fetch
             pass
         elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
-            btc_close_4h = self.download_klines('BTCUSDT', 100, interval='4h')
+            btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
 
         # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
         self._sync_server_orders()
@@ -523,26 +524,26 @@ class RubberBandScalper(
 
         # v12.5.1: Log position status AFTER sync (SL/TP verified)
         for pos_key, pos in self.strategy.active_positions.items():
-            api_sym = pos.get('symbol', pos_key.split(':')[0])
+            api_sym = pos.get("symbol", pos_key.split(":")[0])
             try:
                 mark = self.client.futures_mark_price(symbol=api_sym)
-                cur_px = float(mark['markPrice'])
+                cur_px = float(mark["markPrice"])
             except Exception:
-                cur_px = pos.get('entry_price', 0)
-            entry_px = pos.get('entry_price', 0)
+                cur_px = pos.get("entry_price", 0)
+            entry_px = pos.get("entry_price", 0)
             if entry_px > 0:
-                if pos['signal'] == 1:
+                if pos["signal"] == 1:
                     upnl_pct = (cur_px - entry_px) / entry_px * 100
                 else:
                     upnl_pct = (entry_px - cur_px) / entry_px * 100
             else:
                 upnl_pct = 0.0
-            sl_id = pos.get('server_sl_order_id')
-            tp_id = pos.get('server_tp_order_id')
+            sl_id = pos.get("server_sl_order_id")
+            tp_id = pos.get("server_tp_order_id")
             # Use bars_held+1 to match the value AFTER this cycle's update,
             # consistent with the Summary section printed later.
-            bars = pos.get('bars_held', 0) + 1
-            direction = 'L' if pos.get('signal') == 1 else 'S'
+            bars = pos.get("bars_held", 0) + 1
+            direction = "L" if pos.get("signal") == 1 else "S"
             logger.info(
                 f"  [{pos_key}] {direction} entry=${entry_px:.4f} "
                 f"mark=${cur_px:.4f} uPnL={upnl_pct:+.2f}% bars={bars} "
@@ -552,7 +553,7 @@ class RubberBandScalper(
         # 4. Process existing positions (always, even when paused)
         for pos_key in list(self.strategy.active_positions):
             # Extract Binance symbol from compound key (e.g., BTCUSDT:LONG → BTCUSDT)
-            api_sym = pos_key.split(':')[0] if ':' in pos_key else pos_key
+            api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
 
             # v12.3.2: Download full OHLC for active positions to compute
             # fresh ATR. Previously only close was downloaded, so runner
@@ -567,7 +568,7 @@ class RubberBandScalper(
 
             # v12.3.2: Compute FRESH ATR for PBT runner trailing
             # VolStraddle uses R43 trailing stop (client-side, no ATR needed).
-            if self.strategy_name == 'vol_straddle':
+            if self.strategy_name == "vol_straddle":
                 current_atr = 0.02
             elif self.config.atr_period > 0 and len(close) >= self.config.atr_period:
                 atr_arr = compute_atr_pct(high, low, close, self.config.atr_period)
@@ -577,46 +578,44 @@ class RubberBandScalper(
                 current_atr = 0.02
 
             exit_reason = self.strategy.update_position(
-                pos_key, current_price, current_atr_pct=current_atr,
-                current_high=float(high[-1]), current_low=float(low[-1]),
+                pos_key,
+                current_price,
+                current_atr_pct=current_atr,
+                current_high=float(high[-1]),
+                current_low=float(low[-1]),
             )
             if exit_reason:
-                logger.info(
-                    f"  [{pos_key}] Exit signal: {exit_reason} @ ${current_price:.4f}"
-                )
+                logger.info(f"  [{pos_key}] Exit signal: {exit_reason} @ ${current_price:.4f}")
                 # Straddle leg tracking: log which leg exits first
-                if ':' in pos_key and self.strategy_name == 'vol_straddle':
-                    api_sym, side = pos_key.split(':', 1)
-                    other_side = 'SHORT' if side == 'LONG' else 'LONG'
+                if ":" in pos_key and self.strategy_name == "vol_straddle":
+                    api_sym, side = pos_key.split(":", 1)
+                    other_side = "SHORT" if side == "LONG" else "LONG"
                     other_key = f"{api_sym}:{other_side}"
                     other_pos = self.strategy._positions.get(other_key)
                     if other_pos:
-                        entry_o = other_pos.get('entry_price', 0)
+                        entry_o = other_pos.get("entry_price", 0)
                         if entry_o > 0:
-                            if other_pos['signal'] == 1:
+                            if other_pos["signal"] == 1:
                                 o_gain = (current_price - entry_o) / entry_o
                             else:
                                 o_gain = (entry_o - current_price) / entry_o
                             logger.info(
                                 f"  [STRADDLE] {side} leg closed ({exit_reason}), "
                                 f"{other_side} still open "
-                                f"uPnL={o_gain*100:+.2f}% "
+                                f"uPnL={o_gain * 100:+.2f}% "
                                 f"bars={other_pos.get('bars_held', 0)}"
                             )
                     else:
-                        logger.info(
-                            f"  [STRADDLE] Last leg ({side}) closed ({exit_reason}) "
-                            f"— straddle fully unwound"
-                        )
-                if exit_reason == 'partial_close':
+                        logger.info(f"  [STRADDLE] Last leg ({side}) closed ({exit_reason}) — straddle fully unwound")
+                if exit_reason == "partial_close":
                     self._partial_close_position(pos_key, current_price)
-                elif exit_reason == 'confirm_entry':
+                elif exit_reason == "confirm_entry":
                     # Elliott: upgrade 2% exploratory → add 8% primary
                     self._add_to_position(pos_key, current_price, balance)
-                elif exit_reason == 'pyramid':
+                elif exit_reason == "pyramid":
                     # Elliott: pyramid using unrealized profits
                     self._pyramid_position(pos_key, current_price, balance)
-                elif exit_reason == 'cancel_exploration':
+                elif exit_reason == "cancel_exploration":
                     # Elliott: confirmation timed out → close pilot
                     self._close_position(pos_key, exit_reason, current_price)
                 else:
@@ -624,15 +623,13 @@ class RubberBandScalper(
             else:
                 pos = self.strategy._positions.get(pos_key)
                 if pos:
-                    _mh = pos.get('max_hold', self.config.max_hold)
+                    _mh = pos.get("max_hold", self.config.max_hold)
                     logger.debug(
                         f"  [{pos_key}] HOLD: bars={pos.get('bars_held', 0)}/{_mh} "
-                        f"best_pnl={pos.get('best_pnl', 0)*100:.2f}%"
+                        f"best_pnl={pos.get('best_pnl', 0) * 100:.2f}%"
                     )
                     # v12.3.3: Ratchet server SL for runners to protect profits
-                    if (pos.get('partial_closed')
-                            and self.config.breakeven_after_partial
-                            and not self.paper_mode):
+                    if pos.get("partial_closed") and self.config.breakeven_after_partial and not self.paper_mode:
                         self._ratchet_runner_sl(pos_key, pos)
 
         # 5. Look for new entries (skip if risk blocked or paused)
@@ -640,9 +637,8 @@ class RubberBandScalper(
             logger.info("⏸️ Paused — skipping new entries")
         elif not risk_blocked:
             # ── G7: Daily Loss Circuit Breaker ──
-            if (self.strategy_name == 'vol_straddle'
-                    and self.vs_config.daily_loss_limit_pct > 0):
-                today_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            if self.strategy_name == "vol_straddle" and self.vs_config.daily_loss_limit_pct > 0:
+                today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 if self._daily_loss_date != today_utc:
                     # New UTC day — reset counter
                     self._daily_loss_date = today_utc
@@ -651,8 +647,7 @@ class RubberBandScalper(
                     logger.info(f"G7 DailyBreaker: reset for {today_utc}")
                 # Accumulate closed PnL from today's trades
                 self._daily_realized_pnl = sum(
-                    t['pnl_usd'] for t in self._trade_history
-                    if t.get('time', '').startswith(today_utc)
+                    t["pnl_usd"] for t in self._trade_history if t.get("time", "").startswith(today_utc)
                 )
                 limit_usd = balance * self.vs_config.daily_loss_limit_pct
                 if not self._daily_loss_blocked and self._daily_realized_pnl < -limit_usd:
@@ -660,28 +655,25 @@ class RubberBandScalper(
                     logger.warning(
                         f"⛔ G7 DailyBreaker TRIGGERED: "
                         f"today PnL=${self._daily_realized_pnl:.2f} < "
-                        f"-${limit_usd:.2f} ({self.vs_config.daily_loss_limit_pct*100:.0f}% limit). "
+                        f"-${limit_usd:.2f} ({self.vs_config.daily_loss_limit_pct * 100:.0f}% limit). "
                         f"No new entries until UTC midnight."
                     )
-                    self.discord.send(content=(
-                        f"⛔ **Daily Loss Limit Hit** — "
-                        f"Realized PnL today: ${self._daily_realized_pnl:.2f} "
-                        f"(limit -${limit_usd:.2f}). "
-                        f"No new entries until midnight UTC."
-                    ))
+                    self.discord.send(
+                        content=(
+                            f"⛔ **Daily Loss Limit Hit** — "
+                            f"Realized PnL today: ${self._daily_realized_pnl:.2f} "
+                            f"(limit -${limit_usd:.2f}). "
+                            f"No new entries until midnight UTC."
+                        )
+                    )
                 if self._daily_loss_blocked:
                     logger.info(
-                        f"G7 DailyBreaker active: "
-                        f"today PnL=${self._daily_realized_pnl:.2f}. "
-                        f"Skipping new entries."
+                        f"G7 DailyBreaker active: today PnL=${self._daily_realized_pnl:.2f}. Skipping new entries."
                     )
             if not self._daily_loss_blocked:
-                available_slots = (
-                    self._cfg.max_concurrent - self.strategy.n_active
-                )
+                available_slots = self._cfg.max_concurrent - self.strategy.n_active
                 if available_slots > 0:
-                    self._scan_entries(symbols, btc_close, balance, available_slots,
-                                       btc_close_4h=btc_close_4h)
+                    self._scan_entries(symbols, btc_close, balance, available_slots, btc_close_4h=btc_close_4h)
 
         # 6. Save state
         self._save_state()
@@ -716,7 +708,7 @@ class RubberBandScalper(
             # v9.0: Download full klines (close + high + low + volume + taker)
             # VolStraddle needs 500 bars: 15m warmup=200 needs ≥201 bars,
             # 1h resampling needs ≥4×(warmup_1h+1)=204 bars. 500 covers both.
-            n_bars = 500 if self.strategy_name == 'vol_straddle' else 200
+            n_bars = 500 if self.strategy_name == "vol_straddle" else 200
             result = self.download_klines(sym, n_bars, full=True)
             if result is None:
                 continue
@@ -728,31 +720,31 @@ class RubberBandScalper(
             self.strategy.update_market_data(sym, volume, taker_buy, high, low)
 
             # v7.0: Download 4h data for MTF confirmation / Elliott wave detection
-            if self.strategy_name == 'elliott':
+            if self.strategy_name == "elliott":
                 # Elliott needs 600+ bars of 4h OHLC for 500 EMA + ZigZag
-                result_4h = self.download_klines(sym, 600, interval='4h', full=True)
+                result_4h = self.download_klines(sym, 600, interval="4h", full=True)
                 if result_4h is not None:
                     c4h, h4h, l4h, _, _ = result_4h
                     self.strategy.update_htf_data(sym, c4h, h4h, l4h)
-            elif self.strategy_name == 'vol_straddle':
+            elif self.strategy_name == "vol_straddle":
                 # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
                 # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
                 n_bars_4h = 300 if (self.vs_config and self.vs_config.ma_cluster_enabled) else 100
-                result_4h = self.download_klines(sym, n_bars_4h, interval='4h', full=True)
+                result_4h = self.download_klines(sym, n_bars_4h, interval="4h", full=True)
                 if result_4h is not None:
                     c4h, h4h, l4h, _, _ = result_4h
                     self.strategy.update_htf_data(sym, c4h, h4h, l4h)
             elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
-                close_4h = self.download_klines(sym, 100, interval='4h')
+                close_4h = self.download_klines(sym, 100, interval="4h")
                 if close_4h is not None:
                     self.strategy.update_htf_data(sym, close_4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
 
             # v12.0: Collect full diagnostic context (read-only, after on_bar)
-            if self.strategy_name != 'elliott' and hasattr(self.strategy, 'diagnose_bar'):
+            if self.strategy_name != "elliott" and hasattr(self.strategy, "diagnose_bar"):
                 diag = self.strategy.diagnose_bar(sym, close, btc_close)
-                diag['signal_actual'] = signal  # cross-verify with on_bar
+                diag["signal_actual"] = signal  # cross-verify with on_bar
                 scan_diags.append(diag)
 
             # Track 8-bar move for diagnostics
@@ -762,9 +754,7 @@ class RubberBandScalper(
 
             if signal != 0:
                 # Measure move strength for prioritization
-                move = abs(
-                    close[-1] / close[-_lb - 1] - 1.0
-                )
+                move = abs(close[-1] / close[-_lb - 1] - 1.0)
                 if signal == 2:
                     # Straddle: expand into LONG + SHORT candidates
                     candidates.append((sym, 1, move, close))
@@ -777,11 +767,11 @@ class RubberBandScalper(
 
         # ── Diagnostic: log scan summary every cycle ──
         top_movers = sorted(moves_seen, key=lambda x: x[1], reverse=True)[:3]
-        if self.strategy_name == 'vol_straddle':
+        if self.strategy_name == "vol_straddle":
             # VR strategy: show VR threshold + actual VR values
             print(format_scan_summary(len(candidates), top_movers, 0.0))
             if candidates:
-                cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
@@ -790,7 +780,7 @@ class RubberBandScalper(
                     for s, m in top_movers:
                         vr_all = self.strategy.get_vr_all_tf(s)
                         vr_str = f"15m={vr_all['15m']:.2f}/1h={vr_all['1h']:.2f}/4h={vr_all['4h']:.2f}"
-                        top3_with_vr.append(f"{s}({m*100:.2f}%, {vr_str})")
+                        top3_with_vr.append(f"{s}({m * 100:.2f}%, {vr_str})")
                     logger.info(
                         f"No candidates — top moves: {', '.join(top3_with_vr)} "
                         f"(threshold VR<{self.vs_config.d_vr_threshold} any TF)"
@@ -801,7 +791,7 @@ class RubberBandScalper(
                     near_s = 0  # VR < s_threshold + 0.05
                     in_squeeze = 0  # VR < d_threshold
                     global_min_vr = 999.0
-                    closest_sym = ''
+                    closest_sym = ""
                     for s, _ in moves_seen:
                         vr_all = self.strategy.get_vr_all_tf(s)
                         min_vr = min(vr_all.values())
@@ -822,45 +812,27 @@ class RubberBandScalper(
                     )
 
                     # ── MA Cluster monitor (parallel to VR Squeeze monitor) ──
-                    if (self.vs_config and self.vs_config.ma_cluster_enabled
-                            and hasattr(self.strategy, '_ma_cluster_state')
-                            and self.strategy._ma_cluster_state):
+                    if (
+                        self.vs_config
+                        and self.vs_config.ma_cluster_enabled
+                        and hasattr(self.strategy, "_ma_cluster_state")
+                        and self.strategy._ma_cluster_state
+                    ):
                         _mcs = self.strategy._ma_cluster_state
-                        _in_cluster = {
-                            s: d for s, d in _mcs.items() if d['duration'] > 0
-                        }
-                        _zombie = sum(
-                            1 for d in _in_cluster.values()
-                            if d['rejection'].startswith('zombie')
-                        )
-                        _mom_fail = sum(
-                            1 for d in _in_cluster.values()
-                            if d['rejection'].startswith('momentum_fail')
-                        )
-                        _cooldown = sum(
-                            1 for d in _in_cluster.values()
-                            if d['rejection'] == 'cooldown'
-                        )
-                        _pre_dur = sum(
-                            1 for d in _in_cluster.values()
-                            if d['rejection'].startswith('pre_duration')
-                        )
-                        _no_break = sum(
-                            1 for d in _in_cluster.values()
-                            if d['rejection'] == 'no_breakout'
-                        )
-                        _fired = sum(
-                            1 for d in _in_cluster.values()
-                            if d['rejection'] == 'fired'
-                        )
+                        _in_cluster = {s: d for s, d in _mcs.items() if d["duration"] > 0}
+                        _zombie = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("zombie"))
+                        _mom_fail = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("momentum_fail"))
+                        _cooldown = sum(1 for d in _in_cluster.values() if d["rejection"] == "cooldown")
+                        _pre_dur = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("pre_duration"))
+                        _no_break = sum(1 for d in _in_cluster.values() if d["rejection"] == "no_breakout")
+                        _fired = sum(1 for d in _in_cluster.values() if d["rejection"] == "fired")
                         _top3 = sorted(
                             _in_cluster.items(),
-                            key=lambda x: x[1]['duration'], reverse=True,
+                            key=lambda x: x[1]["duration"],
+                            reverse=True,
                         )[:3]
-                        _top3_str = ', '.join(
-                            f"{s}({d['duration']}bars,"
-                            f"sp={d['spread']:.1f}%,{d['rejection']})"
-                            for s, d in _top3
+                        _top3_str = ", ".join(
+                            f"{s}({d['duration']}bars,sp={d['spread']:.1f}%,{d['rejection']})" for s, d in _top3
                         )
                         logger.info(
                             f"MA Cluster monitor: {len(_in_cluster)} in cluster "
@@ -873,14 +845,14 @@ class RubberBandScalper(
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
             if candidates:
-                cand_strs = [f"{s}({m*100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
-                    top3 = [f"{s}({m*100:.2f}%)" for s, m in top_movers]
+                    top3 = [f"{s}({m * 100:.2f}%)" for s, m in top_movers]
                     logger.info(
                         f"No candidates — top moves: {', '.join(top3)} "
-                        f"(base >{self.config.threshold*100:.1f}%, adaptive per-symbol)"
+                        f"(base >{self.config.threshold * 100:.1f}%, adaptive per-symbol)"
                     )
 
         # v12.0: Write structured diagnostics to JSONL
@@ -890,11 +862,13 @@ class RubberBandScalper(
 
         # ── G6: BTC Trend Gate — compute once, apply to all LONG candidates ──
         btc_ma = None
-        if (self.strategy_name == 'vol_straddle'
-                and self.vs_config.btc_long_filter_enabled
-                and btc_close is not None
-                and len(btc_close) >= self.vs_config.btc_long_ma_period):
-            btc_ma = float(np.mean(btc_close[-self.vs_config.btc_long_ma_period:]))
+        if (
+            self.strategy_name == "vol_straddle"
+            and self.vs_config.btc_long_filter_enabled
+            and btc_close is not None
+            and len(btc_close) >= self.vs_config.btc_long_ma_period
+        ):
+            btc_ma = float(np.mean(btc_close[-self.vs_config.btc_long_ma_period :]))
             btc_cur = float(btc_close[-1])
             btc_above_ma = btc_cur >= btc_ma
             logger.info(
@@ -920,10 +894,7 @@ class RubberBandScalper(
 
             # ═══ v12.3 PARITY: Direction Diversity Filter ═══
             if self._cfg.dir_diversity_enabled:
-                same_dir = sum(
-                    1 for p in self.strategy.active_positions.values()
-                    if p.get('signal') == signal
-                )
+                same_dir = sum(1 for p in self.strategy.active_positions.values() if p.get("signal") == signal)
                 if same_dir >= self._cfg.max_same_direction:
                     logger.info(
                         f"[{sym}] DirDiversity blocked: "
@@ -936,35 +907,28 @@ class RubberBandScalper(
                 entries_made += 1
 
         if entries_made > 0:
-            logger.info(
-                f"Opened {entries_made} new positions "
-                f"(from {len(candidates)} candidates)"
-            )
+            logger.info(f"Opened {entries_made} new positions (from {len(candidates)} candidates)")
 
     # ==================== State Persistence ====================
 
     def _save_state(self) -> None:
         """Persist positions and trade history."""
         state = {
-            'version': '2.0.0',
-            'saved_at': datetime.now(timezone.utc).isoformat(),
-            'paper_mode': self.paper_mode,
-            'paper_balance': self._paper_balance,
-            'initial_balance': self._initial_balance,
-            'high_water_mark': self._high_water_mark,
-
-            'positions': self.strategy.active_positions,
-            'trade_history': self._trade_history[-100:],  # Keep last 100
-            'cycle_count': self._cycle_count,
+            "version": "2.0.0",
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "paper_mode": self.paper_mode,
+            "paper_balance": self._paper_balance,
+            "initial_balance": self._initial_balance,
+            "high_water_mark": self._high_water_mark,
+            "positions": self.strategy.active_positions,
+            "trade_history": self._trade_history[-100:],  # Keep last 100
+            "cycle_count": self._cycle_count,
         }
         # v14.0: Persist MA cluster cooldown for crash recovery.
         # Without this, a restart during an active cluster episode would
         # re-fire a duplicate signal on the same cluster.
-        if self.strategy_name == 'vol_straddle' and hasattr(self.strategy, '_ma_cluster_cooldown'):
-            state['ma_cluster_cooldown'] = {
-                sym: int(arr[0])
-                for sym, arr in self.strategy._ma_cluster_cooldown.items()
-            }
+        if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_ma_cluster_cooldown"):
+            state["ma_cluster_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._ma_cluster_cooldown.items()}
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
         try:
             save_scalper_state(state, filepath=filepath)
@@ -978,19 +942,17 @@ class RubberBandScalper(
         if state is None:
             return
 
-        logger.info(
-            f"Restoring state from {state.get('saved_at', 'unknown')}"
-        )
+        logger.info(f"Restoring state from {state.get('saved_at', 'unknown')}")
 
-        self._paper_balance = state.get('paper_balance', self._paper_balance)
-        self._initial_balance = state.get('initial_balance', 0)
-        self._high_water_mark = state.get('high_water_mark', 0)
+        self._paper_balance = state.get("paper_balance", self._paper_balance)
+        self._initial_balance = state.get("initial_balance", 0)
+        self._high_water_mark = state.get("high_water_mark", 0)
 
-        self._trade_history = state.get('trade_history', [])
+        self._trade_history = state.get("trade_history", [])
         self._cycle_count = 0  # Always reset per session (new log file each run)
 
         # Restore positions
-        positions = state.get('positions', {})
+        positions = state.get("positions", {})
 
         # v12.4.6: Reset session state when no positions survive restart.
         # Persisting HWM across sessions with 0 positions causes
@@ -1003,113 +965,75 @@ class RubberBandScalper(
             self._high_water_mark = balance
             self._initial_balance = balance
             self._trade_history = []
-            logger.info(
-                f"No positions to restore — fresh session: "
-                f"HWM reset to ${balance:.2f}, trade history cleared"
-            )
+            logger.info(f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history cleared")
 
         for sym, pos in positions.items():
             # Parse compound key (e.g. 'SUIUSDT:LONG') to extract the clean
             # Binance API symbol and position_side separately.
             # Without this, open_position stores the compound key as 'symbol',
             # causing -1022 signature errors when it's sent to the Binance API.
-            parts = sym.rsplit(':', 1)
-            if len(parts) == 2 and parts[1] in ('LONG', 'SHORT'):
+            parts = sym.rsplit(":", 1)
+            if len(parts) == 2 and parts[1] in ("LONG", "SHORT"):
                 api_sym = parts[0]
                 restored_position_side = parts[1]
             else:
                 api_sym = sym
-                restored_position_side = pos.get('position_side')
+                restored_position_side = pos.get("position_side")
 
             self.strategy.open_position(
                 symbol=api_sym,
-                signal=pos['signal'],
-                entry_price=pos['entry_price'],
-                notional=pos['notional'],
-                leverage=pos.get('leverage', 1),
-                move_size=pos.get('move_size', 0.03),
-                entry_stop_mult=pos.get('entry_stop_mult'),
-                server_sl_order_id=pos.get('server_sl_order_id'),
-                server_tp_order_id=pos.get('server_tp_order_id'),
+                signal=pos["signal"],
+                entry_price=pos["entry_price"],
+                notional=pos["notional"],
+                leverage=pos.get("leverage", 1),
+                move_size=pos.get("move_size", 0.03),
+                entry_stop_mult=pos.get("entry_stop_mult"),
+                server_sl_order_id=pos.get("server_sl_order_id"),
+                server_tp_order_id=pos.get("server_tp_order_id"),
                 position_side=restored_position_side,
             )
             # Restore bars_held and PBT runner state
             if sym in self.strategy._positions:
-                self.strategy._positions[sym]['bars_held'] = pos.get(
-                    'bars_held', 0
-                )
-                self.strategy._positions[sym]['best_pnl'] = pos.get(
-                    'best_pnl', 0.0
-                )
-                self.strategy._positions[sym]['partial_closed'] = pos.get(
-                    'partial_closed', False
-                )
+                self.strategy._positions[sym]["bars_held"] = pos.get("bars_held", 0)
+                self.strategy._positions[sym]["best_pnl"] = pos.get("best_pnl", 0.0)
+                self.strategy._positions[sym]["partial_closed"] = pos.get("partial_closed", False)
                 # v12.3 PBT: Restore runner trailing state
                 # Without these, a restarted runner loses its breakeven
                 # floor and peak tracking — violating PBT safety promise.
-                self.strategy._positions[sym]['highest_since_tp1'] = pos.get(
-                    'highest_since_tp1', 0.0
-                )
-                self.strategy._positions[sym]['trail_floor'] = pos.get(
-                    'trail_floor', None
-                )
-                self.strategy._positions[sym]['confidence'] = pos.get(
-                    'confidence', 0
-                )
+                self.strategy._positions[sym]["highest_since_tp1"] = pos.get("highest_since_tp1", 0.0)
+                self.strategy._positions[sym]["trail_floor"] = pos.get("trail_floor", None)
+                self.strategy._positions[sym]["confidence"] = pos.get("confidence", 0)
                 # v12.3.3: Restore server SL ratchet state for runners.
                 # Without these, a restarted runner triggers a redundant
                 # ratchet API call and has a brief inconsistency window.
-                self.strategy._positions[sym]['_computed_trail_stop'] = pos.get(
-                    '_computed_trail_stop'
-                )
-                self.strategy._positions[sym]['_server_sl_pct'] = pos.get(
-                    '_server_sl_pct', 0.0
-                )
+                self.strategy._positions[sym]["_computed_trail_stop"] = pos.get("_computed_trail_stop")
+                self.strategy._positions[sym]["_server_sl_pct"] = pos.get("_server_sl_pct", 0.0)
                 # R43: Trailing stop state for directional trades
-                self.strategy._positions[sym]['trail_active'] = pos.get(
-                    'trail_active', False
-                )
-                self.strategy._positions[sym]['peak_gain'] = pos.get(
-                    'peak_gain', 0.0
-                )
-                self.strategy._positions[sym]['is_straddle'] = pos.get(
-                    'is_straddle', False
-                )
+                self.strategy._positions[sym]["trail_active"] = pos.get("trail_active", False)
+                self.strategy._positions[sym]["peak_gain"] = pos.get("peak_gain", 0.0)
+                self.strategy._positions[sym]["is_straddle"] = pos.get("is_straddle", False)
                 # v14.0: Restore per-signal fields (sl/tp/tf/max_hold/strategy_type).
                 # Without this, crash recovery defaults to VR squeeze params
                 # for ALL positions — breaking MA cluster SL/TP/max_hold/exit routing.
-                self.strategy._positions[sym]['strategy_type'] = pos.get(
-                    'strategy_type', 'vr_squeeze'
-                )
-                self.strategy._positions[sym]['sl'] = pos.get(
-                    'sl', self.strategy._positions[sym].get('sl')
-                )
-                self.strategy._positions[sym]['tp'] = pos.get(
-                    'tp', self.strategy._positions[sym].get('tp')
-                )
-                self.strategy._positions[sym]['tf'] = pos.get(
-                    'tf', self.strategy._positions[sym].get('tf')
-                )
-                self.strategy._positions[sym]['max_hold'] = pos.get(
-                    'max_hold', self.strategy._positions[sym].get('max_hold')
+                self.strategy._positions[sym]["strategy_type"] = pos.get("strategy_type", "vr_squeeze")
+                self.strategy._positions[sym]["sl"] = pos.get("sl", self.strategy._positions[sym].get("sl"))
+                self.strategy._positions[sym]["tp"] = pos.get("tp", self.strategy._positions[sym].get("tp"))
+                self.strategy._positions[sym]["tf"] = pos.get("tf", self.strategy._positions[sym].get("tf"))
+                self.strategy._positions[sym]["max_hold"] = pos.get(
+                    "max_hold", self.strategy._positions[sym].get("max_hold")
                 )
 
-        logger.info(
-            f"Restored {len(positions)} positions, "
-            f"{len(self._trade_history)} trade records"
-        )
+        logger.info(f"Restored {len(positions)} positions, {len(self._trade_history)} trade records")
 
         # v14.0: Restore MA cluster cooldown state
-        if self.strategy_name == 'vol_straddle' and hasattr(self.strategy, '_ma_cluster_cooldown'):
-            cooldown_data = state.get('ma_cluster_cooldown', {})
+        if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_ma_cluster_cooldown"):
+            cooldown_data = state.get("ma_cluster_cooldown", {})
             for sym, val in cooldown_data.items():
                 arr = np.zeros(1, dtype=np.int64)
                 arr[0] = val
                 self.strategy._ma_cluster_cooldown[sym] = arr
             if cooldown_data:
-                logger.info(
-                    f"Restored MA cluster cooldown for {len(cooldown_data)} symbols"
-                )
+                logger.info(f"Restored MA cluster cooldown for {len(cooldown_data)} symbols")
 
     # ==================== Entry Points ====================
 
@@ -1125,20 +1049,17 @@ class RubberBandScalper(
         if self.paper_mode:
             return
 
-        want_hedge = (
-            self.strategy_name == 'vol_straddle'
-            and self.vs_config.hedge_mode
-        )
+        want_hedge = self.strategy_name == "vol_straddle" and self.vs_config.hedge_mode
 
         try:
             resp = self.client.futures_get_position_mode()
-            current_hedge = resp.get('dualSidePosition', False)
+            current_hedge = resp.get("dualSidePosition", False)
         except Exception as e:
             logger.error(f"Position mode check failed: {e}")
             return
 
         if current_hedge == want_hedge:
-            mode_label = 'Hedge' if current_hedge else 'One-Way'
+            mode_label = "Hedge" if current_hedge else "One-Way"
             logger.info(f"Position mode: {mode_label} (OK)")
             return
 
@@ -1146,22 +1067,23 @@ class RubberBandScalper(
             self.client.futures_change_position_mode(
                 dualSidePosition=want_hedge,
             )
-            mode_label = 'Hedge' if want_hedge else 'One-Way'
+            mode_label = "Hedge" if want_hedge else "One-Way"
             logger.info(f"Position mode switched to {mode_label}")
         except BinanceAPIException as e:
-            if '-4059' in str(e):
+            if "-4059" in str(e):
                 # Already in desired mode (race condition)
                 pass
-            elif '-4068' in str(e):
+            elif "-4068" in str(e):
                 # Cannot change while positions are open
                 logger.error(
-                    "Cannot switch position mode — open positions exist. "
-                    "Close all positions first, then restart."
+                    "Cannot switch position mode — open positions exist. Close all positions first, then restart."
                 )
-                self.discord.send(content=(
-                    "\U0001f6a8 **포지션 모드 전환 실패** — "
-                    "열린 포지션이 있어 전환 불가. 모든 포지션 청산 후 재시작 필요."
-                ))
+                self.discord.send(
+                    content=(
+                        "\U0001f6a8 **포지션 모드 전환 실패** — "
+                        "열린 포지션이 있어 전환 불가. 모든 포지션 청산 후 재시작 필요."
+                    )
+                )
             else:
                 logger.error(f"Position mode change failed: {e}")
 
@@ -1212,82 +1134,97 @@ class RubberBandScalper(
             logger.info("Discord Bot started for interactive commands")
 
         n_symbols = len(self._cfg.symbol_whitelist) if self._cfg.symbol_whitelist else 0
-        commit_str = f"`{GIT_COMMIT['short']}`" if GIT_COMMIT['short'] else 'unknown'
+        commit_str = f"`{GIT_COMMIT['short']}`" if GIT_COMMIT["short"] else "unknown"
         n_recovered = self.strategy.n_active
 
-        if self.strategy_name == 'vol_straddle':
+        if self.strategy_name == "vol_straddle":
             vc = self.vs_config
-            self.discord.send(embed={
-                'title': '🚀 QuantBox VolStraddle 시작',
-                'color': 0x2979FF,
-                'description': (
-                    "VolStraddle D_mom8 (A1-D50) 초기화 완료.\n"
-                    "`!help`로 명령어 확인."
-                ),
-                'fields': [
-                    {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},
-                    {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
-                    {'name': '슬롯', 'value': f'{n_recovered}/{vc.max_concurrent}', 'inline': True},
-                    {'name': '── 전략 설정 ──', 'value': (
-                        f"VR({vc.vr_short}/{vc.vr_long}) < {vc.d_vr_threshold:.2f}\n"
-                        f"TP={vc.d_tp*100:.0f}% | SL={vc.d_sl*100:.0f}% | "
-                        f"Mom={vc.momentum_period}bar"
-                    ), 'inline': False},
-                    {'name': 'TF', 'value': (
-                        f"{'15m ' if vc.enable_15m else ''}"
-                        f"{'1h ' if vc.enable_1h else ''}"
-                        f"{'4h' if vc.enable_4h else ''}"
-                    ).strip(), 'inline': True},
-                    {'name': '레버리지', 'value': f'{vc.base_leverage}x', 'inline': True},
-                    {'name': 'CW-Tier', 'value': (
-                        f"{'ON' if vc.cw_enabled else 'OFF'} "
-                        f"(min={vc.min_conviction_score})"
-                    ), 'inline': True},
-                    {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
-                    {'name': '커밋', 'value': commit_str, 'inline': True},
-                ],
-                'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
-            })
+            self.discord.send(
+                embed={
+                    "title": "🚀 QuantBox VolStraddle 시작",
+                    "color": 0x2979FF,
+                    "description": ("VolStraddle D_mom8 (A1-D50) 초기화 완료.\n`!help`로 명령어 확인."),
+                    "fields": [
+                        {"name": "모드", "value": f"**{mode_str}**", "inline": True},
+                        {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
+                        {"name": "슬롯", "value": f"{n_recovered}/{vc.max_concurrent}", "inline": True},
+                        {
+                            "name": "── 전략 설정 ──",
+                            "value": (
+                                f"VR({vc.vr_short}/{vc.vr_long}) < {vc.d_vr_threshold:.2f}\n"
+                                f"TP={vc.d_tp * 100:.0f}% | SL={vc.d_sl * 100:.0f}% | "
+                                f"Mom={vc.momentum_period}bar"
+                            ),
+                            "inline": False,
+                        },
+                        {
+                            "name": "TF",
+                            "value": (
+                                f"{'15m ' if vc.enable_15m else ''}"
+                                f"{'1h ' if vc.enable_1h else ''}"
+                                f"{'4h' if vc.enable_4h else ''}"
+                            ).strip(),
+                            "inline": True,
+                        },
+                        {"name": "레버리지", "value": f"{vc.base_leverage}x", "inline": True},
+                        {
+                            "name": "CW-Tier",
+                            "value": (f"{'ON' if vc.cw_enabled else 'OFF'} (min={vc.min_conviction_score})"),
+                            "inline": True,
+                        },
+                        {"name": "유니버스", "value": f"{n_symbols}종목", "inline": True},
+                        {"name": "커밋", "value": commit_str, "inline": True},
+                    ],
+                    "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
+                }
+            )
         else:
             eff_lev = self.config.base_leverage * self.config.mtf_leverage_mult
             _mtf_str = f"ON (SMA {self.config.mtf_sma_period})" if self.config.mtf_confirmation_enabled else "OFF"
             _adaptive_str = (
                 f"적응형 {self.config.atr_multiplier}x "
-                f"(floor {self.config.threshold_floor*100:.1f}%, cap {self.config.threshold_cap*100:.1f}%)"
+                f"(floor {self.config.threshold_floor * 100:.1f}%, cap {self.config.threshold_cap * 100:.1f}%)"
                 if self.config.atr_period > 0
-                else f"고정 {self.config.threshold*100:.1f}%"
+                else f"고정 {self.config.threshold * 100:.1f}%"
             )
-            self.discord.send(embed={
-                'title': '🚀 QuantBox 스캘퍼 시작',
-                'color': 0x2979FF,
-                'description': (
-                    "러버밴드 평균회귀 스캘퍼 초기화 완료.\n"
-                    "`!help`로 명령어 확인."
-                ),
-                'fields': [
-                    {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},
-                    {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
-                    {'name': '슬롯', 'value': f'{n_recovered}/{self.config.max_concurrent}', 'inline': True},
-                    {'name': '── 전략 설정 ──', 'value': (
-                        f"진입: {_adaptive_str}\n"
-                        f"TP={self.config.target_retrace} | "
-                        f"SL={'ATR×'+str(self.config.atr_stop_mult)+'['+str(round(self.config.atr_stop_floor*100,1))+'%-'+str(round(self.config.atr_stop_cap*100))+'%]' if self.config.atr_stop_enabled else str(self.config.stop_mult)+'×move'} | "
-                        f"MaxHold={self.config.max_hold}바"
-                    ), 'inline': False},
-                    {'name': 'MTF', 'value': _mtf_str, 'inline': True},
-                    {'name': '레버리지', 'value': (
-                        f'Base {self.config.base_leverage}x × '
-                        f'MTF {self.config.mtf_leverage_mult}x = '
-                        f'{eff_lev:.1f}x'
-                    ), 'inline': True},
-                    {'name': '유니버스', 'value': f'{n_symbols}종목', 'inline': True},
-                    {'name': '커밋', 'value': commit_str, 'inline': True},
-                ],
-                'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
-            })
+            self.discord.send(
+                embed={
+                    "title": "🚀 QuantBox 스캘퍼 시작",
+                    "color": 0x2979FF,
+                    "description": ("러버밴드 평균회귀 스캘퍼 초기화 완료.\n`!help`로 명령어 확인."),
+                    "fields": [
+                        {"name": "모드", "value": f"**{mode_str}**", "inline": True},
+                        {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
+                        {"name": "슬롯", "value": f"{n_recovered}/{self.config.max_concurrent}", "inline": True},
+                        {
+                            "name": "── 전략 설정 ──",
+                            "value": (
+                                f"진입: {_adaptive_str}\n"
+                                f"TP={self.config.target_retrace} | "
+                                f"SL={'ATR×' + str(self.config.atr_stop_mult) + '[' + str(round(self.config.atr_stop_floor * 100, 1)) + '%-' + str(round(self.config.atr_stop_cap * 100)) + '%]' if self.config.atr_stop_enabled else str(self.config.stop_mult) + '×move'} | "
+                                f"MaxHold={self.config.max_hold}바"
+                            ),
+                            "inline": False,
+                        },
+                        {"name": "MTF", "value": _mtf_str, "inline": True},
+                        {
+                            "name": "레버리지",
+                            "value": (
+                                f"Base {self.config.base_leverage}x × "
+                                f"MTF {self.config.mtf_leverage_mult}x = "
+                                f"{eff_lev:.1f}x"
+                            ),
+                            "inline": True,
+                        },
+                        {"name": "유니버스", "value": f"{n_symbols}종목", "inline": True},
+                        {"name": "커밋", "value": commit_str, "inline": True},
+                    ],
+                    "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
+                }
+            )
 
         # Pre-fetch exchange info
-        self.get_symbol_info('BTCUSDT')
+        self.get_symbol_info("BTCUSDT")
 
         # Get trading universe (refresh every 6 hours)
         symbols = self.get_trading_symbols()
@@ -1316,12 +1253,14 @@ class RubberBandScalper(
                 break
             except Exception as e:
                 logger.error(f"Cycle error: {e}", exc_info=True)
-                self.discord.send(embed={
-                    'title': '🚨 사이클 오류',
-                    'color': 0xFF1744,
-                    'description': f'포지션 {self.strategy.n_active}개 활성 중\n```\n{str(e)[:400]}\n```',
-                    'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
-                })
+                self.discord.send(
+                    embed={
+                        "title": "🚨 사이클 오류",
+                        "color": 0xFF1744,
+                        "description": f"포지션 {self.strategy.n_active}개 활성 중\n```\n{str(e)[:400]}\n```",
+                        "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
+                    }
+                )
                 time.sleep(60)
 
         # Clean shutdown
@@ -1332,81 +1271,73 @@ class RubberBandScalper(
         if self._bot_runner:
             self._bot_runner.stop()
 
-        total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        total_pnl = sum(t["pnl_usd"] for t in self._trade_history)
         n_trades = len(self._trade_history)
-        wins = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
+        wins = sum(1 for t in self._trade_history if t["pnl_usd"] > 0)
         wr = wins / n_trades * 100 if n_trades > 0 else 0
         balance_now = self.get_balance()
         session_return = (
-            (balance_now - self._initial_balance) / self._initial_balance * 100
-            if self._initial_balance > 0 else 0
+            (balance_now - self._initial_balance) / self._initial_balance * 100 if self._initial_balance > 0 else 0
         )
 
-        best = max(self._trade_history, key=lambda t: t['pnl_usd']) if self._trade_history else None
-        worst = min(self._trade_history, key=lambda t: t['pnl_usd']) if self._trade_history else None
+        best = max(self._trade_history, key=lambda t: t["pnl_usd"]) if self._trade_history else None
+        worst = min(self._trade_history, key=lambda t: t["pnl_usd"]) if self._trade_history else None
 
         # Terminal summary
-        print(format_session_summary(
-            cycles=self._cycle_count,
-            n_trades=n_trades,
-            win_rate=wr,
-            total_pnl=total_pnl,
-            balance=balance_now,
-            session_roi=session_return,
-            best_trade=best,
-            worst_trade=worst,
-        ))
+        print(
+            format_session_summary(
+                cycles=self._cycle_count,
+                n_trades=n_trades,
+                win_rate=wr,
+                total_pnl=total_pnl,
+                balance=balance_now,
+                session_roi=session_return,
+                best_trade=best,
+                worst_trade=worst,
+            )
+        )
 
         fields = [
-            {'name': '사이클', 'value': str(self._cycle_count), 'inline': True},
-            {'name': '거래', 'value': f'{n_trades}건 (승률 {wr:.0f}%)', 'inline': True},
-            {'name': '총 수익', 'value': f'${total_pnl:+,.2f}', 'inline': True},
-            {'name': '잔고', 'value': f'${balance_now:,.2f}', 'inline': True},
-            {'name': '세션 ROI', 'value': f'{session_return:+.2f}%', 'inline': True},
+            {"name": "사이클", "value": str(self._cycle_count), "inline": True},
+            {"name": "거래", "value": f"{n_trades}건 (승률 {wr:.0f}%)", "inline": True},
+            {"name": "총 수익", "value": f"${total_pnl:+,.2f}", "inline": True},
+            {"name": "잔고", "value": f"${balance_now:,.2f}", "inline": True},
+            {"name": "세션 ROI", "value": f"{session_return:+.2f}%", "inline": True},
         ]
         if best:
-            fields.append({'name': '최고 수익', 'value': f"{best['symbol']} ${best['pnl_usd']:+,.2f}", 'inline': True})
+            fields.append({"name": "최고 수익", "value": f"{best['symbol']} ${best['pnl_usd']:+,.2f}", "inline": True})
         if worst:
-            fields.append({'name': '최대 손실', 'value': f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", 'inline': True})
+            fields.append(
+                {"name": "최대 손실", "value": f"{worst['symbol']} ${worst['pnl_usd']:+,.2f}", "inline": True}
+            )
 
-        self.discord.send(embed={
-            'title': '🛑 QuantBox 스켈퍼 종료',
-            'color': 0xFF1744 if total_pnl < 0 else 0x00C853,
-            'fields': fields,
-            'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
-        })
+        self.discord.send(
+            embed={
+                "title": "🛑 QuantBox 스켈퍼 종료",
+                "color": 0xFF1744 if total_pnl < 0 else 0x00C853,
+                "fields": fields,
+                "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
+            }
+        )
 
 
 # ──────────────────────── CLI ──────────────────────────────────────────
 
+
 def main():
-    parser = argparse.ArgumentParser(
-        description='QuantBox Scalper — Rubber Band / Elliott Wave / VolStraddle'
+    parser = argparse.ArgumentParser(description="QuantBox Scalper — Rubber Band / Elliott Wave / VolStraddle")
+    parser.add_argument("--paper", action="store_true", help="Paper trading mode (no real orders)")
+    parser.add_argument("--once", action="store_true", help="Run a single cycle then exit")
+    parser.add_argument("--lookback", type=int, default=None, help="Signal lookback bars (default: from .env/config)")
+    parser.add_argument("--threshold", type=float, default=None, help="Min move to trigger (default: from .env/config)")
+    parser.add_argument(
+        "--max-slots", type=int, default=None, help="Max concurrent positions (default: from .env/config)"
     )
     parser.add_argument(
-        '--paper', action='store_true',
-        help='Paper trading mode (no real orders)'
-    )
-    parser.add_argument(
-        '--once', action='store_true',
-        help='Run a single cycle then exit'
-    )
-    parser.add_argument(
-        '--lookback', type=int, default=None,
-        help='Signal lookback bars (default: from .env/config)'
-    )
-    parser.add_argument(
-        '--threshold', type=float, default=None,
-        help='Min move to trigger (default: from .env/config)'
-    )
-    parser.add_argument(
-        '--max-slots', type=int, default=None,
-        help='Max concurrent positions (default: from .env/config)'
-    )
-    parser.add_argument(
-        '--strategy', choices=['rubberband', 'elliott', 'vol_straddle'],
-        default='vol_straddle',
-        help='Trading strategy: vol_straddle (default), rubberband, or elliott'
+        "--strategy",
+        choices=["rubberband", "elliott", "vol_straddle"],
+        default="vol_straddle",
+        help="Trading strategy: vol_straddle (default), rubberband, or elliott",
     )
     args = parser.parse_args()
 
@@ -1425,9 +1356,9 @@ def main():
         paper_mode=args.paper,
         config=config,
         strategy_name=args.strategy,
-        vs_config=VolStraddleConfig(
-            **({"max_concurrent": args.max_slots} if args.max_slots is not None else {})
-        ) if args.strategy == 'vol_straddle' else None,
+        vs_config=VolStraddleConfig(**({"max_concurrent": args.max_slots} if args.max_slots is not None else {}))
+        if args.strategy == "vol_straddle"
+        else None,
     )
 
     if args.once:
@@ -1436,5 +1367,5 @@ def main():
         scalper.run_continuous()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

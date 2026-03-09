@@ -20,6 +20,7 @@ from quantbox.strategy.rubberband import RubberBandConfig, RubberBandStrategy
 
 # ═══════════════════════ 1. Config Defaults ═══════════════════════
 
+
 class TestV126ConfigDefaults:
     """v12.6 default values must match R21 champion [E]: Clmx×3.0+ATR2."""
 
@@ -54,8 +55,10 @@ class TestV126ConfigDefaults:
 
 # ═══════════════════════ 2. ATR Stop Calculation ═══════════════════════
 
-def _make_strategy(atr_stop_enabled=True, atr_stop_mult=2.0,
-                   atr_stop_floor=0.005, atr_stop_cap=0.04) -> RubberBandStrategy:
+
+def _make_strategy(
+    atr_stop_enabled=True, atr_stop_mult=2.0, atr_stop_floor=0.005, atr_stop_cap=0.04
+) -> RubberBandStrategy:
     """Build a strategy instance with custom v12.6 ATR stop settings."""
     cfg = RubberBandConfig(
         atr_stop_enabled=atr_stop_enabled,
@@ -73,11 +76,13 @@ class TestATRStopMult:
     def test_basic_atr_stop(self):
         """SL = 2.0×ATR / move_size = stop_mult equivalent."""
         strat = _make_strategy()
-        strat._last_atr_pct['TESTUSDT'] = 0.015  # 1.5% ATR
+        strat._last_atr_pct["TESTUSDT"] = 0.015  # 1.5% ATR
         close = np.ones(50)  # dummy close prices (HTF disabled)
 
         result = strat.get_effective_stop_mult(
-            close, symbol='TESTUSDT', move_size=0.05,
+            close,
+            symbol="TESTUSDT",
+            move_size=0.05,
         )
         # Expected: 2.0 × 0.015 / 0.05 = 0.6
         assert abs(result - 0.60) < 1e-9
@@ -85,11 +90,13 @@ class TestATRStopMult:
     def test_atr_stop_floor_enforcement(self):
         """If 2×ATR < floor (0.5%), clamp to floor."""
         strat = _make_strategy()
-        strat._last_atr_pct['TESTUSDT'] = 0.001  # 0.1% ATR → raw SL = 0.2%
+        strat._last_atr_pct["TESTUSDT"] = 0.001  # 0.1% ATR → raw SL = 0.2%
         close = np.ones(50)
 
         result = strat.get_effective_stop_mult(
-            close, symbol='TESTUSDT', move_size=0.05,
+            close,
+            symbol="TESTUSDT",
+            move_size=0.05,
         )
         # Raw: 2.0 × 0.001 = 0.002 < floor 0.005 → clamped to 0.005
         expected = 0.005 / 0.05  # = 0.1
@@ -98,11 +105,13 @@ class TestATRStopMult:
     def test_atr_stop_cap_enforcement(self):
         """If 2×ATR > cap (4%), clamp to cap."""
         strat = _make_strategy()
-        strat._last_atr_pct['TESTUSDT'] = 0.03  # 3% ATR → raw SL = 6%
+        strat._last_atr_pct["TESTUSDT"] = 0.03  # 3% ATR → raw SL = 6%
         close = np.ones(50)
 
         result = strat.get_effective_stop_mult(
-            close, symbol='TESTUSDT', move_size=0.05,
+            close,
+            symbol="TESTUSDT",
+            move_size=0.05,
         )
         # Raw: 2.0 × 0.03 = 0.06 > cap 0.04 → clamped to 0.04
         expected = 0.04 / 0.05  # = 0.8
@@ -111,11 +120,13 @@ class TestATRStopMult:
     def test_fallback_to_fixed_stop_when_atr_disabled(self):
         """When atr_stop_enabled=False, returns cfg.stop_mult (legacy path)."""
         strat = _make_strategy(atr_stop_enabled=False)
-        strat._last_atr_pct['TESTUSDT'] = 0.015
+        strat._last_atr_pct["TESTUSDT"] = 0.015
         close = np.ones(50)
 
         result = strat.get_effective_stop_mult(
-            close, symbol='TESTUSDT', move_size=0.05,
+            close,
+            symbol="TESTUSDT",
+            move_size=0.05,
         )
         # Falls through to fixed path: cfg.stop_mult = 0.382
         assert abs(result - 0.382) < 1e-6
@@ -130,15 +141,18 @@ class TestATRStopMult:
     def test_fallback_when_move_size_zero(self):
         """move_size=0 → legacy fixed stop (avoid division by zero)."""
         strat = _make_strategy()
-        strat._last_atr_pct['TESTUSDT'] = 0.015
+        strat._last_atr_pct["TESTUSDT"] = 0.015
         close = np.ones(50)
         result = strat.get_effective_stop_mult(
-            close, symbol='TESTUSDT', move_size=0.0,
+            close,
+            symbol="TESTUSDT",
+            move_size=0.0,
         )
         assert abs(result - 0.382) < 1e-6
 
 
 # ═══════════════════════ 3. Climax Confidence Integration ═══════════════════════
+
 
 def _make_confidence_data(n: int = 200, vol_spike_mult: float = 1.0):
     """Build deterministic confidence-scoring data.
@@ -182,16 +196,16 @@ class TestClimaxConfidenceScoring:
         """Strategy with controls to isolate climax contribution."""
         cfg = RubberBandConfig(
             lookback=8,
-            threshold=0.042,            # threshold < 5% dip → signals
-            atr_period=0,               # disable adaptive threshold
+            threshold=0.042,  # threshold < 5% dip → signals
+            atr_period=0,  # disable adaptive threshold
             btc_directional_period=48,
             btc_regime_period=96,
             min_confidence=min_confidence,
             climax_enabled=climax_enabled,
             climax_vol_mult=3.0,
-            stoch_enabled=False,        # already default
-            macd_enabled=False,         # already default
-            atr_stop_enabled=False,     # test stop separately
+            stoch_enabled=False,  # already default
+            macd_enabled=False,  # already default
+            atr_stop_enabled=False,  # test stop separately
             mtf_confirmation_enabled=False,  # disable 4h filter
         )
         strat = RubberBandStrategy(cfg)
@@ -207,9 +221,9 @@ class TestClimaxConfidenceScoring:
         """
         close, btc, vol, taker = _make_confidence_data(vol_spike_mult=4.5)
         strat = self._make_strategy(climax_enabled=True, min_confidence=5)
-        strat.update_market_data('TESTUSDT', vol, taker)
+        strat.update_market_data("TESTUSDT", vol, taker)
 
-        sig = strat.on_bar('TESTUSDT', close, btc)
+        sig = strat.on_bar("TESTUSDT", close, btc)
         assert sig == 1, f"Expected LONG signal with climax vol spike, got {sig}"
 
     def test_climax_disabled_blocks_signal_at_min_conf5(self):
@@ -220,9 +234,9 @@ class TestClimaxConfidenceScoring:
         """
         close, btc, vol, taker = _make_confidence_data(vol_spike_mult=4.5)
         strat = self._make_strategy(climax_enabled=False, min_confidence=5)
-        strat.update_market_data('TESTUSDT', vol, taker)
+        strat.update_market_data("TESTUSDT", vol, taker)
 
-        sig = strat.on_bar('TESTUSDT', close, btc)
+        sig = strat.on_bar("TESTUSDT", close, btc)
         assert sig == 0, f"Expected no signal without climax at min_confidence=5, got {sig}"
 
     def test_no_climax_without_vol_spike(self):
@@ -231,13 +245,14 @@ class TestClimaxConfidenceScoring:
         # confidence=4 → no signal
         close, btc, vol, taker = _make_confidence_data(vol_spike_mult=1.0)
         strat = self._make_strategy(climax_enabled=True, min_confidence=5)
-        strat.update_market_data('TESTUSDT', vol, taker)
+        strat.update_market_data("TESTUSDT", vol, taker)
 
-        sig = strat.on_bar('TESTUSDT', close, btc)
+        sig = strat.on_bar("TESTUSDT", close, btc)
         assert sig == 0, f"Expected no signal without vol spike, got {sig}"
 
 
 # ═══════════════════════ 4. RubberBandConfig SSoT Verification ═══════════════════════
+
 
 class TestSettingsToRbConfig:
     """RubberBandConfig is SSoT for all RB params (v12.6+).
@@ -249,27 +264,35 @@ class TestSettingsToRbConfig:
     def test_v126_keys_present(self):
         """All 6 v12.6 keys must exist as attributes on RubberBandConfig."""
         from quantbox.strategy.rubberband.config import RubberBandConfig
+
         cfg = RubberBandConfig()
         required_attrs = {
-            'climax_enabled', 'climax_vol_mult',
-            'atr_stop_enabled', 'atr_stop_mult',
-            'atr_stop_floor', 'atr_stop_cap',
+            "climax_enabled",
+            "climax_vol_mult",
+            "atr_stop_enabled",
+            "atr_stop_mult",
+            "atr_stop_floor",
+            "atr_stop_cap",
         }
         missing = required_attrs - set(vars(cfg).keys())
         assert not missing, f"Attributes missing from RubberBandConfig: {missing}"
 
     def test_macd_disabled_in_settings(self):
         from quantbox.strategy.rubberband.config import RubberBandConfig
+
         assert RubberBandConfig().macd_enabled is False
 
     def test_stoch_disabled_in_settings(self):
         from quantbox.strategy.rubberband.config import RubberBandConfig
+
         assert RubberBandConfig().stoch_enabled is False
 
     def test_climax_enabled_in_settings(self):
         from quantbox.strategy.rubberband.config import RubberBandConfig
+
         assert RubberBandConfig().climax_enabled is True
 
     def test_atr_stop_enabled_in_settings(self):
         from quantbox.strategy.rubberband.config import RubberBandConfig
+
         assert RubberBandConfig().atr_stop_enabled is True

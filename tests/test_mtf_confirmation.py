@@ -55,12 +55,12 @@ def mixed_signals_15m():
     n = 1600  # 100 4h bars × 16 15m bars
     signals = np.zeros(n)
     # Scatter some entries
-    signals[300] = 1.5   # Long
+    signals[300] = 1.5  # Long
     signals[301] = 1.5
     signals[302] = 1.5
     signals[500] = -1.5  # Short
     signals[501] = -1.5
-    signals[800] = 1.5   # Long
+    signals[800] = 1.5  # Long
     signals[1200] = -1.5  # Short
     return signals
 
@@ -228,7 +228,7 @@ def test_on_bar_applies_mtf_confirmation():
         mtf_confirmation_enabled=True,
         mtf_sma_period=6,
         mtf_leverage_mult=1.0,
-        entry_mode='confidence',
+        entry_mode="confidence",
         min_confidence=1,  # Low bar so we get signals
     )
     strategy = RubberBandStrategy(cfg)
@@ -260,7 +260,7 @@ def test_on_bar_without_htf_data_falls_through():
     """Without htf data, on_bar should still work (no MTF filter applied)."""
     cfg = RubberBandConfig(
         mtf_confirmation_enabled=True,
-        entry_mode='confidence',
+        entry_mode="confidence",
     )
     strategy = RubberBandStrategy(cfg)
 
