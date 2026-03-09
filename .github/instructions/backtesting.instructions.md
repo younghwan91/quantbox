@@ -116,12 +116,6 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 > 60 syms = r53 63sym 유니버스에서 상장폐지 3개(MKR/FTM/EOS) 제외.
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
 
-**구버전 참고 (v14.4.0, 34 syms, 4.73yr):**
-
-| 조합 | N | PF |
-|------|---|----|
-| VR+MA, TBR OFF | ~4,097 | ~1.521 |
-
 ---
 
 ## 3. 룩어헤드 바이어스 — 체크리스트
@@ -188,168 +182,87 @@ L/N=3.0 VR CAGR: +X% (4.7년 복리)
 
 ## 5. 포지션 사이징 검증
 
-> ⚠️ **실전 교훈 (2026-03-05):** `n_active=0`에서 단일 진입만 테스트
-> → 2번째 슬롯 진입 시 마진 부족 `-2019` 에러.
+> ⚠️ **실전 교훈 (2026-03-05):** `n_active=0` 단일 진입만 테스트 → 2번째 슬롯에서 마진 부족 `-2019`.
 
-**백테스트에서 슬롯 수 명시:**
-
-```python
-# 잘못된 예: production은 10 slots인데 15 slots로 시뮬레이션
-pnl = portfolio_sim(trades, max_concurrent=15)  # ❌
-
-# 올바른 예
-pnl = portfolio_sim(trades, max_concurrent=10)  # ✅ Production = 10
-```
-
-**마진 검증 체크:**
-- 보고서에 `max_concurrent=10` 명시
-- n_active=0, 1, 2, ..., 9 순서로 연속 진입 시 마진 < balance × 95% 확인
-- VR: `balance × (1/10) × 30 ≤ available_margin`
-- MA: `balance × (1/10) × 21 ≤ available_margin`
+**반드시:** `portfolio_sim(trades, max_concurrent=10)` — 15나 다른 값 금지.  
+마진 공식: `balance / 10 × 30 (VR)` or `balance / 10 × 21 (MA)` ≤ available margin.
 
 ---
 
 ## 6. 비용 모델
 
 ```python
-COST_DIRECTIONAL = 0.0008  # 0.08% round-trip (entry 0.04% + exit 0.04%)
-COST_STRADDLE    = 0.0016  # 0.16% round-trip (long 0.08% + short 0.08%)
-# 펀딩비: 8h마다 약 0.01%, 48h 보유 시 약 0.06% 추가 (pnl에서 차감)
+COST_DIRECTIONAL = 0.0008  # 0.08% round-trip
+COST_STRADDLE    = 0.0016  # 0.16% round-trip (long+short)
+# 펀딩비: 8h마다 ~0.01%, 48h 보유 시 ~0.06% 추가
 ```
-
-이 값은 `trade_sim.py`의 `COST_DIRECTIONAL`, `COST_STRADDLE` 상수에서 읽는다. 변경 시 여기만.
 
 ---
 
 ## 7. 데이터 범위 및 워밍업
 
 ```python
-WARMUP_15m = 200  # 최초 200 바는 신호 무시 (ATR 계산 안정화)
-WARMUP_1h  = 50
-WARMUP_4h  = 13   # ceil(200 / 16)
-
-# 권장 데이터 범위: 2020-01-01 이후 (5년 이상)
-# 2020 이전 데이터는 Binance 유동성 부족으로 비현실적 결과 가능
+WARMUP_15m = 200; WARMUP_1h = 50; WARMUP_4h = 13  # ceil(200/16)
+# 권장: 2020-01-01 이후 (5년+). 그 이전은 Binance 유동성 부족.
 ```
 
 ---
 
 ## 8. 통계 유효성 기준
 
-| 지표 | 최소 기준 | 권장 |
-|------|---------|------|
-| N (거래 수) | ≥ 500 | ≥ 2,000 |
+| 지표 | 최소 | 권장 |
+|------|------|------|
+| N | ≥ 500 | ≥ 2,000 |
 | PF | > 1.05 | > 1.20 |
 | Bootstrap P(PF≥1.0) | ≥ 90% | ≥ 95% |
-| OOS PF (50% holdout) | > 1.03 | > 1.15 |
+| OOS50 PF | > 1.03 | > 1.15 |
 | OOS/IS 괴리 | < 10% | < 5% |
 | 손실 연도 수 | 0 | 0 |
-| 연속 손실 거래 | < 15 | < 10 |
 
-**OOS 검증:**
-```python
-split = int(len(all_data) * 0.5)
-is_trades  = collect_trades(cfg, all_data[:split])
-oos_trades = collect_trades(cfg, all_data[split:])
-# OOS PF가 IS PF의 85% 이상이면 과적합 아님
-```
+OOS 검증: 50% split, `oos_pf / is_pf ≥ 0.85`이면 과적합 아님.
 
 ---
 
-## 9. 연구 스크립트 템플릿
-
-새 연구 스크립트 (`research/active/r{N}_r{M}/r{N}_description.py`) 기본 구조:
+## 9. 연구 스크립트 4-Phase 구조
 
 ```python
-"""r{N}: 연구 목적 한 줄 설명.
-
-Phase 0: Pre-flight config 확인
-Phase 1: 베이스라인 검증 (±1%)
-Phase 2: 실험 파라미터 스윕
-Phase 3: 결과 요약 및 리포트
-"""
+"""r{N}: 목적 한 줄."""
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-from quantbox.backtest.trade_sim import (
-    collect_trades, portfolio_sim, compute_metrics, bootstrap_pf, precompute_all_vr,
-)
+from quantbox.backtest.trade_sim import collect_trades, portfolio_sim, compute_metrics, bootstrap_pf, precompute_all_vr
 
-# ── Phase 0: Config 읽기 ──────────────────────────────────────────────────
+# Phase 0: Config 읽기 (하드코딩 금지)
 cfg = VolStraddleConfig()
-print(f"[Phase 0] d_tp={cfg.d_tp}, d_trail_activate={cfg.d_trail_activate}, "
-      f"VR_LN={cfg.base_leverage/cfg.max_concurrent:.1f}, "
-      f"TBR={cfg.f5_tbr_enabled}")
+baseline_cfg = {"d_tp": cfg.d_tp, "d_sl": cfg.d_sl,
+                "d_trail_activate": cfg.d_trail_activate, "d_trail_distance": cfg.d_trail_distance,
+                "f5_tbr_enabled": cfg.f5_tbr_enabled}
 
-# ── Phase 0: 데이터 로드 ─────────────────────────────────────────────────
-# data_15m = { symbol: {"close": np.ndarray, "high": ..., "low": ..., "open": ...} }
-# 로드 방법: precompute_all_vr() 또는 기존 스크립트 참조
+# Phase 1: 베이스라인 재현 → ±1% 확인 후 진행
+b_pnl = portfolio_sim(collect_trades(baseline_cfg, ...), max_concurrent=cfg.max_concurrent)
+b_m   = compute_metrics(b_pnl, DATA_YEARS)
+assert abs(b_m['N'] - 5515) / 5515 < 0.01, f"N drift: {b_m['N']}"
+assert abs(b_m['PF'] - 1.273) / 1.273 < 0.01, f"PF drift: {b_m['PF']:.3f}"
 
-# ── Phase 1: 베이스라인 (정적 파라미터, 변경 금지) ─────────────────────
-baseline_cfg = {
-    "d_tp": cfg.d_tp,
-    "d_sl": cfg.d_sl,
-    "d_trail_activate": cfg.d_trail_activate,
-    "d_trail_distance": cfg.d_trail_distance,
-    "f5_tbr_enabled": cfg.f5_tbr_enabled,
-    # ... 나머지 config
-}
-b_trades = collect_trades(baseline_cfg, data_15m, data_1h, data_4h, strat="combined")
-b_pnl    = portfolio_sim(b_trades, max_concurrent=cfg.max_concurrent)
-b_m      = compute_metrics(b_pnl, DATA_YEARS)
-
-print(f"[Phase 1 Baseline] N={b_m['N']}, PF={b_m['PF']:.3f}")
-# 최신 정식 수치 (v14.5.2, 60 syms, 6yr): v14.4.x baseline
-assert abs(b_m['N'] - 5515) / 5515 < 0.01, f"Baseline N drift! {b_m['N']} vs 5515"
-assert abs(b_m['PF'] - 1.273) / 1.273 < 0.01, f"Baseline PF drift! {b_m['PF']:.3f} vs 1.273"
-print("[Phase 1] ✅ Baseline verified")
-
-# ── Phase 2: 실험 ────────────────────────────────────────────────────────
-results = []
+# Phase 2: 파라미터 스윕
 for param_value in param_grid:
-    exp_cfg = {**baseline_cfg, "target_param": param_value}
-    trades  = collect_trades(exp_cfg, ...)
-    pnl     = portfolio_sim(trades, max_concurrent=cfg.max_concurrent)
-    m       = compute_metrics(pnl, DATA_YEARS)
-    boot    = bootstrap_pf(pnl)
-    results.append({"param": param_value, **m, "ci_lo": boot["CI_lo"], "ci_hi": boot["CI_hi"]})
+    m = compute_metrics(portfolio_sim(collect_trades({**baseline_cfg, "p": param_value}, ...), max_concurrent=10), DATA_YEARS)
+    boot = bootstrap_pf(...)
+    results.append({...})
 
-# ── Phase 3: 리포트 ──────────────────────────────────────────────────────
-# docs/backtest_results/YYYYMM/YYYYMMDD_{commit}_{description}.md 에 저장
+# Phase 3: 보고서 → docs/backtest_results/YYYYMM/YYYYMMDD_{commit}_{desc}.md
 ```
 
 ---
 
-## 10. 보고서 파일명 규칙
+## 10. 보고서 파일명 및 필수 섹션
 
-```
-docs/backtest_results/YYYYMM/YYYYMMDD_{commit_short}_{description}.md
+**파일명:** `docs/backtest_results/YYYYMM/YYYYMMDD_{commit_short}_{description}.md`
 
-예: docs/backtest_results/202603/20260308_81dec2e_r47_exit_ab_test.md
-```
-
-**보고서 필수 섹션:**
-
-```markdown
-## Summary
-- 데이터: 2020-01-01 ~ 2025-12-31 (5.5년)
-- 슬롯: 10 (max_concurrent=10), 비용: 0.08% round-trip
-- 베이스라인 N={}, PF={} (±1% 검증 통과)
-- 수익률 모델: 1x compound (레버리지 미적용)
-
-## Results
-| 파라미터 | N | PF | Sharpe | EV(bp) | MaxDD | OOS50 PF | Bootstrap CI |
-|----------|---|----|--------|--------|-------|----------|-------------|
-
-## Conclusion
-- 최적 파라미터: ...
-- 베이스라인 대비 PF 변화: +X.X%
-- 프로덕션 적용 권고: Yes/No / 추가 검증 필요
-
-## Backtest-Live Parity Notes
-- config.py 읽음: ✅
-- 룩어헤드 없음: ✅ (j = (i//ratio) - 1)
-- 비용 모델: COST_DIRECTIONAL=0.0008, COST_STRADDLE=0.0016
-- 슬롯 수: 10 (production과 동일)
-```
+**필수 포함:**
+- 데이터 범위 (2020-01-01 ~ YYYY-MM-DD, X년)
+- 슬롯: 10, 비용: 0.08% round-trip
+- 베이스라인 N/PF (±1% 검증 통과 여부)
+- 수익률 모델 명시: **1x compound** 또는 **L/N=3.0**
+- Parity Notes: config.py 읽음 ✅, 룩어헤드 없음 ✅
 
 ---
 
@@ -370,42 +283,13 @@ docs/backtest_results/YYYYMM/YYYYMMDD_{commit_short}_{description}.md
 
 ## 12. `.env` 운영 원칙 — 중복 추가 금지
 
-> **규칙: `config.py`가 source of truth. `.env`는 override 전용.**
+> `config.py`가 source of truth. `.env`는 override 전용. 상세 규칙은 `copilot-instructions.md` 참조.
 
-```bash
-# ❌ 금지: config.py default와 같은 값을 .env에 중복 추가
-VS_D_TRAIL_ACTIVATE=0.005   # config.py도 0.005 → 중복, 제거
-
-# ✅ 허용: config.py default와 다른 값만 .env에 추가 (환경별 override)
-VS_MAX_CONCURRENT=5          # 이 환경에서만 5슬롯으로 제한
-```
-
-**새 파라미터 추가 워크플로:**
-1. `config.py`에 기본값 추가 → 이것이 source of truth
-2. `.env`는 건드리지 않음 (기본값과 같으면 중복)
-3. 봇 재시작하면 새 기본값 자동 적용
-
-**파라미터 변경 워크플로 (config.py만 수정):**
-1. `config.py` default 변경
-2. `.env` 확인: 같은 파라미터의 VS_ 변수가 있으면 **반드시** 삭제 or 같이 변경
-3. `grep -E "VS_변수명" .env` 로 확인 필수
-
-**왜 이게 중요한가?**
-- pydantic-settings는 `.env`의 `VS_*`를 `config.py` 기본값보다 항상 우선 적용
-- `.env`에 구버전 값이 있으면 `config.py`만 바꿔도 라이브 봇에 반영 안 됨
-- 2026-03-09 발견: `.env`에 37개 VS_ 중복 → 매 파라미터 변경마다 2파일 수정 필요
+**요약:** `VS_*` 기본값과 같은 값을 `.env`에 중복 추가 금지. 추가하면 pydantic-settings가 config.py 변경을 무시함.
 
 ---
 
 ## 13. 연구 브랜치 컨벤션
 
-```bash
-git checkout -b research/r{N}-{description}   # 브랜치 생성
-git merge --no-ff develop                     # 머지 (squash 아님, 이력 보존)
-git push origin research/r{N}-{description}
+Git flow 규칙은 `copilot-instructions.md` 참조. 요약: `research/r{N}-{desc}` 브랜치 → `--no-ff` 머지 (이력 보존).
 
-# 리포트 저장 후 develop 머지 (연구 완료 시):
-git checkout develop
-git merge --no-ff research/r{N}-{description}
-git push origin develop
-```

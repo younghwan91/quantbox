@@ -160,11 +160,34 @@ STATE_FILE = STATE_DIR / 'scalper_state.json'
 PAPER_STATE_FILE = STATE_DIR / 'scalper_state_paper.json'
 
 
+def _rotate_state_backups(filepath: Path, keep: int = 5) -> None:
+    """Keep the N most recent backups, delete older ones."""
+    pattern = filepath.stem + '_backup_'
+    backups = sorted(filepath.parent.glob(f'{pattern}*.json'))
+    for old in backups[:-keep]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
 def _save_scalper_state(state: dict, filepath: Path | None = None) -> None:
-    """Atomic JSON write."""
+    """Atomic JSON write with rotating backup (keeps 5 most recent)."""
     if filepath is None:
         filepath = STATE_FILE
     filepath.parent.mkdir(parents=True, exist_ok=True)
+
+    # Rotate backup before overwriting
+    if filepath.exists():
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup = filepath.parent / f'{filepath.stem}_backup_{ts}.json'
+        try:
+            import shutil
+            shutil.copy2(filepath, backup)
+            _rotate_state_backups(filepath, keep=5)
+        except OSError:
+            pass
+
     fd, tmp = tempfile.mkstemp(dir=str(filepath.parent), suffix='.tmp')
     try:
         with os.fdopen(fd, 'w') as f:
