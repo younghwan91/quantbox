@@ -34,6 +34,14 @@ TBR_ENABLED   = cfg.f5_tbr_enabled                   # False (r47 이후)
 - [ ] `f5_tbr_enabled` 확인 (현재 False)
 - [ ] `VR_LN = base_leverage / max_concurrent` (3.0). 하드코딩 2.5 등 금지
 - [ ] `MA_LN = ma_cluster_leverage / max_concurrent` (2.1). 하드코딩 금지
+- [ ] **심볼 universe = `cfg.symbol_whitelist`** (현재 60개). 하드코딩 금지
+
+> ⚠️ **Backtest-Live Universe Parity 원칙 (절대 규칙):**
+> **라이브 트레이딩 universe는 항상 백테스트 universe와 동일해야 한다.**
+> 두 개가 달라지는 순간 백테스트 수치는 무효. 그것이 "라이브가 달라서" 재실행하는 것이지,
+> "universe를 바꿔서" 재실행하는 게 아니다. 둘의 차이가 생기면 무조건 재실행.
+> - 상장폐지 발견 시: 라이브 제거 → 백테스트 재실행 → 공식 수치 업데이트 (순서 무관, 동시에)
+> - 신규 심볼 추가 시: 백테스트 먼저 → 검증 통과 후 라이브 추가 (백테스트 선행 필수)
 
 > ⚠️ **위반 선례 (2026-03-07):** `backtest_v14_3_0.py`가 `tp=0.05` + `VR_LN=2.5`, `MA_LN=1.2` 하드코딩 →
 > 실제 프로덕션 `tp=0.12` + trailing + `VR_LN=3.0`, `MA_LN=2.1`. N/PF/CAGR 전부 틀린 수치 보고.
@@ -97,22 +105,22 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 **허용 기준:** 최신 리포트 대비 N ±1%, PF ±1%  
 **이탈 시 → 즉시 중단.** 데이터 범위, config, 함수 버전 확인 먼저.
 
-**최신 정식 베이스라인 (v14.5.0, 2026-03-08 기준):**
+**최신 정식 베이스라인 (v14.5.2+, 2026-03-08 기준, commit=7399f4c):**
 
-| 버전 | 유니버스 | 기간 | N | PF | Calmar |
-|------|---------|------|---|----|--------|
-| v14.4.x baseline | 63 syms | 6yr | ~5,470 | ~1.223 | ~10.3 |
-| **v14.5.0 (프로덕션)** | 63 syms | 6yr | **~6,517** | **~1.728** | **~89.9** |
+| 버전 | 유니버스 | 기간 | N | PF | Calmar | DD |
+|------|---------|------|---|----|--------|----|
+| v14.4.x baseline | **60 syms** | 6yr | 5,515 | 1.273 | 15.9 | 69.7% |
+| **v14.5.0 (프로덕션)** | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% |
 
-> v14.5.0 = S_d8 trailing (act=1.5%/dist=0.2%) 추가. CI=[1.606,1.858], DD=60.9%.
-> 위 수치는 `r53_rerun_correct.py` 기준 (correct D_trail params). 새 리포트 나오면 이 표 업데이트.
+> v14.5.0 = S_d8 trailing (act=1.5%/dist=0.2%) 추가. CI=[1.461,1.676], P(PF≥1)=100%.
+> 60 syms = r53 63sym 유니버스에서 상장폐지 3개(MKR/FTM/EOS) 제외.
+> **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
 
 **구버전 참고 (v14.4.0, 34 syms, 4.73yr):**
 
-| 조합 | N | PF | Sharpe |
-|------|---|----|--------|
-| VR+MA, TBR OFF | ~4,097 | ~1.521 | ~5.06 |
-| VR+MA, TBR ON | ~3,890 | ~1.466 | ~4.65 |
+| 조합 | N | PF |
+|------|---|----|
+| VR+MA, TBR OFF | ~4,097 | ~1.521 |
 
 ---
 
@@ -288,10 +296,10 @@ b_trades = collect_trades(baseline_cfg, data_15m, data_1h, data_4h, strat="combi
 b_pnl    = portfolio_sim(b_trades, max_concurrent=cfg.max_concurrent)
 b_m      = compute_metrics(b_pnl, DATA_YEARS)
 
-print(f"[Phase 1 Baseline] N={b_m['N']}, PF={b_m['PF']:.3f}, Sharpe={b_m['Sharpe']:.2f}")
-# 최신 정식 수치 (v14.4.0): N≈4097, PF≈1.521
-assert abs(b_m['N'] - 4097) / 4097 < 0.01, f"Baseline N drift! {b_m['N']} vs 4097"
-assert abs(b_m['PF'] - 1.521) / 1.521 < 0.01, f"Baseline PF drift! {b_m['PF']:.3f} vs 1.521"
+print(f"[Phase 1 Baseline] N={b_m['N']}, PF={b_m['PF']:.3f}")
+# 최신 정식 수치 (v14.5.2, 60 syms, 6yr): v14.4.x baseline
+assert abs(b_m['N'] - 5515) / 5515 < 0.01, f"Baseline N drift! {b_m['N']} vs 5515"
+assert abs(b_m['PF'] - 1.273) / 1.273 < 0.01, f"Baseline PF drift! {b_m['PF']:.3f} vs 1.273"
 print("[Phase 1] ✅ Baseline verified")
 
 # ── Phase 2: 실험 ────────────────────────────────────────────────────────
@@ -302,7 +310,7 @@ for param_value in param_grid:
     pnl     = portfolio_sim(trades, max_concurrent=cfg.max_concurrent)
     m       = compute_metrics(pnl, DATA_YEARS)
     boot    = bootstrap_pf(pnl)
-    results.append({"param": param_value, **m, "ci_lo": boot["lo"], "ci_hi": boot["hi"]})
+    results.append({"param": param_value, **m, "ci_lo": boot["CI_lo"], "ci_hi": boot["CI_hi"]})
 
 # ── Phase 3: 리포트 ──────────────────────────────────────────────────────
 # docs/backtest_results/YYYYMM/YYYYMMDD_{commit}_{description}.md 에 저장

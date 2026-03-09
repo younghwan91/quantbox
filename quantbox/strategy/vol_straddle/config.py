@@ -168,6 +168,15 @@ class VolStraddleConfig(BaseSettings):
     f5_tbr_z_threshold: float = 0.5    # R46b optimal (lb=192, p=0.029)
     f5_tbr_z_window: int = 192         # Lookback bars (~2 days of 15m)
 
+    # ── G6: BTC Trend Gate (live regime filter) ──
+    # Suppress LONG entries when BTC is below its moving average.
+    # Prevents systematic losses during multi-day crypto downtrends.
+    # SHORT entries are always allowed (downtrend = short opportunity).
+    # Live only — backtest uses all historical periods including bear markets.
+    btc_long_filter_enabled: bool = True
+    btc_long_ma_period: int = 50        # 50 bars × 15m = 12.5h trend MA
+    btc_long_ma_interval: str = '15m'  # timeframe for MA computation (must match cycle interval)
+
     # ── Symbol Selection ──
     symbol_whitelist: list[str] = Field(default_factory=list)
     exclude_symbols: list[str] = Field(default_factory=lambda: [
@@ -199,6 +208,12 @@ class VolStraddleConfig(BaseSettings):
     lookback: int = 8               # Used for move calc in logging — not for signal
     threshold: float = 0.0          # Not used — signal is VR-based
     bar_interval_minutes: int = 15
+
+    # ── Daily Loss Circuit Breaker ──
+    # Block new entries for the rest of the day after realized loss exceeds limit.
+    # Prevents the "keep entering and losing" spiral during bad market sessions.
+    # Resets at UTC midnight. Set to 0 to disable.
+    daily_loss_limit_pct: float = 0.05  # 5% of account balance
 
     @model_validator(mode='after')
     def _populate_symbol_whitelist(self) -> 'VolStraddleConfig':

@@ -270,6 +270,11 @@ class RubberBandScalper(
         self._high_water_mark: float = 0.0
         self._drawdown_halt: bool = False
 
+        # Daily loss circuit breaker
+        self._daily_realized_pnl: float = 0.0   # cumulative today's closed pnl (USD)
+        self._daily_loss_date: str = ''          # UTC date when tracking started (YYYY-MM-DD)
+        self._daily_loss_blocked: bool = False   # True = new entries blocked for today
+
         # Symbol info cache (avoid repeated exchange_info calls)
         self._symbol_info_cache: dict[str, dict] = {}
         self._exchange_info_fetched: bool = False
@@ -867,12 +872,49 @@ class RubberBandScalper(
         if self._paused:
             logger.info("⏸️ Paused — skipping new entries")
         elif not risk_blocked:
-            available_slots = (
-                self._cfg.max_concurrent - self.strategy.n_active
-            )
-            if available_slots > 0:
-                self._scan_entries(symbols, btc_close, balance, available_slots,
-                                   btc_close_4h=btc_close_4h)
+            # ── G7: Daily Loss Circuit Breaker ──
+            if (self.strategy_name == 'vol_straddle'
+                    and self.vs_config.daily_loss_limit_pct > 0):
+                today_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                if self._daily_loss_date != today_utc:
+                    # New UTC day — reset counter
+                    self._daily_loss_date = today_utc
+                    self._daily_realized_pnl = 0.0
+                    self._daily_loss_blocked = False
+                    logger.info(f"G7 DailyBreaker: reset for {today_utc}")
+                # Accumulate closed PnL from today's trades
+                self._daily_realized_pnl = sum(
+                    t['pnl_usd'] for t in self._trade_history
+                    if t.get('time', '').startswith(today_utc)
+                )
+                limit_usd = balance * self.vs_config.daily_loss_limit_pct
+                if not self._daily_loss_blocked and self._daily_realized_pnl < -limit_usd:
+                    self._daily_loss_blocked = True
+                    logger.warning(
+                        f"⛔ G7 DailyBreaker TRIGGERED: "
+                        f"today PnL=${self._daily_realized_pnl:.2f} < "
+                        f"-${limit_usd:.2f} ({self.vs_config.daily_loss_limit_pct*100:.0f}% limit). "
+                        f"No new entries until UTC midnight."
+                    )
+                    self.discord.send(content=(
+                        f"⛔ **Daily Loss Limit Hit** — "
+                        f"Realized PnL today: ${self._daily_realized_pnl:.2f} "
+                        f"(limit -${limit_usd:.2f}). "
+                        f"No new entries until midnight UTC."
+                    ))
+                if self._daily_loss_blocked:
+                    logger.info(
+                        f"G7 DailyBreaker active: "
+                        f"today PnL=${self._daily_realized_pnl:.2f}. "
+                        f"Skipping new entries."
+                    )
+            if not self._daily_loss_blocked:
+                available_slots = (
+                    self._cfg.max_concurrent - self.strategy.n_active
+                )
+                if available_slots > 0:
+                    self._scan_entries(symbols, btc_close, balance, available_slots,
+                                       btc_close_4h=btc_close_4h)
 
         # 6. Save state
         self._save_state()
@@ -1079,10 +1121,35 @@ class RubberBandScalper(
             ts = datetime.now(timezone.utc).isoformat()
             _diag_logger.log_scan(self._cycle_count, ts, scan_diags)
 
+        # ── G6: BTC Trend Gate — compute once, apply to all LONG candidates ──
+        btc_ma = None
+        if (self.strategy_name == 'vol_straddle'
+                and self.vs_config.btc_long_filter_enabled
+                and btc_close is not None
+                and len(btc_close) >= self.vs_config.btc_long_ma_period):
+            btc_ma = float(np.mean(btc_close[-self.vs_config.btc_long_ma_period:]))
+            btc_cur = float(btc_close[-1])
+            btc_above_ma = btc_cur >= btc_ma
+            logger.info(
+                f"G6 BTC Trend Gate: BTC=${btc_cur:.1f} "
+                f"MA{self.vs_config.btc_long_ma_period}=${btc_ma:.1f} "
+                f"→ {'ABOVE (LONG OK)' if btc_above_ma else 'BELOW (LONG BLOCKED)'}"
+            )
+
         entries_made = 0
         for sym, signal, move, close in candidates:
             if entries_made >= max_entries:
                 break
+
+            # ── G6: BTC Trend Gate — block LONG when BTC below MA ──
+            if signal == 1 and btc_ma is not None:
+                btc_cur = float(btc_close[-1])
+                if btc_cur < btc_ma:
+                    logger.info(
+                        f"[{sym}] G6 LONG suppressed: BTC ${btc_cur:.1f} < "
+                        f"MA{self.vs_config.btc_long_ma_period} ${btc_ma:.1f}"
+                    )
+                    continue
 
             # ═══ v12.3 PARITY: Direction Diversity Filter ═══
             if self._cfg.dir_diversity_enabled:
