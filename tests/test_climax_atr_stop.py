@@ -237,35 +237,39 @@ class TestClimaxConfidenceScoring:
         assert sig == 0, f"Expected no signal without vol spike, got {sig}"
 
 
-# ═══════════════════════ 4. Settings → Config Mapping ═══════════════════════
+# ═══════════════════════ 4. RubberBandConfig SSoT Verification ═══════════════════════
 
 class TestSettingsToRbConfig:
-    """QuantBoxSettings.to_trader_config() must include all v12.6 keys."""
+    """RubberBandConfig is SSoT for all RB params (v12.6+).
+
+    settings.rb_* fields have been removed. These tests verify that
+    RubberBandConfig() holds the correct v12.6 production values.
+    """
 
     def test_v126_keys_present(self):
-        """All 6 new v12.6 keys must appear in to_trader_config()."""
-        from quantbox.core.settings import get_settings
-        cfg = get_settings().to_trader_config()
-        required_keys = {
+        """All 6 v12.6 keys must exist as attributes on RubberBandConfig."""
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        cfg = RubberBandConfig()
+        required_attrs = {
             'climax_enabled', 'climax_vol_mult',
             'atr_stop_enabled', 'atr_stop_mult',
             'atr_stop_floor', 'atr_stop_cap',
         }
-        missing = required_keys - set(cfg.keys())
-        assert not missing, f"Keys missing from to_rb_config(): {missing}"
+        missing = required_attrs - set(vars(cfg).keys())
+        assert not missing, f"Attributes missing from RubberBandConfig: {missing}"
 
     def test_macd_disabled_in_settings(self):
-        from quantbox.core.settings import get_settings
-        assert get_settings().rb_macd_enabled is False
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        assert RubberBandConfig().macd_enabled is False
 
     def test_stoch_disabled_in_settings(self):
-        from quantbox.core.settings import get_settings
-        assert get_settings().rb_stoch_enabled is False
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        assert RubberBandConfig().stoch_enabled is False
 
     def test_climax_enabled_in_settings(self):
-        from quantbox.core.settings import get_settings
-        assert get_settings().rb_climax_enabled is True
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        assert RubberBandConfig().climax_enabled is True
 
     def test_atr_stop_enabled_in_settings(self):
-        from quantbox.core.settings import get_settings
-        assert get_settings().rb_atr_stop_enabled is True
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        assert RubberBandConfig().atr_stop_enabled is True

@@ -1830,106 +1830,14 @@ def main():
 
     _setup_logging(strategy_name=args.strategy, paper_mode=args.paper)
 
-    # Build config from .env settings (pydantic-settings) + CLI overrides
-    settings = get_settings()
-    config = RubberBandConfig(
-        lookback=args.lookback if args.lookback is not None else settings.rb_lookback,
-        threshold=args.threshold if args.threshold is not None else settings.rb_threshold,
-        target_retrace=settings.rb_target_retrace,
-        stop_mult=settings.rb_stop_mult,
-        max_hold=settings.rb_max_hold,
-        stop_decay=settings.rb_stop_decay,
-        htf_period=settings.rb_htf_period,
-        htf_block_threshold=settings.rb_htf_block_threshold,
-        htf_agree_discount=settings.rb_htf_agree_discount,
-        htf_agree_stop_mult=settings.rb_htf_agree_stop_mult,
-        dynamic_leverage_enabled=settings.rb_dynamic_leverage_enabled,
-        base_leverage=settings.rb_base_leverage,
-        leverage_scale=settings.rb_leverage_scale,
-        max_leverage=settings.rb_max_leverage,
-        btc_directional_enabled=settings.rb_btc_directional_enabled,
-        btc_directional_period=settings.rb_btc_directional_period,
-        partial_exit_enabled=settings.rb_partial_exit_enabled,
-        partial_exit_fraction=settings.rb_partial_exit_fraction,
-        trail_atr_mult=settings.rb_trail_atr_mult,
-        breakeven_after_partial=settings.rb_breakeven_after_partial,
-        runner_max_hold_mult=settings.rb_runner_max_hold_mult,
-        pre_tp1_trail_activation=settings.rb_pre_tp1_trail_activation,
-        pre_tp1_trail_factor=settings.rb_pre_tp1_trail_factor,
-        rr_leverage_enabled=settings.rb_rr_leverage_enabled,
-        min_rr_for_leverage=settings.rb_min_rr_for_leverage,
-        max_concurrent=args.max_slots if args.max_slots is not None else settings.rb_max_concurrent,
-        # v6.0: Confidence scoring
-        entry_mode=settings.rb_entry_mode,
-        btc_regime_period=settings.rb_btc_regime_period,
-        asset_trend_period=settings.rb_asset_trend_period,
-        min_confidence=settings.rb_min_confidence,
-        confidence_leverage_step=settings.rb_confidence_leverage_step,
-        rsi_period=settings.rb_rsi_period,
-        vol_period=settings.rb_vol_period,
-        # v7.0: Multi-timeframe confirmation
-        mtf_confirmation_enabled=settings.rb_mtf_confirmation_enabled,
-        mtf_sma_period=settings.rb_mtf_sma_period,
-        mtf_leverage_mult=settings.rb_mtf_leverage_mult,
-        # v8.0: Dynamic target (disabled in v9.0 — Fib discipline outperforms)
-        dynamic_target_enabled=settings.rb_dynamic_target_enabled,
-        target_conf3=settings.rb_target_conf3,
-        target_conf4=settings.rb_target_conf4,
-        target_conf5=settings.rb_target_conf5,
-        # v9.0: S+R+M Confluence (MACD + Stochastic evidence)
-        macd_enabled=settings.rb_macd_enabled,
-        macd_fast=settings.rb_macd_fast,
-        macd_slow=settings.rb_macd_slow,
-        macd_signal_period=settings.rb_macd_signal_period,
-        stoch_enabled=settings.rb_stoch_enabled,
-        stoch_k_period=settings.rb_stoch_k_period,
-        stoch_d_period=settings.rb_stoch_d_period,
-        # v11.4: Adaptive Threshold (Walk-Forward Validated)
-        atr_period=settings.rb_atr_period,
-        atr_multiplier=settings.rb_atr_multiplier,
-        threshold_floor=settings.rb_threshold_floor,
-        threshold_cap=settings.rb_threshold_cap,
-        # v10.0: Symbol whitelist & dynamic capital
-        symbol_whitelist=[s.strip() for s in settings.rb_symbol_whitelist.split(',') if s.strip()],
-        dynamic_capital_enabled=settings.rb_dynamic_capital_enabled,
-        # v7.0: Independent 4H rubber band
-        htf_independent_enabled=settings.rb_htf_independent_enabled,
-        htf_rb_lookback=settings.rb_htf_rb_lookback,
-        htf_rb_threshold=settings.rb_htf_rb_threshold,
-        htf_rb_target_retrace=settings.rb_htf_rb_target_retrace,
-        htf_rb_stop_mult=settings.rb_htf_rb_stop_mult,
-        htf_rb_max_hold=settings.rb_htf_rb_max_hold,
-        htf_rb_btc_sma_period=settings.rb_htf_rb_btc_sma_period,
-        # v12.3: SteepX Confidence Sizing
-        steep_cap_curve=settings.rb_steep_cap_curve,
-        cap_mult_conf2=settings.rb_cap_mult_conf2,
-        cap_mult_conf3=settings.rb_cap_mult_conf3,
-        cap_mult_conf4=settings.rb_cap_mult_conf4,
-        cap_mult_conf5=settings.rb_cap_mult_conf5,
-        # v12.3: SoftTight DD Scaling
-        soft_equity_scale=settings.rb_soft_equity_scale,
-        soft_eq_dd1=settings.rb_soft_eq_dd1,
-        soft_eq_scale1=settings.rb_soft_eq_scale1,
-        soft_eq_dd2=settings.rb_soft_eq_dd2,
-        soft_eq_scale2=settings.rb_soft_eq_scale2,
-        soft_eq_dd3=settings.rb_soft_eq_dd3,
-        soft_eq_scale3=settings.rb_soft_eq_scale3,
-        # v12.3: Vol-Adjusted Sizing
-        vol_adjusted_size=settings.rb_vol_adjusted_size,
-        vol_adj_median_atr=settings.rb_vol_adj_median_atr,
-        vol_adj_min=settings.rb_vol_adj_min,
-        vol_adj_max=settings.rb_vol_adj_max,
-        # v12.3: Direction Diversity
-        dir_diversity_enabled=settings.rb_dir_diversity_enabled,
-        max_same_direction=settings.rb_max_same_direction,
-        # v12.6: Climax Volume Filter + ATR-Based Stop
-        climax_enabled=settings.rb_climax_enabled,
-        climax_vol_mult=settings.rb_climax_vol_mult,
-        atr_stop_enabled=settings.rb_atr_stop_enabled,
-        atr_stop_mult=settings.rb_atr_stop_mult,
-        atr_stop_floor=settings.rb_atr_stop_floor,
-        atr_stop_cap=settings.rb_atr_stop_cap,
-    )
+    # Build config from RubberBandConfig defaults (config.py is SSoT) + CLI overrides
+    config = RubberBandConfig()
+    if args.lookback is not None:
+        config.lookback = args.lookback
+    if args.threshold is not None:
+        config.threshold = args.threshold
+    if args.max_slots is not None:
+        config.max_concurrent = args.max_slots
 
     scalper = RubberBandScalper(
         paper_mode=args.paper,
