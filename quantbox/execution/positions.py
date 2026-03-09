@@ -266,6 +266,35 @@ class PositionMixin:
         if self.strategy_name == 'vol_straddle' and self.vs_config.hedge_mode:
             pos_side = 'LONG' if signal > 0 else 'SHORT'
 
+        # ── Exchange-level dedup (prevents double-entry after rapid restarts) ──
+        # Even if internal state is stale, the exchange will tell us the truth.
+        if not self.paper_mode and self.strategy_name == 'vol_straddle':
+            try:
+                ex_positions = self.client.futures_position_information(symbol=symbol)
+                wanted_side = pos_side  # 'LONG' or 'SHORT'
+                already_open = any(
+                    p.get('positionSide') == wanted_side
+                    and abs(float(p.get('positionAmt', 0))) > 0
+                    for p in ex_positions
+                )
+                if already_open:
+                    logger.warning(
+                        f"[{symbol}] Exchange dedup: {wanted_side} already open "
+                        f"on exchange — skipping entry to prevent duplication"
+                    )
+                    # Sync internal state to reflect reality
+                    if not self.strategy.has_position(symbol):
+                        logger.warning(
+                            f"[{symbol}] State out of sync — "
+                            f"position exists on exchange but not in internal state. "
+                            f"Reconciliation will fix this."
+                        )
+                    return False
+            except Exception as exc:
+                logger.warning(
+                    f"[{symbol}] Exchange dedup check failed ({exc}), proceeding anyway"
+                )
+
         result = self._place_order(
             symbol, side, quantity, leverage=lev_int,
             position_side=pos_side,
