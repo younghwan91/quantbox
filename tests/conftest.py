@@ -33,13 +33,17 @@ def _isolate_state_file(tmp_path):
     or _save_state() would overwrite the live bot's position state.
     """
     import quantbox.scalper as _mod
+    import quantbox.core.scalper_state as _state_mod
     orig_file = _mod.STATE_FILE
-    orig_dir = _mod.STATE_DIR
-    _mod.STATE_DIR = tmp_path
+    orig_state_file = _state_mod.STATE_FILE
+    orig_state_dir = _state_mod.STATE_DIR
+    _state_mod.STATE_DIR = tmp_path
+    _state_mod.STATE_FILE = tmp_path / 'scalper_state.json'
     _mod.STATE_FILE = tmp_path / 'scalper_state.json'
     yield
     _mod.STATE_FILE = orig_file
-    _mod.STATE_DIR = orig_dir
+    _state_mod.STATE_FILE = orig_state_file
+    _state_mod.STATE_DIR = orig_state_dir
 
 
 def _get_real_data_loader():

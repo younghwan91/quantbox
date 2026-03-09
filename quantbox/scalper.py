@@ -28,17 +28,11 @@ Safety features:
 """
 
 import argparse
-import json
 import logging
 import logging.handlers
 import math
-import os
-import subprocess
-import sys
-import tempfile
 import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timezone
 
 import numpy as np
 from binance.client import Client
@@ -53,9 +47,6 @@ from quantbox.core.terminal_ui import (
     format_cycle_header,
     format_scan_summary,
     format_session_summary,
-    print_banner,
-    print_startup_complete,
-    print_system_info,
 )
 from quantbox.notifications.bot import (
     DiscordBotRunner,
@@ -66,81 +57,20 @@ from quantbox.strategy.rubberband import (
 )
 from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
+from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
 from quantbox.core.commands import CommandsMixin
+from quantbox.core.loop_mixin import LoopMixin
+from quantbox.core.scalper_state import (
+    PAPER_STATE_FILE, STATE_FILE, load_scalper_state, save_scalper_state,
+)
 from quantbox.execution.brackets import BracketMixin
+from quantbox.execution.data_mixin import DataMixin
 from quantbox.execution.positions import PositionMixin
 from quantbox.execution.reconciliation import ReconciliationMixin
 
 load_dotenv()
 
-# ──────────────────────── Git Commit Tracking ─────────────────────────
-
-
-def _get_git_commit() -> dict[str, str]:
-    """Get current git commit info for log traceability.
-
-    Returns:
-        Dict with 'short', 'full', 'message', 'date' keys.
-        All values are empty strings if git is unavailable.
-    """
-    info = {'short': '', 'full': '', 'message': '', 'date': ''}
-    try:
-        info['short'] = subprocess.run(
-            ['git', 'rev-parse', '--short', 'HEAD'],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-        info['full'] = subprocess.run(
-            ['git', 'rev-parse', 'HEAD'],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-        info['message'] = subprocess.run(
-            ['git', 'log', '-1', '--format=%s'],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-        info['date'] = subprocess.run(
-            ['git', 'log', '-1', '--format=%ci'],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-    except Exception:
-        pass
-    return info
-
-
-GIT_COMMIT = _get_git_commit()
-
 # ──────────────────────── Logging ──────────────────────────────────────
-
-def _setup_logging(strategy_name: str = 'vol_straddle', paper_mode: bool = False) -> Path:
-    log_dir = Path('logs/bot') / strategy_name
-    log_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    mode = 'paper' if paper_mode else 'live'
-    log_file = log_dir / f'scalper_{mode}_{ts}.log'
-
-    # Write git commit header before configuring logging handlers
-    # so the log file starts with version traceability info
-    if GIT_COMMIT['short']:
-        with open(log_file, 'w') as f:
-            f.write(f"# Commit: {GIT_COMMIT['short']} ({GIT_COMMIT['date']})\n")
-            f.write(f"# Message: {GIT_COMMIT['message']}\n")
-            f.write(f"# Full SHA: {GIT_COMMIT['full']}\n")
-            f.write("#\n")
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [%(levelname)s] %(name)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.handlers.RotatingFileHandler(
-                str(log_file), mode='a',
-                maxBytes=50 * 1024 * 1024, backupCount=5,
-            ),
-        ],
-    )
-    for name in ('urllib3', 'requests', 'binance'):
-        logging.getLogger(name).setLevel(logging.WARNING)
-    return log_file
-
 
 logger = logging.getLogger('Scalper')
 
@@ -148,71 +78,10 @@ logger = logging.getLogger('Scalper')
 # ──────────────── Diagnostic Logger ─────────────────────
 from quantbox.utils.diagnostics import _diag_logger  # noqa: E402
 
-# ──────────────────────── State File ──────────────────────────────────
-
-STATE_DIR = Path('data/state')
-STATE_FILE = STATE_DIR / 'scalper_state.json'
-PAPER_STATE_FILE = STATE_DIR / 'scalper_state_paper.json'
-
-
-def _rotate_state_backups(filepath: Path, keep: int = 5) -> None:
-    """Keep the N most recent backups, delete older ones."""
-    pattern = filepath.stem + '_backup_'
-    backups = sorted(filepath.parent.glob(f'{pattern}*.json'))
-    for old in backups[:-keep]:
-        try:
-            old.unlink()
-        except OSError:
-            pass
-
-
-def _save_scalper_state(state: dict, filepath: Path | None = None) -> None:
-    """Atomic JSON write with rotating backup (keeps 5 most recent)."""
-    if filepath is None:
-        filepath = STATE_FILE
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-
-    # Rotate backup before overwriting
-    if filepath.exists():
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup = filepath.parent / f'{filepath.stem}_backup_{ts}.json'
-        try:
-            import shutil
-            shutil.copy2(filepath, backup)
-            _rotate_state_backups(filepath, keep=5)
-        except OSError:
-            pass
-
-    fd, tmp = tempfile.mkstemp(dir=str(filepath.parent), suffix='.tmp')
-    try:
-        with os.fdopen(fd, 'w') as f:
-            json.dump(state, f, indent=2, default=str)
-        os.replace(tmp, str(filepath))
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
-def _load_scalper_state(filepath: Path | None = None) -> dict | None:
-    if filepath is None:
-        filepath = STATE_FILE
-    if not filepath.exists():
-        return None
-    try:
-        with open(filepath) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        logger.error(f"State load failed: {e}")
-        return None
-
-
 # ──────────────────────── Scalper Class ────────────────────────────────
 
 class RubberBandScalper(
-    BracketMixin, ReconciliationMixin, PositionMixin, CommandsMixin,
+    LoopMixin, DataMixin, BracketMixin, ReconciliationMixin, PositionMixin, CommandsMixin,
 ):
     """Live rubber band scalper for Binance USDT-M Futures.
 
@@ -390,126 +259,6 @@ class RubberBandScalper(
                 return True
 
         return False
-
-    # ==================== Market Data =====================
-
-    def get_trading_symbols(self) -> list[str]:
-        """Get top-N USDT-M futures symbols by volume."""
-        try:
-            exchange_info = self.client.futures_exchange_info()
-            usdt_symbols = [
-                s['symbol'] for s in exchange_info['symbols']
-                if s['symbol'].endswith('USDT') and s['status'] == 'TRADING'
-            ]
-
-            tickers = self.client.futures_ticker()
-            volumes = {
-                t['symbol']: float(t['quoteVolume'])
-                for t in tickers if t['symbol'] in usdt_symbols
-            }
-            sorted_syms = sorted(volumes, key=volumes.get, reverse=True)
-
-            # v11.1 fix: When whitelist is set, use whitelist directly
-            # (only filter to actively trading symbols). Volume rank
-            # is irrelevant when we have a curated, A/B-validated list.
-            if self._cfg.symbol_whitelist:
-                whitelist_set = set(self._cfg.symbol_whitelist)
-                exclude_set = set(self._cfg.exclude_symbols)
-                tradable = set(volumes.keys())  # actively trading symbols
-                result = [
-                    s for s in sorted_syms
-                    if s in whitelist_set and s not in exclude_set
-                ]
-                missing = whitelist_set - tradable
-                if missing:
-                    logger.warning(f"Whitelist symbols not tradable: {missing}")
-                logger.info(f"Universe: {len(result)} symbols (whitelist={len(whitelist_set)})")
-            else:
-                # No whitelist: fall back to top-N by volume
-                result = [
-                    s for s in sorted_syms[:self._cfg.min_volume_rank]
-                    if s not in self._cfg.exclude_symbols
-                ]
-                logger.info(f"Universe: {len(result)} symbols")
-            return result
-        except Exception as e:
-            logger.error(f"Symbol fetch failed: {e}")
-            return []
-
-    def get_symbol_info(self, symbol: str) -> dict:
-        """Get tick_size, step_size, min_notional for a symbol (cached)."""
-        if symbol in self._symbol_info_cache:
-            return self._symbol_info_cache[symbol]
-
-        try:
-            if not self._exchange_info_fetched:
-                info = self.client.futures_exchange_info()
-                for sym_info in info['symbols']:
-                    result = {
-                        'quantity_precision': sym_info['quantityPrecision'],
-                        'price_precision': sym_info['pricePrecision'],
-                    }
-                    for f in sym_info['filters']:
-                        if f['filterType'] == 'LOT_SIZE':
-                            result['step_size'] = float(f['stepSize'])
-                            result['min_qty'] = float(f['minQty'])
-                        elif f['filterType'] == 'PRICE_FILTER':
-                            result['tick_size'] = float(f['tickSize'])
-                        elif f['filterType'] == 'MIN_NOTIONAL':
-                            result['min_notional'] = float(f.get('notional', 5))
-                    self._symbol_info_cache[sym_info['symbol']] = result
-                self._exchange_info_fetched = True
-            return self._symbol_info_cache.get(symbol, {})
-        except Exception as e:
-            logger.error(f"Symbol info fetch failed for {symbol}: {e}")
-            return {}
-
-    def download_klines(
-        self, symbol: str, n_bars: int = 200, interval: str = '15m',
-        full: bool = False,
-    ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-        """Download recent COMPLETED klines (incomplete bar dropped).
-
-        Binance futures_klines always includes the currently-open (incomplete)
-        candle as the last element. We request n_bars+1 and drop the last one
-        to ensure backtest-live parity: signals are computed only on CLOSED bars.
-
-        Args:
-            symbol: Trading symbol.
-            n_bars: Number of completed bars to return.
-            interval: Candle interval ('15m', '4h', etc.).
-            full: If True, returns (close, high, low, volume, taker_buy) tuple.
-
-        Returns:
-            Array of close prices (default), or (close, high, low, volume,
-            taker_buy) tuple if full=True, or None on failure.
-        """
-        try:
-            klines = self.client.futures_klines(
-                symbol=symbol,
-                interval=interval,
-                limit=n_bars + 1,  # +1 to compensate for dropping incomplete bar
-            )
-            if not klines:
-                return None
-            # Drop the last (currently-open/incomplete) candle for backtest parity.
-            # The last kline from Binance is ALWAYS the live candle that hasn't
-            # closed yet — using it would compute signals on partial data that
-            # never existed in the backtest.
-            klines = klines[:-1]
-            if not klines:
-                return None
-            close = np.array([float(k[4]) for k in klines], dtype=np.float64)
-            if full:
-                high = np.array([float(k[2]) for k in klines], dtype=np.float64)
-                low = np.array([float(k[3]) for k in klines], dtype=np.float64)
-                volume = np.array([float(k[5]) for k in klines], dtype=np.float64)
-                taker_buy = np.array([float(k[9]) for k in klines], dtype=np.float64)
-                return close, high, low, volume, taker_buy
-            return close
-        except Exception as e:
-            logger.error(f"Klines fetch failed for {symbol} ({interval}): {e}")
-            return None
 
     # ==================== Order Execution ====================
 
@@ -1192,82 +941,6 @@ class RubberBandScalper(
                 f"(from {len(candidates)} candidates)"
             )
 
-    def _log_summary(self, balance: float) -> None:
-        """Log periodic summary — always, even with 0 trades."""
-        positions = self.strategy.active_positions
-        n_trades = len(self._trade_history)
-        wins = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
-        total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
-        wr = wins / n_trades * 100 if n_trades > 0 else 0
-
-        hwm = self._high_water_mark if self._high_water_mark > 0 else balance
-        dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
-
-        # Time since last trade
-        last_trade_ago = ''
-        if self._trade_history:
-            last_t = self._trade_history[-1].get('time', '')
-            if last_t:
-                try:
-                    from datetime import datetime as _dt
-                    lt = _dt.fromisoformat(last_t)
-                    delta = datetime.now(timezone.utc) - lt
-                    hours = delta.total_seconds() / 3600
-                    last_trade_ago = f', LastTrade={hours:.1f}h ago'
-                except Exception:
-                    pass
-
-        logger.info(
-            f"[Summary] Trades={n_trades}, WR={wr:.0f}%, "
-            f"PnL=${total_pnl:+.2f}, Balance=${balance:.2f}, "
-            f"HWM=${hwm:.2f}, DD={dd_pct:.1f}%, "
-            f"Active={len(positions)}{last_trade_ago}"
-        )
-
-        # Active position details
-        for sym, pos in positions.items():
-            logger.info(
-                f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
-                f"entry=${pos['entry_price']:.4f} "
-                f"bars={pos['bars_held']}/{pos.get('max_hold', self.config.max_hold)} "
-                f"MFE={pos.get('best_pnl', 0)*100:+.2f}% "
-                f"MAE={pos.get('worst_pnl', 0)*100:+.2f}% "
-                f"SL={pos.get('server_sl_order_id') or 'NONE'} "
-                f"TP={pos.get('server_tp_order_id') or 'NONE'}"
-            )
-
-        # Periodic VR distribution (every 16 cycles ≈ 4h) when no positions
-        if (self.strategy_name == 'vol_straddle'
-                and len(positions) == 0
-                and self._cycle_count % 16 == 0):
-            self._log_vr_distribution()
-
-    def _log_vr_distribution(self) -> None:
-        """Log top-10 closest-to-squeeze symbols with per-TF VR.
-
-        Provides visibility into market state during extended no-signal
-        periods. Fires every ~4h (16 cycles × 15m).
-        """
-        if not hasattr(self.strategy, 'get_vr_all_tf'):
-            return
-        vr_entries: list[tuple[str, float, dict[str, float]]] = []
-        for sym in (self._cfg.symbol_whitelist or []):
-            vr_all = self.strategy.get_vr_all_tf(sym)
-            min_vr = min(vr_all.values())
-            if min_vr < 999.0:
-                vr_entries.append((sym, min_vr, vr_all))
-        if not vr_entries:
-            return
-        vr_entries.sort(key=lambda x: x[1])
-        top10 = vr_entries[:10]
-        lines = [f"  [VR Distribution] Top-10 closest to squeeze (threshold={self.vs_config.d_vr_threshold}):"]
-        for rank, (sym, min_vr, vr_all) in enumerate(top10, 1):
-            lines.append(
-                f"    {rank:2d}. {sym:<16s} min={min_vr:.3f} "
-                f"(15m={vr_all['15m']:.3f} 1h={vr_all['1h']:.3f} 4h={vr_all['4h']:.3f})"
-            )
-        logger.info('\n'.join(lines))
-
     # ==================== State Persistence ====================
 
     def _save_state(self) -> None:
@@ -1294,14 +967,14 @@ class RubberBandScalper(
             }
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
         try:
-            _save_scalper_state(state, filepath=filepath)
+            save_scalper_state(state, filepath=filepath)
         except Exception as e:
             logger.error(f"State save failed: {e}")
 
     def _load_state(self) -> None:
         """Restore state from disk."""
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
-        state = _load_scalper_state(filepath=filepath)
+        state = load_scalper_state(filepath=filepath)
         if state is None:
             return
 
@@ -1703,115 +1376,6 @@ class RubberBandScalper(
             'footer': {'text': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')},
         })
 
-    def _print_startup_banner(self, balance: float, n_symbols: int) -> None:
-        """Print the startup banner with system info."""
-        settings = get_settings()
-        mode_str = 'PAPER' if self.paper_mode else 'LIVE'
-        print_banner()
-        if GIT_COMMIT['short']:
-            logger.info(
-                f"Git: {GIT_COMMIT['short']} — {GIT_COMMIT['message']}"
-            )
-        if self.strategy_name == 'vol_straddle':
-            vc = self.vs_config
-            print_system_info(
-                mode=mode_str,
-                strategy='vol_straddle',
-                balance=balance,
-                n_symbols=n_symbols,
-                max_slots=vc.max_concurrent,
-                leverage_base=vc.base_leverage,
-                leverage_max=vc.max_leverage,
-                lookback=vc.momentum_period,
-                threshold=vc.d_vr_threshold,
-                target=vc.d_tp,
-                stop_mult=vc.d_sl,
-                max_hold=vc.max_hold_15m,
-                entry_mode='vr_compression',
-                min_confidence=0.0,
-                testnet=settings.binance_testnet,
-                ma_cluster_enabled=vc.ma_cluster_enabled,
-                ma_cluster_pct=vc.ma_cluster_pct,
-                ma_cluster_min_duration=vc.ma_cluster_min_duration,
-                ma_cluster_max_duration=vc.ma_cluster_max_duration,
-                ma_cluster_min_momentum=vc.ma_cluster_min_momentum,
-                ma_cluster_sl=vc.ma_cluster_sl,
-                ma_cluster_tp=vc.ma_cluster_tp,
-                ma_cluster_leverage=vc.ma_cluster_leverage,
-            )
-        else:
-            print_system_info(
-                mode=mode_str,
-                strategy=self.strategy_name,
-                balance=balance,
-                n_symbols=n_symbols,
-                max_slots=self.config.max_concurrent,
-                leverage_base=self.config.base_leverage,
-                leverage_max=self.config.max_leverage,
-                lookback=self.config.lookback,
-                threshold=self.config.threshold,
-                target=self.config.target_retrace,
-                stop_mult=self.config.stop_mult,
-                max_hold=self.config.max_hold,
-                entry_mode=self.config.entry_mode,
-                min_confidence=self.config.min_confidence,
-                testnet=settings.binance_testnet,
-            )
-        print_startup_complete(mode_str)
-
-    def _next_bar_time(self) -> datetime:
-        """Calculate the next 15-minute bar close time (+5s buffer)."""
-        now = datetime.now(timezone.utc)
-        next_boundary = ((now.minute // 15) + 1) * 15
-        if next_boundary >= 60:
-            target = now.replace(
-                minute=0, second=5, microsecond=0
-            ) + timedelta(hours=1)
-        else:
-            target = now.replace(
-                minute=next_boundary, second=5, microsecond=0
-            )
-        return target
-
-    def _wait_for_bar(self) -> None:
-        """Wait for the next 15m bar close, polling every 5s for commands.
-
-        While waiting:
-        - Process bot commands (~5s latency for responsive interaction)
-        - Sync server-side TP/SL order fills (every 60s to avoid API spam)
-        - Check for stop requests
-        """
-        target = self._next_bar_time()
-        remaining = (target - datetime.now(timezone.utc)).total_seconds()
-        if remaining > 0:
-            next_str = target.strftime('%H:%M:%S UTC')
-            logger.info(f"Waiting {remaining:.0f}s for next bar close ({next_str})")
-
-        BOT_POLL_INTERVAL = 5.0    # Check bot commands every 5s
-        SYNC_INTERVAL = 60.0       # Sync server orders every 60s
-        last_sync = time.monotonic()
-
-        while True:
-            now = datetime.now(timezone.utc)
-            remaining = (target - now).total_seconds()
-            if remaining <= 0:
-                break
-
-            # Process bot commands while waiting (~5s response time)
-            self._process_bot_commands()
-            if self._stop_requested:
-                break
-
-            # Sync server-side TP/SL fills periodically (not every 5s)
-            if time.monotonic() - last_sync >= SYNC_INTERVAL:
-                self._sync_server_orders()
-                self._save_state()  # v12.3.1: persist after inter-cycle sync
-                last_sync = time.monotonic()
-
-            # Sleep 5s max for responsive bot commands
-            sleep_secs = min(BOT_POLL_INTERVAL, remaining)
-            time.sleep(sleep_secs)
-
 
 # ──────────────────────── CLI ──────────────────────────────────────────
 
@@ -1846,7 +1410,7 @@ def main():
     )
     args = parser.parse_args()
 
-    _setup_logging(strategy_name=args.strategy, paper_mode=args.paper)
+    setup_logging(strategy_name=args.strategy, paper_mode=args.paper, git_commit=GIT_COMMIT)
 
     # Build config from RubberBandConfig defaults (config.py is SSoT) + CLI overrides
     config = RubberBandConfig()
