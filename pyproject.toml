@@ -32,6 +32,22 @@ addopts = "-m 'not slow'"
 asyncio_mode = "strict"
 timeout = 30
 
+[tool.coverage.run]
+source = ["quantbox"]
+omit = [
+    "quantbox/strategy/rubberband/*",  # legacy, non-production
+    "quantbox/strategy/elliott.py",    # legacy, non-production
+    "quantbox/strategy/alpha_engine.py",
+]
+
+[tool.coverage.report]
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
 [tool.ruff]
 line-length = 120
 
@@ -51,10 +67,14 @@ python_version = "3.13"
 ignore_missing_imports = true
 warn_unused_ignores = false
 follow_imports = "skip"
-# Scope: SSoT config files only. Expand as codebase gets typed.
+# Scope: SSoT config files + pure utility modules.
+# Mixin files (brackets, positions, reconciliation, loop_mixin, data_mixin, commands)
+# use self.attr from other mixins → Protocol pattern needed before adding here.
 files = [
     "quantbox/strategy/vol_straddle/config.py",
     "quantbox/strategy/rubberband/config.py",
+    "quantbox/core/bot_utils.py",
+    "quantbox/core/scalper_state.py",
 ]
 
 [dependency-groups]
@@ -62,6 +82,7 @@ dev = [
     "mypy>=1.19.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
     "pytest-timeout>=2.4.0",
     "ruff>=0.15.5",
 ]
