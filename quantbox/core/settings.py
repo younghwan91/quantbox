@@ -17,7 +17,7 @@ QuantBox 환경변수 설정 — pydantic-settings 기반 검증.
 
 from functools import lru_cache
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

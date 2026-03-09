@@ -53,7 +53,7 @@ class Event:
     type: EventType
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    
+
     def __post_init__(self):
         if isinstance(self.timestamp, str):
             self.timestamp = datetime.fromisoformat(self.timestamp)
@@ -67,7 +67,7 @@ class MarketEvent(Event):
     type: EventType = EventType.MARKET
     symbol: str = ""
     data: Dict[str, Any] = field(default_factory=dict)
-    
+
     # OHLCV data
     open: float = 0.0
     high: float = 0.0
@@ -83,16 +83,16 @@ class SignalEvent(Event):
     """
     type: EventType = EventType.SIGNAL
     signal_type: SignalType = SignalType.LONG
-    
+
     # Pair trading specific
     symbol1: str = ""
     symbol2: str = ""
-    
+
     # Signal strength and direction
     strength: float = 1.0  # Signal strength/confidence
     z_score: float = 0.0
     hedge_ratio: float = 1.0
-    
+
     # Strategy metadata
     strategy_id: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -106,19 +106,19 @@ class OrderEvent(Event):
     type: EventType = EventType.ORDER
     order_type: OrderType = OrderType.MARKET
     side: OrderSide = OrderSide.BUY
-    
+
     symbol: str = ""
     quantity: float = 0.0
     price: Optional[float] = None  # For limit orders
     stop_price: Optional[float] = None  # For stop orders
-    
+
     # Order management
     order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     parent_order_id: Optional[str] = None  # For bracket orders
-    
+
     # Time in force
     time_in_force: str = "GTC"  # GTC, IOC, FOK
-    
+
     # Pair trading specific
     is_pair_order: bool = False
     pair_symbol: str = ""  # The other symbol in the pair
@@ -131,21 +131,21 @@ class FillEvent(Event):
     Event representing a filled order.
     """
     type: EventType = EventType.FILL
-    
+
     order_id: str = ""
     symbol: str = ""
     side: OrderSide = OrderSide.BUY
-    
+
     # Fill details
     fill_quantity: float = 0.0
     fill_price: float = 0.0
     commission: float = 0.0
     slippage: float = 0.0
-    
+
     # Execution metadata
     exchange_order_id: str = ""
     execution_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    
+
     @property
     def total_cost(self) -> float:
         """Total cost including commission and slippage."""
@@ -159,7 +159,7 @@ class RiskEvent(Event):
     Event for risk management alerts.
     """
     type: EventType = EventType.RISK
-    
+
     risk_type: str = ""  # e.g., "MAX_DRAWDOWN", "POSITION_LIMIT", "STOP_LOSS"
     symbol: str = ""
     current_value: float = 0.0
@@ -174,14 +174,14 @@ class PositionEvent(Event):
     Event representing a position update.
     """
     type: EventType = EventType.POSITION
-    
+
     symbol: str = ""
     quantity: float = 0.0
     avg_price: float = 0.0
     current_price: float = 0.0
     unrealized_pnl: float = 0.0
     realized_pnl: float = 0.0
-    
+
     @property
     def market_value(self) -> float:
         """Current market value of position."""
@@ -192,34 +192,34 @@ class EventQueue:
     """
     Thread-safe event queue for managing trading events.
     """
-    
+
     def __init__(self, maxsize: int = 0):
         self._queue: Queue = Queue(maxsize=maxsize)
         self._handlers: Dict[EventType, List[callable]] = {
             event_type: [] for event_type in EventType
         }
-    
+
     def put(self, event: Event):
         """Add event to queue."""
         self._queue.put(event)
-    
+
     def get(self, block: bool = True, timeout: float = None) -> Event:
         """Get event from queue."""
         return self._queue.get(block=block, timeout=timeout)
-    
+
     def empty(self) -> bool:
         """Check if queue is empty."""
         return self._queue.empty()
-    
+
     def register_handler(self, event_type: EventType, handler: callable):
         """Register an event handler for a specific event type."""
         self._handlers[event_type].append(handler)
-    
+
     def process(self, event: Event):
         """Process an event by calling all registered handlers."""
         for handler in self._handlers[event.type]:
             handler(event)
-    
+
     def process_all(self):
         """Process all events in the queue."""
         while not self.empty():
@@ -260,19 +260,19 @@ def create_pair_orders(
 ) -> List[OrderEvent]:
     """
     Create pair of orders from a signal event.
-    
+
     Returns two OrderEvents - one for each leg of the pair trade.
     """
     hedge_ratio = signal.hedge_ratio
     effective_capital = capital * (1 - 2 * fee_rate)
-    
+
     # Calculate quantities
     qty1_value = effective_capital / (1 + hedge_ratio)
     qty2_value = hedge_ratio * qty1_value
-    
+
     qty1 = qty1_value / price1
     qty2 = qty2_value / price2
-    
+
     # Determine sides based on signal type
     if signal.signal_type == SignalType.LONG:
         # Long spread: buy symbol1, sell symbol2
@@ -282,7 +282,7 @@ def create_pair_orders(
         # Short spread: sell symbol1, buy symbol2
         side1 = OrderSide.SELL
         side2 = OrderSide.BUY
-    
+
     order1 = OrderEvent(
         symbol=signal.symbol1,
         side=side1,
@@ -291,7 +291,7 @@ def create_pair_orders(
         pair_symbol=signal.symbol2,
         hedge_ratio=hedge_ratio
     )
-    
+
     order2 = OrderEvent(
         symbol=signal.symbol2,
         side=side2,
@@ -300,9 +300,9 @@ def create_pair_orders(
         pair_symbol=signal.symbol1,
         hedge_ratio=1.0 / hedge_ratio
     )
-    
+
     # Link orders
     order1.parent_order_id = signal.event_id
     order2.parent_order_id = signal.event_id
-    
+
     return [order1, order2]

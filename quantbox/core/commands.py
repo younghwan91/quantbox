@@ -79,7 +79,7 @@ class CommandsMixin:
             status = "🛑 DD HALT"
 
         lines = [
-            f"```",
+            "```",
             f"📊 QuantBox Status — {status}",
             f"{'─' * 40}",
             f"Balance:    ${balance:,.2f}",
@@ -93,7 +93,7 @@ class CommandsMixin:
             for sym, pos in positions.items():
                 direction = "L" if pos['signal'] == 1 else "S"
                 bars = pos.get('bars_held', 0)
-                best = pos.get('best_pnl', 0) * 100
+                best = pos.get('best_pnl', 0) * 100  # noqa: F841
                 notional = pos.get('notional', 0)
                 # Extract Binance symbol from compound key
                 api_sym = pos.get('symbol', sym.split(':')[0])
