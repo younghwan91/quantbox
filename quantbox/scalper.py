@@ -75,6 +75,7 @@ from quantbox.execution.brackets import BracketMixin
 from quantbox.execution.data_mixin import DataMixin
 from quantbox.execution.positions import PositionMixin
 from quantbox.execution.reconciliation import ReconciliationMixin
+from quantbox.core.trade_journal import TradeJournal
 
 load_dotenv()
 
@@ -183,6 +184,11 @@ class RubberBandScalper(
         # Trade history
         self._trade_history: list[dict] = []
         self._cycle_count: int = 0
+
+        # Trade journal (persistent SQLite)
+        _session_str = "paper" if paper_mode else "live"
+        _db_path = "data/journal_paper.sqlite" if paper_mode else "data/journal.sqlite"
+        self._journal = TradeJournal(db_path=_db_path, session=_session_str)
 
         # Control flags
         self._stop_requested: bool = False

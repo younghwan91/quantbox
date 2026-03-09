@@ -20,6 +20,7 @@ ZERO LOOKAHEAD:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -985,6 +986,8 @@ class VolStraddleStrategy:
             "max_hold": max_hold,
             "is_straddle": kwargs.get("is_straddle", False),
             "strategy_type": meta.get("strategy_type", "vr_squeeze"),
+            # Entry timestamp (for trade journal)
+            "opened_at": datetime.now(timezone.utc).isoformat(),
             # R43 Trailing Stop (directional only, VR squeeze only)
             "trail_active": False,
             "peak_gain": 0.0,
