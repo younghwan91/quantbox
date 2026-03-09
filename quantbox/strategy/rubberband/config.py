@@ -33,7 +33,7 @@ class RubberBandConfig:
     asset_trend_period: int = 192          # Asset SMA for classic pullback (192 = 48h)
 
     # ── Confidence Scoring (v10.0, MTF acts as quality gate) ──
-    min_confidence: int = 1                # v10.0: Lowered to 1 (MTF is the real filter, +86.9% ret)
+    min_confidence: int = 3                # v12.3: M-2SSTSX validated (Sharpe 5.50, DD 8.0%)
     confidence_leverage_step: float = 0.0  # Extra leverage per confidence point above 1 (0=flat)
     rsi_period: int = 14                   # RSI calculation period
     vol_period: int = 20                   # Volume SMA period for spike detection
@@ -99,8 +99,8 @@ class RubberBandConfig:
     # Chosen config: 2.5x_f1 — OOS Sharpe 8.23, OOS/IS 1.09, zero overfitting.
     # When atr_period=0, falls back to fixed `threshold` above.
     atr_period: int = 48                    # ATR EMA period (48 × 15m = 12h)
-    atr_multiplier: float = 2.5             # ATR multiplier for threshold calc
-    threshold_floor: float = 0.01           # Minimum threshold (1%)
+    atr_multiplier: float = 2.0             # v12.2: A/B validated (2.5→2.0, E-3Slot)
+    threshold_floor: float = 0.008          # v12.2: Minimum threshold (0.8%)
     threshold_cap: float = 0.06             # Maximum threshold (6%)
 
     # ── v7.0 Independent 4H Rubber Band (A/B validated) ──
@@ -205,18 +205,24 @@ class RubberBandConfig:
 
     # ── Risk management ──
     risk_per_trade: float = 0.01   # Risk 1% of capital per trade
-    max_concurrent: int = 5        # Max simultaneous positions
+    max_concurrent: int = 2        # v12.3: M-2SSTSX optimal (2 slots, DD 8.0%)
     max_drawdown_pct: float = 0.10  # 10% session drawdown → halt
 
     # ── Symbol selection (v10.0: whitelist filter) ──
     min_volume_rank: int = 30  # Top 30 by volume
     exclude_symbols: list[str] = field(default_factory=lambda: ['USDCUSDT', 'TUSDUSDT', 'BUSDUSDT'])
     symbol_whitelist: list[str] = field(default_factory=lambda: [
-        'FILUSDT', '1000PEPEUSDT', 'XRPUSDT', 'XLMUSDT', 'ADAUSDT',
-        'FETUSDT', 'ETHUSDT', 'ARBUSDT', '1000SHIBUSDT', 'LINKUSDT',
-        'ATOMUSDT', 'OPUSDT', 'DOTUSDT', 'NEARUSDT', 'AAVEUSDT',
-        'BCHUSDT', 'HBARUSDT', 'SOLUSDT', 'ICPUSDT', 'BNBUSDT',
-    ])  # v11.1 Top-20: 3384% ret, Calmar 155.22, A/B validated vs Top-15 baseline
+        'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
+        'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'XLMUSDT',
+        'DOTUSDT', '1000PEPEUSDT', 'ARBUSDT', 'FETUSDT', '1000SHIBUSDT',
+        'OPUSDT', 'ATOMUSDT', 'HBARUSDT', 'ICPUSDT', 'FILUSDT',
+        'TRXUSDT', 'SUIUSDT', 'TONUSDT', 'LTCUSDT', 'BCHUSDT',
+        'UNIUSDT', 'NEARUSDT', 'APTUSDT', 'AAVEUSDT', 'INJUSDT',
+        'ETCUSDT', 'GRTUSDT', 'STXUSDT', 'EGLDUSDT', 'AXSUSDT',
+        'SANDUSDT', 'THETAUSDT', 'ALGOUSDT', 'RUNEUSDT', 'DYDXUSDT',
+        'CRVUSDT', 'LDOUSDT', 'COMPUSDT', 'SNXUSDT', 'VETUSDT',
+        'APEUSDT', 'ENAUSDT', 'TAOUSDT', 'WLDUSDT', 'WIFUSDT',
+    ])  # v12.3: M-2SSTSX validated 50-symbol universe
 
     # ── Dynamic capital allocation (v10.0) ──
     dynamic_capital_enabled: bool = True  # balance / max(1, n_active+1) instead of fixed slots

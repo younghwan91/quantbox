@@ -178,7 +178,22 @@ class VolStraddleConfig(BaseSettings):
     btc_long_ma_interval: str = '15m'  # timeframe for MA computation (must match cycle interval)
 
     # ── Symbol Selection ──
-    symbol_whitelist: list[str] = Field(default_factory=list)
+    # Source of truth for the production universe (60 symbols, r53 validated).
+    # To override: set VS_SYMBOL_WHITELIST in .env — but update config.py default too.
+    symbol_whitelist: list[str] = Field(default_factory=lambda: [
+        "ADAUSDT", "ALGOUSDT", "ATOMUSDT", "AVAXUSDT", "AXSUSDT",
+        "AAVEUSDT", "BANDUSDT", "BATUSDT", "BCHUSDT", "BELUSDT",
+        "BNBUSDT", "BTCUSDT", "COMPUSDT", "CRVUSDT", "DASHUSDT",
+        "DOGEUSDT", "DOTUSDT", "EGLDUSDT", "ENJUSDT", "ETCUSDT",
+        "ETHUSDT", "FILUSDT", "GRTUSDT", "ICXUSDT", "IOSTUSDT",
+        "IOTAUSDT", "KAVAUSDT", "KNCUSDT", "KSMUSDT", "LINKUSDT",
+        "LRCUSDT", "LTCUSDT", "NEARUSDT", "NEOUSDT", "ONTUSDT",
+        "QTUMUSDT", "RLCUSDT", "RSRUSDT", "RUNEUSDT", "SANDUSDT",
+        "SKLUSDT", "SNXUSDT", "SOLUSDT", "STORJUSDT", "SUSHIUSDT",
+        "THETAUSDT", "TRBUSDT", "TRXUSDT", "UNIUSDT", "VETUSDT",
+        "XLMUSDT", "XMRUSDT", "XRPUSDT", "XTZUSDT", "YFIUSDT",
+        "ZECUSDT", "ZENUSDT", "ZILUSDT", "ZRXUSDT", "1INCHUSDT",
+    ])
     exclude_symbols: list[str] = Field(default_factory=lambda: [
         'USDCUSDT', 'TUSDUSDT', 'BUSDUSDT',
     ])
