@@ -41,4 +41,4 @@ secrets.json
 /saved_plots/
 /reports/
 /temp/
-devlog/
+devlog/.coverage
