@@ -391,7 +391,7 @@ class TestPollingLoop:
         """14:03 → 다음 바 14:15:05."""
         from quantbox.scalper import RubberBandScalper
         fake_now = datetime(2026, 2, 17, 14, 3, 0, tzinfo=timezone.utc)
-        with patch("quantbox.scalper.datetime") as mock_dt:
+        with patch("quantbox.core.loop_mixin.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             # We need a scalper instance; create minimal mock
@@ -405,7 +405,7 @@ class TestPollingLoop:
         """14:47 → 다음 바 15:00:05."""
         from quantbox.scalper import RubberBandScalper
         fake_now = datetime(2026, 2, 17, 14, 47, 0, tzinfo=timezone.utc)
-        with patch("quantbox.scalper.datetime") as mock_dt:
+        with patch("quantbox.core.loop_mixin.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             s = MagicMock(spec=RubberBandScalper)
@@ -436,8 +436,8 @@ class TestPollingLoop:
             call_idx[0] += 1
             return fake_times[idx]
 
-        with patch("quantbox.scalper.datetime") as mock_dt, \
-             patch("quantbox.scalper.time") as mock_time:
+        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, \
+             patch("quantbox.core.loop_mixin.time") as mock_time:
             mock_dt.now = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             mock_time.sleep = MagicMock()
@@ -458,8 +458,8 @@ class TestPollingLoop:
 
         fake_now_val = datetime(2026, 2, 17, 14, 1, 0, tzinfo=timezone.utc)
 
-        with patch("quantbox.scalper.datetime") as mock_dt, \
-             patch("quantbox.scalper.time") as mock_time:
+        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, \
+             patch("quantbox.core.loop_mixin.time") as mock_time:
             mock_dt.now.return_value = fake_now_val
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             mock_time.sleep = MagicMock()
@@ -498,8 +498,8 @@ class TestPollingLoop:
             mono_idx[0] += 1
             return mono_values[idx]
 
-        with patch("quantbox.scalper.datetime") as mock_dt, \
-             patch("quantbox.scalper.time") as mock_time:
+        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, \
+             patch("quantbox.core.loop_mixin.time") as mock_time:
             mock_dt.now = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             mock_time.sleep = MagicMock()
