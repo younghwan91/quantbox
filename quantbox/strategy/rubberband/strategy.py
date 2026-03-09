@@ -26,8 +26,7 @@ from quantbox.strategy.rubberband.signals import (
     compute_signals_with_regime,
 )
 
-logger = logging.getLogger('Scalper')
-
+logger = logging.getLogger("Scalper")
 
 
 # ──────────────────────── Live Signal Helper ──────────────────────────
@@ -126,12 +125,18 @@ class RubberBandStrategy:
             return 0
 
         # ═══ v6.0+ Confidence-Scored Entry (stateless last-bar evaluation) ═══
-        if btc_close_prices is not None and cfg.entry_mode == 'confidence':
-            min_bars = max(
-                cfg.lookback, cfg.btc_directional_period,
-                cfg.btc_regime_period, cfg.asset_trend_period,
-                cfg.rsi_period, cfg.vol_period,
-            ) + 1
+        if btc_close_prices is not None and cfg.entry_mode == "confidence":
+            min_bars = (
+                max(
+                    cfg.lookback,
+                    cfg.btc_directional_period,
+                    cfg.btc_regime_period,
+                    cfg.asset_trend_period,
+                    cfg.rsi_period,
+                    cfg.vol_period,
+                )
+                + 1
+            )
             if len(btc_close_prices) < min_bars or len(close_prices) < min_bars:
                 return 0
             # on_bar needs volume/taker_buy — stored in self._volume_data / self._taker_data
@@ -140,10 +145,14 @@ class RubberBandStrategy:
             if vol_data is None or taker_data is None:
                 # Fallback to regime_switch if volume data not available
                 sigs = compute_signals_regime_switch(
-                    close_prices, btc_close_prices,
-                    cfg.lookback, cfg.threshold,
-                    cfg.target_retrace, cfg.stop_mult,
-                    cfg.max_hold, cfg.stop_decay,
+                    close_prices,
+                    btc_close_prices,
+                    cfg.lookback,
+                    cfg.threshold,
+                    cfg.target_retrace,
+                    cfg.stop_mult,
+                    cfg.max_hold,
+                    cfg.stop_decay,
                     cfg.btc_directional_period,
                     cfg.btc_regime_period,
                     cfg.asset_trend_period,
@@ -196,7 +205,7 @@ class RubberBandStrategy:
             # BTC regime NaN guard (btc_sma needed for sanity check only;
             # v12.4.1 removed Risk-On/Risk-Off branching in favour of
             # universal Risk-Off logic that uses btc_mom instead)
-            btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period:]))
+            btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period :]))
             if np.isnan(btc_sma_val):
                 self._mtf_confirmed[symbol] = False
                 return 0
@@ -225,8 +234,11 @@ class RubberBandStrategy:
                 high_data = self._high_data.get(symbol, close_prices)
                 low_data = self._low_data.get(symbol, close_prices)
                 sk, sd = _compute_stochastic_inline(
-                    high_data, low_data, close_prices,
-                    cfg.stoch_k_period, cfg.stoch_d_period,
+                    high_data,
+                    low_data,
+                    close_prices,
+                    cfg.stoch_k_period,
+                    cfg.stoch_d_period,
                 )
                 stoch_k_val, stoch_d_val = float(sk[-1]), float(sd[-1])
                 if n > 1:
@@ -236,7 +248,10 @@ class RubberBandStrategy:
             macd_hist_val, macd_hist_prev = 0.0, 0.0
             if cfg.macd_enabled and n >= cfg.macd_slow + cfg.macd_signal_period:
                 _, _, mhist = _compute_macd_inline(
-                    close_prices, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period,
+                    close_prices,
+                    cfg.macd_fast,
+                    cfg.macd_slow,
+                    cfg.macd_signal_period,
                 )
                 macd_hist_val = float(mhist[-1])
                 if n > 1:
@@ -258,10 +273,14 @@ class RubberBandStrategy:
             # all market regimes (bull + bear) → use it universally.
             if ret < -thr and btc_mom < 0:
                 # LONG: alt dips with BTC → sympathy → mean revert
-                if rsi_val < 35: confidence += 1
-                if vol_ratio > 1.5: confidence += 1
-                if taker_ratio_val < 0.42: confidence += 1
-                if btc_mom < -0.01: confidence += 1
+                if rsi_val < 35:
+                    confidence += 1
+                if vol_ratio > 1.5:
+                    confidence += 1
+                if taker_ratio_val < 0.42:
+                    confidence += 1
+                if btc_mom < -0.01:
+                    confidence += 1
                 if cfg.stoch_enabled and n > 1:
                     if stoch_k_val < 20 and stoch_k_val > stoch_d_val and sk_prev <= sd_prev:
                         confidence += 1
@@ -277,10 +296,14 @@ class RubberBandStrategy:
 
             elif ret > thr and btc_mom > 0:
                 # SHORT: alt pumps with BTC bounce → fades back
-                if rsi_val > 65: confidence += 1
-                if vol_ratio > 1.5: confidence += 1
-                if taker_ratio_val > 0.58: confidence += 1
-                if btc_mom > 0.01: confidence += 1
+                if rsi_val > 65:
+                    confidence += 1
+                if vol_ratio > 1.5:
+                    confidence += 1
+                if taker_ratio_val > 0.58:
+                    confidence += 1
+                if btc_mom > 0.01:
+                    confidence += 1
                 if cfg.stoch_enabled and n > 1:
                     if stoch_k_val > 80 and stoch_k_val < stoch_d_val and sk_prev >= sd_prev:
                         confidence += 1
@@ -298,8 +321,13 @@ class RubberBandStrategy:
             htf_close = self._htf_close_data.get(symbol)
             mtf_applied = False
 
-            if signal != 0 and cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
-                sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period:]))
+            if (
+                signal != 0
+                and cfg.mtf_confirmation_enabled
+                and htf_close is not None
+                and len(htf_close) >= cfg.mtf_sma_period
+            ):
+                sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period :]))
                 trend_up = float(htf_close[-1]) > sma_4h
 
                 if signal > 0 and not trend_up:
@@ -321,18 +349,27 @@ class RubberBandStrategy:
             return signal
 
         # ═══ v5.0 Regime-Switch Dual Entry ═══
-        if btc_close_prices is not None and cfg.entry_mode == 'regime_switch':
-            min_bars = max(
-                cfg.lookback, cfg.btc_directional_period,
-                cfg.btc_regime_period, cfg.asset_trend_period,
-            ) + 1
+        if btc_close_prices is not None and cfg.entry_mode == "regime_switch":
+            min_bars = (
+                max(
+                    cfg.lookback,
+                    cfg.btc_directional_period,
+                    cfg.btc_regime_period,
+                    cfg.asset_trend_period,
+                )
+                + 1
+            )
             if len(btc_close_prices) < min_bars or len(close_prices) < min_bars:
                 return 0
             sigs = compute_signals_regime_switch(
-                close_prices, btc_close_prices,
-                cfg.lookback, cfg.threshold,
-                cfg.target_retrace, cfg.stop_mult,
-                cfg.max_hold, cfg.stop_decay,
+                close_prices,
+                btc_close_prices,
+                cfg.lookback,
+                cfg.threshold,
+                cfg.target_retrace,
+                cfg.stop_mult,
+                cfg.max_hold,
+                cfg.stop_decay,
                 cfg.btc_directional_period,
                 cfg.btc_regime_period,
                 cfg.asset_trend_period,
@@ -344,10 +381,14 @@ class RubberBandStrategy:
             if len(btc_close_prices) < max(cfg.lookback, cfg.regime_lookback) + 1:
                 return 0
             sigs = compute_signals_with_regime(
-                close_prices, btc_close_prices,
-                cfg.lookback, cfg.threshold,
-                cfg.target_retrace, cfg.stop_mult,
-                cfg.max_hold, cfg.regime_lookback,
+                close_prices,
+                btc_close_prices,
+                cfg.lookback,
+                cfg.threshold,
+                cfg.target_retrace,
+                cfg.stop_mult,
+                cfg.max_hold,
+                cfg.regime_lookback,
                 cfg.regime_trend_threshold,
                 cfg.stop_decay,
             )
@@ -357,19 +398,27 @@ class RubberBandStrategy:
                 return 0
             if cfg.partial_exit_enabled:
                 sigs = compute_signals_partial_exit_btc_directional(
-                    close_prices, btc_close_prices,
-                    cfg.lookback, cfg.threshold,
-                    cfg.target_retrace, cfg.stop_mult,
-                    cfg.max_hold, cfg.stop_decay,
+                    close_prices,
+                    btc_close_prices,
+                    cfg.lookback,
+                    cfg.threshold,
+                    cfg.target_retrace,
+                    cfg.stop_mult,
+                    cfg.max_hold,
+                    cfg.stop_decay,
                     cfg.btc_directional_period,
                     cfg.runner_max_hold_mult,
                 )
             else:
                 sigs = compute_signals_with_btc_directional(
-                    close_prices, btc_close_prices,
-                    cfg.lookback, cfg.threshold,
-                    cfg.target_retrace, cfg.stop_mult,
-                    cfg.max_hold, cfg.stop_decay,
+                    close_prices,
+                    btc_close_prices,
+                    cfg.lookback,
+                    cfg.threshold,
+                    cfg.target_retrace,
+                    cfg.stop_mult,
+                    cfg.max_hold,
+                    cfg.stop_decay,
                     cfg.btc_directional_period,
                 )
         elif cfg.htf_period > 0:
@@ -377,18 +426,24 @@ class RubberBandStrategy:
                 return 0
             sigs = compute_signals_mtf(
                 close_prices,
-                cfg.lookback, cfg.threshold,
-                cfg.target_retrace, cfg.stop_mult,
+                cfg.lookback,
+                cfg.threshold,
+                cfg.target_retrace,
+                cfg.stop_mult,
                 cfg.max_hold,
                 cfg.stop_decay,
-                cfg.htf_period, cfg.htf_block_threshold,
-                cfg.htf_agree_discount, cfg.htf_agree_stop_mult,
+                cfg.htf_period,
+                cfg.htf_block_threshold,
+                cfg.htf_agree_discount,
+                cfg.htf_agree_stop_mult,
             )
         else:
             sigs = compute_signals(
                 close_prices,
-                cfg.lookback, cfg.threshold,
-                cfg.target_retrace, cfg.stop_mult,
+                cfg.lookback,
+                cfg.threshold,
+                cfg.target_retrace,
+                cfg.stop_mult,
                 cfg.max_hold,
                 cfg.stop_decay,
             )
@@ -424,10 +479,14 @@ class RubberBandStrategy:
             return 0
 
         sigs = compute_signals_4h_independent(
-            close_4h, btc_close_4h,
-            cfg.htf_rb_lookback, cfg.htf_rb_threshold,
-            cfg.htf_rb_target_retrace, cfg.htf_rb_stop_mult,
-            cfg.htf_rb_max_hold, cfg.htf_rb_btc_sma_period,
+            close_4h,
+            btc_close_4h,
+            cfg.htf_rb_lookback,
+            cfg.htf_rb_threshold,
+            cfg.htf_rb_target_retrace,
+            cfg.htf_rb_stop_mult,
+            cfg.htf_rb_max_hold,
+            cfg.htf_rb_btc_sma_period,
         )
         return int(sigs[-1])
 
@@ -465,23 +524,23 @@ class RubberBandStrategy:
             _diag_thr = cfg.threshold
 
         diag: dict = {
-            'symbol': symbol,
-            'price': float(close_prices[-1]) if len(close_prices) > 0 else 0.0,
-            'move_8bar': 0.0,
-            'threshold': _diag_thr,
-            'passed_threshold': False,
-            'regime': None,          # 'risk_on' | 'risk_off' | None
-            'btc_mom': 0.0,
-            'asset_trend': None,     # 'up' | 'down' | None
-            'entry_type': None,      # 'classic_long'|'classic_short'|'sympathy_long'|'sympathy_short'
-            'confidence': 0,
-            'min_confidence': cfg.min_confidence,
-            'passed_confidence': False,
-            'evidence': {},          # per-indicator breakdown
-            'raw_signal': 0,         # signal from compute_signals before MTF
-            'mtf_trend_up': None,    # True/False/None
-            'mtf_blocked': False,
-            'final_signal': 0,
+            "symbol": symbol,
+            "price": float(close_prices[-1]) if len(close_prices) > 0 else 0.0,
+            "move_8bar": 0.0,
+            "threshold": _diag_thr,
+            "passed_threshold": False,
+            "regime": None,  # 'risk_on' | 'risk_off' | None
+            "btc_mom": 0.0,
+            "asset_trend": None,  # 'up' | 'down' | None
+            "entry_type": None,  # 'classic_long'|'classic_short'|'sympathy_long'|'sympathy_short'
+            "confidence": 0,
+            "min_confidence": cfg.min_confidence,
+            "passed_confidence": False,
+            "evidence": {},  # per-indicator breakdown
+            "raw_signal": 0,  # signal from compute_signals before MTF
+            "mtf_trend_up": None,  # True/False/None
+            "mtf_blocked": False,
+            "final_signal": 0,
         }
 
         if len(close_prices) < cfg.lookback + 1:
@@ -489,16 +548,22 @@ class RubberBandStrategy:
 
         # 8-bar move
         ret = float(close_prices[-1] / close_prices[-cfg.lookback - 1] - 1.0)
-        diag['move_8bar'] = ret
+        diag["move_8bar"] = ret
 
-        if btc_close_prices is None or cfg.entry_mode != 'confidence':
+        if btc_close_prices is None or cfg.entry_mode != "confidence":
             return diag
 
-        min_bars = max(
-            cfg.lookback, cfg.btc_directional_period,
-            cfg.btc_regime_period, cfg.asset_trend_period,
-            cfg.rsi_period, cfg.vol_period,
-        ) + 1
+        min_bars = (
+            max(
+                cfg.lookback,
+                cfg.btc_directional_period,
+                cfg.btc_regime_period,
+                cfg.asset_trend_period,
+                cfg.rsi_period,
+                cfg.vol_period,
+            )
+            + 1
+        )
         if len(btc_close_prices) < min_bars or len(close_prices) < min_bars:
             return diag
 
@@ -506,18 +571,18 @@ class RubberBandStrategy:
 
         # ── Indicators (same as compute_signals_v9, last bar only) ──
         # BTC regime
-        btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period:]))
+        btc_sma_val = float(np.mean(btc_close_prices[-cfg.btc_regime_period :]))
         is_risk_on = float(btc_close_prices[-1]) > btc_sma_val
-        diag['regime'] = 'risk_on' if is_risk_on else 'risk_off'
+        diag["regime"] = "risk_on" if is_risk_on else "risk_off"
 
         # BTC momentum
         btc_mom = float(btc_close_prices[-1] / btc_close_prices[-cfg.btc_directional_period - 1] - 1.0)
-        diag['btc_mom'] = btc_mom
+        diag["btc_mom"] = btc_mom
 
         # Asset trend
-        asset_sma_val = float(np.mean(close_prices[-cfg.asset_trend_period:]))
+        asset_sma_val = float(np.mean(close_prices[-cfg.asset_trend_period :]))
         is_uptrend = float(close_prices[-1]) > asset_sma_val
-        diag['asset_trend'] = 'up' if is_uptrend else 'down'
+        diag["asset_trend"] = "up" if is_uptrend else "down"
 
         # RSI (approximate using last portion — same Wilder smoothing)
         rsi_arr = _compute_rsi_inline(close_prices, cfg.rsi_period)
@@ -541,41 +606,41 @@ class RubberBandStrategy:
         if cfg.stoch_enabled:
             high_data = self._high_data.get(symbol, close_prices)
             low_data = self._low_data.get(symbol, close_prices)
-            sk, sd = _compute_stochastic_inline(high_data, low_data, close_prices,
-                                                 cfg.stoch_k_period, cfg.stoch_d_period)
+            sk, sd = _compute_stochastic_inline(
+                high_data, low_data, close_prices, cfg.stoch_k_period, cfg.stoch_d_period
+            )
             stoch_k_val, stoch_d_val = float(sk[-1]), float(sd[-1])
 
         # MACD
         macd_hist_val, macd_hist_prev = 0.0, 0.0
         if cfg.macd_enabled and n >= cfg.macd_slow + cfg.macd_signal_period:
-            _, _, mhist = _compute_macd_inline(close_prices, cfg.macd_fast,
-                                                cfg.macd_slow, cfg.macd_signal_period)
+            _, _, mhist = _compute_macd_inline(close_prices, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period)
             macd_hist_val = float(mhist[-1])
             macd_hist_prev = float(mhist[-2]) if n > 1 else 0.0
 
         # SMA distance
         sma_dist = abs(float(close_prices[-1]) - asset_sma_val) / asset_sma_val if asset_sma_val > 0 else 0.0
 
-        diag['evidence'] = {
-            'rsi': round(rsi_val, 2),
-            'vol_ratio': round(vol_ratio, 3),
-            'taker_ratio': round(taker_ratio_val, 4),
-            'sma_dist': round(sma_dist, 4),
-            'stoch_k': round(stoch_k_val, 2),
-            'stoch_d': round(stoch_d_val, 2),
-            'macd_hist': round(macd_hist_val, 6),
-            'macd_hist_prev': round(macd_hist_prev, 6),
+        diag["evidence"] = {
+            "rsi": round(rsi_val, 2),
+            "vol_ratio": round(vol_ratio, 3),
+            "taker_ratio": round(taker_ratio_val, 4),
+            "sma_dist": round(sma_dist, 4),
+            "stoch_k": round(stoch_k_val, 2),
+            "stoch_d": round(stoch_d_val, 2),
+            "macd_hist": round(macd_hist_val, 6),
+            "macd_hist_prev": round(macd_hist_prev, 6),
             # v12.6
-            'climax_vol_ratio': round(vol_ratio, 3),
-            'climax_threshold': cfg.climax_vol_mult if cfg.climax_enabled else None,
-            'climax_fired': (cfg.climax_enabled and vol_ratio >= cfg.climax_vol_mult and vol_ratio > 0),
-            'atr_stop_enabled': cfg.atr_stop_enabled,
-            'atr_pct': round(self._last_atr_pct.get(symbol, float('nan')), 5),
+            "climax_vol_ratio": round(vol_ratio, 3),
+            "climax_threshold": cfg.climax_vol_mult if cfg.climax_enabled else None,
+            "climax_fired": (cfg.climax_enabled and vol_ratio >= cfg.climax_vol_mult and vol_ratio > 0),
+            "atr_stop_enabled": cfg.atr_stop_enabled,
+            "atr_pct": round(self._last_atr_pct.get(symbol, float("nan")), 5),
         }
 
         # ── Threshold gate ──
-        diag['passed_threshold'] = abs(ret) > _diag_thr
-        if not diag['passed_threshold']:
+        diag["passed_threshold"] = abs(ret) > _diag_thr
+        if not diag["passed_threshold"]:
             return diag
 
         # ── Confidence scoring (v12.4.1: base=0 for backtest parity) ──
@@ -584,11 +649,15 @@ class RubberBandStrategy:
 
         # v12.4.1: Always use Risk-Off (sympathy) logic — validated in backtest
         if ret < -_diag_thr and btc_mom < 0:
-            entry_type = 'sympathy_long'
-            if rsi_val < 35: confidence += 1
-            if vol_ratio > 1.5: confidence += 1
-            if taker_ratio_val < 0.42: confidence += 1
-            if btc_mom < -0.01: confidence += 1
+            entry_type = "sympathy_long"
+            if rsi_val < 35:
+                confidence += 1
+            if vol_ratio > 1.5:
+                confidence += 1
+            if taker_ratio_val < 0.42:
+                confidence += 1
+            if btc_mom < -0.01:
+                confidence += 1
             if cfg.stoch_enabled and n > 1:
                 sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
                 sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
@@ -601,11 +670,15 @@ class RubberBandStrategy:
             if cfg.climax_enabled and vol_ratio >= cfg.climax_vol_mult and not (vol_ratio == 0):
                 confidence += 1
         elif ret > _diag_thr and btc_mom > 0:
-            entry_type = 'sympathy_short'
-            if rsi_val > 65: confidence += 1
-            if vol_ratio > 1.5: confidence += 1
-            if taker_ratio_val > 0.58: confidence += 1
-            if btc_mom > 0.01: confidence += 1
+            entry_type = "sympathy_short"
+            if rsi_val > 65:
+                confidence += 1
+            if vol_ratio > 1.5:
+                confidence += 1
+            if taker_ratio_val > 0.58:
+                confidence += 1
+            if btc_mom > 0.01:
+                confidence += 1
             if cfg.stoch_enabled and n > 1:
                 sk_prev = float(sk[-2]) if cfg.stoch_enabled else 50.0
                 sd_prev = float(sd[-2]) if cfg.stoch_enabled else 50.0
@@ -618,37 +691,37 @@ class RubberBandStrategy:
             if cfg.climax_enabled and vol_ratio >= cfg.climax_vol_mult and not (vol_ratio == 0):
                 confidence += 1
         else:
-            entry_type = 'blocked'
+            entry_type = "blocked"
 
-        diag['entry_type'] = entry_type
-        diag['confidence'] = confidence
-        diag['passed_confidence'] = confidence >= cfg.min_confidence
+        diag["entry_type"] = entry_type
+        diag["confidence"] = confidence
+        diag["passed_confidence"] = confidence >= cfg.min_confidence
 
         # Determine raw signal (before MTF)
         raw_signal = 0
-        if entry_type == 'sympathy_long' and confidence >= cfg.min_confidence:
+        if entry_type == "sympathy_long" and confidence >= cfg.min_confidence:
             raw_signal = 1
-        elif entry_type == 'sympathy_short' and confidence >= cfg.min_confidence:
+        elif entry_type == "sympathy_short" and confidence >= cfg.min_confidence:
             raw_signal = -1
-        diag['raw_signal'] = raw_signal
+        diag["raw_signal"] = raw_signal
 
         # ── MTF filter ──
         htf_close = self._htf_close_data.get(symbol)
         if cfg.mtf_confirmation_enabled and htf_close is not None and len(htf_close) >= cfg.mtf_sma_period:
-            sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period:]))
+            sma_4h = float(np.mean(htf_close[-cfg.mtf_sma_period :]))
             trend_up = float(htf_close[-1]) > sma_4h
-            diag['mtf_trend_up'] = trend_up
+            diag["mtf_trend_up"] = trend_up
 
             if raw_signal > 0 and not trend_up:
-                diag['mtf_blocked'] = True
-                diag['final_signal'] = 0
+                diag["mtf_blocked"] = True
+                diag["final_signal"] = 0
             elif raw_signal < 0 and trend_up:
-                diag['mtf_blocked'] = True
-                diag['final_signal'] = 0
+                diag["mtf_blocked"] = True
+                diag["final_signal"] = 0
             else:
-                diag['final_signal'] = raw_signal
+                diag["final_signal"] = raw_signal
         else:
-            diag['final_signal'] = raw_signal
+            diag["final_signal"] = raw_signal
 
         return diag
 
@@ -676,7 +749,8 @@ class RubberBandStrategy:
         return symbol in self._positions
 
     def get_effective_stop_mult(
-        self, close_prices: np.ndarray,
+        self,
+        close_prices: np.ndarray,
         symbol: str | None = None,
         move_size: float | None = None,
     ) -> float:
@@ -717,7 +791,7 @@ class RubberBandStrategy:
             return cfg.stop_mult
 
         # Compute HTF SMA at current bar (same as Numba function)
-        htf_window = close_prices[-cfg.htf_period:]
+        htf_window = close_prices[-cfg.htf_period :]
         htf_sma = float(np.mean(htf_window))
         if htf_sma <= 0:
             return cfg.stop_mult
@@ -743,8 +817,13 @@ class RubberBandStrategy:
         return cfg.stop_mult
 
     def open_position(
-        self, symbol: str, signal: int, entry_price: float,
-        notional: float, leverage: float, move_size: float,
+        self,
+        symbol: str,
+        signal: int,
+        entry_price: float,
+        notional: float,
+        leverage: float,
+        move_size: float,
         entry_stop_mult: float | None = None,
         server_sl_order_id: str | None = None,
         server_tp_order_id: str | None = None,
@@ -761,35 +840,37 @@ class RubberBandStrategy:
                 Used for cancellation when position is closed normally.
         """
         if entry_price <= 0:
-            raise ValueError(
-                f"Invalid entry_price for {symbol}: {entry_price}"
-            )
+            raise ValueError(f"Invalid entry_price for {symbol}: {entry_price}")
         self._positions[symbol] = {
-            'signal': signal,
-            'entry_price': entry_price,
-            'notional': notional,
-            'leverage': leverage,
-            'move_size': move_size,
-            'bars_held': 0,
-            'best_pnl': 0.0,
-            'entry_stop_mult': entry_stop_mult if entry_stop_mult is not None else self.config.stop_mult,
-            'partial_closed': False,   # v4.3: track partial exit state
-            'server_sl_order_id': server_sl_order_id,  # v11.1: server-side stop
-            'server_tp_order_id': server_tp_order_id,  # v11.2: server-side TP
+            "signal": signal,
+            "entry_price": entry_price,
+            "notional": notional,
+            "leverage": leverage,
+            "move_size": move_size,
+            "bars_held": 0,
+            "best_pnl": 0.0,
+            "entry_stop_mult": entry_stop_mult if entry_stop_mult is not None else self.config.stop_mult,
+            "partial_closed": False,  # v4.3: track partial exit state
+            "server_sl_order_id": server_sl_order_id,  # v11.1: server-side stop
+            "server_tp_order_id": server_tp_order_id,  # v11.2: server-side TP
             # v12.3 PBT fields
-            'confidence': kwargs.get('confidence', 0),  # for SteepX logging
-            'highest_since_tp1': 0.0,   # track runner peak after TP1
-            'trail_floor': None,        # breakeven floor after TP1 (None = not set)
+            "confidence": kwargs.get("confidence", 0),  # for SteepX logging
+            "highest_since_tp1": 0.0,  # track runner peak after TP1
+            "trail_floor": None,  # breakeven floor after TP1 (None = not set)
         }
 
     def close_position(self, symbol: str) -> dict | None:
         """Remove position and return its info."""
         return self._positions.pop(symbol, None)
 
-    def update_position(self, symbol: str, current_price: float,
-                        current_atr_pct: float | None = None,
-                        current_high: float | None = None,
-                        current_low: float | None = None) -> str | None:
+    def update_position(
+        self,
+        symbol: str,
+        current_price: float,
+        current_atr_pct: float | None = None,
+        current_high: float | None = None,
+        current_low: float | None = None,
+    ) -> str | None:
         """Check if position should be closed or partially closed.
 
         v12.5: Accepts current_high/current_low for intra-bar SL/TP detection.
@@ -812,88 +893,92 @@ class RubberBandStrategy:
         if pos is None:
             return None
 
-        pos['bars_held'] += 1
+        pos["bars_held"] += 1
         cfg = self.config
 
         # Close-based gain (used for trailing decisions)
-        if pos['signal'] == 1:
-            gain = (current_price - pos['entry_price']) / pos['entry_price']
+        if pos["signal"] == 1:
+            gain = (current_price - pos["entry_price"]) / pos["entry_price"]
         else:
-            gain = (pos['entry_price'] - current_price) / pos['entry_price']
+            gain = (pos["entry_price"] - current_price) / pos["entry_price"]
 
         # v12.5: Intra-bar extreme gains for SL/TP detection
         if current_high is not None and current_low is not None:
-            if pos['signal'] == 1:
-                worst_gain = (current_low - pos['entry_price']) / pos['entry_price']
-                best_gain = (current_high - pos['entry_price']) / pos['entry_price']
+            if pos["signal"] == 1:
+                worst_gain = (current_low - pos["entry_price"]) / pos["entry_price"]
+                best_gain = (current_high - pos["entry_price"]) / pos["entry_price"]
             else:
-                worst_gain = (pos['entry_price'] - current_high) / pos['entry_price']
-                best_gain = (pos['entry_price'] - current_low) / pos['entry_price']
+                worst_gain = (pos["entry_price"] - current_high) / pos["entry_price"]
+                best_gain = (pos["entry_price"] - current_low) / pos["entry_price"]
         else:
             worst_gain = gain
             best_gain = gain
 
-        if best_gain > pos['best_pnl']:
-            pos['best_pnl'] = best_gain
+        if best_gain > pos["best_pnl"]:
+            pos["best_pnl"] = best_gain
 
-        target = pos['move_size'] * cfg.target_retrace
-        entry_sm = pos.get('entry_stop_mult', cfg.stop_mult)
-        time_factor = 1.0 - cfg.stop_decay * (pos['bars_held'] / cfg.max_hold)
+        target = pos["move_size"] * cfg.target_retrace
+        entry_sm = pos.get("entry_stop_mult", cfg.stop_mult)
+        time_factor = 1.0 - cfg.stop_decay * (pos["bars_held"] / cfg.max_hold)
         if time_factor < 0.1:
             time_factor = 0.1
-        effective_stop = pos['move_size'] * entry_sm * time_factor
+        effective_stop = pos["move_size"] * entry_sm * time_factor
 
-        if not pos.get('partial_closed', False):
+        if not pos.get("partial_closed", False):
             # ── Phase 1: Full position ──
             if cfg.partial_exit_enabled:
                 # PBT mode: wait for TP1 hit to trigger partial close
                 # v12.5: Use best_gain (intra-bar high/low) for TP1 detection
                 # SL handled server-side; worst_gain here is backup
                 if best_gain >= target:
-                    pos['partial_closed'] = True
-                    pos['highest_since_tp1'] = best_gain
+                    pos["partial_closed"] = True
+                    pos["highest_since_tp1"] = best_gain
                     if cfg.breakeven_after_partial:
-                        pos['trail_floor'] = 0.0  # breakeven floor
+                        pos["trail_floor"] = 0.0  # breakeven floor
                     else:
-                        pos['trail_floor'] = -effective_stop
-                    return 'partial_close'
+                        pos["trail_floor"] = -effective_stop
+                    return "partial_close"
 
                 if worst_gain < -effective_stop:
-                    return 'stop_loss'
+                    return "stop_loss"
 
-                if pos['bars_held'] >= cfg.max_hold:
-                    return 'max_hold'
+                if pos["bars_held"] >= cfg.max_hold:
+                    return "max_hold"
 
                 # Pre-TP1 trailing (only if gain exceeds activation threshold)
                 # v12.3.3: configurable params (were hardcoded 0.5/0.3)
                 # v12.5.3: Use worst_gain (intra-bar) for parity with Phase 2.
                 # Close-based gain missed intra-bar breach → TONUSDT gave back
                 # 1.10% best_pnl and exited at +0.07% (2026-02-22 incident).
-                if (pos['best_pnl'] > target * cfg.pre_tp1_trail_activation
-                        and worst_gain < pos['best_pnl'] * cfg.pre_tp1_trail_factor):
-                    return 'trailing_stop'
+                if (
+                    pos["best_pnl"] > target * cfg.pre_tp1_trail_activation
+                    and worst_gain < pos["best_pnl"] * cfg.pre_tp1_trail_factor
+                ):
+                    return "trailing_stop"
 
             else:
                 # Standard mode (no partial exit)
                 # v12.5: best_gain for TP, worst_gain for SL
                 if best_gain >= target:
-                    return 'target'
+                    return "target"
                 if worst_gain < -effective_stop:
-                    return 'stop_loss'
+                    return "stop_loss"
                 # v12.3.3: configurable pre-TP1 trail params
                 # v12.5.3: worst_gain for intra-bar parity
-                if (pos['best_pnl'] > target * cfg.pre_tp1_trail_activation
-                        and worst_gain < pos['best_pnl'] * cfg.pre_tp1_trail_factor):
-                    return 'trailing_stop'
-                if pos['bars_held'] >= cfg.max_hold:
-                    return 'max_hold'
+                if (
+                    pos["best_pnl"] > target * cfg.pre_tp1_trail_activation
+                    and worst_gain < pos["best_pnl"] * cfg.pre_tp1_trail_factor
+                ):
+                    return "trailing_stop"
+                if pos["bars_held"] >= cfg.max_hold:
+                    return "max_hold"
 
         else:
             # ── Phase 2: Runner (after partial close) ──
             # Track runner peak (use best_gain for peak, worst_gain for stop)
-            highest = pos.get('highest_since_tp1', best_gain)
+            highest = pos.get("highest_since_tp1", best_gain)
             if best_gain > highest:
-                pos['highest_since_tp1'] = best_gain
+                pos["highest_since_tp1"] = best_gain
                 highest = best_gain
 
             # ATR-based trailing stop for runner
@@ -901,21 +986,21 @@ class RubberBandStrategy:
             trail_stop = highest - cfg.trail_atr_mult * atr_val
 
             # Apply breakeven floor
-            floor_val = pos.get('trail_floor')
+            floor_val = pos.get("trail_floor")
             if floor_val is not None and trail_stop < floor_val:
                 trail_stop = floor_val
 
             # v12.3.3: Store computed trail_stop for server-side ratcheting.
             # Scalper reads this after update_position() to sync server SL.
-            pos['_computed_trail_stop'] = trail_stop
+            pos["_computed_trail_stop"] = trail_stop
 
             # v12.5: worst_gain for intra-bar trail stop check
             if worst_gain <= trail_stop:
-                return 'trail_runner'
+                return "trail_runner"
 
             # v12.4 HybTight: Extended time exit for runner (configurable mult)
-            if pos['bars_held'] >= cfg.max_hold * cfg.runner_max_hold_mult:
-                return 'time_runner'
+            if pos["bars_held"] >= cfg.max_hold * cfg.runner_max_hold_mult:
+                return "time_runner"
 
             # NOTE: No fixed TP for runner. The runner rides the trend
             # and exits ONLY via ATR trailing stop or time limit.
@@ -931,4 +1016,3 @@ class RubberBandStrategy:
     @property
     def n_active(self) -> int:
         return len(self._positions)
-

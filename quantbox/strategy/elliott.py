@@ -53,7 +53,7 @@ class ElliottConfig:
     """
 
     # ── ZigZag swing detection (sweep-optimized 2026-02-18) ──
-    zigzag_threshold: float = 0.02       # 2% min swing on 4h (sweep: 0.02 > 0.03, +5 trades)
+    zigzag_threshold: float = 0.02  # 2% min swing on 4h (sweep: 0.02 > 0.03, +5 trades)
     zigzag_threshold_15m: float = 0.015  # 1.5% on 15m (divergence check)
     # Multi-scale zigzag for fractal structure (winning_strategy §1)
     zigzag_thresholds: tuple[float, ...] = (0.02, 0.04, 0.06)
@@ -62,12 +62,12 @@ class ElliottConfig:
 
     # ── EMA periods (winning_strategy §2.1) ──
     ema_periods: tuple[int, ...] = (20, 50, 100, 200, 500)
-    ema_macro_fast: int = 200   # BTC macro trend — fast line
-    ema_macro_slow: int = 500   # BTC macro trend — slow line
+    ema_macro_fast: int = 200  # BTC macro trend — fast line
+    ema_macro_slow: int = 500  # BTC macro trend — slow line
 
     # ── RSI (winning_strategy §2.1) ──
     rsi_period: int = 14
-    rsi_dynamic_period: int = 9   # High-vol dynamic adjustment
+    rsi_dynamic_period: int = 9  # High-vol dynamic adjustment
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
 
@@ -131,17 +131,17 @@ class ElliottConfig:
     max_w3_w1_time_ratio: float = 2.5
 
     # ── Capital management (winning_strategy §4) ──
-    max_margin_pct: float = 0.10     # 10% max of total capital
-    exploratory_pct: float = 0.02    # 2% initial pilot
-    primary_pct: float = 0.08        # 8% on confirmation
+    max_margin_pct: float = 0.10  # 10% max of total capital
+    exploratory_pct: float = 0.02  # 2% initial pilot
+    primary_pct: float = 0.08  # 8% on confirmation
     partial_tp_fraction: float = 0.50  # 50% take-profit
 
     # ── Leverage ──
     nominal_leverage: int = 20  # Exchange-set (effective = nominal × margin%)
 
     # ── Confirmation & position management ──
-    confirmation_bars: int = 4   # Max bars to wait for primary confirmation
-    max_hold_bars: int = 96      # Max hold ~16 days at 4h
+    confirmation_bars: int = 4  # Max bars to wait for primary confirmation
+    max_hold_bars: int = 96  # Max hold ~16 days at 4h
     trail_atr_mult: float = 1.5  # Trailing stop in ATR units (sweep: 1.5 > 2.0, +0.3% ret)
 
     # ── Stop loss (§3.1: tight invalidation) ──
@@ -162,11 +162,11 @@ class ElliottConfig:
     # With tight stop at C, smaller stop distance → higher leverage (max 2x)
     # This ensures max loss per trade is always risk_per_trade % of equity.
     effective_leverage: float = 2.0  # cap (used when stop is very tight)
-    risk_per_trade: float = 0.02     # 2% max equity risk per trade
+    risk_per_trade: float = 0.02  # 2% max equity risk per trade
     risk_sized_leverage: bool = True  # scale leverage to stop distance
 
     # ── Costs ──
-    fee_rate: float = 0.0005       # 0.05% taker
+    fee_rate: float = 0.0005  # 0.05% taker
     slippage_rate: float = 0.0002  # 0.02% slippage
     funding_rate_8h: float = 0.0001
 
@@ -178,7 +178,7 @@ class ElliottConfig:
     divergence_lookback: int = 60
 
     # ── Wedge/triangle detection ──
-    wedge_min_pivots: int = 6    # Minimum alternating pivots for wedge
+    wedge_min_pivots: int = 6  # Minimum alternating pivots for wedge
     wedge_converge_ratio: float = 0.70  # High-range/Low-range ratio < this
 
     # ── Bar interval ──
@@ -266,7 +266,10 @@ def compute_rsi(close: np.ndarray, period: int) -> np.ndarray:
 
 @numba.jit(nopython=True, cache=True)
 def compute_macd(
-    close: np.ndarray, fast: int, slow: int, signal_period: int,
+    close: np.ndarray,
+    fast: int,
+    slow: int,
+    signal_period: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """MACD line, signal line, and histogram.
 
@@ -289,8 +292,11 @@ def compute_macd(
 
 @numba.jit(nopython=True, cache=True)
 def compute_stochastic(
-    high: np.ndarray, low: np.ndarray, close: np.ndarray,
-    k_period: int, d_period: int,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    k_period: int,
+    d_period: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Stochastic %K and %D.
 
@@ -333,7 +339,10 @@ def compute_stochastic(
 
 @numba.jit(nopython=True, cache=True)
 def compute_atr(
-    high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    period: int,
 ) -> np.ndarray:
     """Average True Range (Wilder smoothing).
 
@@ -387,7 +396,9 @@ def compute_atr(
 
 @numba.jit(nopython=True, cache=True)
 def zigzag_pivots(
-    high: np.ndarray, low: np.ndarray, threshold: float,
+    high: np.ndarray,
+    low: np.ndarray,
+    threshold: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
     """Standard ZigZag pivot detection.
 
@@ -503,7 +514,9 @@ def zigzag_pivots(
 
 @numba.jit(nopython=True, cache=True)
 def detect_bullish_divergence(
-    close: np.ndarray, rsi: np.ndarray, lookback: int,
+    close: np.ndarray,
+    rsi: np.ndarray,
+    lookback: int,
 ) -> bool:
     """Bullish RSI divergence: lower low in price + higher low in RSI.
 
@@ -544,7 +557,9 @@ def detect_bullish_divergence(
 
 @numba.jit(nopython=True, cache=True)
 def detect_bearish_divergence(
-    close: np.ndarray, rsi: np.ndarray, lookback: int,
+    close: np.ndarray,
+    rsi: np.ndarray,
+    lookback: int,
 ) -> bool:
     """Bearish RSI divergence: higher high in price + lower high in RSI.
 
@@ -607,7 +622,9 @@ def check_macd_reversal(histogram: np.ndarray, direction: int) -> bool:
 
 @numba.jit(nopython=True, cache=True)
 def check_stoch_cross(
-    k: np.ndarray, d: np.ndarray, direction: int,
+    k: np.ndarray,
+    d: np.ndarray,
+    direction: int,
 ) -> bool:
     """Check Stochastic %K/%D crossover.
 
@@ -709,8 +726,18 @@ def detect_impulse_abc_patterns(
             idx_arr = [int(pivot_idx[i + j]) for j in range(9)]
 
             pattern = _validate_bullish_impulse_abc(
-                W0, W1, W2, W3, W4, W5, A, B, C,
-                int(pivot_idx[i + 8]), config, idx_arr,
+                W0,
+                W1,
+                W2,
+                W3,
+                W4,
+                W5,
+                A,
+                B,
+                C,
+                int(pivot_idx[i + 8]),
+                config,
+                idx_arr,
             )
             if pattern is not None:
                 patterns.append(pattern)
@@ -731,8 +758,18 @@ def detect_impulse_abc_patterns(
             idx_arr = [int(pivot_idx[i + j]) for j in range(9)]
 
             pattern = _validate_bearish_impulse_abc(
-                W0, W1, W2, W3, W4, W5, A, B, C,
-                int(pivot_idx[i + 8]), config, idx_arr,
+                W0,
+                W1,
+                W2,
+                W3,
+                W4,
+                W5,
+                A,
+                B,
+                C,
+                int(pivot_idx[i + 8]),
+                config,
+                idx_arr,
             )
             if pattern is not None:
                 patterns.append(pattern)
@@ -813,9 +850,17 @@ def _compute_pattern_quality(
 
 
 def _validate_bullish_impulse_abc(
-    W0: float, W1: float, W2: float, W3: float, W4: float,
-    W5: float, A: float, B: float, C: float,
-    c_idx: int, config: ElliottConfig,
+    W0: float,
+    W1: float,
+    W2: float,
+    W3: float,
+    W4: float,
+    W5: float,
+    A: float,
+    B: float,
+    C: float,
+    c_idx: int,
+    config: ElliottConfig,
     pivot_indices: list[int] | None = None,
 ) -> dict | None:
     """Validate bullish impulse (UP) + bearish ABC (DOWN) → Long entry.
@@ -826,11 +871,11 @@ def _validate_bullish_impulse_abc(
     Returns pattern dict with quality score, or None if validation fails.
     """
     # ── Wave lengths ──
-    wave1 = W1 - W0   # UP
+    wave1 = W1 - W0  # UP
     wave2_drop = W1 - W2  # DOWN (retrace)
-    wave3 = W3 - W2   # UP (extension)
+    wave3 = W3 - W2  # UP (extension)
     wave4_drop = W3 - W4  # DOWN (retrace)
-    wave5 = W5 - W4   # UP
+    wave5 = W5 - W4  # UP
 
     # Basic direction checks
     if wave1 <= 0 or wave2_drop <= 0 or wave3 <= 0 or wave4_drop <= 0 or wave5 <= 0:
@@ -866,9 +911,9 @@ def _validate_bullish_impulse_abc(
         return None
 
     # ── ABC correction validation (§3.1) ──
-    wave_a_len = W5 - A   # A decline
-    wave_b_len = B - A     # B recovery
-    wave_c_len = B - C     # C decline
+    wave_a_len = W5 - A  # A decline
+    wave_b_len = B - A  # B recovery
+    wave_c_len = B - C  # C decline
 
     if wave_a_len <= 0 or wave_b_len <= 0 or wave_c_len <= 0:
         return None
@@ -928,9 +973,18 @@ def _validate_bullish_impulse_abc(
         w3_bars = pivot_indices[3] - pivot_indices[2]  # W2→W3
     wave5_len = wave5
     quality = _compute_pattern_quality(
-        w2_retrace, w3_ext, w4_retrace, b_retrace, c_vs_a,
-        c_fib_dist, impulse_bars, correction_bars,
-        wave1, wave3, wave5_len, config,
+        w2_retrace,
+        w3_ext,
+        w4_retrace,
+        b_retrace,
+        c_vs_a,
+        c_fib_dist,
+        impulse_bars,
+        correction_bars,
+        wave1,
+        wave3,
+        wave5_len,
+        config,
     )
 
     # ── Timing alpha features ──
@@ -948,35 +1002,53 @@ def _validate_bullish_impulse_abc(
         corr_impulse_ratio = correction_bars / impulse_bars
 
     return {
-        'signal': 1,  # Long
-        'type': 'bullish_impulse_abc_long',
-        'w0': W0, 'w1': W1, 'w2': W2, 'w3': W3, 'w4': W4, 'w5': W5,
-        'a_price': A, 'b_price': B, 'c_price': C,
-        'c_idx': c_idx,
-        'w2_retrace': w2_retrace, 'w3_extension': w3_ext,
-        'w4_retrace': w4_retrace,
-        'b_retrace': b_retrace, 'c_vs_a': c_vs_a,
-        'c_fib_dist': c_fib_dist,
-        'target_1': target_1, 'target_2': target_2,
-        'stop': stop,
-        'wave1_length': wave1,
-        'impulse_size': total_impulse,
-        'quality': quality,
+        "signal": 1,  # Long
+        "type": "bullish_impulse_abc_long",
+        "w0": W0,
+        "w1": W1,
+        "w2": W2,
+        "w3": W3,
+        "w4": W4,
+        "w5": W5,
+        "a_price": A,
+        "b_price": B,
+        "c_price": C,
+        "c_idx": c_idx,
+        "w2_retrace": w2_retrace,
+        "w3_extension": w3_ext,
+        "w4_retrace": w4_retrace,
+        "b_retrace": b_retrace,
+        "c_vs_a": c_vs_a,
+        "c_fib_dist": c_fib_dist,
+        "target_1": target_1,
+        "target_2": target_2,
+        "stop": stop,
+        "wave1_length": wave1,
+        "impulse_size": total_impulse,
+        "quality": quality,
         # Timing alpha features
-        'impulse_accel': impulse_accel,
-        'corr_impulse_ratio': corr_impulse_ratio,
-        'w3_w1_time_ratio': w3_w1_time_ratio,
-        'w1_bars': w1_bars,
-        'w3_bars': w3_bars,
-        'impulse_bars': impulse_bars,
-        'correction_bars': correction_bars,
+        "impulse_accel": impulse_accel,
+        "corr_impulse_ratio": corr_impulse_ratio,
+        "w3_w1_time_ratio": w3_w1_time_ratio,
+        "w1_bars": w1_bars,
+        "w3_bars": w3_bars,
+        "impulse_bars": impulse_bars,
+        "correction_bars": correction_bars,
     }
 
 
 def _validate_bearish_impulse_abc(
-    W0: float, W1: float, W2: float, W3: float, W4: float,
-    W5: float, A: float, B: float, C: float,
-    c_idx: int, config: ElliottConfig,
+    W0: float,
+    W1: float,
+    W2: float,
+    W3: float,
+    W4: float,
+    W5: float,
+    A: float,
+    B: float,
+    C: float,
+    c_idx: int,
+    config: ElliottConfig,
     pivot_indices: list[int] | None = None,
 ) -> dict | None:
     """Validate bearish impulse (DOWN) + bullish ABC (UP) → Short entry.
@@ -987,11 +1059,11 @@ def _validate_bearish_impulse_abc(
     Returns pattern dict with quality score, or None if validation fails.
     """
     # ── Wave lengths (all positive for valid bearish impulse) ──
-    wave1 = W0 - W1   # DOWN
+    wave1 = W0 - W1  # DOWN
     wave2_rise = W2 - W1  # UP (retrace)
-    wave3 = W2 - W3   # DOWN (extension)
+    wave3 = W2 - W3  # DOWN (extension)
     wave4_rise = W4 - W3  # UP (retrace)
-    wave5 = W4 - W5   # DOWN
+    wave5 = W4 - W5  # DOWN
 
     if wave1 <= 0 or wave2_rise <= 0 or wave3 <= 0 or wave4_rise <= 0 or wave5 <= 0:
         return None
@@ -1026,9 +1098,9 @@ def _validate_bearish_impulse_abc(
         return None
 
     # ── ABC correction validation ──
-    wave_a_len = A - W5   # A rise
-    wave_b_len = A - B     # B decline
-    wave_c_len = C - B     # C rise
+    wave_a_len = A - W5  # A rise
+    wave_b_len = A - B  # B decline
+    wave_c_len = C - B  # C rise
 
     if wave_a_len <= 0 or wave_b_len <= 0 or wave_c_len <= 0:
         return None
@@ -1081,9 +1153,18 @@ def _validate_bearish_impulse_abc(
         w3_bars = pivot_indices[3] - pivot_indices[2]  # W2→W3
     wave5_len = wave5
     quality = _compute_pattern_quality(
-        w2_retrace, w3_ext, w4_retrace, b_retrace, c_vs_a,
-        c_fib_dist, impulse_bars, correction_bars,
-        wave1, wave3, wave5_len, config,
+        w2_retrace,
+        w3_ext,
+        w4_retrace,
+        b_retrace,
+        c_vs_a,
+        c_fib_dist,
+        impulse_bars,
+        correction_bars,
+        wave1,
+        wave3,
+        wave5_len,
+        config,
     )
 
     # ── Timing alpha features ──
@@ -1099,29 +1180,41 @@ def _validate_bearish_impulse_abc(
         corr_impulse_ratio = correction_bars / impulse_bars
 
     return {
-        'signal': -1,  # Short
-        'type': 'bearish_impulse_abc_short',
-        'w0': W0, 'w1': W1, 'w2': W2, 'w3': W3, 'w4': W4, 'w5': W5,
-        'a_price': A, 'b_price': B, 'c_price': C,
-        'c_idx': c_idx,
-        'w2_retrace': w2_retrace, 'w3_extension': w3_ext,
-        'w4_retrace': w4_retrace,
-        'b_retrace': b_retrace, 'c_vs_a': c_vs_a,
-        'c_fib_dist': c_fib_dist,
-        'target_1': target_1, 'target_2': target_2,
-        'stop': stop,
-        'wave1_length': wave1,
-        'impulse_size': total_impulse,
-        'quality': quality,
+        "signal": -1,  # Short
+        "type": "bearish_impulse_abc_short",
+        "w0": W0,
+        "w1": W1,
+        "w2": W2,
+        "w3": W3,
+        "w4": W4,
+        "w5": W5,
+        "a_price": A,
+        "b_price": B,
+        "c_price": C,
+        "c_idx": c_idx,
+        "w2_retrace": w2_retrace,
+        "w3_extension": w3_ext,
+        "w4_retrace": w4_retrace,
+        "b_retrace": b_retrace,
+        "c_vs_a": c_vs_a,
+        "c_fib_dist": c_fib_dist,
+        "target_1": target_1,
+        "target_2": target_2,
+        "stop": stop,
+        "wave1_length": wave1,
+        "impulse_size": total_impulse,
+        "quality": quality,
         # Timing alpha features
-        'impulse_accel': impulse_accel,
-        'corr_impulse_ratio': corr_impulse_ratio,
-        'w3_w1_time_ratio': w3_w1_time_ratio,
-        'w1_bars': w1_bars,
-        'w3_bars': w3_bars,
-        'impulse_bars': impulse_bars,
-        'correction_bars': correction_bars,
+        "impulse_accel": impulse_accel,
+        "corr_impulse_ratio": corr_impulse_ratio,
+        "w3_w1_time_ratio": w3_w1_time_ratio,
+        "w1_bars": w1_bars,
+        "w3_bars": w3_bars,
+        "impulse_bars": impulse_bars,
+        "correction_bars": correction_bars,
     }
+
+
 def scan_multi_scale_patterns(
     high: np.ndarray,
     low: np.ndarray,
@@ -1158,7 +1251,7 @@ def scan_multi_scale_patterns(
             continue
         patterns = detect_impulse_abc_patterns(pidx, pprice, ptype, n_piv, config)
         for p in patterns:
-            c_idx = p['c_idx']
+            c_idx = p["c_idx"]
             # Deduplicate: skip if we already have a pattern within 3 bars
             is_dup = False
             for seen in seen_c_indices:
@@ -1396,17 +1489,17 @@ class ElliottStrategy:
             'neutral': Between the two → both directions allowed.
         """
         if self._btc_close_4h is None or len(self._btc_close_4h) < self.config.ema_macro_slow + 50:
-            return 'neutral'
+            return "neutral"
 
         ema200 = compute_ema(self._btc_close_4h, self.config.ema_macro_fast)
         ema500 = compute_ema(self._btc_close_4h, self.config.ema_macro_slow)
         current = float(self._btc_close_4h[-1])
 
         if current > float(ema200[-1]) and current > float(ema500[-1]):
-            return 'long'
+            return "long"
         elif current < float(ema200[-1]) and current < float(ema500[-1]):
-            return 'short'
-        return 'neutral'
+            return "short"
+        return "neutral"
 
     # ── Entry signal ──
 
@@ -1461,7 +1554,7 @@ class ElliottStrategy:
 
         # Only consider patterns where C completed recently
         n_4h = len(close_4h)
-        recent = [p for p in patterns if p['c_idx'] >= n_4h - cfg.pattern_lookback_bars]
+        recent = [p for p in patterns if p["c_idx"] >= n_4h - cfg.pattern_lookback_bars]
         if not recent:
             return 0
 
@@ -1469,17 +1562,17 @@ class ElliottStrategy:
         pattern = recent[-1]
 
         # 4. Check macro bias alignment
-        if bias == 'long' and pattern['signal'] != 1:
+        if bias == "long" and pattern["signal"] != 1:
             return 0
-        if bias == 'short' and pattern['signal'] != -1:
+        if bias == "short" and pattern["signal"] != -1:
             return 0
 
         # 4b. Timing alpha filter (same gates as backtest for parity)
-        if pattern.get('impulse_accel', 1.0) < cfg.min_impulse_accel:
+        if pattern.get("impulse_accel", 1.0) < cfg.min_impulse_accel:
             return 0
-        if pattern.get('corr_impulse_ratio', 0.5) < cfg.min_corr_impulse_ratio:
+        if pattern.get("corr_impulse_ratio", 0.5) < cfg.min_corr_impulse_ratio:
             return 0
-        if pattern.get('w3_w1_time_ratio', 1.0) > cfg.max_w3_w1_time_ratio:
+        if pattern.get("w3_w1_time_ratio", 1.0) > cfg.max_w3_w1_time_ratio:
             return 0
 
         # 5. Store for position creation
@@ -1498,7 +1591,7 @@ class ElliottStrategy:
             f"target_1={pattern['target_1']:.4f}"
         )
 
-        return pattern['signal']
+        return pattern["signal"]
 
     def on_bar_4h(
         self,
@@ -1546,26 +1639,26 @@ class ElliottStrategy:
         pattern = self._pending_patterns.pop(symbol, {})
 
         self._positions[symbol] = {
-            'signal': signal,
-            'entry_price': entry_price,
-            'notional': notional,
-            'leverage': leverage,
-            'move_size': move_size,
-            'bars_held': 0,
-            'best_pnl': 0.0,
-            'entry_stop_mult': entry_stop_mult or 0.03,
-            'partial_closed': False,
-            'server_sl_order_id': server_sl_order_id,
-            'server_tp_order_id': server_tp_order_id,
+            "signal": signal,
+            "entry_price": entry_price,
+            "notional": notional,
+            "leverage": leverage,
+            "move_size": move_size,
+            "bars_held": 0,
+            "best_pnl": 0.0,
+            "entry_stop_mult": entry_stop_mult or 0.03,
+            "partial_closed": False,
+            "server_sl_order_id": server_sl_order_id,
+            "server_tp_order_id": server_tp_order_id,
             # ── Elliott-specific ──
-            'phase': 'exploratory',       # exploratory → primary → trailing
-            'confirmation_countdown': self.config.confirmation_bars,
-            'target_1': pattern.get('target_1', entry_price * 1.02),
-            'target_2': pattern.get('target_2', entry_price * 1.05),
-            'stop_price': pattern.get('stop', entry_price * 0.97),
-            'impulse_size': pattern.get('impulse_size', move_size),
-            'pyramid_done': False,
-            'wedge_detected': False,
+            "phase": "exploratory",  # exploratory → primary → trailing
+            "confirmation_countdown": self.config.confirmation_bars,
+            "target_1": pattern.get("target_1", entry_price * 1.02),
+            "target_2": pattern.get("target_2", entry_price * 1.05),
+            "stop_price": pattern.get("stop", entry_price * 0.97),
+            "impulse_size": pattern.get("impulse_size", move_size),
+            "pyramid_done": False,
+            "wedge_detected": False,
         }
 
     def close_position(self, symbol: str) -> dict | None:
@@ -1581,7 +1674,9 @@ class ElliottStrategy:
         return 0.03
 
     def update_position(
-        self, symbol: str, current_price: float,
+        self,
+        symbol: str,
+        current_price: float,
     ) -> str | None:
         """Check position status and return action string.
 
@@ -1606,132 +1701,134 @@ class ElliottStrategy:
         if pos is None:
             return None
 
-        pos['bars_held'] += 1
+        pos["bars_held"] += 1
         cfg = self.config
 
         # Calculate unrealized PnL
-        if pos['signal'] == 1:
-            gain = (current_price - pos['entry_price']) / pos['entry_price']
+        if pos["signal"] == 1:
+            gain = (current_price - pos["entry_price"]) / pos["entry_price"]
         else:
-            gain = (pos['entry_price'] - current_price) / pos['entry_price']
+            gain = (pos["entry_price"] - current_price) / pos["entry_price"]
 
-        if gain > pos['best_pnl']:
-            pos['best_pnl'] = gain
+        if gain > pos["best_pnl"]:
+            pos["best_pnl"] = gain
 
         # ── Phase 1: Exploratory — waiting for confirmation ──
-        if pos['phase'] == 'exploratory':
-            pos['confirmation_countdown'] -= 1
+        if pos["phase"] == "exploratory":
+            pos["confirmation_countdown"] -= 1
 
             # Check stop loss
-            if pos['signal'] == 1 and current_price <= pos['stop_price']:
-                return 'stop_loss'
-            if pos['signal'] == -1 and current_price >= pos['stop_price']:
-                return 'stop_loss'
+            if pos["signal"] == 1 and current_price <= pos["stop_price"]:
+                return "stop_loss"
+            if pos["signal"] == -1 and current_price >= pos["stop_price"]:
+                return "stop_loss"
 
             # Check divergence confirmation on 15m data
             if self._check_confirmation(symbol, pos):
-                pos['phase'] = 'primary'
-                pos['best_pnl'] = gain
-                return 'confirm_entry'
+                pos["phase"] = "primary"
+                pos["best_pnl"] = gain
+                return "confirm_entry"
 
             # Confirmation timeout → cancel
-            if pos['confirmation_countdown'] <= 0:
-                return 'cancel_exploration'
+            if pos["confirmation_countdown"] <= 0:
+                return "cancel_exploration"
 
             return None
 
         # ── Phase 2+: Primary / Trailing ──
 
         # After partial close: breakeven stop takes priority
-        if pos['partial_closed']:
+        if pos["partial_closed"]:
             if gain <= 0:
-                return 'breakeven_stop'
+                return "breakeven_stop"
 
         # Hard stop loss (before partial close)
-        if not pos['partial_closed']:
-            if pos['signal'] == 1 and current_price <= pos['stop_price']:
-                return 'stop_loss'
-            if pos['signal'] == -1 and current_price >= pos['stop_price']:
-                return 'stop_loss'
+        if not pos["partial_closed"]:
+            if pos["signal"] == 1 and current_price <= pos["stop_price"]:
+                return "stop_loss"
+            if pos["signal"] == -1 and current_price >= pos["stop_price"]:
+                return "stop_loss"
 
         # 50% partial TP at target_1 (winning_strategy §5.5)
-        if not pos['partial_closed']:
+        if not pos["partial_closed"]:
             hit_target = False
-            if pos['signal'] == 1 and current_price >= pos['target_1']:
+            if pos["signal"] == 1 and current_price >= pos["target_1"]:
                 hit_target = True
-            elif pos['signal'] == -1 and current_price <= pos['target_1']:
+            elif pos["signal"] == -1 and current_price <= pos["target_1"]:
                 hit_target = True
 
             if hit_target:
-                pos['partial_closed'] = True
-                pos['phase'] = 'trailing'
+                pos["partial_closed"] = True
+                pos["phase"] = "trailing"
                 # Trail stop to breakeven
-                pos['stop_price'] = pos['entry_price']
-                pos['best_pnl'] = gain
-                return 'partial_close'
+                pos["stop_price"] = pos["entry_price"]
+                pos["best_pnl"] = gain
+                return "partial_close"
 
         # Trailing stop: ATR-based trailing (parity with backtest)
         # Backtest uses: new_trail = extreme_price - trail_atr_mult * ATR
         # Live must match: compute ATR from 4h data, trail from extreme.
-        if pos['partial_closed']:
+        if pos["partial_closed"]:
             close_4h = self._htf_close.get(symbol)
             high_4h = self._htf_high.get(symbol)
             low_4h = self._htf_low.get(symbol)
             if close_4h is not None and high_4h is not None and low_4h is not None and len(close_4h) >= 14:
                 atr_arr = compute_atr(high_4h, low_4h, close_4h, 14)
                 atr_now = float(atr_arr[-1])
-                if pos['signal'] == 1:
+                if pos["signal"] == 1:
                     new_trail = current_price - cfg.trail_atr_mult * atr_now
-                    if new_trail > pos.get('trail_stop', pos['stop_price']):
-                        pos['trail_stop'] = new_trail
-                    if current_price <= pos.get('trail_stop', pos['stop_price']):
-                        return 'trailing_stop'
+                    if new_trail > pos.get("trail_stop", pos["stop_price"]):
+                        pos["trail_stop"] = new_trail
+                    if current_price <= pos.get("trail_stop", pos["stop_price"]):
+                        return "trailing_stop"
                 else:
                     new_trail = current_price + cfg.trail_atr_mult * atr_now
-                    existing = pos.get('trail_stop', pos['stop_price'])
+                    existing = pos.get("trail_stop", pos["stop_price"])
                     if existing == 0.0 or new_trail < existing:
-                        pos['trail_stop'] = new_trail
-                    if current_price >= pos.get('trail_stop', pos['stop_price']):
-                        return 'trailing_stop'
+                        pos["trail_stop"] = new_trail
+                    if current_price >= pos.get("trail_stop", pos["stop_price"]):
+                        return "trailing_stop"
 
         # Extended target_2 (full exit, rare — trend exhaustion)
-        if pos['partial_closed']:
+        if pos["partial_closed"]:
             hit_ext = False
-            if pos['signal'] == 1 and current_price >= pos['target_2']:
+            if pos["signal"] == 1 and current_price >= pos["target_2"]:
                 hit_ext = True
-            elif pos['signal'] == -1 and current_price <= pos['target_2']:
+            elif pos["signal"] == -1 and current_price <= pos["target_2"]:
                 hit_ext = True
             if hit_ext:
-                return 'target'
+                return "target"
 
         # Pyramiding check (winning_strategy §4.2)
-        if (cfg.pyramid_enabled
-                and not pos['pyramid_done']
-                and not pos['partial_closed']
-                and gain >= cfg.pyramid_min_profit_pct):
+        if (
+            cfg.pyramid_enabled
+            and not pos["pyramid_done"]
+            and not pos["partial_closed"]
+            and gain >= cfg.pyramid_min_profit_pct
+        ):
             # Check for Wave 3 extension confirmation via 4h pivots
             if self._check_pyramid_opportunity(symbol, pos, current_price):
-                pos['pyramid_done'] = True
-                pos['stop_price'] = pos['entry_price']  # Trail to BE
-                return 'pyramid'
+                pos["pyramid_done"] = True
+                pos["stop_price"] = pos["entry_price"]  # Trail to BE
+                return "pyramid"
 
         # Wedge detection (winning_strategy §3.2 — exit signal)
-        if not pos['wedge_detected']:
+        if not pos["wedge_detected"]:
             if self._check_wedge(symbol):
-                pos['wedge_detected'] = True
-                if not pos['partial_closed']:
-                    pos['partial_closed'] = True
-                    pos['phase'] = 'trailing'
-                    pos['stop_price'] = pos['entry_price']
-                    return 'partial_close'
+                pos["wedge_detected"] = True
+                if not pos["partial_closed"]:
+                    pos["partial_closed"] = True
+                    pos["phase"] = "trailing"
+                    pos["stop_price"] = pos["entry_price"]
+                    return "partial_close"
 
         # Counter-divergence exit (trend exhaustion)
-        if pos['bars_held'] > 8 and self._check_counter_divergence(symbol, pos):
-            return 'counter_divergence'
+        if pos["bars_held"] > 8 and self._check_counter_divergence(symbol, pos):
+            return "counter_divergence"
 
         # Max hold
-        if pos['bars_held'] >= cfg.max_hold_bars:
-            return 'max_hold'
+        if pos["bars_held"] >= cfg.max_hold_bars:
+            return "max_hold"
 
         return None
 
@@ -1758,14 +1855,21 @@ class ElliottStrategy:
             return False
 
         cfg = self.config
-        direction = pos['signal']
+        direction = pos["signal"]
 
         rsi = compute_rsi(close, cfg.rsi_period)
         _, _, histogram = compute_macd(
-            close, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period,
+            close,
+            cfg.macd_fast,
+            cfg.macd_slow,
+            cfg.macd_signal_period,
         )
         k, d = compute_stochastic(
-            high, low, close, cfg.stoch_k_period, cfg.stoch_d_period,
+            high,
+            low,
+            close,
+            cfg.stoch_k_period,
+            cfg.stoch_d_period,
         )
 
         confirmations = 0
@@ -1789,7 +1893,10 @@ class ElliottStrategy:
         return confirmations >= 2
 
     def _check_pyramid_opportunity(
-        self, symbol: str, pos: dict, current_price: float,
+        self,
+        symbol: str,
+        pos: dict,
+        current_price: float,
     ) -> bool:
         """Check if current price action suggests Wave 3/C momentum.
 
@@ -1799,17 +1906,17 @@ class ElliottStrategy:
         Returns:
             True if pyramiding is warranted.
         """
-        target_1 = pos.get('target_1', 0)
+        target_1 = pos.get("target_1", 0)
         if target_1 <= 0:
             return False
 
         # Price must be beyond midpoint to target_1
-        entry = pos['entry_price']
+        entry = pos["entry_price"]
         midpoint = (entry + target_1) / 2.0
 
-        if pos['signal'] == 1 and current_price < midpoint:
+        if pos["signal"] == 1 and current_price < midpoint:
             return False
-        if pos['signal'] == -1 and current_price > midpoint:
+        if pos["signal"] == -1 and current_price > midpoint:
             return False
 
         # Check EMA alignment on 4h
@@ -1820,7 +1927,7 @@ class ElliottStrategy:
         ema20 = compute_ema(close_4h, 20)
         ema50 = compute_ema(close_4h, 50)
 
-        if pos['signal'] == 1:
+        if pos["signal"] == 1:
             return float(ema20[-1]) > float(ema50[-1])  # Bullish alignment
         else:
             return float(ema20[-1]) < float(ema50[-1])  # Bearish alignment
@@ -1838,11 +1945,16 @@ class ElliottStrategy:
 
         cfg = self.config
         pidx, pprice, ptype, n_piv = zigzag_pivots(
-            high_4h, low_4h, cfg.zigzag_threshold,
+            high_4h,
+            low_4h,
+            cfg.zigzag_threshold,
         )
         return detect_ending_diagonal(
-            pprice, ptype, n_piv,
-            cfg.wedge_min_pivots, cfg.wedge_converge_ratio,
+            pprice,
+            ptype,
+            n_piv,
+            cfg.wedge_min_pivots,
+            cfg.wedge_converge_ratio,
         )
 
     def _check_counter_divergence(self, symbol: str, pos: dict) -> bool:
@@ -1860,13 +1972,17 @@ class ElliottStrategy:
 
         rsi = compute_rsi(close, self.config.rsi_period)
 
-        if pos['signal'] == 1:
+        if pos["signal"] == 1:
             return detect_bearish_divergence(
-                close, rsi, self.config.divergence_lookback,
+                close,
+                rsi,
+                self.config.divergence_lookback,
             )
         else:
             return detect_bullish_divergence(
-                close, rsi, self.config.divergence_lookback,
+                close,
+                rsi,
+                self.config.divergence_lookback,
             )
 
     # ── Position query (same interface as RubberBandStrategy) ──
@@ -1952,10 +2068,17 @@ def compute_elliott_signals(
     btc_ema500 = compute_ema(btc_close_4h, cfg.ema_macro_slow)
     rsi_4h = compute_rsi(close_4h, cfg.rsi_period)
     _, _, macd_hist_4h = compute_macd(
-        close_4h, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal_period,
+        close_4h,
+        cfg.macd_fast,
+        cfg.macd_slow,
+        cfg.macd_signal_period,
     )
     stoch_k_4h, stoch_d_4h = compute_stochastic(
-        high_4h, low_4h, close_4h, cfg.stoch_k_period, cfg.stoch_d_period,
+        high_4h,
+        low_4h,
+        close_4h,
+        cfg.stoch_k_period,
+        cfg.stoch_d_period,
     )
     atr_4h = compute_atr(high_4h, low_4h, close_4h, 14)
 
@@ -1964,16 +2087,16 @@ def compute_elliott_signals(
 
     # Position sizing (§4.1-§4.2)
     lev_exploratory = cfg.nominal_leverage * cfg.exploratory_pct  # 20 × 0.02 = 0.4
-    lev_primary = cfg.effective_leverage                          # 2.0 (fallback)
-    max_lev = cfg.effective_leverage                              # 2.0 cap
+    lev_primary = cfg.effective_leverage  # 2.0 (fallback)
+    max_lev = cfg.effective_leverage  # 2.0 cap
     # Per-trade vars initialized; overridden at each entry
     trade_lev = lev_primary
-    trade_lev_after_tp = trade_lev * cfg.partial_tp_fraction      # 1.0
+    trade_lev_after_tp = trade_lev * cfg.partial_tp_fraction  # 1.0
     max_hold = cfg.max_hold_bars  # 96 bars = 16 days at 4h
 
     # ── Pre-compute patterns (O(n)) ──
     all_patterns = scan_multi_scale_patterns(high_4h, low_4h, cfg)
-    all_patterns.sort(key=lambda p: p['c_idx'])
+    all_patterns.sort(key=lambda p: p["c_idx"])
 
     # ── Pre-compute divergence arrays ──
     div_lookback = cfg.divergence_lookback
@@ -1982,10 +2105,14 @@ def compute_elliott_signals(
     for i in range(min_start, n):
         lb = min(div_lookback, i)
         bull_div[i] = detect_bullish_divergence(
-            close_4h[:i + 1], rsi_4h[:i + 1], lb,
+            close_4h[: i + 1],
+            rsi_4h[: i + 1],
+            lb,
         )
         bear_div[i] = detect_bearish_divergence(
-            close_4h[:i + 1], rsi_4h[:i + 1], lb,
+            close_4h[: i + 1],
+            rsi_4h[: i + 1],
+            lb,
         )
     bull_cum = np.cumsum(bull_div.astype(np.int32))
     bear_cum = np.cumsum(bear_div.astype(np.int32))
@@ -2065,9 +2192,11 @@ def compute_elliott_signals(
 
             # Exploratory → primary confirmation (§4.2)
             if not pos_confirmed and bars_held <= cfg.confirmation_bars:
-                has_macd = check_macd_reversal(macd_hist_4h[:bar + 1], pos_direction)
+                has_macd = check_macd_reversal(macd_hist_4h[: bar + 1], pos_direction)
                 has_stoch = check_stoch_cross(
-                    stoch_k_4h[:bar + 1], stoch_d_4h[:bar + 1], pos_direction,
+                    stoch_k_4h[: bar + 1],
+                    stoch_d_4h[: bar + 1],
+                    pos_direction,
                 )
                 if has_macd or has_stoch:
                     pos_confirmed = True
@@ -2112,22 +2241,22 @@ def compute_elliott_signals(
             continue
 
         # ── Not in position: look for new entry ──
-        while pat_ptr < len(all_patterns) and all_patterns[pat_ptr]['c_idx'] < bar - lookback_bars:
+        while pat_ptr < len(all_patterns) and all_patterns[pat_ptr]["c_idx"] < bar - lookback_bars:
             pat_ptr += 1
 
         recent = []
         for j in range(pat_ptr, len(all_patterns)):
             p = all_patterns[j]
-            if p['c_idx'] > bar:
+            if p["c_idx"] > bar:
                 break
-            if p['c_idx'] >= bar - lookback_bars:
+            if p["c_idx"] >= bar - lookback_bars:
                 recent.append(p)
 
         if not recent:
             continue
 
         pattern = recent[-1]
-        if pattern['c_idx'] in used_patterns:
+        if pattern["c_idx"] in used_patterns:
             continue
 
         # Macro bias (§2.1)
@@ -2136,22 +2265,22 @@ def compute_elliott_signals(
         above_500 = btc_price > float(btc_ema500[bar])
 
         if above_200 and above_500:
-            bias = 'long'
+            bias = "long"
         elif not above_200 and not above_500:
-            bias = 'short'
+            bias = "short"
         else:
-            bias = 'neutral'  # between EMAs: both directions ok
+            bias = "neutral"  # between EMAs: both directions ok
 
         # Macro filter: only block opposing direction
-        if bias == 'long' and pattern['signal'] != 1:
+        if bias == "long" and pattern["signal"] != 1:
             continue
-        if bias == 'short' and pattern['signal'] != -1:
+        if bias == "short" and pattern["signal"] != -1:
             continue
         # neutral → allow both
 
         # Confluence Protocol (§2.2): require ≥ 2 of {divergence, MACD, Stoch}
-        direction = pattern['signal']
-        c_idx = pattern['c_idx']
+        direction = pattern["signal"]
+        c_idx = pattern["c_idx"]
         div_lo = max(min_start, c_idx - div_margin)
 
         confirmations = 0
@@ -2162,10 +2291,12 @@ def compute_elliott_signals(
             if _any_in_range(bear_cum, div_lo, bar):
                 confirmations += 1
 
-        if check_macd_reversal(macd_hist_4h[:bar + 1], direction):
+        if check_macd_reversal(macd_hist_4h[: bar + 1], direction):
             confirmations += 1
         if check_stoch_cross(
-            stoch_k_4h[:bar + 1], stoch_d_4h[:bar + 1], direction,
+            stoch_k_4h[: bar + 1],
+            stoch_d_4h[: bar + 1],
+            direction,
         ):
             confirmations += 1
 
@@ -2173,37 +2304,37 @@ def compute_elliott_signals(
             continue
 
         # ── Quality filter: only trade high-quality wave structures ──
-        pattern_quality = pattern.get('quality', 0.0)
+        pattern_quality = pattern.get("quality", 0.0)
         if pattern_quality < cfg.min_pattern_quality:
             continue  # low quality wave reading → skip
 
         # ── Timing alpha filter (research: best_refined variant) ──
         # Filters out decelerating impulses, rushed corrections, and
         # abnormally slow W3 waves — all correlated with poor outcomes.
-        if pattern.get('impulse_accel', 1.0) < cfg.min_impulse_accel:
+        if pattern.get("impulse_accel", 1.0) < cfg.min_impulse_accel:
             continue  # W3 slower than W1 → weak momentum → skip
-        if pattern.get('corr_impulse_ratio', 0.5) < cfg.min_corr_impulse_ratio:
+        if pattern.get("corr_impulse_ratio", 0.5) < cfg.min_corr_impulse_ratio:
             continue  # correction too short → likely not real ABC → skip
-        if pattern.get('w3_w1_time_ratio', 1.0) > cfg.max_w3_w1_time_ratio:
+        if pattern.get("w3_w1_time_ratio", 1.0) > cfg.max_w3_w1_time_ratio:
             continue  # W3 took too long vs W1 → exhaustion → skip
 
         # ── Risk filter: only enter if stop is tight relative to entry ──
         entry_price = float(close_4h[bar])
-        stop_price = float(pattern['stop'])
+        stop_price = float(pattern["stop"])
         risk_pct = abs(entry_price - stop_price) / entry_price
         if risk_pct > cfg.max_entry_risk_pct:
             continue  # entry too far from C → poor RR → skip
 
         # ── ENTER: exploratory position (§4.2: 2% pilot) ──
-        used_patterns.add(pattern['c_idx'])
+        used_patterns.add(pattern["c_idx"])
         in_position = True
         pos_direction = direction
         pos_entry_price = entry_price
         pos_entry_bar = bar
         pos_partial_done = False
-        pos_stop = float(pattern['stop'])
-        pos_tp1 = float(pattern['target_1'])
-        pos_tp2 = float(pattern['target_2'])
+        pos_stop = float(pattern["stop"])
+        pos_tp1 = float(pattern["target_1"])
+        pos_tp2 = float(pattern["target_2"])
         pos_trail_stop = pos_stop
 
         # Risk-sized leverage: ensure each trade risks exactly risk_per_trade

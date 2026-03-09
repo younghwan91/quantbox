@@ -17,6 +17,7 @@ from quantbox.strategy.vol_selector import (
 
 # ── compute_realized_vol ──
 
+
 class TestComputeRealizedVol:
     """Tests for the Numba-compiled realized vol function."""
 
@@ -61,6 +62,7 @@ class TestComputeRealizedVol:
 
 # ── rank_symbols_by_vol ──
 
+
 class TestRankSymbolsByVol:
     """Tests for symbol ranking by volatility."""
 
@@ -69,23 +71,23 @@ class TestRankSymbolsByVol:
         rng = np.random.RandomState(42)
         n = 500
         symbols = {
-            'STABLE': np.full(n, 1.0),  # Zero vol
-            'LOW': 100.0 * np.cumprod(1.0 + rng.normal(0, 0.001, n)),
-            'HIGH': 100.0 * np.cumprod(1.0 + rng.normal(0, 0.01, n)),
+            "STABLE": np.full(n, 1.0),  # Zero vol
+            "LOW": 100.0 * np.cumprod(1.0 + rng.normal(0, 0.001, n)),
+            "HIGH": 100.0 * np.cumprod(1.0 + rng.normal(0, 0.01, n)),
         }
         ranked = rank_symbols_by_vol(symbols, top_n=3)
-        assert ranked[0][0] == 'HIGH'
-        assert ranked[-1][0] == 'STABLE'
+        assert ranked[0][0] == "HIGH"
+        assert ranked[-1][0] == "STABLE"
 
     def test_top_n_limits(self):
         """Only returns requested number of symbols."""
-        symbols = {f'SYM{i}': np.full(100, float(i + 1)) for i in range(10)}
+        symbols = {f"SYM{i}": np.full(100, float(i + 1)) for i in range(10)}
         ranked = rank_symbols_by_vol(symbols, top_n=3)
         assert len(ranked) == 3
 
     def test_top_n_larger_than_universe(self):
         """Requesting more than available returns all."""
-        symbols = {'A': np.ones(100), 'B': np.ones(100)}
+        symbols = {"A": np.ones(100), "B": np.ones(100)}
         ranked = rank_symbols_by_vol(symbols, top_n=10)
         assert len(ranked) == 2
 
@@ -100,15 +102,16 @@ class TestRankSymbolsByVol:
         b_last = 100.0 * np.cumprod(1.0 + rng.normal(0, 0.02, 500))
 
         symbols = {
-            'A': np.concatenate([a_first, a_last]),
-            'B': np.concatenate([b_first, b_last]),
+            "A": np.concatenate([a_first, a_last]),
+            "B": np.concatenate([b_first, b_last]),
         }
         # Using only last 500 bars → B should rank higher
         ranked = rank_symbols_by_vol(symbols, top_n=2, lookback_bars=500)
-        assert ranked[0][0] == 'B'
+        assert ranked[0][0] == "B"
 
 
 # ── VolatilitySelector ──
+
 
 class TestVolatilitySelector:
     """Tests for the stateful selector class."""
@@ -124,7 +127,7 @@ class TestVolatilitySelector:
         cfg = VolSelectorConfig(vol_lookback_bars=100, rebalance_interval_bars=50)
         sel = VolatilitySelector(cfg)
 
-        symbols = {'A': np.ones(200), 'B': np.ones(200)}
+        symbols = {"A": np.ones(200), "B": np.ones(200)}
         sel.rebalance(symbols, current_bar=100)
 
         assert not sel.should_rebalance(120)
@@ -137,21 +140,21 @@ class TestVolatilitySelector:
         sel = VolatilitySelector(cfg)
 
         symbols = {
-            'LOW': np.full(200, 1.0),
-            'MED': 100.0 * np.cumprod(1.0 + rng.normal(0, 0.005, 200)),
-            'HIGH': 100.0 * np.cumprod(1.0 + rng.normal(0, 0.02, 200)),
+            "LOW": np.full(200, 1.0),
+            "MED": 100.0 * np.cumprod(1.0 + rng.normal(0, 0.005, 200)),
+            "HIGH": 100.0 * np.cumprod(1.0 + rng.normal(0, 0.02, 200)),
         }
         result = sel.rebalance(symbols, current_bar=200)
         assert len(result) == 2
-        assert 'HIGH' in result
-        assert 'LOW' not in result
+        assert "HIGH" in result
+        assert "LOW" not in result
 
     def test_selected_symbols_property(self):
         """selected_symbols returns current selection."""
         sel = VolatilitySelector(VolSelectorConfig(top_n=1))
         symbols = {
-            'A': np.full(200, 1.0),
-            'B': 100.0 * np.cumprod(np.ones(200) + 0.01),
+            "A": np.full(200, 1.0),
+            "B": 100.0 * np.cumprod(np.ones(200) + 0.01),
         }
         sel.rebalance(symbols)
         assert len(sel.selected_symbols) == 1
@@ -161,24 +164,25 @@ class TestVolatilitySelector:
         rng = np.random.RandomState(42)
         sel = VolatilitySelector(VolSelectorConfig(top_n=1))
         symbols = {
-            'STABLE': np.full(200, 100.0),
-            'VOLATILE': 100.0 * np.cumprod(1.0 + rng.normal(0, 0.02, 200)),
+            "STABLE": np.full(200, 100.0),
+            "VOLATILE": 100.0 * np.cumprod(1.0 + rng.normal(0, 0.02, 200)),
         }
         sel.rebalance(symbols)
-        assert sel.is_selected('VOLATILE')
-        assert not sel.is_selected('STABLE')
+        assert sel.is_selected("VOLATILE")
+        assert not sel.is_selected("STABLE")
 
     def test_rebalance_count(self):
         """Tracks number of rebalances."""
         sel = VolatilitySelector()
         assert sel.rebalance_count == 0
-        sel.rebalance({'A': np.ones(100)})
+        sel.rebalance({"A": np.ones(100)})
         assert sel.rebalance_count == 1
-        sel.rebalance({'A': np.ones(100)})
+        sel.rebalance({"A": np.ones(100)})
         assert sel.rebalance_count == 2
 
 
 # ── Integration with real data ──
+
 
 class TestVolSelectorRealData:
     """Integration tests using cached Binance data."""
@@ -189,6 +193,7 @@ class TestVolSelectorRealData:
             pytest.skip("Real data not available")
 
         from quantbox.data.real_data_loader import RealDataLoader
+
         loader = RealDataLoader()
         all_symbols = loader.get_available_symbols()
         if len(all_symbols) < 5:
@@ -197,8 +202,8 @@ class TestVolSelectorRealData:
         symbol_closes = {}
         for sym in all_symbols[:10]:
             df = loader.load_symbol(sym)
-            if df is not None and 'Close' in df.columns:
-                symbol_closes[sym] = df['Close'].values.astype(np.float64)
+            if df is not None and "Close" in df.columns:
+                symbol_closes[sym] = df["Close"].values.astype(np.float64)
 
         ranked = rank_symbols_by_vol(symbol_closes, top_n=5)
         assert len(ranked) <= 5

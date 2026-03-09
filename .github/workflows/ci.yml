@@ -30,6 +30,9 @@ jobs:
           BINANCE_API_SECRET: ci_placeholder
         run: uv run pytest tests/ -m "not slow" -q --tb=short
 
+      - name: Ruff format check
+        run: uv run ruff format --check quantbox/ tests/
+
       - name: Ruff lint
         run: uv run ruff check quantbox/
 

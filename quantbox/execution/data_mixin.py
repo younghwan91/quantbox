@@ -12,7 +12,7 @@ import logging
 
 import numpy as np
 
-logger = logging.getLogger('Scalper')
+logger = logging.getLogger("Scalper")
 
 
 class DataMixin:
@@ -23,15 +23,13 @@ class DataMixin:
         try:
             exchange_info = self.client.futures_exchange_info()
             usdt_symbols = [
-                s['symbol'] for s in exchange_info['symbols']
-                if s['symbol'].endswith('USDT') and s['status'] == 'TRADING'
+                s["symbol"]
+                for s in exchange_info["symbols"]
+                if s["symbol"].endswith("USDT") and s["status"] == "TRADING"
             ]
 
             tickers = self.client.futures_ticker()
-            volumes = {
-                t['symbol']: float(t['quoteVolume'])
-                for t in tickers if t['symbol'] in usdt_symbols
-            }
+            volumes = {t["symbol"]: float(t["quoteVolume"]) for t in tickers if t["symbol"] in usdt_symbols}
             sorted_syms = sorted(volumes, key=volumes.get, reverse=True)
 
             # v11.1 fix: When whitelist is set, use whitelist directly
@@ -41,20 +39,14 @@ class DataMixin:
                 whitelist_set = set(self._cfg.symbol_whitelist)
                 exclude_set = set(self._cfg.exclude_symbols)
                 tradable = set(volumes.keys())  # actively trading symbols
-                result = [
-                    s for s in sorted_syms
-                    if s in whitelist_set and s not in exclude_set
-                ]
+                result = [s for s in sorted_syms if s in whitelist_set and s not in exclude_set]
                 missing = whitelist_set - tradable
                 if missing:
                     logger.warning(f"Whitelist symbols not tradable: {missing}")
                 logger.info(f"Universe: {len(result)} symbols (whitelist={len(whitelist_set)})")
             else:
                 # No whitelist: fall back to top-N by volume
-                result = [
-                    s for s in sorted_syms[:self._cfg.min_volume_rank]
-                    if s not in self._cfg.exclude_symbols
-                ]
+                result = [s for s in sorted_syms[: self._cfg.min_volume_rank] if s not in self._cfg.exclude_symbols]
                 logger.info(f"Universe: {len(result)} symbols")
             return result
         except Exception as e:
@@ -69,20 +61,20 @@ class DataMixin:
         try:
             if not self._exchange_info_fetched:
                 info = self.client.futures_exchange_info()
-                for sym_info in info['symbols']:
+                for sym_info in info["symbols"]:
                     result = {
-                        'quantity_precision': sym_info['quantityPrecision'],
-                        'price_precision': sym_info['pricePrecision'],
+                        "quantity_precision": sym_info["quantityPrecision"],
+                        "price_precision": sym_info["pricePrecision"],
                     }
-                    for f in sym_info['filters']:
-                        if f['filterType'] == 'LOT_SIZE':
-                            result['step_size'] = float(f['stepSize'])
-                            result['min_qty'] = float(f['minQty'])
-                        elif f['filterType'] == 'PRICE_FILTER':
-                            result['tick_size'] = float(f['tickSize'])
-                        elif f['filterType'] == 'MIN_NOTIONAL':
-                            result['min_notional'] = float(f.get('notional', 5))
-                    self._symbol_info_cache[sym_info['symbol']] = result
+                    for f in sym_info["filters"]:
+                        if f["filterType"] == "LOT_SIZE":
+                            result["step_size"] = float(f["stepSize"])
+                            result["min_qty"] = float(f["minQty"])
+                        elif f["filterType"] == "PRICE_FILTER":
+                            result["tick_size"] = float(f["tickSize"])
+                        elif f["filterType"] == "MIN_NOTIONAL":
+                            result["min_notional"] = float(f.get("notional", 5))
+                    self._symbol_info_cache[sym_info["symbol"]] = result
                 self._exchange_info_fetched = True
             return self._symbol_info_cache.get(symbol, {})
         except Exception as e:
@@ -90,7 +82,10 @@ class DataMixin:
             return {}
 
     def download_klines(
-        self, symbol: str, n_bars: int = 200, interval: str = '15m',
+        self,
+        symbol: str,
+        n_bars: int = 200,
+        interval: str = "15m",
         full: bool = False,
     ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """Download recent COMPLETED klines (incomplete bar dropped).
