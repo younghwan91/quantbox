@@ -13,11 +13,10 @@ from unittest.mock import MagicMock, patch
 from quantbox.strategy.rubberband import RubberBandConfig, RubberBandStrategy
 from quantbox.scalper import (
     RubberBandScalper,
-    _save_scalper_state,
-    _load_scalper_state,
     STATE_FILE,
     PAPER_STATE_FILE,
 )
+from quantbox.core.scalper_state import save_scalper_state, load_scalper_state
 
 
 # ── State Persistence ──
@@ -44,8 +43,8 @@ class TestScalperState:
                 {'symbol': 'ETHUSDT', 'pnl_usd': 5.23}
             ],
         }
-        _save_scalper_state(state, filepath=fpath)
-        loaded = _load_scalper_state(filepath=fpath)
+        save_scalper_state(state, filepath=fpath)
+        loaded = load_scalper_state(filepath=fpath)
 
         assert loaded is not None
         assert loaded['paper_balance'] == 1000.0
@@ -55,13 +54,13 @@ class TestScalperState:
 
     def test_load_missing_file(self, tmp_path):
         """Loading non-existent file returns None."""
-        result = _load_scalper_state(filepath=tmp_path / "nope.json")
+        result = load_scalper_state(filepath=tmp_path / "nope.json")
         assert result is None
 
     def test_atomic_write_no_corruption(self, tmp_path):
         """File is not corrupted on normal write."""
         fpath = tmp_path / "atomic.json"
-        _save_scalper_state({'test': True}, filepath=fpath)
+        save_scalper_state({'test': True}, filepath=fpath)
         with open(fpath) as f:
             data = json.load(f)
         assert data['test'] is True

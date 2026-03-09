@@ -61,7 +61,7 @@ class TestStateRestoration:
 
         # Clear and reload
         scalper.strategy._positions.clear()
-        with patch('quantbox.scalper._load_scalper_state', return_value=state):
+        with patch('quantbox.scalper.load_scalper_state', return_value=state):
             scalper._load_state()
 
         restored = scalper.strategy._positions['TESTUSDT']
@@ -90,7 +90,7 @@ class TestStateRestoration:
             },
         }
 
-        with patch('quantbox.scalper._load_scalper_state', return_value=state):
+        with patch('quantbox.scalper.load_scalper_state', return_value=state):
             scalper._load_state()
 
         restored = scalper.strategy._positions['TESTUSDT']
