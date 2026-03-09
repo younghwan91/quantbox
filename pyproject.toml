@@ -38,6 +38,9 @@ omit = [
     "quantbox/strategy/rubberband/*",  # legacy, non-production
     "quantbox/strategy/elliott.py",    # legacy, non-production
     "quantbox/strategy/alpha_engine.py",
+    # signals.py uses Numba @jit(nopython=True) — JIT-compiled code is not
+    # trackable by coverage.py. Logic is verified by tests/test_signals_unit.py.
+    "quantbox/strategy/vol_straddle/signals.py",
 ]
 
 [tool.coverage.report]
