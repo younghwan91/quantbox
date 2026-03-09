@@ -49,7 +49,7 @@ def compute_signals(
 
         if position == 0:
             if ret < -threshold:
-                position = 1   # Long: fade the drop
+                position = 1  # Long: fade the drop
                 entry_price = close[i]
                 move_size = abs(ret)
                 hold_count = 0
@@ -414,8 +414,7 @@ def compute_signals_regime_switch(
 
 # ────────── ATR Computation (v11.4 Adaptive Threshold) ──────────
 @numba.jit(nopython=True, cache=True)
-def compute_atr_pct(high: np.ndarray, low: np.ndarray, close: np.ndarray,
-                    period: int) -> np.ndarray:
+def compute_atr_pct(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> np.ndarray:
     """ATR as percentage of close price (EMA-smoothed).
 
     Args:
@@ -523,8 +522,11 @@ def _compute_ema_inline(arr: np.ndarray, period: int) -> np.ndarray:
 
 @numba.jit(nopython=True, cache=True)
 def _compute_stochastic_inline(
-    high: np.ndarray, low: np.ndarray, close: np.ndarray,
-    k_period: int = 14, d_period: int = 3,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    k_period: int = 14,
+    d_period: int = 3,
 ) -> tuple:
     """Stochastic %K and %D arrays."""
     n = len(close)
@@ -555,7 +557,10 @@ def _compute_stochastic_inline(
 
 @numba.jit(nopython=True, cache=True)
 def _compute_macd_inline(
-    close: np.ndarray, fast: int = 12, slow: int = 26, signal_period: int = 9,
+    close: np.ndarray,
+    fast: int = 12,
+    slow: int = 26,
+    signal_period: int = 9,
 ) -> tuple:
     """MACD line, signal line, histogram."""
     ema_fast = _compute_ema_inline(close, fast)
@@ -681,8 +686,7 @@ def compute_signals_confidence(
     best_pnl = 0.0
     lev = base_leverage
     trade_target_retrace = target_retrace  # per-trade target (may scale by confidence)
-    start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period,
-                    rsi_period, vol_period)
+    start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period, rsi_period, vol_period)
 
     for i in range(start_bar, n):
         ret = close[i] / close[i - lookback] - 1.0
@@ -766,8 +770,7 @@ def compute_signals_confidence(
                     move_size = abs(ret)
                     hold_count = 0
                     best_pnl = 0.0
-                    lev = min(base_leverage + confidence_leverage_step * (confidence - 1),
-                              max_leverage)
+                    lev = min(base_leverage + confidence_leverage_step * (confidence - 1), max_leverage)
                     # v8.0: Scale target by confidence (ride the wave when certain)
                     if dynamic_target_enabled:
                         if confidence >= 5:
@@ -924,15 +927,13 @@ def compute_signals_v9(
 
     # v9.0: Pre-compute stochastic and MACD
     if stoch_enabled:
-        stoch_k, stoch_d = _compute_stochastic_inline(
-            high, low, close, stoch_k_period, stoch_d_period)
+        stoch_k, stoch_d = _compute_stochastic_inline(high, low, close, stoch_k_period, stoch_d_period)
     else:
         stoch_k = np.full(n, 50.0)
         stoch_d = np.full(n, 50.0)
 
     if macd_enabled:
-        _macd_line, _macd_signal, macd_hist = _compute_macd_inline(
-            close, macd_fast, macd_slow, macd_signal_period)
+        _macd_line, _macd_signal, macd_hist = _compute_macd_inline(close, macd_fast, macd_slow, macd_signal_period)
     else:
         macd_hist = np.full(n, 0.0)
 
@@ -949,8 +950,7 @@ def compute_signals_v9(
     best_pnl = 0.0
     lev = base_leverage
     trade_target_retrace = target_retrace
-    start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period,
-                    rsi_period, vol_period)
+    start_bar = max(lookback, btc_mom_period, btc_regime_period, asset_trend_period, rsi_period, vol_period)
     if atr_period > 0 and atr_period > start_bar:
         start_bar = atr_period
 
@@ -1082,8 +1082,7 @@ def compute_signals_v9(
                     move_size = abs(ret)
                     hold_count = 0
                     best_pnl = 0.0
-                    lev = min(base_leverage + confidence_leverage_step * (confidence - 1),
-                              max_leverage)
+                    lev = min(base_leverage + confidence_leverage_step * (confidence - 1), max_leverage)
                     # v8.0: Scale target by confidence (ride the wave when certain)
                     if dynamic_target_enabled:
                         if confidence >= 5:
@@ -1376,8 +1375,8 @@ def compute_signals_with_partial_exit(
     """
     n = len(close)
     sig = np.zeros(n)
-    position = 0       # Direction: +1, -1, or 0
-    phase = 0           # 0=flat, 1=full position, 2=half position
+    position = 0  # Direction: +1, -1, or 0
+    phase = 0  # 0=flat, 1=full position, 2=half position
     entry_price = 0.0
     move_size = 0.0
     hold_count = 0
@@ -1480,7 +1479,7 @@ def compute_signals_with_partial_exit(
         if phase == 0:
             sig[i] = 0.0
         elif phase == 1:
-            sig[i] = float(position)        # ±1.0
+            sig[i] = float(position)  # ±1.0
         elif phase == 2:
             sig[i] = float(position) * 0.5  # ±0.5
 
@@ -2000,4 +1999,3 @@ def calculate_position_size(
         notional = capital * leverage
 
     return notional, leverage
-

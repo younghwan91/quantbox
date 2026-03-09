@@ -22,12 +22,13 @@ from threading import Lock
 import json
 
 
-logger = logging.getLogger('DataCache')
+logger = logging.getLogger("DataCache")
 
 
 @dataclass
 class CacheEntry:
     """Represents a cached data entry."""
+
     key: str
     data: Any
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -121,7 +122,7 @@ class DiskCache:
         """Load cache index from disk."""
         if self.index_file.exists():
             try:
-                with open(self.index_file, 'r') as f:
+                with open(self.index_file, "r") as f:
                     return json.load(f)
             except Exception as e:
                 logger.warning(f"Failed to load cache index: {e}")
@@ -130,7 +131,7 @@ class DiskCache:
     def _save_index(self):
         """Save cache index to disk."""
         try:
-            with open(self.index_file, 'w') as f:
+            with open(self.index_file, "w") as f:
                 json.dump(self._index, f, indent=2, default=str)
         except Exception as e:
             logger.error(f"Failed to save cache index: {e}")
@@ -151,7 +152,7 @@ class DiskCache:
 
         # Check index for expiration
         if key in self._index:
-            expires_at = self._index[key].get('expires_at')
+            expires_at = self._index[key].get("expires_at")
             if expires_at:
                 expires_dt = datetime.fromisoformat(expires_at)
                 if datetime.now(timezone.utc) > expires_dt:
@@ -160,10 +161,10 @@ class DiskCache:
 
         try:
             if self.compress:
-                with gzip.open(filepath, 'rb') as f:
+                with gzip.open(filepath, "rb") as f:
                     entry = pickle.load(f)
             else:
-                with open(filepath, 'rb') as f:
+                with open(filepath, "rb") as f:
                     entry = pickle.load(f)
             return entry
         except Exception as e:
@@ -176,18 +177,18 @@ class DiskCache:
 
         try:
             if self.compress:
-                with gzip.open(filepath, 'wb') as f:
+                with gzip.open(filepath, "wb") as f:
                     pickle.dump(entry, f)
             else:
-                with open(filepath, 'wb') as f:
+                with open(filepath, "wb") as f:
                     pickle.dump(entry, f)
 
             # Update index
             self._index[entry.key] = {
-                'filepath': str(filepath),
-                'created_at': entry.created_at.isoformat(),
-                'expires_at': entry.expires_at.isoformat() if entry.expires_at else None,
-                'metadata': entry.metadata
+                "filepath": str(filepath),
+                "created_at": entry.created_at.isoformat(),
+                "expires_at": entry.expires_at.isoformat() if entry.expires_at else None,
+                "metadata": entry.metadata,
             }
             self._save_index()
 
@@ -223,7 +224,7 @@ class DiskCache:
         expired_keys = []
 
         for key, info in self._index.items():
-            expires_at = info.get('expires_at')
+            expires_at = info.get("expires_at")
             if expires_at:
                 if now > datetime.fromisoformat(expires_at):
                     expired_keys.append(key)
@@ -251,7 +252,7 @@ class DataCache:
         cache_dir: str = "data/cache",
         memory_size: int = 100,
         default_expiry_hours: int = 24,
-        compress: bool = True
+        compress: bool = True,
     ):
         self.cache_dir = cache_dir
         self.default_expiry_hours = default_expiry_hours
@@ -261,34 +262,17 @@ class DataCache:
         self.disk_cache = DiskCache(cache_dir, compress=compress)
 
         # Statistics
-        self._stats = {
-            'memory_hits': 0,
-            'disk_hits': 0,
-            'misses': 0,
-            'writes': 0
-        }
+        self._stats = {"memory_hits": 0, "disk_hits": 0, "misses": 0, "writes": 0}
 
         logger.info(f"DataCache initialized at {cache_dir}")
 
-    def _generate_key(
-        self,
-        symbol: str,
-        interval: str,
-        start: datetime,
-        end: datetime
-    ) -> str:
+    def _generate_key(self, symbol: str, interval: str, start: datetime, end: datetime) -> str:
         """Generate cache key for market data."""
         start_str = start.strftime("%Y%m%d_%H%M")
         end_str = end.strftime("%Y%m%d_%H%M")
         return f"{symbol}_{interval}_{start_str}_{end_str}"
 
-    def get(
-        self,
-        symbol: str,
-        interval: str,
-        start: datetime,
-        end: datetime
-    ) -> Optional[pd.DataFrame]:
+    def get(self, symbol: str, interval: str, start: datetime, end: datetime) -> Optional[pd.DataFrame]:
         """
         Get cached data for a symbol and timeframe.
 
@@ -306,20 +290,20 @@ class DataCache:
         # Try memory cache first
         entry = self.memory_cache.get(key)
         if entry:
-            self._stats['memory_hits'] += 1
+            self._stats["memory_hits"] += 1
             logger.debug(f"Memory cache hit: {key}")
             return entry.data
 
         # Try disk cache
         entry = self.disk_cache.get(key)
         if entry:
-            self._stats['disk_hits'] += 1
+            self._stats["disk_hits"] += 1
             # Promote to memory cache
             self.memory_cache.put(entry)
             logger.debug(f"Disk cache hit: {key}")
             return entry.data
 
-        self._stats['misses'] += 1
+        self._stats["misses"] += 1
         logger.debug(f"Cache miss: {key}")
         return None
 
@@ -331,7 +315,7 @@ class DataCache:
         end: datetime,
         data: pd.DataFrame,
         expiry_hours: Optional[int] = None,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
     ):
         """
         Cache data for a symbol and timeframe.
@@ -352,20 +336,21 @@ class DataCache:
             key=key,
             data=data,
             expires_at=datetime.now(timezone.utc) + timedelta(hours=expiry),
-            metadata=metadata or {
-                'symbol': symbol,
-                'interval': interval,
-                'rows': len(data),
-                'start': start.isoformat(),
-                'end': end.isoformat()
-            }
+            metadata=metadata
+            or {
+                "symbol": symbol,
+                "interval": interval,
+                "rows": len(data),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+            },
         )
 
         # Write to both caches
         self.memory_cache.put(entry)
         self.disk_cache.put(entry)
 
-        self._stats['writes'] += 1
+        self._stats["writes"] += 1
         logger.debug(f"Cached {len(data)} rows for {key}")
 
     def get_or_fetch(
@@ -375,7 +360,7 @@ class DataCache:
         start: datetime,
         end: datetime,
         fetch_func: callable,
-        expiry_hours: Optional[int] = None
+        expiry_hours: Optional[int] = None,
     ) -> pd.DataFrame:
         """
         Get cached data or fetch and cache if not available.
@@ -406,13 +391,7 @@ class DataCache:
 
         return data
 
-    def get_multi(
-        self,
-        symbols: List[str],
-        interval: str,
-        start: datetime,
-        end: datetime
-    ) -> Dict[str, pd.DataFrame]:
+    def get_multi(self, symbols: List[str], interval: str, start: datetime, end: datetime) -> Dict[str, pd.DataFrame]:
         """
         Get cached data for multiple symbols.
 
@@ -431,7 +410,7 @@ class DataCache:
         interval: str,
         start: datetime,
         end: datetime,
-        expiry_hours: Optional[int] = None
+        expiry_hours: Optional[int] = None,
     ):
         """
         Cache data for multiple symbols.
@@ -439,11 +418,7 @@ class DataCache:
         for symbol, df in data.items():
             self.put(symbol, interval, start, end, df, expiry_hours)
 
-    def invalidate(
-        self,
-        symbol: Optional[str] = None,
-        interval: Optional[str] = None
-    ):
+    def invalidate(self, symbol: Optional[str] = None, interval: Optional[str] = None):
         """
         Invalidate cache entries.
 
@@ -466,26 +441,20 @@ class DataCache:
 
     def get_stats(self) -> Dict:
         """Get cache statistics."""
-        total_hits = self._stats['memory_hits'] + self._stats['disk_hits']
-        total_requests = total_hits + self._stats['misses']
+        total_hits = self._stats["memory_hits"] + self._stats["disk_hits"]
+        total_requests = total_hits + self._stats["misses"]
         hit_rate = total_hits / total_requests if total_requests > 0 else 0
 
         return {
             **self._stats,
-            'total_hits': total_hits,
-            'total_requests': total_requests,
-            'hit_rate': hit_rate,
-            'hit_rate_pct': hit_rate * 100,
-            'memory_cache_size': self.memory_cache.size,
+            "total_hits": total_hits,
+            "total_requests": total_requests,
+            "hit_rate": hit_rate,
+            "hit_rate_pct": hit_rate * 100,
+            "memory_cache_size": self.memory_cache.size,
         }
 
-    def preload(
-        self,
-        symbols: List[str],
-        intervals: List[str],
-        days: int = 30,
-        fetch_func: callable = None
-    ):
+    def preload(self, symbols: List[str], intervals: List[str], days: int = 30, fetch_func: callable = None):
         """
         Preload cache with historical data.
 
@@ -526,13 +495,13 @@ class TimeframedCache:
 
     # Default expiry hours based on timeframe
     EXPIRY_MAP = {
-        '1m': 1,
-        '5m': 4,
-        '15m': 12,
-        '30m': 24,
-        '1h': 48,
-        '4h': 168,  # 1 week
-        '1d': 720,  # 1 month
+        "1m": 1,
+        "5m": 4,
+        "15m": 12,
+        "30m": 24,
+        "1h": 48,
+        "4h": 168,  # 1 week
+        "1d": 720,  # 1 month
     }
 
     def __init__(self, base_dir: str = "data/cache"):
@@ -544,42 +513,21 @@ class TimeframedCache:
         if interval not in self._caches:
             cache_dir = os.path.join(self.base_dir, interval)
             expiry = self.EXPIRY_MAP.get(interval, 24)
-            self._caches[interval] = DataCache(
-                cache_dir=cache_dir,
-                default_expiry_hours=expiry
-            )
+            self._caches[interval] = DataCache(cache_dir=cache_dir, default_expiry_hours=expiry)
         return self._caches[interval]
 
-    def get(
-        self,
-        symbol: str,
-        interval: str,
-        start: datetime,
-        end: datetime
-    ) -> Optional[pd.DataFrame]:
+    def get(self, symbol: str, interval: str, start: datetime, end: datetime) -> Optional[pd.DataFrame]:
         """Get data from appropriate timeframe cache."""
         cache = self._get_cache(interval)
         return cache.get(symbol, interval, start, end)
 
-    def put(
-        self,
-        symbol: str,
-        interval: str,
-        start: datetime,
-        end: datetime,
-        data: pd.DataFrame
-    ):
+    def put(self, symbol: str, interval: str, start: datetime, end: datetime, data: pd.DataFrame):
         """Put data in appropriate timeframe cache."""
         cache = self._get_cache(interval)
         cache.put(symbol, interval, start, end, data)
 
     def get_or_fetch(
-        self,
-        symbol: str,
-        interval: str,
-        start: datetime,
-        end: datetime,
-        fetch_func: callable
+        self, symbol: str, interval: str, start: datetime, end: datetime, fetch_func: callable
     ) -> pd.DataFrame:
         """Get or fetch data from appropriate timeframe cache."""
         cache = self._get_cache(interval)
@@ -587,7 +535,4 @@ class TimeframedCache:
 
     def get_all_stats(self) -> Dict[str, Dict]:
         """Get statistics for all timeframe caches."""
-        return {
-            interval: cache.get_stats()
-            for interval, cache in self._caches.items()
-        }
+        return {interval: cache.get_stats() for interval, cache in self._caches.items()}

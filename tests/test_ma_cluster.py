@@ -9,6 +9,7 @@ Validates:
   6. Position exit (simple SL/TP, no trailing stop for MA cluster)
   7. Config defaults
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -58,10 +59,12 @@ class TestComputeSma:
 
 class TestCheckMaCluster:
     def _make_converging_data(
-        self, n: int = 250, cluster_start: int = 200,
-        cluster_bars: int = 20, breakout_up: bool = True,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-               np.ndarray, np.ndarray]:
+        self,
+        n: int = 250,
+        cluster_start: int = 200,
+        cluster_bars: int = 20,
+        breakout_up: bool = True,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Generate synthetic 4h data where SMAs converge then breakout."""
         rng = np.random.default_rng(42)
         # Base price trending up slowly
@@ -97,7 +100,7 @@ class TestCheckMaCluster:
         # Only 3 bars of convergence (< min_duration=8)
         n = 210
         close = np.full(n, 100.0)
-        sma20 = np.full(n, 110.0)   # 10% spread — NOT clustered
+        sma20 = np.full(n, 110.0)  # 10% spread — NOT clustered
         sma50 = np.full(n, 90.0)
         sma100 = np.full(n, 100.0)
         sma200 = np.full(n, 100.0)
@@ -117,9 +120,16 @@ class TestCheckMaCluster:
         duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig == 0
         assert duration_out[0] == 3  # Only 3 bars of cluster
@@ -145,9 +155,16 @@ class TestCheckMaCluster:
         duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig == 1  # Positive momentum → long
         assert duration_out[0] >= 8
@@ -168,17 +185,31 @@ class TestCheckMaCluster:
 
         # First call → signal fires
         sig1 = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig1 == 1
 
         # Second call with SAME data → blocked by cooldown
         sig2 = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig2 == 0
         assert cooldown_arr[0] == 1  # Still in cooldown
@@ -200,9 +231,16 @@ class TestCheckMaCluster:
         duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig != 0
 
@@ -216,9 +254,16 @@ class TestCheckMaCluster:
         mom_next = np.full(51, 0.05)
 
         sig2 = check_ma_cluster(
-            close_next, sma20_next, sma50_next, sma100_next, sma200_next,
-            mom_next, cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close_next,
+            sma20_next,
+            sma50_next,
+            sma100_next,
+            sma200_next,
+            mom_next,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig2 == 0  # Blocked by cooldown
 
@@ -238,9 +283,16 @@ class TestCheckMaCluster:
         close[-1] = 105.0
 
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig != 0
         assert cooldown_arr[0] == 1
@@ -254,9 +306,16 @@ class TestCheckMaCluster:
         mom2 = np.full(10, 0.05)
 
         sig2 = check_ma_cluster(
-            close2, sma20_2, sma50_2, sma100_2, sma200_2, mom2,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close2,
+            sma20_2,
+            sma50_2,
+            sma100_2,
+            sma200_2,
+            mom2,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig2 == 0
         assert cooldown_arr[0] == 0  # Reset
@@ -278,9 +337,16 @@ class TestCheckMaCluster:
         duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig == -1
 
@@ -298,9 +364,16 @@ class TestCheckMaCluster:
         duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
         )
         assert sig == 0  # No breakout → no signal
 
@@ -321,9 +394,16 @@ class TestCheckMaCluster:
 
         # With min_momentum=0.01, this weak signal is rejected
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
             min_momentum=0.01,
         )
         assert sig == 0
@@ -331,9 +411,16 @@ class TestCheckMaCluster:
         # With default (0.003), this would fire
         cooldown_arr[0] = 0
         sig2 = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
             min_momentum=0.003,
         )
         assert sig2 == 1
@@ -355,9 +442,16 @@ class TestCheckMaCluster:
 
         # With max_duration=24, duration=100 is way over → rejected
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
             max_duration=24,
         )
         assert sig == 0
@@ -366,9 +460,16 @@ class TestCheckMaCluster:
         # With max_duration=0 (disabled), it fires
         cooldown_arr[0] = 0
         sig2 = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
             max_duration=0,
         )
         assert sig2 == 1
@@ -397,9 +498,16 @@ class TestCheckMaCluster:
 
         # duration=20, max_duration=24 → allowed
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown_arr, duration_out=duration_out,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown_arr,
+            duration_out=duration_out,
             max_duration=24,
         )
         assert sig == 1
@@ -467,7 +575,9 @@ class TestStrategyIntegration:
         return VolStraddleStrategy(cfg)
 
     def _build_4h_data(
-        self, n: int = 250, cluster_bars: int = 20,
+        self,
+        n: int = 250,
+        cluster_bars: int = 20,
         breakout_pct: float = 0.05,
     ) -> dict[str, np.ndarray]:
         """Build 4h OHLCV where SMAs converge then breakout."""
@@ -480,7 +590,7 @@ class TestStrategyIntegration:
         high[-1] = close[-1] * 1.01
         low[-1] = close[-1] * 0.99
 
-        return {'close': close, 'high': high, 'low': low}
+        return {"close": close, "high": high, "low": low}
 
     def test_ma_cluster_signal_via_on_bar(self):
         """Strategy returns non-zero via MA cluster when VR doesn't fire."""
@@ -490,52 +600,56 @@ class TestStrategyIntegration:
         data_4h = self._build_4h_data(n=n, breakout_pct=0.05)
 
         # Store 4h data
-        strategy.update_htf_data('BTCUSDT', data_4h['close'],
-                                 data_4h['high'], data_4h['low'])
+        strategy.update_htf_data("BTCUSDT", data_4h["close"], data_4h["high"], data_4h["low"])
 
         # Need 15m close_prices for on_bar (even though 15m is disabled)
         close_15m = np.full(500, 100.0)
 
         # Update market data (high/low for VR computation)
         strategy.update_market_data(
-            'BTCUSDT', np.ones(500), np.ones(500),
-            np.full(500, 101.0), np.full(500, 99.0),
+            "BTCUSDT",
+            np.ones(500),
+            np.ones(500),
+            np.full(500, 101.0),
+            np.full(500, 99.0),
         )
 
         # Stateless: first call should fire (cluster duration computed from data)
-        sig = strategy.on_bar('BTCUSDT', close_15m)
+        sig = strategy.on_bar("BTCUSDT", close_15m)
 
         # Should get a signal from MA cluster (all SMAs = 100, close = 105)
         # The 4h data is static (all 100), so SMAs all converge at 100.
         # Breakout happens because close[-1]=105 > ma_max ≈ 100.
         assert sig != 0
-        meta = strategy.get_last_signal_meta('BTCUSDT')
-        assert meta['strategy_type'] == 'ma_cluster'
-        assert meta['sl'] == 0.02
-        assert meta['tp'] == 0.08
-        assert meta['tf'] == '4h'
-        assert meta['leverage_override'] == 21.0
+        meta = strategy.get_last_signal_meta("BTCUSDT")
+        assert meta["strategy_type"] == "ma_cluster"
+        assert meta["sl"] == 0.02
+        assert meta["tp"] == 0.08
+        assert meta["tf"] == "4h"
+        assert meta["leverage_override"] == 21.0
         # max_hold should be converted: 12 bars × 16 (4h→15m) = 192
-        assert meta['max_hold'] == 12 * 16
+        assert meta["max_hold"] == 12 * 16
 
     def test_ma_cluster_disabled(self):
         """No MA cluster signal when disabled."""
         strategy = self._make_strategy(ma_cluster_enabled=False)
 
         data_4h = self._build_4h_data(n=250, breakout_pct=0.05)
-        strategy.update_htf_data('BTCUSDT', data_4h['close'],
-                                 data_4h['high'], data_4h['low'])
+        strategy.update_htf_data("BTCUSDT", data_4h["close"], data_4h["high"], data_4h["low"])
 
         close_15m = np.full(500, 100.0)
         strategy.update_market_data(
-            'BTCUSDT', np.ones(500), np.ones(500),
-            np.full(500, 101.0), np.full(500, 99.0),
+            "BTCUSDT",
+            np.ones(500),
+            np.ones(500),
+            np.full(500, 101.0),
+            np.full(500, 99.0),
         )
 
-        sig = strategy.on_bar('BTCUSDT', close_15m)
+        sig = strategy.on_bar("BTCUSDT", close_15m)
         # MA cluster disabled → no ma_cluster metadata
-        meta = strategy.get_last_signal_meta('BTCUSDT')
-        assert meta.get('strategy_type') != 'ma_cluster'
+        meta = strategy.get_last_signal_meta("BTCUSDT")
+        assert meta.get("strategy_type") != "ma_cluster"
 
     def test_position_exit_no_trail_for_ma_cluster(self):
         """MA cluster positions use simple SL/TP, not trailing stop."""
@@ -543,27 +657,38 @@ class TestStrategyIntegration:
 
         # Open a MA cluster position
         strategy.open_position(
-            symbol='BTCUSDT', signal=1, entry_price=100.0,
-            notional=1200.0, leverage=12.0, move_size=1.0,
-            sl=0.02, tp=0.08, tf='4h',
-            max_hold=12, position_side='LONG',
+            symbol="BTCUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=1200.0,
+            leverage=12.0,
+            move_size=1.0,
+            sl=0.02,
+            tp=0.08,
+            tf="4h",
+            max_hold=12,
+            position_side="LONG",
         )
         # Manually set strategy_type (would come from signal metadata)
-        key = 'BTCUSDT:LONG'
-        strategy._positions[key]['strategy_type'] = 'ma_cluster'
+        key = "BTCUSDT:LONG"
+        strategy._positions[key]["strategy_type"] = "ma_cluster"
 
         # Price moves to +3% (past trail_activate=2%)
         # For VR squeeze, trailing would activate. For MA cluster, no trail.
         result = strategy.update_position(
-            key, 103.0,
-            current_high=103.5, current_low=102.5,
+            key,
+            103.0,
+            current_high=103.5,
+            current_low=102.5,
         )
         assert result is None  # No exit yet
 
         # Price drops back to +0.5% — VR trail would exit, MA cluster holds
         result = strategy.update_position(
-            key, 100.5,
-            current_high=103.0, current_low=100.0,
+            key,
+            100.5,
+            current_high=103.0,
+            current_low=100.0,
         )
         # MA cluster: worst_gain for LONG = (100.0 - 100) / 100 = 0%
         # SL = 2%, so no stop loss hit
@@ -574,20 +699,29 @@ class TestStrategyIntegration:
         strategy = self._make_strategy()
 
         strategy.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=100.0,
-            notional=1200.0, leverage=12.0, move_size=1.0,
-            sl=0.02, tp=0.08, tf='4h',
-            max_hold=12, position_side='LONG',
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=1200.0,
+            leverage=12.0,
+            move_size=1.0,
+            sl=0.02,
+            tp=0.08,
+            tf="4h",
+            max_hold=12,
+            position_side="LONG",
         )
-        key = 'ETHUSDT:LONG'
-        strategy._positions[key]['strategy_type'] = 'ma_cluster'
+        key = "ETHUSDT:LONG"
+        strategy._positions[key]["strategy_type"] = "ma_cluster"
 
         # Drop 2.1% — should hit SL
         result = strategy.update_position(
-            key, 97.9,
-            current_high=100.0, current_low=97.8,
+            key,
+            97.9,
+            current_high=100.0,
+            current_low=97.8,
         )
-        assert result == 'stop_loss'
+        assert result == "stop_loss"
 
     def test_ma_cluster_take_profit(self):
         """MA cluster hard TP ceiling at 8% (safety rail; r47 trailing fires first normally).
@@ -599,29 +733,40 @@ class TestStrategyIntegration:
         strategy = self._make_strategy()
 
         strategy.open_position(
-            symbol='ETHUSDT', signal=-1, entry_price=100.0,
-            notional=1200.0, leverage=12.0, move_size=1.0,
-            sl=0.02, tp=0.08, tf='4h',
-            max_hold=12, position_side='SHORT',
+            symbol="ETHUSDT",
+            signal=-1,
+            entry_price=100.0,
+            notional=1200.0,
+            leverage=12.0,
+            move_size=1.0,
+            sl=0.02,
+            tp=0.08,
+            tf="4h",
+            max_hold=12,
+            position_side="SHORT",
         )
-        key = 'ETHUSDT:SHORT'
-        strategy._positions[key]['strategy_type'] = 'ma_cluster'
+        key = "ETHUSDT:SHORT"
+        strategy._positions[key]["strategy_type"] = "ma_cluster"
 
         # Gradual drop with tight bars — trail never fires
         for p in [98, 96, 94]:
             result = strategy.update_position(
-                key, p,
-                current_high=p + 0.05, current_low=p,
+                key,
+                p,
+                current_high=p + 0.05,
+                current_low=p,
             )
             assert result is None, f"Premature exit at {p}: {result}"
 
         # Hit hard TP at 8% drop with tight bar
         tp_price = 92.0  # 8% drop from 100
         result = strategy.update_position(
-            key, tp_price,
-            current_high=tp_price + 0.05, current_low=tp_price,
+            key,
+            tp_price,
+            current_high=tp_price + 0.05,
+            current_low=tp_price,
         )
-        assert result == 'target', f"Expected hard TP 'target', got {result}"
+        assert result == "target", f"Expected hard TP 'target', got {result}"
 
     def test_ma_cluster_trailing_stop(self):
         """MA cluster trailing stop fires after 4% gain retraces 0.5% (r47).
@@ -631,14 +776,21 @@ class TestStrategyIntegration:
         strategy = self._make_strategy()
 
         strategy.open_position(
-            symbol='ETHUSDT', signal=-1, entry_price=100.0,
-            notional=1200.0, leverage=12.0, move_size=1.0,
-            sl=0.02, tp=0.08, tf='4h',
-            max_hold=12, position_side='SHORT',
+            symbol="ETHUSDT",
+            signal=-1,
+            entry_price=100.0,
+            notional=1200.0,
+            leverage=12.0,
+            move_size=1.0,
+            sl=0.02,
+            tp=0.08,
+            tf="4h",
+            max_hold=12,
+            position_side="SHORT",
         )
-        key = 'ETHUSDT:SHORT'
+        key = "ETHUSDT:SHORT"
         cfg = strategy.config
-        strategy._positions[key]['strategy_type'] = 'ma_cluster'
+        strategy._positions[key]["strategy_type"] = "ma_cluster"
 
         trail_activate = cfg.ma_cluster_trail_activate  # 0.04
         trail_distance = cfg.ma_cluster_trail_distance  # 0.005
@@ -646,51 +798,66 @@ class TestStrategyIntegration:
         # Phase 1: Drop to activate with tight bar (tight high)
         peak = 100.0 * (1.0 - trail_activate - 0.005)  # ~95.5
         result = strategy.update_position(
-            key, peak,
-            current_high=peak * 1.001, current_low=peak,
+            key,
+            peak,
+            current_high=peak * 1.001,
+            current_low=peak,
         )
         assert result is None, f"Should activate trail but not exit, got {result}"
         pos = strategy._positions[key]
-        assert pos['trail_active'] is True
+        assert pos["trail_active"] is True
 
         # Phase 2: Bounce past trail distance → exit
-        peak_gain = pos['peak_gain']
+        peak_gain = pos["peak_gain"]
         # For SHORT: worst_gain = (entry - high)/entry; trail fires when worst_gain <= trail_stop_gain
         trail_stop_gain = peak_gain - trail_distance
         high_breach = 100.0 * (1.0 - trail_stop_gain) + 0.5
         result = strategy.update_position(
-            key, high_breach - 1,
-            current_high=high_breach, current_low=peak * 0.995,
+            key,
+            high_breach - 1,
+            current_high=high_breach,
+            current_low=peak * 0.995,
         )
-        assert result == 'trailing_stop', f"Expected trailing_stop, got {result}"
+        assert result == "trailing_stop", f"Expected trailing_stop, got {result}"
 
     def test_ma_cluster_max_hold(self):
         """MA cluster position exits at max_hold (12 bars)."""
         strategy = self._make_strategy()
 
         strategy.open_position(
-            symbol='BNBUSDT', signal=1, entry_price=100.0,
-            notional=1200.0, leverage=12.0, move_size=1.0,
-            sl=0.02, tp=0.08, tf='4h',
-            max_hold=12, position_side='LONG',
+            symbol="BNBUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=1200.0,
+            leverage=12.0,
+            move_size=1.0,
+            sl=0.02,
+            tp=0.08,
+            tf="4h",
+            max_hold=12,
+            position_side="LONG",
         )
-        key = 'BNBUSDT:LONG'
-        strategy._positions[key]['strategy_type'] = 'ma_cluster'
+        key = "BNBUSDT:LONG"
+        strategy._positions[key]["strategy_type"] = "ma_cluster"
 
         # Simulate 11 bars — no exit (price flat)
         for _ in range(11):
             result = strategy.update_position(
-                key, 100.5,
-                current_high=101.0, current_low=100.0,
+                key,
+                100.5,
+                current_high=101.0,
+                current_low=100.0,
             )
             assert result is None
 
         # 12th bar — max hold
         result = strategy.update_position(
-            key, 100.5,
-            current_high=101.0, current_low=100.0,
+            key,
+            100.5,
+            current_high=101.0,
+            current_low=100.0,
         )
-        assert result == 'max_hold'
+        assert result == "max_hold"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -705,7 +872,7 @@ class TestStatelessDuration:
         """duration_out[0] reflects actual consecutive cluster bars."""
         n = 30
         close = np.full(n, 100.0)
-        sma20 = np.full(n, 110.0)   # NOT clustered
+        sma20 = np.full(n, 110.0)  # NOT clustered
         sma50 = np.full(n, 90.0)
         sma100 = np.full(n, 100.0)
         sma200 = np.full(n, 100.0)
@@ -724,9 +891,16 @@ class TestStatelessDuration:
         dur = np.zeros(1, dtype=np.int64)
 
         check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown, duration_out=dur,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown,
+            duration_out=dur,
         )
         assert dur[0] == 15
 
@@ -748,9 +922,16 @@ class TestStatelessDuration:
         dur = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown, duration_out=dur,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown,
+            duration_out=dur,
         )
         assert sig == 0
         assert dur[0] == 0
@@ -769,9 +950,16 @@ class TestStatelessDuration:
         dur = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
-            close, sma20, sma50, sma100, sma200, mom,
-            cluster_pct=0.03, min_duration=8,
-            in_cooldown_arr=cooldown, duration_out=dur,
+            close,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cluster_pct=0.03,
+            min_duration=8,
+            in_cooldown_arr=cooldown,
+            duration_out=dur,
         )
         assert sig == 0
         assert dur[0] == 0
@@ -784,37 +972,45 @@ class TestMaxHoldTfConversion:
         """MA cluster signal metadata has max_hold = 12 * 16 = 192."""
         from quantbox.strategy.vol_straddle.strategy import _TF_TO_15M
 
-        assert _TF_TO_15M == {'15m': 1, '1h': 4, '4h': 16}
+        assert _TF_TO_15M == {"15m": 1, "1h": 4, "4h": 16}
 
-        strategy = VolStraddleStrategy(VolStraddleConfig(
-            enable_15m=False, enable_1h=False, enable_4h=True,
-            ma_cluster_enabled=True,
-            ma_cluster_max_duration=0,
-        ))
+        strategy = VolStraddleStrategy(
+            VolStraddleConfig(
+                enable_15m=False,
+                enable_1h=False,
+                enable_4h=True,
+                ma_cluster_enabled=True,
+                ma_cluster_max_duration=0,
+            )
+        )
 
         # Build data where MA cluster fires
         n = 250
         data = {
-            'close': np.full(n, 100.0, dtype=np.float64),
-            'high': np.full(n, 101.0, dtype=np.float64),
-            'low': np.full(n, 99.0, dtype=np.float64),
+            "close": np.full(n, 100.0, dtype=np.float64),
+            "high": np.full(n, 101.0, dtype=np.float64),
+            "low": np.full(n, 99.0, dtype=np.float64),
         }
-        data['close'][-1] = 105.0  # breakout
+        data["close"][-1] = 105.0  # breakout
 
-        strategy.update_htf_data('TESTUSDT', data['close'], data['high'], data['low'])
+        strategy.update_htf_data("TESTUSDT", data["close"], data["high"], data["low"])
         strategy.update_market_data(
-            'TESTUSDT', np.ones(500), np.ones(500),
-            np.full(500, 101.0), np.full(500, 99.0),
+            "TESTUSDT",
+            np.ones(500),
+            np.ones(500),
+            np.full(500, 101.0),
+            np.full(500, 99.0),
         )
 
-        sig = strategy.on_bar('TESTUSDT', np.full(500, 100.0))
+        sig = strategy.on_bar("TESTUSDT", np.full(500, 100.0))
         if sig != 0:
-            meta = strategy.get_last_signal_meta('TESTUSDT')
-            assert meta['max_hold'] == 12 * 16  # 192 bars of 15m
+            meta = strategy.get_last_signal_meta("TESTUSDT")
+            assert meta["max_hold"] == 12 * 16  # 192 bars of 15m
 
     def test_vr_1h_max_hold_conversion(self):
         """VR 1h signal should have max_hold = 48 * 4 = 192."""
         from quantbox.strategy.vol_straddle.strategy import _TF_TO_15M
+
         cfg = VolStraddleConfig()
-        expected = cfg.get_max_hold('1h') * _TF_TO_15M['1h']
+        expected = cfg.get_max_hold("1h") * _TF_TO_15M["1h"]
         assert expected == 48 * 4  # 192

@@ -18,14 +18,14 @@ from datetime import datetime, timezone
 
 import requests
 
-logger = logging.getLogger('DiscordNotifier')
+logger = logging.getLogger("DiscordNotifier")
 
 # Discord embed color palette
-COLOR_GREEN = 0x00C853   # 수익 / 정상
-COLOR_RED = 0xFF1744     # 손실 / 위험
+COLOR_GREEN = 0x00C853  # 수익 / 정상
+COLOR_RED = 0xFF1744  # 손실 / 위험
 COLOR_YELLOW = 0xFFD600  # 경고
-COLOR_BLUE = 0x2979FF    # 정보
-COLOR_GRAY = 0x9E9E9E    # 중립
+COLOR_BLUE = 0x2979FF  # 정보
+COLOR_GRAY = 0x9E9E9E  # 중립
 
 
 class DiscordNotifier:
@@ -40,7 +40,7 @@ class DiscordNotifier:
     """
 
     def __init__(self, webhook_url: str | None = None):
-        self.webhook_url = webhook_url or os.getenv('DISCORD_WEBHOOK_URL')
+        self.webhook_url = webhook_url or os.getenv("DISCORD_WEBHOOK_URL")
         self.enabled = bool(self.webhook_url)
         # 일일 리포트 추적용
         self._last_daily_report: datetime | None = None
@@ -63,9 +63,9 @@ class DiscordNotifier:
         try:
             data: dict = {}
             if content:
-                data['content'] = content
+                data["content"] = content
             if embed:
-                data['embeds'] = [embed]
+                data["embeds"] = [embed]
 
             r = requests.post(self.webhook_url, json=data, timeout=5)
             return r.status_code == 204
@@ -75,8 +75,7 @@ class DiscordNotifier:
 
     # ==================== Bot Lifecycle ====================
 
-    def notify_start(self, mode: str, balance: float, leverage: int = 1,
-                     max_traders: int = 5):
+    def notify_start(self, mode: str, balance: float, leverage: int = 1, max_traders: int = 5):
         """봇 시작 알림.
 
         Args:
@@ -85,20 +84,21 @@ class DiscordNotifier:
             leverage: 레버리지 배수.
             max_traders: 최대 동시 트레이더 수.
         """
-        self.send(embed={
-            'title': '🚀 QuantBox 트레이딩 시작',
-            'color': COLOR_GREEN,
-            'fields': [
-                {'name': '모드', 'value': mode, 'inline': True},
-                {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
-                {'name': '레버리지', 'value': f'{leverage}x', 'inline': True},
-                {'name': '최대 슬롯', 'value': str(max_traders), 'inline': True},
-                {'name': '시작 시간', 'value': _now_str(), 'inline': True},
-            ],
-        })
+        self.send(
+            embed={
+                "title": "🚀 QuantBox 트레이딩 시작",
+                "color": COLOR_GREEN,
+                "fields": [
+                    {"name": "모드", "value": mode, "inline": True},
+                    {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
+                    {"name": "레버리지", "value": f"{leverage}x", "inline": True},
+                    {"name": "최대 슬롯", "value": str(max_traders), "inline": True},
+                    {"name": "시작 시간", "value": _now_str(), "inline": True},
+                ],
+            }
+        )
 
-    def notify_stop(self, reason: str, total_pnl: float = 0.0,
-                    n_trades: int = 0):
+    def notify_stop(self, reason: str, total_pnl: float = 0.0, n_trades: int = 0):
         """봇 종료 알림.
 
         Args:
@@ -107,23 +107,33 @@ class DiscordNotifier:
             n_trades: 총 트레이드 수.
         """
         color = COLOR_GREEN if total_pnl >= 0 else COLOR_RED
-        self.send(embed={
-            'title': '🛑 QuantBox 트레이딩 종료',
-            'color': color,
-            'fields': [
-                {'name': '사유', 'value': reason, 'inline': True},
-                {'name': '총 PnL', 'value': f'${total_pnl:+,.2f}', 'inline': True},
-                {'name': '총 거래', 'value': str(n_trades), 'inline': True},
-                {'name': '종료 시간', 'value': _now_str(), 'inline': True},
-            ],
-        })
+        self.send(
+            embed={
+                "title": "🛑 QuantBox 트레이딩 종료",
+                "color": color,
+                "fields": [
+                    {"name": "사유", "value": reason, "inline": True},
+                    {"name": "총 PnL", "value": f"${total_pnl:+,.2f}", "inline": True},
+                    {"name": "총 거래", "value": str(n_trades), "inline": True},
+                    {"name": "종료 시간", "value": _now_str(), "inline": True},
+                ],
+            }
+        )
 
     # ==================== Position Events ====================
 
-    def notify_open(self, symbol1: str, symbol2: str, direction: str,
-                    zscore: float, capital: float, slot_id: int = 0,
-                    leverage: int = 1, margin: float = 0.0,
-                    available_after: float = 0.0):
+    def notify_open(
+        self,
+        symbol1: str,
+        symbol2: str,
+        direction: str,
+        zscore: float,
+        capital: float,
+        slot_id: int = 0,
+        leverage: int = 1,
+        margin: float = 0.0,
+        available_after: float = 0.0,
+    ):
         """포지션 오픈 알림 (강화).
 
         Args:
@@ -137,35 +147,41 @@ class DiscordNotifier:
             margin: 마진 (실제 잠긴 자본).
             available_after: 진입 후 가용 잔고.
         """
-        color = COLOR_GREEN if 'LONG' in direction.upper() else COLOR_RED
+        color = COLOR_GREEN if "LONG" in direction.upper() else COLOR_RED
         fields = [
-            {'name': '슬롯', 'value': f'S{slot_id}', 'inline': True},
-            {'name': '페어', 'value': f'{symbol1}/{symbol2}', 'inline': True},
-            {'name': '방향', 'value': direction, 'inline': True},
-            {'name': 'Z-Score', 'value': f'{zscore:.2f}', 'inline': True},
-            {'name': '노셔널', 'value': f'${capital:,.2f}', 'inline': True},
-            {'name': '마진', 'value': f'${margin:,.2f}', 'inline': True},
+            {"name": "슬롯", "value": f"S{slot_id}", "inline": True},
+            {"name": "페어", "value": f"{symbol1}/{symbol2}", "inline": True},
+            {"name": "방향", "value": direction, "inline": True},
+            {"name": "Z-Score", "value": f"{zscore:.2f}", "inline": True},
+            {"name": "노셔널", "value": f"${capital:,.2f}", "inline": True},
+            {"name": "마진", "value": f"${margin:,.2f}", "inline": True},
         ]
         if leverage > 1:
-            fields.append(
-                {'name': '레버리지', 'value': f'{leverage}x', 'inline': True}
-            )
+            fields.append({"name": "레버리지", "value": f"{leverage}x", "inline": True})
         if available_after > 0:
-            fields.append(
-                {'name': '잔여 가용', 'value': f'${available_after:,.2f}', 'inline': True}
-            )
+            fields.append({"name": "잔여 가용", "value": f"${available_after:,.2f}", "inline": True})
 
-        self.send(embed={
-            'title': '📈 포지션 오픈',
-            'color': color,
-            'fields': fields,
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": "📈 포지션 오픈",
+                "color": color,
+                "fields": fields,
+                "footer": {"text": _now_str()},
+            }
+        )
 
-    def notify_close(self, symbol1: str, symbol2: str, pnl: float,
-                     pnl_pct: float, reason: str, slot_id: int = 0,
-                     holding_time: str = '', cumulative_pnl: float = 0.0,
-                     balance_after: float = 0.0):
+    def notify_close(
+        self,
+        symbol1: str,
+        symbol2: str,
+        pnl: float,
+        pnl_pct: float,
+        reason: str,
+        slot_id: int = 0,
+        holding_time: str = "",
+        cumulative_pnl: float = 0.0,
+        balance_after: float = 0.0,
+    ):
         """포지션 청산 알림 (강화).
 
         Args:
@@ -180,42 +196,41 @@ class DiscordNotifier:
             balance_after: 청산 후 잔고.
         """
         color = COLOR_GREEN if pnl >= 0 else COLOR_RED
-        emoji = '✅' if pnl >= 0 else '❌'
+        emoji = "✅" if pnl >= 0 else "❌"
 
         fields = [
-            {'name': '슬롯', 'value': f'S{slot_id}', 'inline': True},
-            {'name': '페어', 'value': f'{symbol1}/{symbol2}', 'inline': True},
-            {'name': 'PnL', 'value': f'${pnl:+,.2f} ({pnl_pct:+.2f}%)', 'inline': True},
-            {'name': '사유', 'value': reason, 'inline': True},
+            {"name": "슬롯", "value": f"S{slot_id}", "inline": True},
+            {"name": "페어", "value": f"{symbol1}/{symbol2}", "inline": True},
+            {"name": "PnL", "value": f"${pnl:+,.2f} ({pnl_pct:+.2f}%)", "inline": True},
+            {"name": "사유", "value": reason, "inline": True},
         ]
         if holding_time:
-            fields.append(
-                {'name': '보유 시간', 'value': holding_time, 'inline': True}
-            )
+            fields.append({"name": "보유 시간", "value": holding_time, "inline": True})
         if cumulative_pnl != 0.0:
-            fields.append(
-                {'name': '누적 PnL', 'value': f'${cumulative_pnl:+,.2f}', 'inline': True}
-            )
+            fields.append({"name": "누적 PnL", "value": f"${cumulative_pnl:+,.2f}", "inline": True})
         if balance_after > 0:
-            fields.append(
-                {'name': '잔고', 'value': f'${balance_after:,.2f}', 'inline': True}
-            )
+            fields.append({"name": "잔고", "value": f"${balance_after:,.2f}", "inline": True})
 
-        self.send(embed={
-            'title': f'{emoji} 포지션 청산',
-            'color': color,
-            'fields': fields,
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": f"{emoji} 포지션 청산",
+                "color": color,
+                "fields": fields,
+                "footer": {"text": _now_str()},
+            }
+        )
 
     # ==================== Cycle Summary ====================
 
-    def notify_cycle_summary(self, slots_info: list[dict],
-                             available_capital: float,
-                             total_capital: float,
-                             total_unrealized_pnl: float = 0.0,
-                             session_pnl: float = 0.0,
-                             n_trades_session: int = 0):
+    def notify_cycle_summary(
+        self,
+        slots_info: list[dict],
+        available_capital: float,
+        total_capital: float,
+        total_unrealized_pnl: float = 0.0,
+        session_pnl: float = 0.0,
+        n_trades_session: int = 0,
+    ):
         """사이클 요약 알림 — 매 run_cycle 완료 시.
 
         슬롯 상태를 한 눈에 보여주는 대시보드.
@@ -232,18 +247,16 @@ class DiscordNotifier:
         # Build slot status lines
         slot_lines = []
         for s in slots_info:
-            if s['status'] == 'active':
+            if s["status"] == "active":
                 pnl_str = f"${s.get('unrealized_pnl', 0):+,.2f}"
-                hours = s.get('holding_hours', 0)
-                pair = s.get('pair', '?/?')
+                hours = s.get("holding_hours", 0)
+                pair = s.get("pair", "?/?")
                 z_str = f"z={s.get('current_z', 0):.1f}"
-                slot_lines.append(
-                    f"🟢 S{s['slot_id']}: {pair} | {pnl_str} | {hours:.1f}h | {z_str}"
-                )
+                slot_lines.append(f"🟢 S{s['slot_id']}: {pair} | {pnl_str} | {hours:.1f}h | {z_str}")
             else:
                 slot_lines.append(f"⚪ S{s['slot_id']}: 대기")
 
-        slots_text = '\n'.join(slot_lines) if slot_lines else '없음'
+        slots_text = "\n".join(slot_lines) if slot_lines else "없음"
 
         # Decide color: green if unrealized+session positive, red if negative
         net = total_unrealized_pnl + session_pnl
@@ -252,32 +265,40 @@ class DiscordNotifier:
         capital_pct = (available_capital / total_capital * 100) if total_capital > 0 else 0
 
         fields = [
-            {'name': '📊 슬롯 상태', 'value': f'```\n{slots_text}\n```', 'inline': False},
-            {'name': '가용 자본', 'value': f'${available_capital:,.2f} ({capital_pct:.0f}%)', 'inline': True},
-            {'name': '총 자본', 'value': f'${total_capital:,.2f}', 'inline': True},
-            {'name': '미실현 PnL', 'value': f'${total_unrealized_pnl:+,.2f}', 'inline': True},
+            {"name": "📊 슬롯 상태", "value": f"```\n{slots_text}\n```", "inline": False},
+            {"name": "가용 자본", "value": f"${available_capital:,.2f} ({capital_pct:.0f}%)", "inline": True},
+            {"name": "총 자본", "value": f"${total_capital:,.2f}", "inline": True},
+            {"name": "미실현 PnL", "value": f"${total_unrealized_pnl:+,.2f}", "inline": True},
         ]
         if session_pnl != 0.0 or n_trades_session > 0:
-            fields.append(
-                {'name': '세션 PnL', 'value': f'${session_pnl:+,.2f} ({n_trades_session}건)', 'inline': True}
-            )
+            fields.append({"name": "세션 PnL", "value": f"${session_pnl:+,.2f} ({n_trades_session}건)", "inline": True})
 
-        self.send(embed={
-            'title': '📋 사이클 요약',
-            'color': color,
-            'fields': fields,
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": "📋 사이클 요약",
+                "color": color,
+                "fields": fields,
+                "footer": {"text": _now_str()},
+            }
+        )
 
     # ==================== Daily Report ====================
 
-    def notify_daily_report(self, total_balance: float,
-                            daily_pnl: float, daily_return_pct: float,
-                            cumulative_pnl: float, cumulative_return_pct: float,
-                            n_trades_today: int, n_trades_total: int,
-                            win_rate: float, max_drawdown_pct: float,
-                            active_slots: int, max_slots: int,
-                            leverage: int = 1):
+    def notify_daily_report(
+        self,
+        total_balance: float,
+        daily_pnl: float,
+        daily_return_pct: float,
+        cumulative_pnl: float,
+        cumulative_return_pct: float,
+        n_trades_today: int,
+        n_trades_total: int,
+        win_rate: float,
+        max_drawdown_pct: float,
+        active_slots: int,
+        max_slots: int,
+        leverage: int = 1,
+    ):
         """24시간 일일 리포트.
 
         Args:
@@ -295,24 +316,30 @@ class DiscordNotifier:
             leverage: 레버리지 배수.
         """
         color = COLOR_GREEN if daily_pnl >= 0 else COLOR_RED
-        emoji = '📈' if daily_pnl >= 0 else '📉'
+        emoji = "📈" if daily_pnl >= 0 else "📉"
 
-        self.send(embed={
-            'title': f'{emoji} 일일 리포트',
-            'color': color,
-            'fields': [
-                {'name': '총 잔고', 'value': f'${total_balance:,.2f}', 'inline': True},
-                {'name': '당일 PnL', 'value': f'${daily_pnl:+,.2f} ({daily_return_pct:+.2f}%)', 'inline': True},
-                {'name': '누적 PnL', 'value': f'${cumulative_pnl:+,.2f} ({cumulative_return_pct:+.2f}%)', 'inline': True},
-                {'name': '당일 거래', 'value': str(n_trades_today), 'inline': True},
-                {'name': '총 거래', 'value': str(n_trades_total), 'inline': True},
-                {'name': '승률', 'value': f'{win_rate:.1f}%', 'inline': True},
-                {'name': '최대 DD', 'value': f'{max_drawdown_pct:.2f}%', 'inline': True},
-                {'name': '슬롯', 'value': f'{active_slots}/{max_slots}', 'inline': True},
-                {'name': '레버리지', 'value': f'{leverage}x', 'inline': True},
-            ],
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": f"{emoji} 일일 리포트",
+                "color": color,
+                "fields": [
+                    {"name": "총 잔고", "value": f"${total_balance:,.2f}", "inline": True},
+                    {"name": "당일 PnL", "value": f"${daily_pnl:+,.2f} ({daily_return_pct:+.2f}%)", "inline": True},
+                    {
+                        "name": "누적 PnL",
+                        "value": f"${cumulative_pnl:+,.2f} ({cumulative_return_pct:+.2f}%)",
+                        "inline": True,
+                    },
+                    {"name": "당일 거래", "value": str(n_trades_today), "inline": True},
+                    {"name": "총 거래", "value": str(n_trades_total), "inline": True},
+                    {"name": "승률", "value": f"{win_rate:.1f}%", "inline": True},
+                    {"name": "최대 DD", "value": f"{max_drawdown_pct:.2f}%", "inline": True},
+                    {"name": "슬롯", "value": f"{active_slots}/{max_slots}", "inline": True},
+                    {"name": "레버리지", "value": f"{leverage}x", "inline": True},
+                ],
+                "footer": {"text": _now_str()},
+            }
+        )
         self._last_daily_report = datetime.now(timezone.utc)
 
     def should_send_daily_report(self) -> bool:
@@ -334,12 +361,14 @@ class DiscordNotifier:
         Args:
             error: 에러 메시지 (500자 제한).
         """
-        self.send(embed={
-            'title': '🚨 에러 발생',
-            'color': COLOR_RED,
-            'description': error[:500],
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": "🚨 에러 발생",
+                "color": COLOR_RED,
+                "description": error[:500],
+                "footer": {"text": _now_str()},
+            }
+        )
 
     def notify_warning(self, title: str, message: str):
         """경고 알림.
@@ -348,12 +377,14 @@ class DiscordNotifier:
             title: 경고 제목.
             message: 경고 상세 메시지.
         """
-        self.send(embed={
-            'title': f'⚠️ {title}',
-            'color': COLOR_YELLOW,
-            'description': message[:500],
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": f"⚠️ {title}",
+                "color": COLOR_YELLOW,
+                "description": message[:500],
+                "footer": {"text": _now_str()},
+            }
+        )
 
     def notify_insufficient_balance(self, available: float, required: float):
         """잔고 부족 경고.
@@ -362,15 +393,17 @@ class DiscordNotifier:
             available: 가용 잔고.
             required: 최소 필요 금액.
         """
-        self.send(embed={
-            'title': '⚠️ 잔고 부족',
-            'color': COLOR_YELLOW,
-            'fields': [
-                {'name': '가용 잔고', 'value': f'${available:,.2f}', 'inline': True},
-                {'name': '최소 필요', 'value': f'${required:,.2f}', 'inline': True},
-            ],
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": "⚠️ 잔고 부족",
+                "color": COLOR_YELLOW,
+                "fields": [
+                    {"name": "가용 잔고", "value": f"${available:,.2f}", "inline": True},
+                    {"name": "최소 필요", "value": f"${required:,.2f}", "inline": True},
+                ],
+                "footer": {"text": _now_str()},
+            }
+        )
 
     def notify_all_slots_occupied(self, slots_info: list[dict]):
         """모든 슬롯 사용 중 알림.
@@ -380,20 +413,20 @@ class DiscordNotifier:
         """
         slot_lines = []
         for s in slots_info:
-            pair = s.get('pair', '?/?')
-            hours = s.get('holding_hours', 0)
+            pair = s.get("pair", "?/?")
+            hours = s.get("holding_hours", 0)
             slot_lines.append(f"S{s['slot_id']}: {pair} ({hours:.1f}h)")
 
-        self.send(embed={
-            'title': '🔒 모든 슬롯 사용 중',
-            'color': COLOR_YELLOW,
-            'description': '\n'.join(slot_lines),
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": "🔒 모든 슬롯 사용 중",
+                "color": COLOR_YELLOW,
+                "description": "\n".join(slot_lines),
+                "footer": {"text": _now_str()},
+            }
+        )
 
-    def notify_drawdown_alert(self, current_dd_pct: float,
-                               threshold_pct: float,
-                               balance: float):
+    def notify_drawdown_alert(self, current_dd_pct: float, threshold_pct: float, balance: float):
         """최대 낙폭 임계치 경고.
 
         Args:
@@ -401,18 +434,20 @@ class DiscordNotifier:
             threshold_pct: 경고 임계치 (%).
             balance: 현재 잔고.
         """
-        self.send(embed={
-            'title': '🔴 낙폭 경고',
-            'color': COLOR_RED,
-            'fields': [
-                {'name': '현재 낙폭', 'value': f'{current_dd_pct:.2f}%', 'inline': True},
-                {'name': '임계치', 'value': f'{threshold_pct:.2f}%', 'inline': True},
-                {'name': '잔고', 'value': f'${balance:,.2f}', 'inline': True},
-            ],
-            'footer': {'text': _now_str()},
-        })
+        self.send(
+            embed={
+                "title": "🔴 낙폭 경고",
+                "color": COLOR_RED,
+                "fields": [
+                    {"name": "현재 낙폭", "value": f"{current_dd_pct:.2f}%", "inline": True},
+                    {"name": "임계치", "value": f"{threshold_pct:.2f}%", "inline": True},
+                    {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
+                ],
+                "footer": {"text": _now_str()},
+            }
+        )
 
 
 def _now_str() -> str:
     """현재 UTC 시각 문자열."""
-    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

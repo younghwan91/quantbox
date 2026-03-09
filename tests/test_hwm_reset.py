@@ -17,13 +17,15 @@ def _make_scalper(**config_overrides):
 
     mock_client = MagicMock()
     mock_client.futures_account_balance.return_value = [
-        {'asset': 'USDT', 'availableBalance': '2052.70'},
+        {"asset": "USDT", "availableBalance": "2052.70"},
     ]
-    mock_client._request_futures_api.return_value = {'algoId': 99999}
+    mock_client._request_futures_api.return_value = {"algoId": 99999}
 
-    with patch('quantbox.scalper.load_dotenv'), \
-         patch('quantbox.scalper.Client', return_value=mock_client), \
-         patch('quantbox.scalper.LimitOrderChaser'):
+    with (
+        patch("quantbox.scalper.load_dotenv"),
+        patch("quantbox.scalper.Client", return_value=mock_client),
+        patch("quantbox.scalper.LimitOrderChaser"),
+    ):
         scalper = RubberBandScalper(paper_mode=True)
 
     scalper.client = mock_client
@@ -44,19 +46,28 @@ class TestHWMResetOnRestart:
 
         # Simulate: old state with high HWM but 0 positions
         state = {
-            'version': '2.0.0',
-            'saved_at': '2026-02-21T00:00:00+00:00',
-            'paper_mode': True,
-            'paper_balance': 2052.70,
-            'initial_balance': 2200.0,
-            'high_water_mark': 2283.80,  # Stale HWM from previous session
-            'positions': {},  # No positions
-            'trade_history': [{'pnl_usd': -10.0, 'symbol': 'TEST', 'signal': 1,
-                               'entry_price': 100, 'exit_price': 99,
-                               'pnl_pct': -1.0, 'notional': 100,
-                               'bars_held': 5, 'reason': 'stop_loss',
-                               'time': '2026-02-21T00:00:00'}],
-            'cycle_count': 0,
+            "version": "2.0.0",
+            "saved_at": "2026-02-21T00:00:00+00:00",
+            "paper_mode": True,
+            "paper_balance": 2052.70,
+            "initial_balance": 2200.0,
+            "high_water_mark": 2283.80,  # Stale HWM from previous session
+            "positions": {},  # No positions
+            "trade_history": [
+                {
+                    "pnl_usd": -10.0,
+                    "symbol": "TEST",
+                    "signal": 1,
+                    "entry_price": 100,
+                    "exit_price": 99,
+                    "pnl_pct": -1.0,
+                    "notional": 100,
+                    "bars_held": 5,
+                    "reason": "stop_loss",
+                    "time": "2026-02-21T00:00:00",
+                }
+            ],
+            "cycle_count": 0,
         }
         save_scalper_state(state, filepath=PAPER_STATE_FILE)
 
@@ -68,9 +79,7 @@ class TestHWMResetOnRestart:
         )
 
         # Trade history should be cleared — old trades are settled
-        assert scalper._trade_history == [], (
-            "Trade history should be empty for fresh session with 0 positions"
-        )
+        assert scalper._trade_history == [], "Trade history should be empty for fresh session with 0 positions"
 
         # DD check should NOT trigger halt
         risk_blocked = scalper._check_risk_limits(2052.70)
@@ -85,23 +94,29 @@ class TestHWMResetOnRestart:
         scalper = _make_scalper(max_drawdown_pct=0.10)
 
         state = {
-            'version': '2.0.0',
-            'saved_at': '2026-02-21T00:00:00+00:00',
-            'paper_mode': True,
-            'paper_balance': 2052.70,
-            'initial_balance': 2200.0,
-            'high_water_mark': 2283.80,
-            'positions': {
-                'ETHUSDT': {
-                    'signal': 1, 'entry_price': 2500.0, 'notional': 100.0,
-                    'leverage': 2, 'move_size': 0.05, 'bars_held': 3,
-                    'best_pnl': 0.01, 'partial_closed': False,
-                    'server_sl_order_id': 'sl_1', 'server_tp_order_id': None,
-                    'entry_stop_mult': 0.382,
+            "version": "2.0.0",
+            "saved_at": "2026-02-21T00:00:00+00:00",
+            "paper_mode": True,
+            "paper_balance": 2052.70,
+            "initial_balance": 2200.0,
+            "high_water_mark": 2283.80,
+            "positions": {
+                "ETHUSDT": {
+                    "signal": 1,
+                    "entry_price": 2500.0,
+                    "notional": 100.0,
+                    "leverage": 2,
+                    "move_size": 0.05,
+                    "bars_held": 3,
+                    "best_pnl": 0.01,
+                    "partial_closed": False,
+                    "server_sl_order_id": "sl_1",
+                    "server_tp_order_id": None,
+                    "entry_stop_mult": 0.382,
                 },
             },
-            'trade_history': [],
-            'cycle_count': 0,
+            "trade_history": [],
+            "cycle_count": 0,
         }
         save_scalper_state(state, filepath=PAPER_STATE_FILE)
 
@@ -120,18 +135,41 @@ class TestHWMResetOnRestart:
         scalper = _make_scalper()
 
         trades = [
-            {'pnl_usd': 15.0, 'symbol': 'A', 'signal': 1, 'entry_price': 100,
-             'exit_price': 101, 'pnl_pct': 1.0, 'notional': 100,
-             'bars_held': 5, 'reason': 'target', 'time': '2026-02-21T00:00:00'},
-            {'pnl_usd': -10.0, 'symbol': 'B', 'signal': -1, 'entry_price': 50,
-             'exit_price': 51, 'pnl_pct': -2.0, 'notional': 50,
-             'bars_held': 3, 'reason': 'stop_loss', 'time': '2026-02-21T01:00:00'},
+            {
+                "pnl_usd": 15.0,
+                "symbol": "A",
+                "signal": 1,
+                "entry_price": 100,
+                "exit_price": 101,
+                "pnl_pct": 1.0,
+                "notional": 100,
+                "bars_held": 5,
+                "reason": "target",
+                "time": "2026-02-21T00:00:00",
+            },
+            {
+                "pnl_usd": -10.0,
+                "symbol": "B",
+                "signal": -1,
+                "entry_price": 50,
+                "exit_price": 51,
+                "pnl_pct": -2.0,
+                "notional": 50,
+                "bars_held": 3,
+                "reason": "stop_loss",
+                "time": "2026-02-21T01:00:00",
+            },
         ]
         state = {
-            'version': '2.0.0', 'saved_at': '2026-02-21T00:00:00+00:00',
-            'paper_mode': True, 'paper_balance': 2000.0,
-            'initial_balance': 2000.0, 'high_water_mark': 2500.0,
-            'positions': {}, 'trade_history': trades, 'cycle_count': 0,
+            "version": "2.0.0",
+            "saved_at": "2026-02-21T00:00:00+00:00",
+            "paper_mode": True,
+            "paper_balance": 2000.0,
+            "initial_balance": 2000.0,
+            "high_water_mark": 2500.0,
+            "positions": {},
+            "trade_history": trades,
+            "cycle_count": 0,
         }
         save_scalper_state(state, filepath=PAPER_STATE_FILE)
 

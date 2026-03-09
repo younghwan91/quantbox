@@ -12,17 +12,21 @@ import time
 
 from binance.exceptions import BinanceAPIException
 
-logger = logging.getLogger('Scalper')
+logger = logging.getLogger("Scalper")
 
 
 class BracketMixin:
     """Mixin: Server-side bracket orders (SL/TP) via Algo Order API."""
 
     def _place_algo_order(
-        self, symbol: str, side: str, order_type: str,
-        quantity: float, trigger_price: float,
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        trigger_price: float,
         limit_price: float | None = None,
-        label: str = 'order',
+        label: str = "order",
         position_side: str | None = None,
     ) -> str | None:
         """Place a conditional order via Binance Algo Order API.
@@ -48,22 +52,22 @@ class BracketMixin:
             return f"paper_{label}_{int(time.time() * 1000)}"
 
         params: dict = {
-            'algoType': 'CONDITIONAL',
-            'symbol': symbol,
-            'side': side,
-            'type': order_type,
-            'quantity': str(quantity),
-            'triggerPrice': str(trigger_price),
+            "algoType": "CONDITIONAL",
+            "symbol": symbol,
+            "side": side,
+            "type": order_type,
+            "quantity": str(quantity),
+            "triggerPrice": str(trigger_price),
         }
         # Hedge Mode: positionSide is mutually exclusive with reduceOnly
         if position_side is not None:
-            params['positionSide'] = position_side
+            params["positionSide"] = position_side
         else:
-            params['reduceOnly'] = 'true'
+            params["reduceOnly"] = "true"
 
         if limit_price is not None:
-            params['price'] = str(limit_price)
-            params['timeInForce'] = 'GTC'
+            params["price"] = str(limit_price)
+            params["timeInForce"] = "GTC"
 
         lp_str = f"${limit_price:.6f}" if limit_price is not None else "N/A"
         logger.debug(
@@ -74,9 +78,12 @@ class BracketMixin:
 
         try:
             resp = self.client._request_futures_api(
-                'post', 'algoOrder', signed=True, data=params,
+                "post",
+                "algoOrder",
+                signed=True,
+                data=params,
             )
-            algo_id = str(resp['algoId'])
+            algo_id = str(resp["algoId"])
             logger.info(
                 f"[{symbol}] SERVER {label.upper()} placed via Algo API: "
                 f"{side} {quantity:.6f} @ trigger=${trigger_price:.6f} "
@@ -85,19 +92,21 @@ class BracketMixin:
             return algo_id
         except Exception as e:
             err_str = str(e)
-            logger.error(
-                f"[{symbol}] SERVER {label.upper()} FAILED: {e}. "
-                f"params={params}"
-            )
+            logger.error(f"[{symbol}] SERVER {label.upper()} FAILED: {e}. params={params}")
             # -2021: "Order would immediately trigger" — price already past
             # the stop level. Return sentinel so caller can force-close.
-            if '-2021' in err_str:
-                return 'WOULD_TRIGGER'
+            if "-2021" in err_str:
+                return "WOULD_TRIGGER"
             return None
 
     def _place_server_stop_loss(
-        self, symbol: str, signal: int, quantity: float,
-        entry_price: float, move_size: float, stop_mult: float,
+        self,
+        symbol: str,
+        signal: int,
+        quantity: float,
+        entry_price: float,
+        move_size: float,
+        stop_mult: float,
         position_side: str | None = None,
     ) -> str | None:
         """Place a server-side stop-loss order on Binance as a safety net.
@@ -130,65 +139,71 @@ class BracketMixin:
         if signal == 1:  # Long: stop below entry
             stop_price = entry_price * (1.0 - stop_distance)
             limit_price = stop_price * (1.0 - buffer)  # Sell limit below stop
-            close_side = 'SELL'
+            close_side = "SELL"
         else:  # Short: stop above entry
             stop_price = entry_price * (1.0 + stop_distance)
             limit_price = stop_price * (1.0 + buffer)  # Buy limit above stop
-            close_side = 'BUY'
+            close_side = "BUY"
 
         info = self.get_symbol_info(symbol)
-        tick_size = info.get('tick_size', 0.01)
-        price_precision = info.get('price_precision', 2)
+        tick_size = info.get("tick_size", 0.01)
+        price_precision = info.get("price_precision", 2)
 
         # Round prices to tick size
-        stop_price = round(
-            round(stop_price / tick_size) * tick_size, price_precision
-        )
-        limit_price = round(
-            round(limit_price / tick_size) * tick_size, price_precision
-        )
+        stop_price = round(round(stop_price / tick_size) * tick_size, price_precision)
+        limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
 
         dist_pct = stop_distance * 100
         logger.info(
             f"[{symbol}] SL calc: entry=${entry_price:.4f} "
-            f"move={move_size*100:.2f}% × stop_mult={stop_mult:.4f} "
+            f"move={move_size * 100:.2f}% × stop_mult={stop_mult:.4f} "
             f"→ dist={dist_pct:.2f}% trigger=${stop_price:.4f} "
             f"limit=${limit_price:.4f} side={close_side}"
         )
 
         algo_id = self._place_algo_order(
-            symbol=symbol, side=close_side, order_type='STOP',
-            quantity=quantity, trigger_price=stop_price,
-            limit_price=limit_price, label='stop-loss',
+            symbol=symbol,
+            side=close_side,
+            order_type="STOP",
+            quantity=quantity,
+            trigger_price=stop_price,
+            limit_price=limit_price,
+            label="stop-loss",
             position_side=position_side,
         )
-        if algo_id == 'WOULD_TRIGGER':
+        if algo_id == "WOULD_TRIGGER":
             logger.error(
                 f"[{symbol}] SL WOULD IMMEDIATELY TRIGGER — "
                 f"price already past stop level ${stop_price:.4f}. "
                 f"Returning sentinel for force-close."
             )
-            self.discord.send(content=(
-                f"\U0001f6a8 **SL 즉시체결** [{symbol}] — "
-                f"현재가가 SL ${stop_price:.4f}을 이미 이탈. "
-                f"강제 청산 필요."
-            ))
-            return 'WOULD_TRIGGER'
-        if algo_id is None:
-            logger.error(
-                f"[{symbol}] Position is UNPROTECTED — "
-                f"client-side stop still active."
+            self.discord.send(
+                content=(
+                    f"\U0001f6a8 **SL 즉시체결** [{symbol}] — "
+                    f"현재가가 SL ${stop_price:.4f}을 이미 이탈. "
+                    f"강제 청산 필요."
+                )
             )
-            self.discord.send(content=(
-                f"\u26a0\ufe0f **서버 SL 실패** [{symbol}] — "
-                f"거래소측 보호주문 없음 (클라이언트 SL만 작동). "
-                f"다음 사이클에 재시도."
-            ))
+            return "WOULD_TRIGGER"
+        if algo_id is None:
+            logger.error(f"[{symbol}] Position is UNPROTECTED — client-side stop still active.")
+            self.discord.send(
+                content=(
+                    f"\u26a0\ufe0f **서버 SL 실패** [{symbol}] — "
+                    f"거래소측 보호주문 없음 (클라이언트 SL만 작동). "
+                    f"다음 사이클에 재시도."
+                )
+            )
         return algo_id
 
     def _place_server_take_profit(
-        self, symbol: str, signal: int, quantity: float,
-        entry_price: float, move_size: float, target_retrace: float,
+        self,
+        symbol: str,
+        signal: int,
+        quantity: float,
+        entry_price: float,
+        move_size: float,
+        target_retrace: float,
         position_side: str | None = None,
     ) -> str | None:
         """Place a server-side take-profit order on Binance.
@@ -220,47 +235,43 @@ class BracketMixin:
         if signal == 1:  # Long: TP above entry
             trigger_price = entry_price * (1.0 + target_distance)
             limit_price = trigger_price * (1.0 - buffer)
-            close_side = 'SELL'
+            close_side = "SELL"
         else:  # Short: TP below entry
             trigger_price = entry_price * (1.0 - target_distance)
             limit_price = trigger_price * (1.0 + buffer)
-            close_side = 'BUY'
+            close_side = "BUY"
 
         info = self.get_symbol_info(symbol)
-        tick_size = info.get('tick_size', 0.01)
-        price_precision = info.get('price_precision', 2)
+        tick_size = info.get("tick_size", 0.01)
+        price_precision = info.get("price_precision", 2)
 
         # Round prices to tick size
-        trigger_price = round(
-            round(trigger_price / tick_size) * tick_size, price_precision
-        )
-        limit_price = round(
-            round(limit_price / tick_size) * tick_size, price_precision
-        )
+        trigger_price = round(round(trigger_price / tick_size) * tick_size, price_precision)
+        limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
 
         dist_pct = target_distance * 100
         logger.info(
             f"[{symbol}] TP calc: entry=${entry_price:.4f} "
-            f"move={move_size*100:.2f}% × retrace={target_retrace:.3f} "
+            f"move={move_size * 100:.2f}% × retrace={target_retrace:.3f} "
             f"→ dist={dist_pct:.2f}% trigger=${trigger_price:.4f} "
             f"limit=${limit_price:.4f} side={close_side}"
         )
 
         algo_id = self._place_algo_order(
-            symbol=symbol, side=close_side, order_type='TAKE_PROFIT',
-            quantity=quantity, trigger_price=trigger_price,
-            limit_price=limit_price, label='take-profit',
+            symbol=symbol,
+            side=close_side,
+            order_type="TAKE_PROFIT",
+            quantity=quantity,
+            trigger_price=trigger_price,
+            limit_price=limit_price,
+            label="take-profit",
             position_side=position_side,
         )
         if algo_id is None:
-            logger.warning(
-                f"[{symbol}] Server TP failed — "
-                f"will rely on client-side TP check."
-            )
+            logger.warning(f"[{symbol}] Server TP failed — will rely on client-side TP check.")
         return algo_id
 
-    def _cancel_server_order(self, symbol: str, order_id: str,
-                             label: str = 'order') -> None:
+    def _cancel_server_order(self, symbol: str, order_id: str, label: str = "order") -> None:
         """Cancel a server-side algo order (stop-loss or take-profit).
 
         Uses Binance Algo Order API (DELETE /fapi/v1/algoOrder).
@@ -272,47 +283,40 @@ class BracketMixin:
             order_id: The algoId to cancel.
             label: Description for logging (e.g. 'stop-loss', 'take-profit').
         """
-        if self.paper_mode or not order_id or order_id.startswith('paper_'):
+        if self.paper_mode or not order_id or order_id.startswith("paper_"):
             return
 
         try:
             resp = self.client._request_futures_api(
-                'delete', 'algoOrder', signed=True,
-                data={'algoId': int(order_id)},
+                "delete",
+                "algoOrder",
+                signed=True,
+                data={"algoId": int(order_id)},
             )
-            logger.info(
-                f"[{symbol}] Server {label} cancelled: "
-                f"algoId={order_id} resp={resp}"
-            )
+            logger.info(f"[{symbol}] Server {label} cancelled: algoId={order_id} resp={resp}")
         except BinanceAPIException as e:
             err_str = str(e)
-            if 'Unknown' in err_str or '-2011' in err_str or '-25029' in err_str:
+            if "Unknown" in err_str or "-2011" in err_str or "-25029" in err_str:
                 # Already cancelled, filled, or expired — OK
-                logger.debug(
-                    f"[{symbol}] Server {label} already gone: "
-                    f"algoId={order_id} ({e})"
-                )
+                logger.debug(f"[{symbol}] Server {label} already gone: algoId={order_id} ({e})")
             else:
-                logger.warning(
-                    f"[{symbol}] Failed to cancel server {label}: "
-                    f"algoId={order_id} error={e}"
-                )
+                logger.warning(f"[{symbol}] Failed to cancel server {label}: algoId={order_id} error={e}")
         except Exception as e:
-            logger.warning(
-                f"[{symbol}] Unexpected error cancelling server {label}: "
-                f"algoId={order_id} error={e}"
-            )
+            logger.warning(f"[{symbol}] Unexpected error cancelling server {label}: algoId={order_id} error={e}")
 
     def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
         """Cancel the server-side stop-loss."""
-        self._cancel_server_order(symbol, order_id, 'stop-loss')
+        self._cancel_server_order(symbol, order_id, "stop-loss")
 
     def _cancel_server_take_profit(self, symbol: str, order_id: str) -> None:
         """Cancel the server-side take-profit."""
-        self._cancel_server_order(symbol, order_id, 'take-profit')
+        self._cancel_server_order(symbol, order_id, "take-profit")
 
     def _lookup_actual_fill(
-        self, symbol: str, expected_qty: str, order_type: str,
+        self,
+        symbol: str,
+        expected_qty: str,
+        order_type: str,
     ) -> dict | None:
         """Look up actual fill price/qty from recent account trades.
 
@@ -331,7 +335,8 @@ class BracketMixin:
             return None
         try:
             recent_trades = self.client.futures_account_trades(
-                symbol=symbol, limit=20,
+                symbol=symbol,
+                limit=20,
             )
             if not recent_trades:
                 return None
@@ -339,25 +344,23 @@ class BracketMixin:
             # Find the most recent trade with realized PnL (reduce-only fill)
             expected_q = float(expected_qty) if expected_qty else 0
             for t in reversed(recent_trades):
-                rpnl = float(t.get('realizedPnl', '0'))
-                tqty = float(t.get('qty', '0'))
+                rpnl = float(t.get("realizedPnl", "0"))
+                tqty = float(t.get("qty", "0"))
                 if rpnl != 0 and abs(tqty - expected_q) / max(expected_q, 1e-8) < 0.05:
                     return {
-                        'price': float(t['price']),
-                        'qty': tqty,
+                        "price": float(t["price"]),
+                        "qty": tqty,
                     }
             # Broader fallback: any recent trade with realized PnL
             for t in reversed(recent_trades):
-                rpnl = float(t.get('realizedPnl', '0'))
+                rpnl = float(t.get("realizedPnl", "0"))
                 if rpnl != 0:
                     return {
-                        'price': float(t['price']),
-                        'qty': float(t.get('qty', '0')),
+                        "price": float(t["price"]),
+                        "qty": float(t.get("qty", "0")),
                     }
         except Exception as e:
-            logger.warning(
-                f"[{symbol}] Failed to lookup actual fill: {e}"
-            )
+            logger.warning(f"[{symbol}] Failed to lookup actual fill: {e}")
         return None
 
     def _check_order_filled(self, symbol: str, order_id: str) -> dict | None:
@@ -377,32 +380,33 @@ class BracketMixin:
         Returns a dict with 'avgPrice' and 'executedQty' if filled,
         None otherwise.
         """
-        if self.paper_mode or not order_id or order_id.startswith('paper_'):
+        if self.paper_mode or not order_id or order_id.startswith("paper_"):
             return None
 
         try:
             resp = self.client._request_futures_api(
-                'get', 'algoOrder', signed=True,
-                data={'algoId': int(order_id)},
+                "get",
+                "algoOrder",
+                signed=True,
+                data={"algoId": int(order_id)},
             )
-            algo_status = resp.get('algoStatus', '')
+            algo_status = resp.get("algoStatus", "")
             logger.info(
-                f"[{symbol}] Algo order check: algoId={order_id} "
-                f"status={algo_status} type={resp.get('orderType', '?')}"
+                f"[{symbol}] Algo order check: algoId={order_id} status={algo_status} type={resp.get('orderType', '?')}"
             )
 
             # v14.0.1: FINISHED is the terminal state for a conditional
             # order that has triggered and whose sub-order has filled.
             # TRIGGERED is a brief intermediate state (trigger fired,
             # sub-order placed but not yet filled). Both mean "filled".
-            if algo_status in ('TRIGGERED', 'FINISHED'):
+            if algo_status in ("TRIGGERED", "FINISHED"):
                 # Extract fill info from the algo order response.
                 # FINISHED provides actualPrice/actualQty from the
                 # actual sub-order fill; TRIGGERED may only have
                 # triggerPrice as a proxy.
-                actual_price = resp.get('actualPrice', '0')
-                actual_qty = resp.get('actualQty') or resp.get('quantity', '0')
-                trigger_price = resp.get('triggerPrice', '0')
+                actual_price = resp.get("actualPrice", "0")
+                actual_qty = resp.get("actualQty") or resp.get("quantity", "0")
+                trigger_price = resp.get("triggerPrice", "0")
 
                 logger.info(
                     f"[{symbol}] Algo order {algo_status}: algoId={order_id} "
@@ -415,50 +419,39 @@ class BracketMixin:
                 # instead of using triggerPrice as proxy (which can differ
                 # by 0.1-0.5% from real execution during fast moves).
                 real_fill = self._lookup_actual_fill(
-                    symbol, actual_qty, resp.get('orderType', ''),
+                    symbol,
+                    actual_qty,
+                    resp.get("orderType", ""),
                 )
                 if real_fill:
-                    fill_price = real_fill['price']
-                    fill_qty = real_fill['qty']
-                    logger.info(
-                        f"[{symbol}] Actual fill from trades: "
-                        f"price=${fill_price:.4f} qty={fill_qty}"
-                    )
+                    fill_price = real_fill["price"]
+                    fill_qty = real_fill["qty"]
+                    logger.info(f"[{symbol}] Actual fill from trades: price=${fill_price:.4f} qty={fill_qty}")
                 else:
                     # Fallback: use actualPrice or triggerPrice
                     fill_price = float(actual_price)
                     if fill_price == 0:
                         fill_price = float(trigger_price)
                     fill_qty = actual_qty
-                    logger.warning(
-                        f"[{symbol}] Using algo trigger/actual price as "
-                        f"fill proxy: ${fill_price:.4f}"
-                    )
+                    logger.warning(f"[{symbol}] Using algo trigger/actual price as fill proxy: ${fill_price:.4f}")
 
                 return {
-                    'avgPrice': str(fill_price),
-                    'executedQty': str(fill_qty),
-                    'status': 'FILLED',
-                    'algoId': order_id,
+                    "avgPrice": str(fill_price),
+                    "executedQty": str(fill_qty),
+                    "status": "FILLED",
+                    "algoId": order_id,
                 }
 
             # v12.3.1: Detect externally cancelled/expired orders.
             # Without this, a cancelled order keeps its algoId in our state,
             # _sync_server_orders skips bracket repair (oid is not None),
             # and the position silently loses server-side protection.
-            if algo_status in ('CANCELLED', 'EXPIRED', 'USER_CANCELLED'):
-                logger.warning(
-                    f"[{symbol}] Algo order {algo_status}: "
-                    f"algoId={order_id} — will trigger bracket repair"
-                )
-                return {'status': 'CANCELLED', 'algoId': order_id}
+            if algo_status in ("CANCELLED", "EXPIRED", "USER_CANCELLED"):
+                logger.warning(f"[{symbol}] Algo order {algo_status}: algoId={order_id} — will trigger bracket repair")
+                return {"status": "CANCELLED", "algoId": order_id}
         except Exception as e:
-            logger.warning(
-                f"[{symbol}] Algo order status check failed: "
-                f"algoId={order_id} error={e}"
-            )
+            logger.warning(f"[{symbol}] Algo order status check failed: algoId={order_id} error={e}")
         return None
-
 
     def _ratchet_runner_sl(self, symbol: str, pos: dict) -> None:
         """Ratchet server-side SL for a Phase 2 runner to protect profits.
@@ -476,77 +469,77 @@ class BracketMixin:
             symbol: Trading symbol.
             pos: Position dict (mutated in place to update server_sl_order_id).
         """
-        trail_stop_pct = pos.get('_computed_trail_stop')
+        trail_stop_pct = pos.get("_computed_trail_stop")
         if trail_stop_pct is None or trail_stop_pct <= 0:
             return  # No improvement over breakeven yet
 
         # Only ratchet if meaningful improvement (≥0.5% absolute gain above last)
-        last_server_floor = pos.get('_server_sl_pct', 0.0)
+        last_server_floor = pos.get("_server_sl_pct", 0.0)
         improvement = trail_stop_pct - last_server_floor
         if improvement < 0.005:  # 0.5% minimum step to avoid API spam
             return
 
         # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT).
         # Strip defensively in case pos['symbol'] was corrupted by old _load_state.
-        raw_sym = pos.get('symbol', symbol)
-        api_sym = raw_sym.split(':')[0] if ':' in raw_sym else raw_sym
+        raw_sym = pos.get("symbol", symbol)
+        api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
 
-        entry_price = pos['entry_price']
-        signal = pos['signal']
+        entry_price = pos["entry_price"]
+        signal = pos["signal"]
 
         # Convert trail_stop (return pct) to trigger price
         if signal == 1:  # Long: SL below
             trigger_price = entry_price * (1.0 + trail_stop_pct)
-            close_side = 'SELL'
+            close_side = "SELL"
             buffer = -0.005  # 0.5% below trigger for limit
         else:  # Short: SL above
             trigger_price = entry_price * (1.0 - trail_stop_pct)
-            close_side = 'BUY'
+            close_side = "BUY"
             buffer = 0.005  # 0.5% above trigger for limit
 
         limit_price = trigger_price * (1.0 + buffer)
 
         info = self.get_symbol_info(api_sym)
-        tick_size = info.get('tick_size', 0.01)
-        price_precision = info.get('price_precision', 2)
+        tick_size = info.get("tick_size", 0.01)
+        price_precision = info.get("price_precision", 2)
 
-        trigger_price = round(
-            round(trigger_price / tick_size) * tick_size, price_precision
-        )
-        limit_price = round(
-            round(limit_price / tick_size) * tick_size, price_precision
-        )
+        trigger_price = round(round(trigger_price / tick_size) * tick_size, price_precision)
+        limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
 
         # v12.3.3 SAFETY: Place new SL FIRST, then cancel old.
         # Reversing this order (cancel-then-place) leaves the runner
         # unprotected if the bot crashes between the two API calls.
         # Binance allows multiple algo stop orders to coexist briefly.
-        quantity = pos['notional'] / pos['entry_price']
+        quantity = pos["notional"] / pos["entry_price"]
         quantity = self._round_qty(quantity, api_sym)
         if quantity <= 0:
             return
 
         new_sl = self._place_algo_order(
-            symbol=api_sym, side=close_side, order_type='STOP',
-            quantity=quantity, trigger_price=trigger_price,
-            limit_price=limit_price, label='runner-trail-sl',
-            position_side=pos.get('position_side'),
+            symbol=api_sym,
+            side=close_side,
+            order_type="STOP",
+            quantity=quantity,
+            trigger_price=trigger_price,
+            limit_price=limit_price,
+            label="runner-trail-sl",
+            position_side=pos.get("position_side"),
         )
 
-        if new_sl and new_sl != 'WOULD_TRIGGER':
+        if new_sl and new_sl != "WOULD_TRIGGER":
             # Success — now cancel old SL (runner always protected)
-            old_sl = pos.get('server_sl_order_id')
+            old_sl = pos.get("server_sl_order_id")
             if old_sl:
                 self._cancel_server_stop_loss(api_sym, old_sl)
-            pos['server_sl_order_id'] = new_sl
-            pos['_server_sl_pct'] = trail_stop_pct
+            pos["server_sl_order_id"] = new_sl
+            pos["_server_sl_pct"] = trail_stop_pct
             logger.info(
                 f"[{symbol}] Runner SL RATCHETED: "
-                f"{last_server_floor*100:.2f}% → {trail_stop_pct*100:.2f}% "
+                f"{last_server_floor * 100:.2f}% → {trail_stop_pct * 100:.2f}% "
                 f"(trigger=${trigger_price:.4f})"
             )
             self._save_state()
-        elif new_sl == 'WOULD_TRIGGER':
+        elif new_sl == "WOULD_TRIGGER":
             # Price already past trail stop — keep old SL, runner exits next cycle
             logger.warning(
                 f"[{symbol}] Runner SL ratchet WOULD_TRIGGER — "
@@ -554,10 +547,6 @@ class BracketMixin:
             )
         else:
             # Placement failed — keep old SL active (don't cancel!)
-            logger.warning(
-                f"[{symbol}] Runner SL ratchet FAILED — "
-                f"keeping old SL at {last_server_floor*100:.2f}%"
-            )
+            logger.warning(f"[{symbol}] Runner SL ratchet FAILED — keeping old SL at {last_server_floor * 100:.2f}%")
 
     # ── Elliott: Add-to-position methods ──
-

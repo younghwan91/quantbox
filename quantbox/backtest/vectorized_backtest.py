@@ -42,11 +42,12 @@ from typing import Callable
 @dataclass
 class BacktestConfig:
     """Configuration for vectorized backtest."""
+
     initial_capital: float = 10000.0
-    cost_per_side: float = 0.0004    # 0.04% per side
+    cost_per_side: float = 0.0004  # 0.04% per side
     funding_per_bar: float = 0.01 / 100 / 32  # 0.01%/8h → per 15m bar
     bar_interval_minutes: int = 15
-    risk_per_trade: float = 0.01     # 1% risk per trade
+    risk_per_trade: float = 0.01  # 1% risk per trade
     max_leverage: float = 20.0
     max_concurrent: int = 5
 
@@ -54,6 +55,7 @@ class BacktestConfig:
 @dataclass
 class BacktestResult:
     """Results from a single-asset backtest."""
+
     symbol: str
     total_return_pct: float
     sharpe: float
@@ -167,9 +169,18 @@ def _backtest_core_partial(
             s += trade_returns[j]
         avg_ret = s / n_trades
 
-    return (equity, total_return, sharpe, max_dd, win_rate,
-            n_trades, bars_in_market, profit_factor, avg_ret,
-            trade_returns[:min(n_trades, len(trade_returns))])
+    return (
+        equity,
+        total_return,
+        sharpe,
+        max_dd,
+        win_rate,
+        n_trades,
+        bars_in_market,
+        profit_factor,
+        avg_ret,
+        trade_returns[: min(n_trades, len(trade_returns))],
+    )
 
 
 @numba.jit(nopython=True, cache=True)
@@ -279,9 +290,18 @@ def _backtest_core(
             s += trade_returns[j]
         avg_ret = s / n_trades
 
-    return (equity, total_return, sharpe, max_dd, win_rate,
-            n_trades, bars_in_market, profit_factor, avg_ret,
-            trade_returns[:min(n_trades, len(trade_returns))])
+    return (
+        equity,
+        total_return,
+        sharpe,
+        max_dd,
+        win_rate,
+        n_trades,
+        bars_in_market,
+        profit_factor,
+        avg_ret,
+        trade_returns[: min(n_trades, len(trade_returns))],
+    )
 
 
 class VectorizedBacktest:
@@ -307,14 +327,12 @@ class VectorizedBacktest:
             BacktestResult with all metrics.
         """
         bars_per_day = 24 * 60 / self.config.bar_interval_minutes
-        equity, total_ret, sharpe, max_dd, wr, n_trades, bars_in, pf, avg_ret, _ = (
-            _backtest_core(
-                close.astype(np.float64),
-                signals.astype(np.float64),
-                self.config.cost_per_side,
-                self.config.funding_per_bar,
-                bars_per_day,
-            )
+        equity, total_ret, sharpe, max_dd, wr, n_trades, bars_in, pf, avg_ret, _ = _backtest_core(
+            close.astype(np.float64),
+            signals.astype(np.float64),
+            self.config.cost_per_side,
+            self.config.funding_per_bar,
+            bars_per_day,
         )
 
         return BacktestResult(
@@ -343,14 +361,12 @@ class VectorizedBacktest:
         exit signals (±0.5). Identical results for non-partial scenarios.
         """
         bars_per_day = 24 * 60 / self.config.bar_interval_minutes
-        equity, total_ret, sharpe, max_dd, wr, n_trades, bars_in, pf, avg_ret, _ = (
-            _backtest_core_partial(
-                close.astype(np.float64),
-                signals.astype(np.float64),
-                self.config.cost_per_side,
-                self.config.funding_per_bar,
-                bars_per_day,
-            )
+        equity, total_ret, sharpe, max_dd, wr, n_trades, bars_in, pf, avg_ret, _ = _backtest_core_partial(
+            close.astype(np.float64),
+            signals.astype(np.float64),
+            self.config.cost_per_side,
+            self.config.funding_per_bar,
+            bars_per_day,
         )
 
         return BacktestResult(
@@ -398,7 +414,7 @@ class VectorizedBacktest:
         portfolio_eq = np.ones(n_bars)
 
         for sym in symbols:
-            close = data[sym]['Close'].values[:n_bars].astype(np.float64)
+            close = data[sym]["Close"].values[:n_bars].astype(np.float64)
 
             if signal_func_with_regime is not None and btc_close is not None:
                 sigs = signal_func_with_regime(close, btc_close[:n_bars])
@@ -422,23 +438,20 @@ class VectorizedBacktest:
 
         rets = np.diff(portfolio_eq) / portfolio_eq[:-1]
         bars_per_day = 24 * 60 / self.config.bar_interval_minutes
-        port_sharpe = (
-            np.mean(rets) / np.std(rets) * np.sqrt(bars_per_day * 365.25)
-            if np.std(rets) > 0 else 0.0
-        )
+        port_sharpe = np.mean(rets) / np.std(rets) * np.sqrt(bars_per_day * 365.25) if np.std(rets) > 0 else 0.0
 
         positive_count = sum(1 for r in per_asset if r.total_return_pct > 0)
 
         return {
-            'portfolio_return_pct': port_ret,
-            'portfolio_sharpe': port_sharpe,
-            'portfolio_max_dd_pct': port_dd,
-            'portfolio_equity': portfolio_eq,
-            'pct_symbols_positive': positive_count / n_symbols * 100,
-            'n_symbols': n_symbols,
-            'total_trades': sum(r.n_trades for r in per_asset),
-            'avg_win_rate': np.mean([r.win_rate for r in per_asset]),
-            'per_asset': {r.symbol: r for r in per_asset},
+            "portfolio_return_pct": port_ret,
+            "portfolio_sharpe": port_sharpe,
+            "portfolio_max_dd_pct": port_dd,
+            "portfolio_equity": portfolio_eq,
+            "pct_symbols_positive": positive_count / n_symbols * 100,
+            "n_symbols": n_symbols,
+            "total_trades": sum(r.n_trades for r in per_asset),
+            "avg_win_rate": np.mean([r.win_rate for r in per_asset]),
+            "per_asset": {r.symbol: r for r in per_asset},
         }
 
     def run_dd_managed_portfolio(
@@ -479,8 +492,12 @@ class VectorizedBacktest:
         n_symbols = len(selected_symbols)
         bars_per_day = 24 * 60 / self.config.bar_interval_minutes
         if n_symbols == 0:
-            return {'portfolio_return_pct': 0.0, 'portfolio_sharpe': 0.0,
-                    'portfolio_max_dd_pct': 0.0, 'portfolio_equity': np.ones(1)}
+            return {
+                "portfolio_return_pct": 0.0,
+                "portfolio_sharpe": 0.0,
+                "portfolio_max_dd_pct": 0.0,
+                "portfolio_equity": np.ones(1),
+            }
 
         n_bars = min(len(data[s]) for s in selected_symbols)
 
@@ -488,7 +505,7 @@ class VectorizedBacktest:
         per_asset_results = {}
         bar_rets = {}
         for sym in selected_symbols:
-            close = data[sym]['Close'].values[:n_bars].astype(np.float64)
+            close = data[sym]["Close"].values[:n_bars].astype(np.float64)
             sigs = signal_func(close)
             if leverage_func is not None:
                 sigs = leverage_func(close, sigs)
@@ -504,7 +521,7 @@ class VectorizedBacktest:
         if inverse_vol_weight and n_symbols > 1:
             vols = np.zeros(n_symbols)
             for idx, sym in enumerate(selected_symbols):
-                close_arr = data[sym]['Close'].values[:n_bars].astype(np.float64)
+                close_arr = data[sym]["Close"].values[:n_bars].astype(np.float64)
                 start = max(0, n_bars - vol_lookback)
                 vols[idx] = compute_realized_vol(close_arr[start:n_bars], np.sqrt(bars_per_day * 365.25))
             # Inverse-vol weight (avoid zero division)
@@ -532,10 +549,8 @@ class VectorizedBacktest:
                 current_dd = (peak - portfolio_eq[j - 1]) / peak
                 if current_dd > dd_dampening_threshold:
                     # Linear scale: full dampening at 2x threshold
-                    excess = min(current_dd - dd_dampening_threshold,
-                                 dd_dampening_threshold)
-                    dampening = 1.0 - (1.0 - dd_dampening_scale) * (
-                        excess / dd_dampening_threshold)
+                    excess = min(current_dd - dd_dampening_threshold, dd_dampening_threshold)
+                    dampening = 1.0 - (1.0 - dd_dampening_scale) * (excess / dd_dampening_threshold)
                     port_bar_ret *= dampening
 
             portfolio_eq[j] = portfolio_eq[j - 1] * (1.0 + port_bar_ret)
@@ -549,30 +564,25 @@ class VectorizedBacktest:
 
         rets_arr = np.diff(portfolio_eq) / portfolio_eq[:-1]
         port_sharpe = (
-            np.mean(rets_arr) / np.std(rets_arr) * np.sqrt(bars_per_day * 365.25)
-            if np.std(rets_arr) > 0 else 0.0
+            np.mean(rets_arr) / np.std(rets_arr) * np.sqrt(bars_per_day * 365.25) if np.std(rets_arr) > 0 else 0.0
         )
 
         calmar = port_ret / port_dd if port_dd > 0 else 999.0
-        positive_count = sum(1 for s in selected_symbols
-                             if per_asset_results[s].total_return_pct > 0)
-        total_trades = sum(per_asset_results[s].n_trades
-                           for s in selected_symbols)
+        positive_count = sum(1 for s in selected_symbols if per_asset_results[s].total_return_pct > 0)
+        total_trades = sum(per_asset_results[s].n_trades for s in selected_symbols)
 
         return {
-            'portfolio_return_pct': port_ret,
-            'portfolio_sharpe': port_sharpe,
-            'portfolio_max_dd_pct': port_dd,
-            'portfolio_equity': portfolio_eq,
-            'calmar': calmar,
-            'weights': {sym: float(weights[i])
-                        for i, sym in enumerate(selected_symbols)},
-            'pct_symbols_positive': positive_count / n_symbols * 100,
-            'n_symbols': n_symbols,
-            'total_trades': total_trades,
-            'avg_win_rate': np.mean([per_asset_results[s].win_rate
-                                     for s in selected_symbols]),
-            'per_asset': per_asset_results,
+            "portfolio_return_pct": port_ret,
+            "portfolio_sharpe": port_sharpe,
+            "portfolio_max_dd_pct": port_dd,
+            "portfolio_equity": portfolio_eq,
+            "calmar": calmar,
+            "weights": {sym: float(weights[i]) for i, sym in enumerate(selected_symbols)},
+            "pct_symbols_positive": positive_count / n_symbols * 100,
+            "n_symbols": n_symbols,
+            "total_trades": total_trades,
+            "avg_win_rate": np.mean([per_asset_results[s].win_rate for s in selected_symbols]),
+            "per_asset": per_asset_results,
         }
 
     def walk_forward(
@@ -601,12 +611,14 @@ class VectorizedBacktest:
         windows = []
         start = 0
         while start + is_bars + oos_bars <= n_bars:
-            windows.append({
-                'is_start': start,
-                'is_end': start + is_bars,
-                'oos_start': start + is_bars,
-                'oos_end': start + is_bars + oos_bars,
-            })
+            windows.append(
+                {
+                    "is_start": start,
+                    "is_end": start + is_bars,
+                    "oos_start": start + is_bars,
+                    "oos_end": start + is_bars + oos_bars,
+                }
+            )
             start += step_bars
 
         results = []
@@ -614,23 +626,25 @@ class VectorizedBacktest:
             sym_rets = []
             sym_sharpes = []
             for sym in symbols:
-                close = data[sym]['Close'].values.astype(np.float64)
+                close = data[sym]["Close"].values.astype(np.float64)
                 sigs = signal_func(close)
                 r = self.run_single(
-                    close[w['oos_start']:w['oos_end']],
-                    sigs[w['oos_start']:w['oos_end']],
+                    close[w["oos_start"] : w["oos_end"]],
+                    sigs[w["oos_start"] : w["oos_end"]],
                     symbol=sym,
                 )
                 sym_rets.append(r.total_return_pct)
                 sym_sharpes.append(r.sharpe)
 
-            results.append({
-                'window': wi + 1,
-                'oos_start': w['oos_start'],
-                'oos_end': w['oos_end'],
-                'avg_return_pct': np.mean(sym_rets),
-                'avg_sharpe': np.mean(sym_sharpes),
-                'pct_positive': np.mean([r > 0 for r in sym_rets]) * 100,
-            })
+            results.append(
+                {
+                    "window": wi + 1,
+                    "oos_start": w["oos_start"],
+                    "oos_end": w["oos_end"],
+                    "avg_return_pct": np.mean(sym_rets),
+                    "avg_sharpe": np.mean(sym_sharpes),
+                    "pct_positive": np.mean([r > 0 for r in sym_rets]) * 100,
+                }
+            )
 
         return results

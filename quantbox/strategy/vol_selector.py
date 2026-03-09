@@ -33,6 +33,7 @@ class VolSelectorConfig:
         bar_interval_minutes: Bar interval in minutes (default: 15).
         annualize_factor: Annualization factor (default: sqrt(96 * 365.25) for 15m bars).
     """
+
     top_n: int = 5
     vol_lookback_bars: int = 2880
     rebalance_interval_bars: int = 960

@@ -19,6 +19,7 @@ def _clear_settings_cache():
     @lru_cache 싱글턴이 테스트 간 환경변수 오염을 일으키는 것을 방지한다.
     """
     from quantbox.core.settings import get_settings
+
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -34,12 +35,13 @@ def _isolate_state_file(tmp_path):
     """
     import quantbox.scalper as _mod
     import quantbox.core.scalper_state as _state_mod
+
     orig_file = _mod.STATE_FILE
     orig_state_file = _state_mod.STATE_FILE
     orig_state_dir = _state_mod.STATE_DIR
     _state_mod.STATE_DIR = tmp_path
-    _state_mod.STATE_FILE = tmp_path / 'scalper_state.json'
-    _mod.STATE_FILE = tmp_path / 'scalper_state.json'
+    _state_mod.STATE_FILE = tmp_path / "scalper_state.json"
+    _mod.STATE_FILE = tmp_path / "scalper_state.json"
     yield
     _mod.STATE_FILE = orig_file
     _state_mod.STATE_FILE = orig_state_file
@@ -49,6 +51,7 @@ def _isolate_state_file(tmp_path):
 def _get_real_data_loader():
     """Get the real data loader instance."""
     from quantbox.data.real_data_loader import RealDataLoader
+
     return RealDataLoader()
 
 
@@ -65,19 +68,19 @@ def sample_ohlcv(real_data_available):
     """Load REAL OHLCV data from Binance cache."""
     if not real_data_available:
         pytest.skip("Real data not available - run data downloader first")
-    
+
     loader = _get_real_data_loader()
-    df = loader.load_symbol('BTCUSDT')
-    
+    df = loader.load_symbol("BTCUSDT")
+
     if df is None:
         # Try any available symbol
         symbols = loader.get_available_symbols()
         if symbols:
             df = loader.load_symbol(symbols[0])
-    
+
     if df is None:
         pytest.skip("No real data available - run data downloader first")
-    
+
     return df
 
 
@@ -86,17 +89,13 @@ def sample_pair_data(real_data_available):
     """Load REAL correlated pair data from Binance cache."""
     if not real_data_available:
         pytest.skip("Real data not available - run data downloader first")
-    
+
     loader = _get_real_data_loader()
-    data = loader.load_data(
-        symbols=['BTCUSDT', 'ETHUSDT'],
-        min_bars=100,
-        align_data=True
-    )
-    
+    data = loader.load_data(symbols=["BTCUSDT", "ETHUSDT"], min_bars=100, align_data=True)
+
     if len(data) < 2:
         pytest.skip("Insufficient real data - need BTCUSDT and ETHUSDT")
-    
+
     return data
 
 
@@ -105,17 +104,15 @@ def multi_symbol_data(real_data_available):
     """Load REAL multi-symbol data from Binance cache."""
     if not real_data_available:
         pytest.skip("Real data not available - run data downloader first")
-    
+
     loader = _get_real_data_loader()
     data = loader.load_data(
-        symbols=['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'],
-        min_bars=100,
-        align_data=True
+        symbols=["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"], min_bars=100, align_data=True
     )
-    
+
     if len(data) < 3:
         pytest.skip("Insufficient real data - need at least 3 symbols")
-    
+
     return data
 
 
@@ -123,4 +120,5 @@ def multi_symbol_data(real_data_available):
 def config():
     """Sample configuration."""
     from quantbox.core.config import Config
+
     return Config()

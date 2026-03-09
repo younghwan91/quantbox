@@ -21,6 +21,7 @@ from quantbox.strategy.rubberband import (
 
 # ────────── Test Data Generators ──────────
 
+
 def _make_prices(
     n: int = 300,
     crash_bar: int = 200,
@@ -38,7 +39,7 @@ def _make_prices(
 
 def _make_btc_regime(
     n: int = 300,
-    regime: str = 'risk_off',
+    regime: str = "risk_off",
     regime_period: int = 96,
 ) -> np.ndarray:
     """Create BTC prices above/below SMA(regime_period).
@@ -47,7 +48,7 @@ def _make_btc_regime(
     risk_off: BTC trending downward → price < SMA.
     """
     btc = np.ones(n, dtype=np.float64)
-    if regime == 'risk_on':
+    if regime == "risk_on":
         # BTC slowly rising → well above SMA
         for i in range(n):
             btc[i] = 1.0 + 0.15 * (i / n)
@@ -91,9 +92,15 @@ def _make_asset_trend(
 
 # Shared parameters
 _PARAMS = dict(
-    lookback=8, threshold=0.045, target_retrace=0.4, stop_mult=0.9,
-    max_hold=10, stop_decay=0.0, btc_mom_period=32,
-    btc_regime_period=96, asset_trend_period=192,
+    lookback=8,
+    threshold=0.045,
+    target_retrace=0.4,
+    stop_mult=0.9,
+    max_hold=10,
+    stop_decay=0.0,
+    btc_mom_period=32,
+    btc_regime_period=96,
+    asset_trend_period=192,
 )
 
 
@@ -102,33 +109,31 @@ class TestRegimeSwitchNumba:
 
     def test_risk_off_sympathy_long(self):
         """Risk-Off: alt dips + BTC falling → long entry (sympathy)."""
-        btc = _make_btc_regime(300, 'risk_off', 96)
+        btc = _make_btc_regime(300, "risk_off", 96)
         close = _make_prices(300, 200, 0.06)
         sigs = compute_signals_regime_switch(close, btc, **_PARAMS)
         assert np.any(sigs > 0), "Risk-Off: should enter long on sympathy dip"
 
     def test_risk_on_classic_long(self):
         """Risk-On: alt dips in its own uptrend → long entry (classic pullback)."""
-        btc = _make_btc_regime(300, 'risk_on', 96)
+        btc = _make_btc_regime(300, "risk_on", 96)
         close = _make_asset_trend(300, 200, 0.06, uptrend=True)
         sigs = compute_signals_regime_switch(close, btc, **_PARAMS)
         assert np.any(sigs > 0), "Risk-On: should enter long on classic pullback"
 
     def test_risk_on_blocked_downtrend(self):
         """Risk-On: alt dips but alt is in downtrend → no entry."""
-        btc = _make_btc_regime(300, 'risk_on', 96)
+        btc = _make_btc_regime(300, "risk_on", 96)
         close = _make_asset_trend(300, 200, 0.06, uptrend=False)
         sigs = compute_signals_regime_switch(close, btc, **_PARAMS)
         # In risk-on, dip in downtrend should be blocked (not a pullback)
         long_sigs = sigs[195:210]
-        assert not np.any(long_sigs > 0), (
-            "Risk-On: should NOT enter long when asset is in downtrend"
-        )
+        assert not np.any(long_sigs > 0), "Risk-On: should NOT enter long when asset is in downtrend"
 
     def test_risk_off_blocked_btc_rising(self):
         """Risk-Off regime but BTC short-term momentum is rising → no sympathy entry."""
         # BTC in downtrend regime (< SMA) but with short-term uptick
-        btc = _make_btc_regime(300, 'risk_off', 96)
+        btc = _make_btc_regime(300, "risk_off", 96)
         # Override last 32 bars with rising BTC (positive momentum)
         for i in range(168, 200):
             btc[i] = btc[168] * (1.0 + 0.03 * ((i - 168) / 32))
@@ -142,14 +147,14 @@ class TestRegimeSwitchNumba:
 
     def test_output_shape(self):
         """Output array shape matches input."""
-        btc = _make_btc_regime(300, 'risk_off', 96)
+        btc = _make_btc_regime(300, "risk_off", 96)
         close = _make_prices(300, 200, 0.06)
         sigs = compute_signals_regime_switch(close, btc, **_PARAMS)
         assert sigs.shape == close.shape
 
     def test_max_hold_enforced(self):
         """Position exits by max_hold bars."""
-        btc = _make_btc_regime(300, 'risk_off', 96)
+        btc = _make_btc_regime(300, "risk_off", 96)
         close = _make_prices(300, 200, 0.06)
         sigs = compute_signals_regime_switch(close, btc, **_PARAMS)
 
@@ -165,7 +170,7 @@ class TestRegimeSwitchNumba:
             elif entered and sigs[i] == 0:
                 break
         if entered:
-            assert hold <= _PARAMS['max_hold'], f"Held {hold} > max_hold={_PARAMS['max_hold']}"
+            assert hold <= _PARAMS["max_hold"], f"Held {hold} > max_hold={_PARAMS['max_hold']}"
 
 
 class TestOnBarRegimeSwitchRouting:
@@ -173,10 +178,10 @@ class TestOnBarRegimeSwitchRouting:
 
     def test_regime_switch_dispatch(self):
         """entry_mode='regime_switch' routes to compute_signals_regime_switch."""
-        cfg = RubberBandConfig(entry_mode='regime_switch')
+        cfg = RubberBandConfig(entry_mode="regime_switch")
         strategy = RubberBandStrategy(cfg)
 
-        btc = _make_btc_regime(300, 'risk_off', 96)
+        btc = _make_btc_regime(300, "risk_off", 96)
         close = _make_prices(300, 200, 0.06)
 
         sig = strategy.on_bar("TEST", close[:200], btc[:200])
@@ -186,17 +191,17 @@ class TestOnBarRegimeSwitchRouting:
     def test_confidence_is_default(self):
         """Default config entry_mode is 'confidence' (v6.0)."""
         cfg = RubberBandConfig()
-        assert cfg.entry_mode == 'confidence'
+        assert cfg.entry_mode == "confidence"
 
     def test_btc_directional_mode_bypasses_regime_switch(self):
         """entry_mode='btc_directional' uses old btc_directional path."""
         cfg = RubberBandConfig(
-            entry_mode='btc_directional',
+            entry_mode="btc_directional",
             btc_directional_enabled=True,
         )
         strategy = RubberBandStrategy(cfg)
 
-        btc = _make_btc_regime(300, 'risk_on', 96)
+        btc = _make_btc_regime(300, "risk_on", 96)
         close = _make_prices(300, 200, 0.06)
 
         # With btc_directional, BTC momentum must align (risk_on = BTC rising)
@@ -206,7 +211,7 @@ class TestOnBarRegimeSwitchRouting:
 
     def test_insufficient_data_returns_zero(self):
         """Returns 0 when data is too short for regime detection."""
-        cfg = RubberBandConfig(entry_mode='regime_switch')
+        cfg = RubberBandConfig(entry_mode="regime_switch")
         strategy = RubberBandStrategy(cfg)
 
         close = np.ones(50, dtype=np.float64)
@@ -216,7 +221,7 @@ class TestOnBarRegimeSwitchRouting:
 
     def test_no_btc_data_falls_through(self):
         """When btc_close=None, regime-switch is skipped entirely."""
-        cfg = RubberBandConfig(entry_mode='regime_switch')
+        cfg = RubberBandConfig(entry_mode="regime_switch")
         strategy = RubberBandStrategy(cfg)
         close = _make_prices(300, 200, 0.06)
         sig = strategy.on_bar("TEST", close[:200], None)
@@ -229,7 +234,7 @@ class TestRegimeSwitchConfigV5:
 
     def test_defaults(self):
         cfg = RubberBandConfig()
-        assert cfg.entry_mode == 'confidence'  # v6.0 default
+        assert cfg.entry_mode == "confidence"  # v6.0 default
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_period == 48  # v11.0: A/B validated
@@ -244,5 +249,5 @@ class TestRegimeSwitchConfigV5:
         assert cfg.asset_trend_period == 96
 
     def test_entry_mode_raw(self):
-        cfg = RubberBandConfig(entry_mode='raw')
-        assert cfg.entry_mode == 'raw'
+        cfg = RubberBandConfig(entry_mode="raw")
+        assert cfg.entry_mode == "raw"
