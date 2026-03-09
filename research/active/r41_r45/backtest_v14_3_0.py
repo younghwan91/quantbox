@@ -5,6 +5,25 @@ F5 gate: reject LONG if TBR z > +0.5, reject SHORT if TBR z < -0.5
          (R46b validated, p=0.029, D_mom8 only — S_d8 straddle unaffected)
 
 Additional metrics vs v14.0.0: Sharpe, Sortino, CAGR (1x + production L/N model).
+
+⛔ DEPRECATED — DO NOT IMPORT FROM THIS FILE
+─────────────────────────────────────────────
+The constants D_TRAIL_ACTIVATE=0.02 and D_TRAIL_DISTANCE=0.003 below are
+PRE-r47 BASELINE values (the OLD production params before r47 exit A/B test).
+Current production values are d_trail_activate=0.005, d_trail_distance=0.002
+(set in r47, now in config.py).
+
+Importing D_TRAIL_ACTIVATE / D_TRAIL_DISTANCE from this file will give WRONG
+values for any production backtest or comparison.
+
+Incident reference: r53 — importing from this file contaminated D_mom8 trail
+results, causing silent parameter mismatch vs live trading.
+
+For correct params always use:
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+    cfg = VolStraddleConfig()
+    cfg.d_trail_activate  # 0.005
+    cfg.d_trail_distance  # 0.002
 """
 
 from __future__ import annotations
@@ -46,13 +65,15 @@ from research.active.r41_r45.r43_exit_improvement import (
 from research.active.r31_r40.scaling_r38 import CFG_V13
 
 
-# ─── Production D_mom8 exit parameters (must match config.py exactly) ─────────
-# RULE: These constants MUST be kept in sync with VolStraddleConfig in config.py.
-# Any change to d_tp / d_trail_* in config.py requires updating here too.
-D_SL = 0.01            # config.py: d_sl = 0.01
-D_TP = 0.12            # config.py: d_tp = 0.12  (R43: was 0.05)
-D_TRAIL_ACTIVATE = 0.02   # config.py: d_trail_activate = 0.02
-D_TRAIL_DISTANCE = 0.003  # config.py: d_trail_distance = 0.003
+# ─── PRE-r47 BASELINE exit parameters (STALE — do NOT use for production) ─────
+# These were the production values BEFORE r47 exit A/B test changed them.
+# r47 found: trail_activate=0.005, trail_distance=0.002 are better.
+# Current production values: see VolStraddleConfig in config.py.
+# ⛔ Importing D_TRAIL_ACTIVATE / D_TRAIL_DISTANCE from this file gives wrong values!
+D_SL = 0.01            # config.py: d_sl = 0.01  (still correct)
+D_TP = 0.12            # config.py: d_tp = 0.12  (still correct)
+D_TRAIL_ACTIVATE = 0.02   # ⛔ STALE — production is now 0.005 (r47)
+D_TRAIL_DISTANCE = 0.003  # ⛔ STALE — production is now 0.002 (r47)
 
 # ─── TBR z-score gate ─────────────────────────────────────────────────────────
 

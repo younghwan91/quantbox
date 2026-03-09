@@ -266,7 +266,7 @@ class TestConfidenceConfig:
     def test_defaults(self):
         cfg = RubberBandConfig()
         assert cfg.entry_mode == 'confidence'
-        assert cfg.min_confidence == 1  # v10.0: lowered, MTF as quality gate
+        assert cfg.min_confidence == 3  # v12.3: M-2SSTSX validated (Sharpe 5.50, DD 8.0%)
         assert cfg.confidence_leverage_step == 0.0
         assert cfg.rsi_period == 14
         assert cfg.vol_period == 20
@@ -276,7 +276,7 @@ class TestConfidenceConfig:
         assert cfg.max_hold == 25  # v12.4 HybTight (was 20)
         assert cfg.stoch_k_period == 3  # v10.0
         assert cfg.dynamic_capital_enabled is True  # v10.0
-        assert len(cfg.symbol_whitelist) == 20  # v11.1 Top-20
+        assert len(cfg.symbol_whitelist) == 50  # v12.3: 50-symbol universe
 
     def test_custom_confidence_params(self):
         cfg = RubberBandConfig(

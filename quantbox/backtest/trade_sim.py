@@ -38,21 +38,44 @@ from quantbox.strategy.vol_straddle.signals import (
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Constants
+#  Constants — derived from VolStraddleConfig (single source of truth)
 # ══════════════════════════════════════════════════════════════════════════════
 
-COST_DIRECTIONAL: float = 0.0008   # 2 × 0.04% (entry + exit)
-COST_STRADDLE: float = 0.0016      # 4 × 0.04% (long + short entry/exit)
+def _load_trade_sim_constants() -> tuple:
+    """Read constants from VolStraddleConfig so trade_sim stays in sync with production."""
+    try:
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+        cfg = VolStraddleConfig()
+        cost_dir = cfg.round_trip_cost        # fee+slippage × 2 (entry+exit)
+        cost_str = cfg.round_trip_cost * 2    # 4 sides (long+short entry+exit)
+        w15 = cfg.warmup_15m
+        w1h = int(cfg.warmup_15m / 4)
+        w4h = int(cfg.warmup_15m / 16) + 1
+        mh15 = cfg.max_hold_15m
+        mh1h = cfg.max_hold_1h
+        mh4h = cfg.max_hold_4h
+        return cost_dir, cost_str, w15, w1h, w4h, mh15, mh1h, mh4h
+    except Exception:
+        # Fallback to hardcoded defaults if config cannot be loaded
+        return 0.0008, 0.0016, 200, 50, 13, 192, 48, 12
+
+
+_COST_DIRECTIONAL, _COST_STRADDLE, _W15m, _W1h, _W4h, _MH15m, _MH1h, _MH4h = (
+    _load_trade_sim_constants()
+)
+
+COST_DIRECTIONAL: float = _COST_DIRECTIONAL   # 2 × round-trip (entry + exit)
+COST_STRADDLE: float = _COST_STRADDLE          # 4 sides (long + short entry/exit)
 
 # Warmup periods — bars to skip before first signal (long ATR needs data).
-WARMUP_15m: int = 200
-WARMUP_1h: int = 50    # 200 / 4
-WARMUP_4h: int = 13    # ceil(200 / 16)
+WARMUP_15m: int = _W15m
+WARMUP_1h: int = _W1h
+WARMUP_4h: int = _W4h
 
 # Timeframe definitions: (label, ratio_vs_15m, warmup, max_hold_dir, max_hold_straddle)
-TF_15m = ("15m", 1, WARMUP_15m, 192, 384)
-TF_1h  = ("1h",  4, WARMUP_1h,  48,  96)
-TF_4h  = ("4h", 16, WARMUP_4h,  12,  24)
+TF_15m = ("15m", 1, WARMUP_15m, _MH15m, _MH15m * 2)
+TF_1h  = ("1h",  4, WARMUP_1h,  _MH1h,  _MH1h * 2)
+TF_4h  = ("4h", 16, WARMUP_4h,  _MH4h,  _MH4h * 2)
 G_3TF  = [TF_15m, TF_1h, TF_4h]
 
 
