@@ -49,15 +49,15 @@ class QuantBoxSettings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file='.env',
-        env_file_encoding='utf-8',
-        extra='ignore',  # .env에 코드에서 안 쓰는 변수가 있어도 무시
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",  # .env에 코드에서 안 쓰는 변수가 있어도 무시
     )
 
     # ── 필수: 바이낸스 API ──
     binance_api_key: str
-    binance_api_secret: str = ''    # model_validator에서 채움
-    binance_secret: str = ''        # 호환 별칭
+    binance_api_secret: str = ""  # model_validator에서 채움
+    binance_secret: str = ""  # 호환 별칭
     binance_testnet: bool = False
 
     # ── 레버리지 및 포지션 사이징 ──
@@ -90,8 +90,8 @@ class QuantBoxSettings(BaseSettings):
     dynamic_exit_range: float = 0.9  # max exit = base + range = 1.0
 
     # ── Regime Protection ──
-    z_score_cap: float = 4.0           # |z| > cap 이면 진입 거부
-    vol_expansion_gate: float = 2.0    # recent_std/formation_std > gate 이면 진입 거부
+    z_score_cap: float = 4.0  # |z| > cap 이면 진입 거부
+    vol_expansion_gate: float = 2.0  # recent_std/formation_std > gate 이면 진입 거부
 
     # ── Trailing Stop (ratchet stop) ──
     trailing_stop_enabled: bool = True
@@ -125,8 +125,8 @@ class QuantBoxSettings(BaseSettings):
     discord_bot_token: str | None = None
     discord_channel_id: int | None = None
 
-    @model_validator(mode='after')
-    def _resolve_api_secret(self) -> 'QuantBoxSettings':
+    @model_validator(mode="after")
+    def _resolve_api_secret(self) -> "QuantBoxSettings":
         """BINANCE_API_SECRET 또는 BINANCE_SECRET 중 하나만 있으면 OK.
 
         둘 다 있으면 BINANCE_API_SECRET 우선.
@@ -135,10 +135,7 @@ class QuantBoxSettings(BaseSettings):
         if not self.binance_api_secret and self.binance_secret:
             self.binance_api_secret = self.binance_secret
         if not self.binance_api_secret:
-            raise ValueError(
-                'BINANCE_API_SECRET (또는 BINANCE_SECRET) 환경변수가 필요합니다. '
-                '.env 파일을 확인하세요.'
-            )
+            raise ValueError("BINANCE_API_SECRET (또는 BINANCE_SECRET) 환경변수가 필요합니다. .env 파일을 확인하세요.")
         return self
 
     def to_trader_config(self) -> dict:
@@ -155,62 +152,62 @@ class QuantBoxSettings(BaseSettings):
 
         return {
             # Data settings
-            'quote_currency': 'USDT',
-            'n_coins': self.n_coins,
-            'interval': '15m',
-            'formation_hours': self.formation_hours,
+            "quote_currency": "USDT",
+            "n_coins": self.n_coins,
+            "interval": "15m",
+            "formation_hours": self.formation_hours,
             # Strategy
-            'entry_zscore': self.entry_zscore,
-            'exit_zscore': self.exit_zscore,
-            'stop_loss_zscore': self.stop_loss_zscore,
-            'use_dynamic_exit': self.use_dynamic_exit,
-            'dynamic_exit_base': self.dynamic_exit_base,
-            'dynamic_exit_range': self.dynamic_exit_range,
-            'max_holding_hours': self.max_holding_hours,
-            'half_life_max_hold_multiplier': self.half_life_max_hold_multiplier,
-            'exit_zscore_decay': self.exit_zscore_decay,
-            'stale_trade_bars': self.stale_trade_bars,
-            'stale_min_improvement': self.stale_min_improvement,
-            'live_coint_check_interval': self.live_coint_check_interval,
-            'live_coint_check_window': self.live_coint_check_window,
-            'live_coint_check_max_pvalue': self.live_coint_check_max_pvalue,
+            "entry_zscore": self.entry_zscore,
+            "exit_zscore": self.exit_zscore,
+            "stop_loss_zscore": self.stop_loss_zscore,
+            "use_dynamic_exit": self.use_dynamic_exit,
+            "dynamic_exit_base": self.dynamic_exit_base,
+            "dynamic_exit_range": self.dynamic_exit_range,
+            "max_holding_hours": self.max_holding_hours,
+            "half_life_max_hold_multiplier": self.half_life_max_hold_multiplier,
+            "exit_zscore_decay": self.exit_zscore_decay,
+            "stale_trade_bars": self.stale_trade_bars,
+            "stale_min_improvement": self.stale_min_improvement,
+            "live_coint_check_interval": self.live_coint_check_interval,
+            "live_coint_check_window": self.live_coint_check_window,
+            "live_coint_check_max_pvalue": self.live_coint_check_max_pvalue,
             # Risk
-            'position_size_pct': pct,
-            'trading_fee': self.trading_fee,
-            'slippage': self.slippage,
-            'funding_rate_8h': self.funding_rate_8h,
-            'leverage': self.leverage,
-            'max_leverage': self.max_leverage,
-            'target_r_pct': self.target_r_pct,
+            "position_size_pct": pct,
+            "trading_fee": self.trading_fee,
+            "slippage": self.slippage,
+            "funding_rate_8h": self.funding_rate_8h,
+            "leverage": self.leverage,
+            "max_leverage": self.max_leverage,
+            "target_r_pct": self.target_r_pct,
             # Multi-trader
-            'max_traders': self.max_traders,
+            "max_traders": self.max_traders,
             # Filters
-            'min_correlation': 0.5,
-            'max_cointegration_pvalue': 0.05,
-            'min_half_life': 3,
-            'max_half_life': 60,
-            'max_hurst': 0.5,
+            "min_correlation": 0.5,
+            "max_cointegration_pvalue": 0.05,
+            "min_half_life": 3,
+            "max_half_life": 60,
+            "max_hurst": 0.5,
             # Execution
-            'check_interval_seconds': 60,
-            'retry_attempts': 3,
-            'retry_delay': 2,
+            "check_interval_seconds": 60,
+            "retry_attempts": 3,
+            "retry_delay": 2,
             # Regime Protection
-            'z_score_cap': self.z_score_cap,
-            'vol_expansion_gate': self.vol_expansion_gate,
+            "z_score_cap": self.z_score_cap,
+            "vol_expansion_gate": self.vol_expansion_gate,
             # Trailing Stop
-            'trailing_stop_enabled': self.trailing_stop_enabled,
-            'trailing_stop_activate_delta': self.trailing_stop_activate_delta,
-            'trailing_stop_trail_z': self.trailing_stop_trail_z,
+            "trailing_stop_enabled": self.trailing_stop_enabled,
+            "trailing_stop_activate_delta": self.trailing_stop_activate_delta,
+            "trailing_stop_trail_z": self.trailing_stop_trail_z,
             # Direction Diversity
-            'max_same_direction_slots': self.max_same_direction_slots,
+            "max_same_direction_slots": self.max_same_direction_slots,
             # Alpha Filters
-            'zscore_velocity_enabled': self.zscore_velocity_enabled,
-            'zscore_velocity_lookback': self.zscore_velocity_lookback,
-            'spread_autocorr_enabled': self.spread_autocorr_enabled,
-            'spread_autocorr_lookback': self.spread_autocorr_lookback,
-            'spread_autocorr_max': self.spread_autocorr_max,
+            "zscore_velocity_enabled": self.zscore_velocity_enabled,
+            "zscore_velocity_lookback": self.zscore_velocity_lookback,
+            "spread_autocorr_enabled": self.spread_autocorr_enabled,
+            "spread_autocorr_lookback": self.spread_autocorr_lookback,
+            "spread_autocorr_max": self.spread_autocorr_max,
             # Drawdown Halt
-            'max_drawdown_pct': self.max_drawdown_pct,
+            "max_drawdown_pct": self.max_drawdown_pct,
         }
 
 

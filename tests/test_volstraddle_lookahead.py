@@ -11,6 +11,7 @@ Key invariants:
 5. Strategy.on_bar checks sig[-1] (last completed bar only).
 6. Truncating close to bar i produces the SAME signal as full array.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -28,25 +29,25 @@ from quantbox.strategy.vol_straddle.signals import (
 )
 from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy
 
-CACHE_DIR = Path('data/cache_extended')
+CACHE_DIR = Path("data/cache_extended")
 
 
-def _load_real_data(symbol: str = '1000PEPEUSDT', days: int = 1095) -> dict:
+def _load_real_data(symbol: str = "1000PEPEUSDT", days: int = 1095) -> dict:
     """Load real cached 15m data."""
-    pattern = f'{symbol}_15m_{days}d_*.npz'
+    pattern = f"{symbol}_15m_{days}d_*.npz"
     files = sorted(CACHE_DIR.glob(pattern))
     if not files:
-        pytest.skip(f'No cached data for {pattern}')
+        pytest.skip(f"No cached data for {pattern}")
     data = np.load(files[-1])
     return {k: data[k].astype(np.float64) for k in data.files}
 
 
-def _load_real_4h(symbol: str = '1000PEPEUSDT', days: int = 1095) -> dict:
+def _load_real_4h(symbol: str = "1000PEPEUSDT", days: int = 1095) -> dict:
     """Load real cached 4h data."""
-    pattern = f'{symbol}_4h_{days}d_*.npz'
+    pattern = f"{symbol}_4h_{days}d_*.npz"
     files = sorted(CACHE_DIR.glob(pattern))
     if not files:
-        pytest.skip(f'No cached 4h data for {pattern}')
+        pytest.skip(f"No cached 4h data for {pattern}")
     data = np.load(files[-1])
     return {k: data[k].astype(np.float64) for k in data.files}
 
@@ -65,9 +66,9 @@ class TestVRNoLookahead:
         If this fails, the VR computation is using future data.
         """
         data = _load_real_data()
-        close = data['close'][:2000]
-        high = data['high'][:2000]
-        low = data['low'][:2000]
+        close = data["close"][:2000]
+        high = data["high"][:2000]
+        low = data["low"][:2000]
 
         vr_full = compute_vr(close, high, low, 7, 50)
 
@@ -76,12 +77,11 @@ class TestVRNoLookahead:
         check_indices = rng.integers(100, len(close), size=10)
 
         for i in check_indices:
-            vr_trunc = compute_vr(close[:i + 1], high[:i + 1], low[:i + 1], 7, 50)
+            vr_trunc = compute_vr(close[: i + 1], high[: i + 1], low[: i + 1], 7, 50)
             if np.isnan(vr_full[i]) and np.isnan(vr_trunc[-1]):
                 continue
             assert vr_trunc[-1] == pytest.approx(vr_full[i], rel=1e-10), (
-                f"VR lookahead at bar {i}: truncated={vr_trunc[-1]:.8f} "
-                f"vs full={vr_full[i]:.8f}"
+                f"VR lookahead at bar {i}: truncated={vr_trunc[-1]:.8f} vs full={vr_full[i]:.8f}"
             )
 
 
@@ -96,7 +96,7 @@ class TestMomentumNoLookahead:
     def test_momentum_truncated_equals_full(self):
         """mom[i] from truncated array equals mom[i] from full array."""
         data = _load_real_data()
-        close = data['close'][:2000]
+        close = data["close"][:2000]
 
         mom_full = compute_momentum(close, 8)
 
@@ -104,10 +104,9 @@ class TestMomentumNoLookahead:
         check_indices = rng.integers(20, len(close), size=10)
 
         for i in check_indices:
-            mom_trunc = compute_momentum(close[:i + 1], 8)
+            mom_trunc = compute_momentum(close[: i + 1], 8)
             assert mom_trunc[-1] == pytest.approx(mom_full[i], rel=1e-10), (
-                f"Momentum lookahead at bar {i}: "
-                f"truncated={mom_trunc[-1]:.8f} vs full={mom_full[i]:.8f}"
+                f"Momentum lookahead at bar {i}: truncated={mom_trunc[-1]:.8f} vs full={mom_full[i]:.8f}"
             )
 
 
@@ -122,9 +121,9 @@ class TestSignalNoLookahead:
     def test_d_signal_truncated_equals_full(self):
         """D_mom8 direction at bar i from truncated data must match full."""
         data = _load_real_data()
-        close = data['close']
-        high = data['high']
-        low = data['low']
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
 
         vr_full = compute_vr(close, high, low, 7, 50)
         sig_full = gen_vr_signal(vr_full, 0.50, 200)
@@ -137,26 +136,24 @@ class TestSignalNoLookahead:
             pytest.skip("No D_mom8 signals in data")
 
         for i in signal_bars[:10]:  # Check up to 10 signal bars
-            vr_trunc = compute_vr(close[:i + 1], high[:i + 1], low[:i + 1], 7, 50)
+            vr_trunc = compute_vr(close[: i + 1], high[: i + 1], low[: i + 1], 7, 50)
             sig_trunc = gen_vr_signal(vr_trunc, 0.50, 200)
-            mom_trunc = compute_momentum(close[:i + 1], 8)
+            mom_trunc = compute_momentum(close[: i + 1], 8)
             dire_trunc = make_direction_momentum(sig_trunc, mom_trunc)
 
             assert sig_trunc[-1] == sig_full[i], (
-                f"Signal lookahead at bar {i}: "
-                f"truncated={sig_trunc[-1]} vs full={sig_full[i]}"
+                f"Signal lookahead at bar {i}: truncated={sig_trunc[-1]} vs full={sig_full[i]}"
             )
             assert dire_trunc[-1] == dire_full[i], (
-                f"Direction lookahead at bar {i}: "
-                f"truncated={dire_trunc[-1]} vs full={dire_full[i]}"
+                f"Direction lookahead at bar {i}: truncated={dire_trunc[-1]} vs full={dire_full[i]}"
             )
 
     def test_s_signal_truncated_equals_full(self):
         """S_d8 signal at bar i from truncated data must match full."""
         data = _load_real_data()
-        close = data['close']
-        high = data['high']
-        low = data['low']
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
 
         vr_full = compute_vr(close, high, low, 7, 50)
         sig_full = gen_vr_dur_signal(vr_full, 0.55, 8, 200)
@@ -166,12 +163,11 @@ class TestSignalNoLookahead:
             pytest.skip("No S_d8 signals in data")
 
         for i in signal_bars[:10]:
-            vr_trunc = compute_vr(close[:i + 1], high[:i + 1], low[:i + 1], 7, 50)
+            vr_trunc = compute_vr(close[: i + 1], high[: i + 1], low[: i + 1], 7, 50)
             sig_trunc = gen_vr_dur_signal(vr_trunc, 0.55, 8, 200)
 
             assert sig_trunc[-1] == sig_full[i], (
-                f"S_d8 lookahead at bar {i}: "
-                f"truncated={sig_trunc[-1]} vs full={sig_full[i]}"
+                f"S_d8 lookahead at bar {i}: truncated={sig_trunc[-1]} vs full={sig_full[i]}"
             )
 
 
@@ -191,11 +187,11 @@ class TestResampleNoLookahead:
         or from the full 15m array.
         """
         data = _load_real_data()
-        n = min(2000, len(data['close']))
-        c15 = data['close'][:n]
-        h15 = data['high'][:n]
-        l15 = data['low'][:n]
-        v15 = data.get('volume', np.ones(n))[:n]
+        n = min(2000, len(data["close"]))
+        c15 = data["close"][:n]
+        h15 = data["high"][:n]
+        l15 = data["low"][:n]
+        v15 = data.get("volume", np.ones(n))[:n]
 
         c1h, h1h, l1h, v1h = resample_ohlcv(c15, h15, l15, v15, 4)
         vr_1h_full = compute_vr(c1h, h1h, l1h, 7, 50)
@@ -218,8 +214,7 @@ class TestResampleNoLookahead:
             if np.isnan(vr_1h_full[j]) and np.isnan(vr_1h_t[-1]):
                 continue
             assert vr_1h_t[-1] == pytest.approx(vr_1h_full[j], rel=1e-10), (
-                f"1h VR lookahead at j={j}: "
-                f"truncated={vr_1h_t[-1]:.8f} vs full={vr_1h_full[j]:.8f}"
+                f"1h VR lookahead at j={j}: truncated={vr_1h_t[-1]:.8f} vs full={vr_1h_full[j]:.8f}"
             )
 
     def test_resample_drops_incomplete_bar(self):
@@ -264,18 +259,18 @@ class TestStrategyOnBarNoLookahead:
         """
         cfg = VolStraddleConfig()
         data = _load_real_data()
-        close = data['close']
-        high = data['high']
-        low = data['low']
-        volume = data.get('volume', np.ones(len(close)))
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
 
         # Find a bar where on_bar gives a signal
         signal_bar = None
         signal_val = 0
         for i in range(300, min(3000, len(close))):
             strat = VolStraddleStrategy(cfg)
-            strat.update_market_data('TEST', volume[:i], volume[:i], high[:i], low[:i])
-            sig_t = strat.on_bar('TEST', close[:i])
+            strat.update_market_data("TEST", volume[:i], volume[:i], high[:i], low[:i])
+            sig_t = strat.on_bar("TEST", close[:i])
             if sig_t != 0:
                 signal_bar = i
                 signal_val = sig_t
@@ -287,23 +282,20 @@ class TestStrategyOnBarNoLookahead:
         # Verify: signal at bar i is the same when computed from
         # data [0..i] vs data [0..i] (same data, fresh strategy instance)
         strat_a = VolStraddleStrategy(cfg)
-        strat_a.update_market_data('TEST', volume[:signal_bar],
-                                    volume[:signal_bar],
-                                    high[:signal_bar],
-                                    low[:signal_bar])
-        sig_a = strat_a.on_bar('TEST', close[:signal_bar])
+        strat_a.update_market_data(
+            "TEST", volume[:signal_bar], volume[:signal_bar], high[:signal_bar], low[:signal_bar]
+        )
+        sig_a = strat_a.on_bar("TEST", close[:signal_bar])
 
         # Create fresh instance and give EXACTLY the same data
         strat_b = VolStraddleStrategy(cfg)
-        strat_b.update_market_data('TEST', volume[:signal_bar],
-                                    volume[:signal_bar],
-                                    high[:signal_bar],
-                                    low[:signal_bar])
-        sig_b = strat_b.on_bar('TEST', close[:signal_bar])
+        strat_b.update_market_data(
+            "TEST", volume[:signal_bar], volume[:signal_bar], high[:signal_bar], low[:signal_bar]
+        )
+        sig_b = strat_b.on_bar("TEST", close[:signal_bar])
 
         assert sig_a == sig_b == signal_val, (
-            f"on_bar not deterministic: sig_a={sig_a}, sig_b={sig_b}, "
-            f"expected={signal_val}"
+            f"on_bar not deterministic: sig_a={sig_a}, sig_b={sig_b}, expected={signal_val}"
         )
 
         # Now verify that adding ONE more bar changes or preserves
@@ -311,12 +303,15 @@ class TestStrategyOnBarNoLookahead:
         # This confirms we only use the LAST bar for signal check.
         if signal_bar + 1 < len(close):
             strat_c = VolStraddleStrategy(cfg)
-            strat_c.update_market_data('TEST', volume[:signal_bar + 1],
-                                        volume[:signal_bar + 1],
-                                        high[:signal_bar + 1],
-                                        low[:signal_bar + 1])
+            strat_c.update_market_data(
+                "TEST",
+                volume[: signal_bar + 1],
+                volume[: signal_bar + 1],
+                high[: signal_bar + 1],
+                low[: signal_bar + 1],
+            )
             # Pass close[:signal_bar+1] — now the LAST bar is different
-            sig_c = strat_c.on_bar('TEST', close[:signal_bar + 1])
+            sig_c = strat_c.on_bar("TEST", close[: signal_bar + 1])
             # sig_c can be ANYTHING (0, +1, -1, 2). The point is that
             # it should NOT retroactively change what sig_a was.
             # sig_a was computed with [0..signal_bar) and that's final.

@@ -25,12 +25,14 @@ from quantbox.backtest.vectorized_backtest import (
 
 # ── Fixtures ──
 
+
 @pytest.fixture
 def btc_close(real_data_available):
     """Real BTC close prices."""
     if not real_data_available:
         pytest.skip("Real data not available")
     from quantbox.data.real_data_loader import RealDataLoader
+
     loader = RealDataLoader()
     df = loader.load_symbol("BTCUSDT")
     if df is None:
@@ -44,6 +46,7 @@ def eth_close(real_data_available):
     if not real_data_available:
         pytest.skip("Real data not available")
     from quantbox.data.real_data_loader import RealDataLoader
+
     loader = RealDataLoader()
     df = loader.load_symbol("ETHUSDT")
     if df is None:
@@ -52,6 +55,7 @@ def eth_close(real_data_available):
 
 
 # ══════════════════ 1. Signal Generation Tests ══════════════════
+
 
 class TestComputeSignals:
     """Test the Numba-compiled signal generator."""
@@ -101,9 +105,7 @@ class TestComputeSignals:
             else:
                 current_run = 0
         # Allow max_hold + 1 because of entry bar counting
-        assert max_run <= max_hold + 1, (
-            f"Max consecutive position={max_run}, expected <={max_hold + 1}"
-        )
+        assert max_run <= max_hold + 1, f"Max consecutive position={max_run}, expected <={max_hold + 1}"
 
 
 class TestSignalsWithRegime:
@@ -113,10 +115,7 @@ class TestSignalsWithRegime:
         """Strict regime filter blocks some entries."""
         n = min(len(btc_close), len(eth_close))
         sigs_base = compute_signals(eth_close[:n], 8, 0.025, 0.5, 1.0, 8)
-        sigs_regime = compute_signals_with_regime(
-            eth_close[:n], btc_close[:n],
-            8, 0.025, 0.5, 1.0, 8, 96, 0.04
-        )
+        sigs_regime = compute_signals_with_regime(eth_close[:n], btc_close[:n], 8, 0.025, 0.5, 1.0, 8, 96, 0.04)
         n_base = np.sum(sigs_base != 0)
         n_regime = np.sum(sigs_regime != 0)
         # Regime filter should block at least some entries
@@ -124,14 +123,12 @@ class TestSignalsWithRegime:
 
     def test_regime_filter_output_shape(self, btc_close, eth_close):
         n = min(len(btc_close), len(eth_close))
-        sigs = compute_signals_with_regime(
-            eth_close[:n], btc_close[:n],
-            8, 0.025, 0.5, 1.0, 8, 96, 0.08
-        )
+        sigs = compute_signals_with_regime(eth_close[:n], btc_close[:n], 8, 0.025, 0.5, 1.0, 8, 96, 0.08)
         assert sigs.shape == (n,)
 
 
 # ══════════════════ 2. Position Sizing Tests ══════════════════
+
 
 class TestPositionSizing:
     """Test risk-based position sizing."""
@@ -139,9 +136,12 @@ class TestPositionSizing:
     def test_basic_sizing(self):
         """1% risk, 2.5% stop → ~40% of capital."""
         notional, leverage = calculate_position_size(
-            capital=10000, risk_per_trade=0.01,
-            entry_price=100.0, move_size=0.025,
-            stop_mult=1.0, max_leverage=20.0,
+            capital=10000,
+            risk_per_trade=0.01,
+            entry_price=100.0,
+            move_size=0.025,
+            stop_mult=1.0,
+            max_leverage=20.0,
         )
         # Risk $100, max loss 2.5% → notional = $4000
         assert abs(notional - 4000) < 1, f"Expected ~$4000, got ${notional}"
@@ -150,9 +150,12 @@ class TestPositionSizing:
     def test_leverage_cap(self):
         """Position size capped by max_leverage."""
         notional, leverage = calculate_position_size(
-            capital=1000, risk_per_trade=0.05,
-            entry_price=100.0, move_size=0.001,
-            stop_mult=1.0, max_leverage=5.0,
+            capital=1000,
+            risk_per_trade=0.05,
+            entry_price=100.0,
+            move_size=0.001,
+            stop_mult=1.0,
+            max_leverage=5.0,
         )
         assert leverage <= 5.0
         assert notional <= 1000 * 5.0 + 0.01
@@ -160,14 +163,17 @@ class TestPositionSizing:
     def test_zero_move(self):
         """Zero move → zero notional (safety)."""
         notional, leverage = calculate_position_size(
-            capital=10000, risk_per_trade=0.01,
-            entry_price=100.0, move_size=0.0,
+            capital=10000,
+            risk_per_trade=0.01,
+            entry_price=100.0,
+            move_size=0.0,
             stop_mult=1.0,
         )
         assert notional == 0.0
 
 
 # ══════════════════ 3. Vectorized Backtest Tests ══════════════════
+
 
 class TestVectorizedBacktest:
     """Test the vectorized backtest engine."""
@@ -183,9 +189,7 @@ class TestVectorizedBacktest:
     def test_backtest_core_with_signals(self, btc_close):
         """Backtest with real data produces sane metrics."""
         sigs = compute_signals(btc_close, 8, 0.025, 0.5, 1.0, 8)
-        eq, ret, sharpe, dd, wr, n_trades, *_ = _backtest_core(
-            btc_close, sigs, 0.0004, 0.0001 / 32
-        )
+        eq, ret, sharpe, dd, wr, n_trades, *_ = _backtest_core(btc_close, sigs, 0.0004, 0.0001 / 32)
         assert len(eq) == len(btc_close)
         assert n_trades > 0, "Expected some trades"
         assert 0 <= dd <= 1.0, f"Invalid max DD: {dd}"
@@ -211,6 +215,7 @@ class TestVectorizedBacktest:
 
 # ══════════════════ 4. Strategy Wrapper Tests ══════════════════
 
+
 class TestRubberBandStrategy:
     """Test the stateful strategy wrapper."""
 
@@ -228,13 +233,19 @@ class TestRubberBandStrategy:
 
     def test_position_lifecycle(self):
         """Open → update → close position flow."""
-        strat = RubberBandStrategy(RubberBandConfig(
-            partial_exit_enabled=False,
-            target_retrace=0.382,  # Use old Fib target for lifecycle test
-        ))
+        strat = RubberBandStrategy(
+            RubberBandConfig(
+                partial_exit_enabled=False,
+                target_retrace=0.382,  # Use old Fib target for lifecycle test
+            )
+        )
         strat.open_position(
-            symbol="TESTUSDT", signal=1, entry_price=100.0,
-            notional=1000.0, leverage=2.0, move_size=0.03,
+            symbol="TESTUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=1000.0,
+            leverage=2.0,
+            move_size=0.03,
         )
         assert strat.has_position("TESTUSDT")
         assert strat.n_active == 1
@@ -253,8 +264,12 @@ class TestRubberBandStrategy:
         """Stop loss fires when price moves against trade."""
         strat = RubberBandStrategy(RubberBandConfig(stop_mult=1.0))
         strat.open_position(
-            symbol="TESTUSDT", signal=1, entry_price=100.0,
-            notional=1000.0, leverage=2.0, move_size=0.03,
+            symbol="TESTUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=1000.0,
+            leverage=2.0,
+            move_size=0.03,
         )
         # Price drops beyond 3% stop (strict < comparison)
         reason = strat.update_position("TESTUSDT", 96.9)
@@ -265,8 +280,12 @@ class TestRubberBandStrategy:
         cfg = RubberBandConfig(max_hold=3)
         strat = RubberBandStrategy(cfg)
         strat.open_position(
-            symbol="TESTUSDT", signal=-1, entry_price=100.0,
-            notional=1000.0, leverage=2.0, move_size=0.03,
+            symbol="TESTUSDT",
+            signal=-1,
+            entry_price=100.0,
+            notional=1000.0,
+            leverage=2.0,
+            move_size=0.03,
         )
         # Simulate flat bars
         for _ in range(2):
@@ -277,6 +296,7 @@ class TestRubberBandStrategy:
 
 
 # ══════════════════ 5. Config Tests ══════════════════
+
 
 class TestRubberBandConfig:
     """Test config properties and defaults."""
@@ -303,6 +323,7 @@ class TestRubberBandConfig:
 
 # ══════════════════ 6. Time-Decaying Stop Tests ══════════════════
 
+
 class TestStopDecay:
     """Test the time-decaying stop loss feature."""
 
@@ -323,9 +344,7 @@ class TestStopDecay:
 
         # Higher decay → tighter stops → fewer bars in market
         # (may also generate more trades due to earlier exits freeing up)
-        assert bars_hi <= bars_no * 1.05, (
-            f"High decay {bars_hi} should not exceed no-decay {bars_no} by >5%"
-        )
+        assert bars_hi <= bars_no * 1.05, f"High decay {bars_hi} should not exceed no-decay {bars_no} by >5%"
 
     def test_decay_signal_values_valid(self, btc_close):
         """Decayed signals must still be in {-1, 0, +1}."""
@@ -337,8 +356,16 @@ class TestStopDecay:
         """stop_decay works with regime-filtered signals."""
         n = min(len(btc_close), len(eth_close))
         sigs = compute_signals_with_regime(
-            eth_close[:n], btc_close[:n],
-            8, 0.025, 0.5, 1.0, 8, 96, 0.08, 0.3,
+            eth_close[:n],
+            btc_close[:n],
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            96,
+            0.08,
+            0.3,
         )
         assert sigs.shape == (n,)
         unique = set(np.unique(sigs))
@@ -351,8 +378,12 @@ class TestStopDecay:
 
         # Open a long position with 3% move
         strat.open_position(
-            symbol="TESTUSDT", signal=1, entry_price=100.0,
-            notional=1000.0, leverage=2.0, move_size=0.03,
+            symbol="TESTUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=1000.0,
+            leverage=2.0,
+            move_size=0.03,
         )
 
         # Without decay: stop at -3% (price 97.0)
@@ -376,6 +407,7 @@ class TestStopDecay:
 
 # ══════════════════ 7. DD-Managed Portfolio Tests ══════════════════
 
+
 class TestDDManagedPortfolio:
     """Test the portfolio-level drawdown management features."""
 
@@ -388,10 +420,11 @@ class TestDDManagedPortfolio:
     def multi_data(self, btc_close, eth_close):
         """Two-symbol dataset for portfolio tests."""
         import pandas as pd
+
         n = min(len(btc_close), len(eth_close))
         return {
-            'BTCUSDT': pd.DataFrame({'Close': btc_close[:n]}),
-            'ETHUSDT': pd.DataFrame({'Close': eth_close[:n]}),
+            "BTCUSDT": pd.DataFrame({"Close": btc_close[:n]}),
+            "ETHUSDT": pd.DataFrame({"Close": eth_close[:n]}),
         }
 
     def _signal_func(self, close):
@@ -400,66 +433,81 @@ class TestDDManagedPortfolio:
     def test_equal_weight_sums_to_one(self, bt, multi_data):
         """Equal weights must sum to 1.0."""
         result = bt.run_dd_managed_portfolio(
-            multi_data, self._signal_func,
-            selected_symbols=['BTCUSDT', 'ETHUSDT'],
+            multi_data,
+            self._signal_func,
+            selected_symbols=["BTCUSDT", "ETHUSDT"],
             inverse_vol_weight=False,
         )
-        total_w = sum(result['weights'].values())
+        total_w = sum(result["weights"].values())
         assert abs(total_w - 1.0) < 1e-8
 
     def test_inverse_vol_weights_differ(self, bt, multi_data):
         """Inverse-vol weights must differ from equal weight."""
         result = bt.run_dd_managed_portfolio(
-            multi_data, self._signal_func,
-            selected_symbols=['BTCUSDT', 'ETHUSDT'],
+            multi_data,
+            self._signal_func,
+            selected_symbols=["BTCUSDT", "ETHUSDT"],
             inverse_vol_weight=True,
         )
         # BTC and ETH have different vols → weights should differ
-        w = list(result['weights'].values())
+        w = list(result["weights"].values())
         assert abs(w[0] - w[1]) > 0.001, "Inverse-vol should produce unequal weights"
 
     def test_dd_dampening_reduces_return(self, bt, multi_data):
         """DD dampening at very low threshold must reduce absolute return."""
         base = bt.run_dd_managed_portfolio(
-            multi_data, self._signal_func,
-            selected_symbols=['BTCUSDT', 'ETHUSDT'],
+            multi_data,
+            self._signal_func,
+            selected_symbols=["BTCUSDT", "ETHUSDT"],
             dd_dampening_threshold=0.0,  # disabled
         )
         dampened = bt.run_dd_managed_portfolio(
-            multi_data, self._signal_func,
-            selected_symbols=['BTCUSDT', 'ETHUSDT'],
+            multi_data,
+            self._signal_func,
+            selected_symbols=["BTCUSDT", "ETHUSDT"],
             dd_dampening_threshold=0.001,  # very aggressive dampening
             dd_dampening_scale=0.1,
         )
         # With aggressive dampening, returns should be reduced
-        assert abs(dampened['portfolio_return_pct']) <= abs(
-            base['portfolio_return_pct']
-        ) * 1.1, "Dampening should not increase absolute return significantly"
+        assert abs(dampened["portfolio_return_pct"]) <= abs(base["portfolio_return_pct"]) * 1.1, (
+            "Dampening should not increase absolute return significantly"
+        )
 
     def test_empty_symbols_returns_zero(self, bt, multi_data):
         """Empty symbol list should return zero metrics."""
         result = bt.run_dd_managed_portfolio(
-            multi_data, self._signal_func,
+            multi_data,
+            self._signal_func,
             selected_symbols=[],
         )
-        assert result['portfolio_return_pct'] == 0.0
-        assert result['portfolio_max_dd_pct'] == 0.0
+        assert result["portfolio_return_pct"] == 0.0
+        assert result["portfolio_max_dd_pct"] == 0.0
 
     def test_result_has_all_keys(self, bt, multi_data):
         """Result dict must contain all expected keys."""
         result = bt.run_dd_managed_portfolio(
-            multi_data, self._signal_func,
-            selected_symbols=['BTCUSDT', 'ETHUSDT'],
+            multi_data,
+            self._signal_func,
+            selected_symbols=["BTCUSDT", "ETHUSDT"],
         )
         expected_keys = {
-            'portfolio_return_pct', 'portfolio_sharpe', 'portfolio_max_dd_pct',
-            'portfolio_equity', 'calmar', 'weights', 'pct_symbols_positive',
-            'n_symbols', 'total_trades', 'avg_win_rate', 'per_asset',
+            "portfolio_return_pct",
+            "portfolio_sharpe",
+            "portfolio_max_dd_pct",
+            "portfolio_equity",
+            "calmar",
+            "weights",
+            "pct_symbols_positive",
+            "n_symbols",
+            "total_trades",
+            "avg_win_rate",
+            "per_asset",
         }
         assert expected_keys.issubset(set(result.keys()))
 
 
 # ══════════════════ 8. Multi-Timeframe Confirmation Tests ══════════════════
+
 
 class TestMTFConfirmation:
     """Test multi-timeframe entry confirmation filter."""
@@ -497,7 +545,7 @@ class TestMTFConfirmation:
     def test_mtf_config_defaults(self):
         """Config should have MTF disabled by default (hurts long-term perf)."""
         cfg = RubberBandConfig()
-        assert cfg.htf_period == 0         # DISABLED
+        assert cfg.htf_period == 0  # DISABLED
         assert cfg.htf_block_threshold == 0.01  # 1% block (unused when disabled)
 
     def test_on_bar_uses_mtf(self, btc_close):
@@ -505,7 +553,7 @@ class TestMTFConfirmation:
         cfg = RubberBandConfig(htf_period=48, htf_block_threshold=0.02)
         strat = RubberBandStrategy(cfg)
         # Should not crash and should return valid signal
-        sig = strat.on_bar('BTCUSDT', btc_close)
+        sig = strat.on_bar("BTCUSDT", btc_close)
         assert sig in (-1, 0, 1)
 
 
@@ -515,12 +563,30 @@ class TestMTFEnhanced:
     def test_agree_discount_increases_entries(self, btc_close):
         """Lower threshold via agree discount should produce more entries."""
         sigs_v1 = compute_signals_mtf(
-            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0,
-            48, 0.02, 1.0, 1.0,  # block-only
+            btc_close,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            0.0,
+            48,
+            0.02,
+            1.0,
+            1.0,  # block-only
         )
         sigs_enh = compute_signals_mtf(
-            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0,
-            48, 0.02, 0.7, 1.0,  # agree discount but same stop
+            btc_close,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            0.0,
+            48,
+            0.02,
+            0.7,
+            1.0,  # agree discount but same stop
         )
         # Enhanced should have >= entries (discount lets more trades in)
         assert np.sum(sigs_enh != 0) >= np.sum(sigs_v1 != 0)
@@ -528,12 +594,30 @@ class TestMTFEnhanced:
     def test_agree_stop_mult_changes_exits(self, btc_close):
         """Tighter stop via agree_stop_mult should change signal pattern."""
         sigs_normal = compute_signals_mtf(
-            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0,
-            48, 0.02, 1.0, 1.0,
+            btc_close,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            0.0,
+            48,
+            0.02,
+            1.0,
+            1.0,
         )
         sigs_tight = compute_signals_mtf(
-            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.0,
-            48, 0.02, 1.0, 0.5,  # 50% tighter stop
+            btc_close,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            0.0,
+            48,
+            0.02,
+            1.0,
+            0.5,  # 50% tighter stop
         )
         # Tighter stop → different signal pattern (some exits happen earlier)
         # Not necessarily fewer signals, but different positions
@@ -544,28 +628,46 @@ class TestMTFEnhanced:
     def test_defaults_production(self):
         """Default config should have production-optimized enhanced MTF."""
         cfg = RubberBandConfig()
-        assert cfg.htf_agree_discount == 0.85   # 15% easier entry
+        assert cfg.htf_agree_discount == 0.85  # 15% easier entry
         assert cfg.htf_agree_stop_mult == 0.95  # 5% tighter stop
 
     def test_on_bar_passes_enhanced_params(self, btc_close):
         """on_bar should pass enhanced params without error."""
         cfg = RubberBandConfig(
-            htf_period=48, htf_block_threshold=0.02,
-            htf_agree_discount=0.8, htf_agree_stop_mult=0.7,
+            htf_period=48,
+            htf_block_threshold=0.02,
+            htf_agree_discount=0.8,
+            htf_agree_stop_mult=0.7,
         )
         strat = RubberBandStrategy(cfg)
-        sig = strat.on_bar('BTCUSDT', btc_close)
+        sig = strat.on_bar("BTCUSDT", btc_close)
         assert sig in (-1, 0, 1)
 
     def test_discount_1_equals_v1(self, btc_close):
         """discount=1.0, stop=1.0 should match block-only v1 exactly."""
         sigs_v1 = compute_signals_mtf(
-            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.3,
-            48, 0.02,
+            btc_close,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            0.3,
+            48,
+            0.02,
         )
         sigs_enh = compute_signals_mtf(
-            btc_close, 8, 0.025, 0.5, 1.0, 8, 0.3,
-            48, 0.02, 1.0, 1.0,
+            btc_close,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            0.3,
+            48,
+            0.02,
+            1.0,
+            1.0,
         )
         np.testing.assert_array_equal(sigs_v1, sigs_enh)
 
@@ -579,8 +681,7 @@ class TestMTFEnhanced:
         assert strat._positions["SYM1"]["entry_stop_mult"] == 1.0
 
         # With explicit entry_stop_mult (HTF agree case)
-        strat.open_position("SYM2", -1, 200.0, 1000.0, 2.0, 0.03,
-                            entry_stop_mult=0.7)
+        strat.open_position("SYM2", -1, 200.0, 1000.0, 2.0, 0.03, entry_stop_mult=0.7)
         assert strat._positions["SYM2"]["entry_stop_mult"] == 0.7
 
     def test_update_position_uses_entry_stop_mult(self):
@@ -589,17 +690,13 @@ class TestMTFEnhanced:
         strat = RubberBandStrategy(cfg)
 
         # Open position with tighter stop (HTF agree simulation)
-        strat.open_position("TESTUSDT", 1, 100.0, 1000.0, 2.0, 0.03,
-                            entry_stop_mult=0.5)
+        strat.open_position("TESTUSDT", 1, 100.0, 1000.0, 2.0, 0.03, entry_stop_mult=0.5)
 
         # With cfg.stop_mult=1.0, stop would be at 3% → price 97.0
         # With entry_stop_mult=0.5, stop is at 1.5% → price 98.5
         # Price 98.0 should trigger stop with tighter stop
         reason = strat.update_position("TESTUSDT", 98.0)
-        assert reason == "stop_loss", (
-            f"Should stop at 98.0 with entry_stop_mult=0.5 (stop at 98.5), "
-            f"got {reason}"
-        )
+        assert reason == "stop_loss", f"Should stop at 98.0 with entry_stop_mult=0.5 (stop at 98.5), got {reason}"
 
     def test_update_position_no_false_stop_without_entry_stop(self):
         """Default entry_stop_mult should use cfg.stop_mult (no false stops)."""

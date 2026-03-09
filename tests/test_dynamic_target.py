@@ -33,12 +33,21 @@ def _make_data(n: int = 500):
 
 
 BASE_KWARGS = dict(
-    lookback=8, threshold=0.045, target_retrace=0.4,
-    stop_mult=0.9, max_hold=10, stop_decay=0.0,
-    btc_mom_period=32, btc_regime_period=96,
-    asset_trend_period=192, min_confidence=2,
-    base_leverage=1.5, confidence_leverage_step=0.0,
-    max_leverage=1.5, rsi_period=14, vol_period=20,
+    lookback=8,
+    threshold=0.045,
+    target_retrace=0.4,
+    stop_mult=0.9,
+    max_hold=10,
+    stop_decay=0.0,
+    btc_mom_period=32,
+    btc_regime_period=96,
+    asset_trend_period=192,
+    min_confidence=2,
+    base_leverage=1.5,
+    confidence_leverage_step=0.0,
+    max_leverage=1.5,
+    rsi_period=14,
+    vol_period=20,
 )
 
 
@@ -65,7 +74,9 @@ class TestDynamicTargetConfig:
     def test_custom_values(self):
         cfg = RubberBandConfig(
             dynamic_target_enabled=False,
-            target_conf3=0.6, target_conf4=0.7, target_conf5=0.8,
+            target_conf3=0.6,
+            target_conf4=0.7,
+            target_conf5=0.8,
         )
         assert cfg.dynamic_target_enabled is False
         assert cfg.target_conf3 == 0.6
@@ -78,14 +89,30 @@ class TestDynamicTargetSignals:
         """Dynamic target disabled should produce identical signals."""
         close, btc, vol, taker = _make_data()
         sig_base = compute_signals_confidence(
-            close, close, close, vol, taker, btc, **BASE_KWARGS,
+            close,
+            close,
+            close,
+            vol,
+            taker,
+            btc,
+            **BASE_KWARGS,
             dynamic_target_enabled=False,
-            target_conf3=0.45, target_conf4=0.5, target_conf5=0.55,
+            target_conf3=0.45,
+            target_conf4=0.5,
+            target_conf5=0.55,
         )
         sig_default = compute_signals_confidence(
-            close, close, close, vol, taker, btc, **BASE_KWARGS,
+            close,
+            close,
+            close,
+            vol,
+            taker,
+            btc,
+            **BASE_KWARGS,
             dynamic_target_enabled=False,
-            target_conf3=0.99, target_conf4=0.99, target_conf5=0.99,
+            target_conf3=0.99,
+            target_conf4=0.99,
+            target_conf5=0.99,
         )
         np.testing.assert_array_equal(sig_base, sig_default)
 
@@ -93,9 +120,17 @@ class TestDynamicTargetSignals:
         """Dynamic target enabled should produce valid signal array."""
         close, btc, vol, taker = _make_data()
         sig = compute_signals_confidence(
-            close, close, close, vol, taker, btc, **BASE_KWARGS,
+            close,
+            close,
+            close,
+            vol,
+            taker,
+            btc,
+            **BASE_KWARGS,
             dynamic_target_enabled=True,
-            target_conf3=0.45, target_conf4=0.5, target_conf5=0.55,
+            target_conf3=0.45,
+            target_conf4=0.5,
+            target_conf5=0.55,
         )
         assert sig.shape == close.shape
         assert sig.dtype == np.float64
@@ -106,14 +141,30 @@ class TestDynamicTargetSignals:
         """A wider target may cause trades to hold longer or exit at different bars."""
         close, btc, vol, taker = _make_data(800)
         sig_narrow = compute_signals_confidence(
-            close, close, close, vol, taker, btc, **BASE_KWARGS,
+            close,
+            close,
+            close,
+            vol,
+            taker,
+            btc,
+            **BASE_KWARGS,
             dynamic_target_enabled=True,
-            target_conf3=0.4, target_conf4=0.4, target_conf5=0.4,  # same as baseline
+            target_conf3=0.4,
+            target_conf4=0.4,
+            target_conf5=0.4,  # same as baseline
         )
         sig_wide = compute_signals_confidence(
-            close, close, close, vol, taker, btc, **BASE_KWARGS,
+            close,
+            close,
+            close,
+            vol,
+            taker,
+            btc,
+            **BASE_KWARGS,
             dynamic_target_enabled=True,
-            target_conf3=0.6, target_conf4=0.7, target_conf5=0.8,
+            target_conf3=0.6,
+            target_conf4=0.7,
+            target_conf5=0.8,
         )
         # Both should be valid
         assert sig_narrow.shape == sig_wide.shape
@@ -126,7 +177,9 @@ class TestDynamicTargetSignals:
         """Verify target scales correctly by checking that conf3 < conf4 < conf5."""
         cfg = RubberBandConfig(
             dynamic_target_enabled=True,
-            target_conf3=1.8, target_conf4=2.0, target_conf5=2.2,
+            target_conf3=1.8,
+            target_conf4=2.0,
+            target_conf5=2.2,
         )
         assert cfg.target_conf3 < cfg.target_conf4 < cfg.target_conf5
         assert cfg.target_retrace < cfg.target_conf3  # base (1.5) < conf3 (1.8)
@@ -136,13 +189,29 @@ class TestDynamicTargetSignals:
         close, btc, vol, taker = _make_data()
         base_tr = 0.4
         sig_disabled = compute_signals_confidence(
-            close, close, close, vol, taker, btc, **BASE_KWARGS,
+            close,
+            close,
+            close,
+            vol,
+            taker,
+            btc,
+            **BASE_KWARGS,
             dynamic_target_enabled=False,
-            target_conf3=0.45, target_conf4=0.5, target_conf5=0.55,
+            target_conf3=0.45,
+            target_conf4=0.5,
+            target_conf5=0.55,
         )
         sig_same = compute_signals_confidence(
-            close, close, close, vol, taker, btc, **BASE_KWARGS,
+            close,
+            close,
+            close,
+            vol,
+            taker,
+            btc,
+            **BASE_KWARGS,
             dynamic_target_enabled=True,
-            target_conf3=base_tr, target_conf4=base_tr, target_conf5=base_tr,
+            target_conf3=base_tr,
+            target_conf4=base_tr,
+            target_conf5=base_tr,
         )
         np.testing.assert_array_equal(sig_disabled, sig_same)

@@ -11,6 +11,7 @@ Validates:
 
 Uses REAL cached data — no synthetic data generation.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -34,25 +35,25 @@ from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-CACHE_DIR = Path('data/cache_extended')
+CACHE_DIR = Path("data/cache_extended")
 
 
-def _load_real_data(symbol: str = '1000PEPEUSDT', days: int = 1095) -> dict:
+def _load_real_data(symbol: str = "1000PEPEUSDT", days: int = 1095) -> dict:
     """Load real cached 15m data."""
-    pattern = f'{symbol}_15m_{days}d_*.npz'
+    pattern = f"{symbol}_15m_{days}d_*.npz"
     files = sorted(CACHE_DIR.glob(pattern))
     if not files:
-        pytest.skip(f'No cached data for {pattern}')
+        pytest.skip(f"No cached data for {pattern}")
     data = np.load(files[-1])
     return {k: data[k].astype(np.float64) for k in data.files}
 
 
-def _load_real_4h(symbol: str = '1000PEPEUSDT', days: int = 1095) -> dict:
+def _load_real_4h(symbol: str = "1000PEPEUSDT", days: int = 1095) -> dict:
     """Load real cached 4h data."""
-    pattern = f'{symbol}_4h_{days}d_*.npz'
+    pattern = f"{symbol}_4h_{days}d_*.npz"
     files = sorted(CACHE_DIR.glob(pattern))
     if not files:
-        pytest.skip(f'No cached 4h data for {pattern}')
+        pytest.skip(f"No cached 4h data for {pattern}")
     data = np.load(files[-1])
     return {k: data[k].astype(np.float64) for k in data.files}
 
@@ -81,12 +82,12 @@ class TestConfig:
         assert cfg.d_vr_threshold == 0.50
 
     def test_vr_periods(self, cfg):
-        assert cfg.vr_short == 8   # R39: was 7
-        assert cfg.vr_long == 56   # R39: was 50
+        assert cfg.vr_short == 8  # R39: was 7
+        assert cfg.vr_long == 56  # R39: was 50
 
     def test_sl_tp(self, cfg):
-        assert cfg.d_sl == 0.01   # 1% SL
-        assert cfg.d_tp == 0.12   # 12% hard TP ceiling (R43: was 5%)
+        assert cfg.d_sl == 0.01  # 1% SL
+        assert cfg.d_tp == 0.12  # 12% hard TP ceiling (R43: was 5%)
         assert cfg.d_trail_activate == 0.005  # r47: trail after +0.5%
         assert cfg.d_trail_distance == 0.002  # r47: 0.2% behind peak
 
@@ -94,9 +95,9 @@ class TestConfig:
         assert cfg.momentum_period == 8
 
     def test_max_hold_per_tf(self, cfg):
-        assert cfg.get_max_hold('15m') == 192
-        assert cfg.get_max_hold('1h') == 48
-        assert cfg.get_max_hold('4h') == 12
+        assert cfg.get_max_hold("15m") == 192
+        assert cfg.get_max_hold("1h") == 48
+        assert cfg.get_max_hold("4h") == 12
 
     def test_round_trip_cost(self, cfg):
         assert cfg.round_trip_cost == pytest.approx(0.0008)
@@ -117,9 +118,9 @@ class TestSignals:
     def test_vr_range_and_shape(self):
         """VR values should be positive and typically 0.2–2.0."""
         data = _load_real_data()
-        close = data['close']
-        high = data['high']
-        low = data['low']
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
 
         vr = compute_vr(close, high, low, 7, 50)
 
@@ -134,7 +135,7 @@ class TestSignals:
     def test_momentum_computation(self):
         """Momentum = close[i] / close[i-8] - 1."""
         data = _load_real_data()
-        close = data['close']
+        close = data["close"]
         mom = compute_momentum(close, 8)
 
         assert len(mom) == len(close)
@@ -149,7 +150,7 @@ class TestSignals:
     def test_gen_vr_signal_warmup(self):
         """No signals before warmup period."""
         data = _load_real_data()
-        close, high, low = data['close'], data['high'], data['low']
+        close, high, low = data["close"], data["high"], data["low"]
         vr = compute_vr(close, high, low, 7, 50)
 
         warmup = 200
@@ -159,7 +160,7 @@ class TestSignals:
     def test_direction_assignment(self):
         """Direction matches momentum sign."""
         data = _load_real_data()
-        close, high, low = data['close'], data['high'], data['low']
+        close, high, low = data["close"], data["high"], data["low"]
         vr = compute_vr(close, high, low, 7, 50)
         sig = gen_vr_signal(vr, 0.50, 200)
         mom = compute_momentum(close, 8)
@@ -193,15 +194,15 @@ class TestResampling:
         c = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
         h = np.array([1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5])
         l = np.array([0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5])
-        v = np.array([10., 20., 30., 40., 50., 60., 70.])
+        v = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0])
 
         c_out, h_out, l_out, v_out = resample_ohlcv(c, h, l, v, 4)
 
         assert len(c_out) == 1
-        assert c_out[0] == 4.0   # Last close of first 4 bars
-        assert h_out[0] == 4.5   # Max high of first 4 bars
-        assert l_out[0] == 0.5   # Min low of first 4 bars
-        assert v_out[0] == 100.  # Sum volume
+        assert c_out[0] == 4.0  # Last close of first 4 bars
+        assert h_out[0] == 4.5  # Max high of first 4 bars
+        assert l_out[0] == 0.5  # Min low of first 4 bars
+        assert v_out[0] == 100.0  # Sum volume
 
     def test_resample_close_is_last_bar(self):
         """Resampled close uses the LAST bar's close (completed)."""
@@ -220,18 +221,18 @@ class TestResampling:
 
     def test_resample_high_low_correct(self):
         """Resampled high/low aggregate correctly over the window."""
-        c = np.array([10., 12., 8., 11., 9., 13., 7., 10.], dtype=np.float64)
-        h = np.array([11., 13., 9., 12., 10., 14., 8., 11.], dtype=np.float64)
-        l = np.array([9., 11., 7., 10., 8., 12., 6., 9.], dtype=np.float64)
+        c = np.array([10.0, 12.0, 8.0, 11.0, 9.0, 13.0, 7.0, 10.0], dtype=np.float64)
+        h = np.array([11.0, 13.0, 9.0, 12.0, 10.0, 14.0, 8.0, 11.0], dtype=np.float64)
+        l = np.array([9.0, 11.0, 7.0, 10.0, 8.0, 12.0, 6.0, 9.0], dtype=np.float64)
         v = np.ones(8)
 
         c_out, h_out, l_out, _ = resample_ohlcv(c, h, l, v, 4)
 
         assert len(c_out) == 2
-        assert h_out[0] == 13.  # max(11, 13, 9, 12)
-        assert l_out[0] == 7.   # min(9, 11, 7, 10)
-        assert h_out[1] == 14.  # max(10, 14, 8, 11)
-        assert l_out[1] == 6.   # min(8, 12, 6, 9)
+        assert h_out[0] == 13.0  # max(11, 13, 9, 12)
+        assert l_out[0] == 7.0  # min(9, 11, 7, 10)
+        assert h_out[1] == 14.0  # max(10, 14, 8, 11)
+        assert l_out[1] == 6.0  # min(8, 12, 6, 9)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -245,17 +246,21 @@ class TestStrategySignal:
     def test_on_bar_produces_signals(self, strategy):
         """on_bar should produce non-zero signals on real data."""
         data = _load_real_data()
-        close = data['close']
-        high = data['high']
-        low = data['low']
-        volume = data.get('volume', np.ones(len(close)))
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
 
         signals_found = 0
         # Walk through data bar by bar (range wide enough for VR warmup)
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         for i in range(200, min(len(close), 5000)):
             strategy.update_market_data(
-                sym, volume[:i], np.ones(i), high[:i], low[:i],
+                sym,
+                volume[:i],
+                np.ones(i),
+                high[:i],
+                low[:i],
             )
             sig = strategy.on_bar(sym, close[:i])
             if sig != 0:
@@ -268,18 +273,22 @@ class TestStrategySignal:
     def test_on_bar_dedup_per_symbol(self, strategy):
         """No signal when symbol already has an open position."""
         data = _load_real_data()
-        close = data['close']
-        high = data['high']
-        low = data['low']
-        volume = data.get('volume', np.ones(len(close)))
-        sym = 'TESTUSDT'
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
 
         # Find first signal
         first_signal = 0
         first_idx = 0
         for i in range(200, min(len(close), 5000)):
             strategy.update_market_data(
-                sym, volume[:i], np.ones(i), high[:i], low[:i],
+                sym,
+                volume[:i],
+                np.ones(i),
+                high[:i],
+                low[:i],
             )
             sig = strategy.on_bar(sym, close[:i])
             if sig != 0:
@@ -292,44 +301,53 @@ class TestStrategySignal:
 
         # Open the position
         strategy.open_position(
-            sym, first_signal, close[first_idx],
-            notional=100.0, leverage=1.5, move_size=1.0,
+            sym,
+            first_signal,
+            close[first_idx],
+            notional=100.0,
+            leverage=1.5,
+            move_size=1.0,
         )
 
         # Walk more bars — all should return 0 (dedup)
         for j in range(first_idx + 1, min(first_idx + 100, len(close))):
             strategy.update_market_data(
-                sym, volume[:j], np.ones(j),
-                high[:j], low[:j],
+                sym,
+                volume[:j],
+                np.ones(j),
+                high[:j],
+                low[:j],
             )
-            assert strategy.on_bar(sym, close[:j]) == 0, (
-                f"Signal leaked at bar {j} despite open position"
-            )
+            assert strategy.on_bar(sym, close[:j]) == 0, f"Signal leaked at bar {j} despite open position"
 
     def test_signal_metadata_stored(self, strategy):
         """After on_bar returns non-zero, signal metadata should be available."""
         data = _load_real_data()
-        close = data['close']
-        high = data['high']
-        low = data['low']
-        volume = data.get('volume', np.ones(len(close)))
-        sym = 'TESTUSDT'
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
 
         for i in range(200, min(len(close), 2000)):
             strategy.update_market_data(
-                sym, volume[:i], np.ones(i), high[:i], low[:i],
+                sym,
+                volume[:i],
+                np.ones(i),
+                high[:i],
+                low[:i],
             )
             sig = strategy.on_bar(sym, close[:i])
             if sig != 0:
                 meta = strategy.get_last_signal_meta(sym)
-                assert 'tf' in meta
-                assert 'sl' in meta
-                assert 'tp' in meta
-                assert 'max_hold' in meta
-                assert 'vr' in meta
-                assert meta['sl'] == 0.01
-                assert meta['tp'] == 0.12
-                assert meta['vr'] > 0
+                assert "tf" in meta
+                assert "sl" in meta
+                assert "tp" in meta
+                assert "max_hold" in meta
+                assert "vr" in meta
+                assert meta["sl"] == 0.01
+                assert meta["tp"] == 0.12
+                assert meta["vr"] > 0
                 break
         else:
             pytest.skip("No signal found in test window")
@@ -344,134 +362,211 @@ class TestPositionManagement:
     """Test position lifecycle and exit logic."""
 
     def test_open_position_stores_tf_metadata(self, strategy):
-        sym = 'ETHUSDT'
+        sym = "ETHUSDT"
         strategy._last_signal_meta[sym] = {
-            'tf': '1h', 'sl': 0.01, 'tp': 0.05,
-            'max_hold': 48, 'vr': 0.42, 'momentum': 0.015,
+            "tf": "1h",
+            "sl": 0.01,
+            "tp": 0.05,
+            "max_hold": 48,
+            "vr": 0.42,
+            "momentum": 0.015,
         }
         strategy.open_position(
-            sym, 1, 100.0, notional=150.0,
-            leverage=1.5, move_size=1.0,
+            sym,
+            1,
+            100.0,
+            notional=150.0,
+            leverage=1.5,
+            move_size=1.0,
         )
 
         pos = strategy._positions[sym]
-        assert pos['tf'] == '1h'
-        assert pos['sl'] == 0.01
-        assert pos['tp'] == 0.05
-        assert pos['max_hold'] == 48
+        assert pos["tf"] == "1h"
+        assert pos["sl"] == 0.01
+        assert pos["tp"] == 0.05
+        assert pos["max_hold"] == 48
 
     def test_stop_loss_exit(self, strategy):
         """SL at 1%: LONG entry $100, low drops to $98.99 → stop_loss."""
-        sym = 'ETHUSDT'
+        sym = "ETHUSDT"
         strategy.open_position(
-            sym, 1, 100.0, notional=150.0,
-            leverage=1.5, move_size=1.0,
-            sl=0.01, tp=0.05, tf='15m', max_hold=192,
+            sym,
+            1,
+            100.0,
+            notional=150.0,
+            leverage=1.5,
+            move_size=1.0,
+            sl=0.01,
+            tp=0.05,
+            tf="15m",
+            max_hold=192,
         )
 
         # Price just above SL → hold
         result = strategy.update_position(
-            sym, 99.05, current_high=99.10, current_low=99.01,
+            sym,
+            99.05,
+            current_high=99.10,
+            current_low=99.01,
         )
         assert result is None
 
         # Price at SL → exit
         result = strategy.update_position(
-            sym, 99.0, current_high=99.5, current_low=98.99,
+            sym,
+            99.0,
+            current_high=99.5,
+            current_low=98.99,
         )
-        assert result == 'stop_loss'
+        assert result == "stop_loss"
 
     def test_take_profit_exit(self, strategy):
         """r47: LONG $100, trail activates at +0.5%, fires on 0.2% retrace."""
-        sym = 'ETHUSDT'
+        sym = "ETHUSDT"
         strategy.open_position(
-            sym, 1, 100.0, notional=150.0,
-            leverage=1.5, move_size=1.0,
-            sl=0.01, tp=0.12, tf='15m', max_hold=192,
+            sym,
+            1,
+            100.0,
+            notional=150.0,
+            leverage=1.5,
+            move_size=1.0,
+            sl=0.01,
+            tp=0.12,
+            tf="15m",
+            max_hold=192,
         )
 
         # Below trail activation threshold (0.3% gain) → hold
         result = strategy.update_position(
-            sym, 100.3, current_high=100.3, current_low=100.28,
+            sym,
+            100.3,
+            current_high=100.3,
+            current_low=100.28,
         )
         assert result is None
 
         # Trail activates (0.7% gain), tight range → hold
         result = strategy.update_position(
-            sym, 100.7, current_high=100.7, current_low=100.65,
+            sym,
+            100.7,
+            current_high=100.7,
+            current_low=100.65,
         )
         assert result is None
 
         # Retraces >0.2% from peak → trailing_stop
         result = strategy.update_position(
-            sym, 100.45, current_high=100.7, current_low=100.45,
+            sym,
+            100.45,
+            current_high=100.7,
+            current_low=100.45,
         )
-        assert result == 'trailing_stop'
+        assert result == "trailing_stop"
 
     def test_short_sl_exit(self, strategy):
         """SHORT entry $100, high hits $101.01 → stop_loss."""
-        sym = 'BTCUSDT'
+        sym = "BTCUSDT"
         strategy.open_position(
-            sym, -1, 100.0, notional=150.0,
-            leverage=1.5, move_size=1.0,
-            sl=0.01, tp=0.05, tf='15m', max_hold=192,
+            sym,
+            -1,
+            100.0,
+            notional=150.0,
+            leverage=1.5,
+            move_size=1.0,
+            sl=0.01,
+            tp=0.05,
+            tf="15m",
+            max_hold=192,
         )
 
         result = strategy.update_position(
-            sym, 101.0, current_high=101.01, current_low=100.5,
+            sym,
+            101.0,
+            current_high=101.01,
+            current_low=100.5,
         )
-        assert result == 'stop_loss'
+        assert result == "stop_loss"
 
     def test_short_tp_exit(self, strategy):
         """r47: SHORT $100, trail activates at +0.5%, fires on 0.2% retrace."""
-        sym = 'BTCUSDT'
+        sym = "BTCUSDT"
         strategy.open_position(
-            sym, -1, 100.0, notional=150.0,
-            leverage=1.5, move_size=1.0,
-            sl=0.01, tp=0.12, tf='15m', max_hold=192,
+            sym,
+            -1,
+            100.0,
+            notional=150.0,
+            leverage=1.5,
+            move_size=1.0,
+            sl=0.01,
+            tp=0.12,
+            tf="15m",
+            max_hold=192,
         )
 
         # Trail activates (0.55% gain), tight bar → hold
         # SHORT: best_gain = (entry - low) / entry
         result = strategy.update_position(
-            sym, 99.45, current_high=99.5, current_low=99.45,
+            sym,
+            99.45,
+            current_high=99.5,
+            current_low=99.45,
         )
         assert result is None
 
         # Retraces >0.2% from peak → trailing_stop
         # peak_gain = 0.55%, trail_stop = 0.35%, worst_gain = (100-99.7)/100 = 0.3% ≤ 0.35% → fires
         result = strategy.update_position(
-            sym, 99.7, current_high=99.7, current_low=99.65,
+            sym,
+            99.7,
+            current_high=99.7,
+            current_low=99.65,
         )
-        assert result == 'trailing_stop'
+        assert result == "trailing_stop"
 
     def test_max_hold_exit(self, strategy):
         """Position held past max_hold → max_hold exit."""
-        sym = 'ETHUSDT'
+        sym = "ETHUSDT"
         strategy.open_position(
-            sym, 1, 100.0, notional=150.0,
-            leverage=1.5, move_size=1.0,
-            sl=0.01, tp=0.05, tf='4h', max_hold=12,
+            sym,
+            1,
+            100.0,
+            notional=150.0,
+            leverage=1.5,
+            move_size=1.0,
+            sl=0.01,
+            tp=0.05,
+            tf="4h",
+            max_hold=12,
         )
 
         # Hold for 11 bars → no exit
         for _ in range(11):
             result = strategy.update_position(
-                sym, 100.1, current_high=100.2, current_low=99.95,
+                sym,
+                100.1,
+                current_high=100.2,
+                current_low=99.95,
             )
             assert result is None
 
         # 12th bar → max_hold exit
         result = strategy.update_position(
-            sym, 100.1, current_high=100.2, current_low=99.95,
+            sym,
+            100.1,
+            current_high=100.2,
+            current_low=99.95,
         )
-        assert result == 'max_hold'
+        assert result == "max_hold"
 
     def test_close_position(self, strategy):
-        sym = 'ETHUSDT'
+        sym = "ETHUSDT"
         strategy.open_position(
-            sym, 1, 100.0, notional=150.0,
-            leverage=1.5, move_size=1.0,
+            sym,
+            1,
+            100.0,
+            notional=150.0,
+            leverage=1.5,
+            move_size=1.0,
         )
         assert strategy.has_position(sym)
         assert strategy.n_active == 1
@@ -492,42 +587,53 @@ class TestScalperInterface:
 
     def test_get_effective_stop_mult(self, strategy):
         """Should return sl_pct from signal metadata."""
-        sym = 'ETHUSDT'
+        sym = "ETHUSDT"
         strategy._last_signal_meta[sym] = {
-            'tf': '15m', 'sl': 0.01, 'tp': 0.05,
-            'max_hold': 192, 'vr': 0.45, 'momentum': 0.02,
+            "tf": "15m",
+            "sl": 0.01,
+            "tp": 0.05,
+            "max_hold": 192,
+            "vr": 0.45,
+            "momentum": 0.02,
         }
         close = np.ones(100)
         result = strategy.get_effective_stop_mult(close, symbol=sym)
         assert result == 0.01
 
     def test_get_last_confidence_zero(self, strategy):
-        assert strategy.get_last_confidence('ETHUSDT') == 0
+        assert strategy.get_last_confidence("ETHUSDT") == 0
 
     def test_was_mtf_confirmed_false(self, strategy):
-        assert strategy.was_mtf_confirmed('ETHUSDT') is False
+        assert strategy.was_mtf_confirmed("ETHUSDT") is False
 
     def test_state_serialization(self, strategy):
         """State round-trip: to_state_dict → from_state_dict."""
-        sym = 'ETHUSDT'
+        sym = "ETHUSDT"
         strategy.open_position(
-            sym, 1, 3000.0, notional=4500.0,
-            leverage=1.5, move_size=1.0,
-            sl=0.01, tp=0.05, tf='1h', max_hold=48,
+            sym,
+            1,
+            3000.0,
+            notional=4500.0,
+            leverage=1.5,
+            move_size=1.0,
+            sl=0.01,
+            tp=0.05,
+            tf="1h",
+            max_hold=48,
         )
 
         state = strategy.to_state_dict()
-        assert state['strategy_name'] == 'vol_straddle'
-        assert sym in state['positions']
+        assert state["strategy_name"] == "vol_straddle"
+        assert sym in state["positions"]
 
         # Restore into fresh strategy
         new_strat = VolStraddleStrategy()
         new_strat.from_state_dict(state)
         assert new_strat.has_position(sym)
         pos = new_strat._positions[sym]
-        assert pos['entry_price'] == 3000.0
-        assert pos['tf'] == '1h'
-        assert pos['sl'] == 0.01
+        assert pos["entry_price"] == 3000.0
+        assert pos["tf"] == "1h"
+        assert pos["sl"] == 0.01
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -544,15 +650,19 @@ class TestMultiTFPriority:
         strategy = VolStraddleStrategy(cfg)
 
         data = _load_real_data()
-        close = data['close']
-        high = data['high']
-        low = data['low']
-        volume = data.get('volume', np.ones(len(close)))
-        sym = 'TESTUSDT'
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
 
         # Resample 15m→4h for OHLCV (cache only has close for 4h)
         c4h, h4h, l4h, _ = resample_ohlcv(
-            close, high, low, volume, 16,
+            close,
+            high,
+            low,
+            volume,
+            16,
         )
 
         # Feed 4h data
@@ -561,14 +671,18 @@ class TestMultiTFPriority:
         # Walk bars looking for any signal, verify metadata has TF field
         for i in range(200, min(len(close), 5000)):
             strategy.update_market_data(
-                sym, volume[:i], np.ones(i), high[:i], low[:i],
+                sym,
+                volume[:i],
+                np.ones(i),
+                high[:i],
+                low[:i],
             )
             sig = strategy.on_bar(sym, close[:i])
             if sig != 0:
                 meta = strategy.get_last_signal_meta(sym)
-                assert meta['tf'] in ('15m', '1h', '4h')
-                assert 'sl' in meta
-                assert 'tp' in meta
+                assert meta["tf"] in ("15m", "1h", "4h")
+                assert "sl" in meta
+                assert "tp" in meta
                 break
 
     def test_tf_disabled(self):
@@ -577,11 +691,11 @@ class TestMultiTFPriority:
         strategy = VolStraddleStrategy(cfg)
 
         data = _load_real_data()
-        sym = 'TESTUSDT'
-        close = data['close'][:500]
-        high = data['high'][:500]
-        low = data['low'][:500]
-        volume = data.get('volume', np.ones(len(close)))[:500]
+        sym = "TESTUSDT"
+        close = data["close"][:500]
+        high = data["high"][:500]
+        low = data["low"][:500]
+        volume = data.get("volume", np.ones(len(close)))[:500]
 
         strategy.update_market_data(sym, volume, np.ones(500), high, low)
         sig = strategy.on_bar(sym, close)
@@ -614,9 +728,9 @@ class TestLookaheadPrevention:
     def test_vr_uses_only_past_data(self):
         """VR at bar i should only use data from bars 0..i."""
         data = _load_real_data()
-        close = data['close'][:300].copy()
-        high = data['high'][:300].copy()
-        low = data['low'][:300].copy()
+        close = data["close"][:300].copy()
+        high = data["high"][:300].copy()
+        low = data["low"][:300].copy()
 
         # Compute VR on full array
         vr_full = compute_vr(close, high, low, 7, 50)
@@ -630,7 +744,7 @@ class TestLookaheadPrevention:
     def test_momentum_no_future(self):
         """Momentum at bar i uses only close[i-8..i], no future data."""
         data = _load_real_data()
-        close = data['close'][:300].copy()
+        close = data["close"][:300].copy()
 
         mom_full = compute_momentum(close, 8)
         mom_partial = compute_momentum(close[:200], 8)
@@ -642,10 +756,10 @@ class TestLookaheadPrevention:
         """1h VR uses only completed 15m bars (no developing bar)."""
         data = _load_real_data()
         n = 201  # 201 bars → 50 completed 1h bars + 1 discarded
-        close = data['close'][:n]
-        high = data['high'][:n]
-        low = data['low'][:n]
-        volume = data.get('volume', np.ones(n))[:n]
+        close = data["close"][:n]
+        high = data["high"][:n]
+        low = data["low"][:n]
+        volume = data.get("volume", np.ones(n))[:n]
 
         c1h, h1h, l1h, _ = resample_ohlcv(close, high, low, volume, 4)
 
@@ -699,9 +813,7 @@ class TestPositionSizing:
             dynamic = min(dynamic, balance * 0.5)  # 50% cap
             # Hard cap (the fix we added)
             capped = min(dynamic, flat_per_slot)
-            assert capped <= flat_per_slot, (
-                f"n_active={n_active}: capped={capped:.2f} > flat={flat_per_slot:.2f}"
-            )
+            assert capped <= flat_per_slot, f"n_active={n_active}: capped={capped:.2f} > flat={flat_per_slot:.2f}"
 
     def test_all_slots_fit_in_balance(self):
         """Opening max_concurrent slots sequentially must not exceed balance.
@@ -722,9 +834,7 @@ class TestPositionSizing:
             per_slot = min(dynamic, flat_per_slot)  # hard cap
             total_margin += per_slot
 
-        assert total_margin <= balance, (
-            f"Total margin ${total_margin:.2f} exceeds balance ${balance:.2f}"
-        )
+        assert total_margin <= balance, f"Total margin ${total_margin:.2f} exceeds balance ${balance:.2f}"
 
     def test_first_slot_not_50pct_of_balance(self):
         """Slot 1 must not consume 50% of balance (the original bug).
@@ -746,7 +856,7 @@ class TestPositionSizing:
         fixed_notional = fixed_slot * leverage  # $2,400
 
         assert buggy_notional == pytest.approx(12000.0)  # confirm bug existed
-        assert fixed_notional == pytest.approx(2400.0)   # confirm fix works
+        assert fixed_notional == pytest.approx(2400.0)  # confirm fix works
         # margin (capital) must be within 1-slot share of balance
         assert fixed_slot <= flat_per_slot  # $200 ≤ $200
 
@@ -831,6 +941,7 @@ class TestHalfKellyLeverage:
 #  TBR z-score Gate (F5, R46 validated)
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestTBRZscore:
     """Unit tests for _compute_tbr_zscore() — no lookahead."""
 
@@ -838,7 +949,7 @@ class TestTBRZscore:
         """Returns 0.0 (pass) when fewer than w+1 bars available."""
         cfg = VolStraddleConfig(f5_tbr_enabled=True, f5_tbr_z_window=192)
         strat = VolStraddleStrategy(cfg)
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         # Only 10 bars — well below window+1=193
         strat._taker_buy_data[sym] = np.ones(10) * 50.0
         strat._volume_data[sym] = np.ones(10) * 100.0
@@ -848,13 +959,13 @@ class TestTBRZscore:
         """Returns 0.0 when symbol not in data dicts."""
         cfg = VolStraddleConfig(f5_tbr_enabled=True)
         strat = VolStraddleStrategy(cfg)
-        assert strat._compute_tbr_zscore('MISSINGUSDT') == 0.0
+        assert strat._compute_tbr_zscore("MISSINGUSDT") == 0.0
 
     def test_neutral_tbr_gives_near_zero_z(self):
         """Flat TBR (constant 0.5) → z ≈ 0."""
         cfg = VolStraddleConfig(f5_tbr_z_window=192)
         strat = VolStraddleStrategy(cfg)
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         n = 300
         strat._volume_data[sym] = np.ones(n) * 1000.0
         strat._taker_buy_data[sym] = np.ones(n) * 500.0  # TBR = 0.5 always
@@ -866,12 +977,12 @@ class TestTBRZscore:
         """Current bar has extreme taker buy → z >> 0."""
         cfg = VolStraddleConfig(f5_tbr_z_window=50)
         strat = VolStraddleStrategy(cfg)
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         n = 200
         rng = np.random.default_rng(42)
         vol = np.ones(n) * 1000.0
         tb = rng.normal(500, 30, n)  # Normal TBR ≈ 0.5
-        tb[-1] = 950.0               # Current bar: extreme buy (TBR ≈ 0.95)
+        tb[-1] = 950.0  # Current bar: extreme buy (TBR ≈ 0.95)
         strat._volume_data[sym] = vol
         strat._taker_buy_data[sym] = tb
         z = strat._compute_tbr_zscore(sym)
@@ -881,7 +992,7 @@ class TestTBRZscore:
         """Current bar has extreme taker sell → z << 0."""
         cfg = VolStraddleConfig(f5_tbr_z_window=50)
         strat = VolStraddleStrategy(cfg)
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         n = 200
         rng = np.random.default_rng(7)
         vol = np.ones(n) * 1000.0
@@ -896,7 +1007,7 @@ class TestTBRZscore:
         """Z-score window excludes current bar (no lookahead parity)."""
         cfg = VolStraddleConfig(f5_tbr_z_window=10)
         strat = VolStraddleStrategy(cfg)
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         n = 30
         vol = np.ones(n) * 1000.0
         # Uniform normal in window [−11:−1], then extreme current bar
@@ -913,7 +1024,7 @@ class TestTBRZscore:
     def test_taker_buy_stored_by_update_market_data(self):
         """update_market_data() stores taker_buy for F5 gate."""
         strat = VolStraddleStrategy()
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         vol = np.ones(50) * 1000.0
         tb = np.ones(50) * 600.0
         high = np.ones(50)
@@ -931,7 +1042,7 @@ class TestTBRGateBlocking:
         rng = np.random.default_rng(0)
         vol = np.ones(n) * 1000.0
         tb = rng.normal(500, 30, n)  # Normal window: TBR≈0.5, std≈0.03
-        tb[-1] = 900.0               # Current bar: extreme buy pressure
+        tb[-1] = 900.0  # Current bar: extreme buy pressure
         strat._volume_data[sym] = vol
         strat._taker_buy_data[sym] = tb
 
@@ -948,7 +1059,7 @@ class TestTBRGateBlocking:
         """With f5_tbr_enabled=True, _compute_tbr_zscore triggers block path."""
         cfg = VolStraddleConfig(f5_tbr_enabled=True, f5_tbr_z_threshold=0.5, f5_tbr_z_window=100)
         strat = VolStraddleStrategy(cfg)
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         self._inject_crowded_long(strat, sym, n=500)
         # Manually verify z > threshold
         z = strat._compute_tbr_zscore(sym)
@@ -963,7 +1074,7 @@ class TestTBRGateBlocking:
         """Crowded short (extreme sell) blocked: z < -threshold."""
         cfg = VolStraddleConfig(f5_tbr_enabled=True, f5_tbr_z_threshold=0.5, f5_tbr_z_window=100)
         strat = VolStraddleStrategy(cfg)
-        sym = 'TESTUSDT'
+        sym = "TESTUSDT"
         self._inject_crowded_short(strat, sym, n=500)
         z = strat._compute_tbr_zscore(sym)
         assert z < -cfg.f5_tbr_z_threshold, f"Test setup error: z={z:.2f} not < -0.5"

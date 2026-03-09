@@ -26,6 +26,7 @@ from quantbox.strategy.rubberband import (
 
 # ── Helpers ──
 
+
 def _make_drop_then_run(n=250, drop_pct=0.06, recovery_pct=0.12):
     """Price drops sharply then recovers strongly (runner scenario).
 
@@ -55,6 +56,7 @@ def _make_drop_then_run(n=250, drop_pct=0.06, recovery_pct=0.12):
 # ════════════════════════════════════════════════════════
 #  TEST 1: Config Defaults
 # ════════════════════════════════════════════════════════
+
 
 class TestHybTightConfig:
     """Verify v12.4 I-HybTight config defaults."""
@@ -90,6 +92,7 @@ class TestHybTightConfig:
 #  TEST 2: runner_max_hold_mult in Numba Signal
 # ════════════════════════════════════════════════════════
 
+
 class TestRunnerMaxHoldNumba:
     """Verify runner_max_hold_mult controls runner time exit in numba."""
 
@@ -98,11 +101,27 @@ class TestRunnerMaxHoldNumba:
         prices = _make_drop_then_run(n=300)
 
         sigs_old = compute_signals_with_partial_exit(
-            prices, prices, prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
+            prices,
+            prices,
+            prices,
+            8,
+            0.032,
+            1.5,
+            0.382,
+            25,
+            0.0,
             runner_max_hold_mult=2.0,
         )
         sigs_new = compute_signals_with_partial_exit(
-            prices, prices, prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
+            prices,
+            prices,
+            prices,
+            8,
+            0.032,
+            1.5,
+            0.382,
+            25,
+            0.0,
             runner_max_hold_mult=3.0,
         )
 
@@ -122,10 +141,26 @@ class TestRunnerMaxHoldNumba:
         prices = _make_drop_then_run(n=300)
 
         sigs_default = compute_signals_with_partial_exit(
-            prices, prices, prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
+            prices,
+            prices,
+            prices,
+            8,
+            0.032,
+            1.5,
+            0.382,
+            25,
+            0.0,
         )
         sigs_explicit = compute_signals_with_partial_exit(
-            prices, prices, prices, 8, 0.032, 1.5, 0.382, 25, 0.0,
+            prices,
+            prices,
+            prices,
+            8,
+            0.032,
+            1.5,
+            0.382,
+            25,
+            0.0,
             runner_max_hold_mult=3.0,
         )
 
@@ -135,6 +170,7 @@ class TestRunnerMaxHoldNumba:
 # ════════════════════════════════════════════════════════
 #  TEST 3: Tighter Trail in Live Runner
 # ════════════════════════════════════════════════════════
+
 
 class TestTighterTrail:
     """Verify trail_atr_mult=1.0 is tighter than 1.5."""
@@ -157,21 +193,21 @@ class TestTighterTrail:
 
         # Open positions and trigger partial
         for s in (strategy_tight, strategy_wide):
-            s.open_position('TEST', 1, 100.0, 1000.0, 1.0, 0.10)
-            result = s.update_position('TEST', 116.0)  # target=0.10*1.5=15%, gain=16%
-            assert result == 'partial_close'
+            s.open_position("TEST", 1, 100.0, 1000.0, 1.0, 0.10)
+            result = s.update_position("TEST", 116.0)  # target=0.10*1.5=15%, gain=16%
+            assert result == "partial_close"
 
         # Runner peak at 20% gain, then pullback
         for s in (strategy_tight, strategy_wide):
-            s.update_position('TEST', 120.0, current_atr_pct=0.03)
+            s.update_position("TEST", 120.0, current_atr_pct=0.03)
 
         # Now moderate pullback: gain = 17%
         # Tight trail_stop = 20% - 1.0*3% = 17% → gain 17% <= 17% = EXIT
         # Wide trail_stop  = 20% - 1.5*3% = 15.5% → gain 17% > 15.5% = HOLD
-        result_tight = strategy_tight.update_position('TEST', 117.0, current_atr_pct=0.03)
-        result_wide = strategy_wide.update_position('TEST', 117.0, current_atr_pct=0.03)
+        result_tight = strategy_tight.update_position("TEST", 117.0, current_atr_pct=0.03)
+        result_wide = strategy_wide.update_position("TEST", 117.0, current_atr_pct=0.03)
 
-        assert result_tight == 'trail_runner'
+        assert result_tight == "trail_runner"
         assert result_wide is None  # Still holding
 
 
@@ -179,16 +215,17 @@ class TestTighterTrail:
 #  TEST 4: Runner Time Exit in Live
 # ════════════════════════════════════════════════════════
 
+
 class TestRunnerTimeExitLive:
     """Verify runner_max_hold_mult controls live runner time exit."""
 
     def _setup_runner(self, cfg):
         """Create a strategy with a position in runner phase."""
         strategy = RubberBandStrategy(cfg)
-        strategy.open_position('TEST', 1, 100.0, 1000.0, 1.0, 0.10)
+        strategy.open_position("TEST", 1, 100.0, 1000.0, 1.0, 0.10)
         # Trigger partial close (target = 0.10 * 1.5 = 15%)
-        result = strategy.update_position('TEST', 116.0)
-        assert result == 'partial_close'
+        result = strategy.update_position("TEST", 116.0)
+        assert result == "partial_close"
         return strategy
 
     def test_time_runner_at_mult_boundary(self):
@@ -205,15 +242,15 @@ class TestRunnerTimeExitLive:
         # Simulate bars at a high price (above trail stop), advancing bars_held
         # Runner exit threshold = 25 * 3.0 = 75 bars
         # update_position increments bars_held FIRST, so set to 73 → becomes 74
-        pos = strategy._positions['TEST']
-        pos['bars_held'] = 73
-        result = strategy.update_position('TEST', 125.0, current_atr_pct=0.01)
+        pos = strategy._positions["TEST"]
+        pos["bars_held"] = 73
+        result = strategy.update_position("TEST", 125.0, current_atr_pct=0.01)
         assert result is None  # 74 < 75, still holding
 
         # Now at 74 → becomes 75, triggers time_runner
-        pos['bars_held'] = 74
-        result = strategy.update_position('TEST', 125.0, current_atr_pct=0.01)
-        assert result == 'time_runner'
+        pos["bars_held"] = 74
+        result = strategy.update_position("TEST", 125.0, current_atr_pct=0.01)
+        assert result == "time_runner"
 
     def test_old_mult_would_exit_earlier(self):
         """With mult=2.0, runner exits at bar 50, not 75."""
@@ -226,10 +263,10 @@ class TestRunnerTimeExitLive:
         )
         strategy = self._setup_runner(cfg_old)
 
-        pos = strategy._positions['TEST']
-        pos['bars_held'] = 49  # increments to 50 = 25 × 2.0
-        result = strategy.update_position('TEST', 125.0, current_atr_pct=0.01)
-        assert result == 'time_runner'
+        pos = strategy._positions["TEST"]
+        pos["bars_held"] = 49  # increments to 50 = 25 × 2.0
+        result = strategy.update_position("TEST", 125.0, current_atr_pct=0.01)
+        assert result == "time_runner"
 
     def test_runner_does_not_exit_before_threshold(self):
         """Runner holds when bars < max_hold × mult."""
@@ -241,9 +278,9 @@ class TestRunnerTimeExitLive:
             runner_max_hold_mult=3.0,
         )
         strategy = self._setup_runner(cfg)
-        pos = strategy._positions['TEST']
-        pos['bars_held'] = 59  # increments to 60, well below 75
-        result = strategy.update_position('TEST', 125.0, current_atr_pct=0.01)
+        pos = strategy._positions["TEST"]
+        pos["bars_held"] = 59  # increments to 60, well below 75
+        result = strategy.update_position("TEST", 125.0, current_atr_pct=0.01)
         assert result is None
 
 
@@ -251,17 +288,20 @@ class TestRunnerTimeExitLive:
 #  TEST 5: Settings Wiring
 # ════════════════════════════════════════════════════════
 
+
 class TestSettingsWiring:
     """Verify RubberBandConfig is the SSoT for RB params (settings.rb_* removed)."""
 
     def test_settings_default(self):
         from quantbox.strategy.rubberband.config import RubberBandConfig
+
         cfg = RubberBandConfig()
         assert cfg.runner_max_hold_mult == 3.0
 
     def test_settings_hybtight_params(self):
         """All four HybTight params have correct defaults in RubberBandConfig."""
         from quantbox.strategy.rubberband.config import RubberBandConfig
+
         cfg = RubberBandConfig()
         assert cfg.target_retrace == 1.5
         assert cfg.max_hold == 25
@@ -272,6 +312,7 @@ class TestSettingsWiring:
 # ════════════════════════════════════════════════════════
 #  TEST 6: Backtest ↔ Live Parity
 # ════════════════════════════════════════════════════════
+
 
 class TestBacktestLiveParity:
     """Critical: backtest and live must agree on runner behavior."""
@@ -307,7 +348,15 @@ class TestBacktestLiveParity:
             prices[i] = recovered
 
         sigs = compute_signals_with_partial_exit(
-            prices, prices, prices, 8, 0.032, 1.5, 0.382, max_hold, 0.0,
+            prices,
+            prices,
+            prices,
+            8,
+            0.032,
+            1.5,
+            0.382,
+            max_hold,
+            0.0,
             runner_max_hold_mult=mult,
         )
 
@@ -316,9 +365,7 @@ class TestBacktestLiveParity:
         if len(runner_bars) > 0:
             runner_duration = len(runner_bars)
             # Runner should not exceed max_hold × mult
-            assert runner_duration <= threshold_bar, (
-                f"Runner held {runner_duration} bars, expected <= {threshold_bar}"
-            )
+            assert runner_duration <= threshold_bar, f"Runner held {runner_duration} bars, expected <= {threshold_bar}"
 
         # Live parity: same threshold
         cfg = RubberBandConfig(

@@ -24,6 +24,7 @@ WARNING: Do NOT reimplement these functions.  Subtle details
 (momentum=0 handling, squeeze counter reset, dedup order) make
 it very easy to produce slightly different numbers.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -41,13 +42,15 @@ from quantbox.strategy.vol_straddle.signals import (
 #  Constants — derived from VolStraddleConfig (single source of truth)
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _load_trade_sim_constants() -> tuple:
     """Read constants from VolStraddleConfig so trade_sim stays in sync with production."""
     try:
         from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
         cfg = VolStraddleConfig()
-        cost_dir = cfg.round_trip_cost        # fee+slippage × 2 (entry+exit)
-        cost_str = cfg.round_trip_cost * 2    # 4 sides (long+short entry+exit)
+        cost_dir = cfg.round_trip_cost  # fee+slippage × 2 (entry+exit)
+        cost_str = cfg.round_trip_cost * 2  # 4 sides (long+short entry+exit)
         w15 = cfg.warmup_15m
         w1h = int(cfg.warmup_15m / 4)
         w4h = int(cfg.warmup_15m / 16) + 1
@@ -60,12 +63,10 @@ def _load_trade_sim_constants() -> tuple:
         return 0.0008, 0.0016, 200, 50, 13, 192, 48, 12
 
 
-_COST_DIRECTIONAL, _COST_STRADDLE, _W15m, _W1h, _W4h, _MH15m, _MH1h, _MH4h = (
-    _load_trade_sim_constants()
-)
+_COST_DIRECTIONAL, _COST_STRADDLE, _W15m, _W1h, _W4h, _MH15m, _MH1h, _MH4h = _load_trade_sim_constants()
 
-COST_DIRECTIONAL: float = _COST_DIRECTIONAL   # 2 × round-trip (entry + exit)
-COST_STRADDLE: float = _COST_STRADDLE          # 4 sides (long + short entry/exit)
+COST_DIRECTIONAL: float = _COST_DIRECTIONAL  # 2 × round-trip (entry + exit)
+COST_STRADDLE: float = _COST_STRADDLE  # 4 sides (long + short entry/exit)
 
 # Warmup periods — bars to skip before first signal (long ATR needs data).
 WARMUP_15m: int = _W15m
@@ -74,9 +75,9 @@ WARMUP_4h: int = _W4h
 
 # Timeframe definitions: (label, ratio_vs_15m, warmup, max_hold_dir, max_hold_straddle)
 TF_15m = ("15m", 1, WARMUP_15m, _MH15m, _MH15m * 2)
-TF_1h  = ("1h",  4, WARMUP_1h,  _MH1h,  _MH1h * 2)
-TF_4h  = ("4h", 16, WARMUP_4h,  _MH4h,  _MH4h * 2)
-G_3TF  = [TF_15m, TF_1h, TF_4h]
+TF_1h = ("1h", 4, WARMUP_1h, _MH1h, _MH1h * 2)
+TF_4h = ("4h", 16, WARMUP_4h, _MH4h, _MH4h * 2)
+G_3TF = [TF_15m, TF_1h, TF_4h]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -133,10 +134,10 @@ def sim_straddle_trades(
         l_tp = entry * (1.0 + tp)
         s_sl = entry * (1.0 + sl)
         s_tp = entry * (1.0 - tp)
-        la = True   # long leg active
-        sa = True   # short leg active
-        le = 0.0    # long exit pnl
-        se = 0.0    # short exit pnl
+        la = True  # long leg active
+        sa = True  # short leg active
+        le = 0.0  # long exit pnl
+        se = 0.0  # short exit pnl
         eb = i
         end = min(i + 1 + max_hold, n)
         for j in range(i + 1, end):
@@ -288,7 +289,7 @@ def collect_trades(
     lp = cfg["lp"]
     vr_key = f"vr_{sp}_{lp}"
     tf_data_map = {1: data_15m, 4: data_1h, 16: data_4h}
-    is_straddle = (strat == "S_d8")
+    is_straddle = strat == "S_d8"
 
     d_sl = cfg["d_sl"]
     s_sl = cfg["s_sl"]
@@ -461,9 +462,17 @@ def compute_metrics(pnl: np.ndarray, data_years: float) -> dict:
     n = len(pnl)
     if n < 2:
         return {
-            "N": n, "PF": 0.0, "EV_bp": 0.0, "t": 0.0, "WR": 0.0,
-            "RR": 0.0, "ret_pct": 0.0, "max_dd_pct": 0.0, "tpd": 0.0,
-            "ann_ret_pct": 0.0, "calmar": 0.0,
+            "N": n,
+            "PF": 0.0,
+            "EV_bp": 0.0,
+            "t": 0.0,
+            "WR": 0.0,
+            "RR": 0.0,
+            "ret_pct": 0.0,
+            "max_dd_pct": 0.0,
+            "tpd": 0.0,
+            "ann_ret_pct": 0.0,
+            "calmar": 0.0,
         }
 
     wins = pnl[pnl > 0]
@@ -473,7 +482,7 @@ def compute_metrics(pnl: np.ndarray, data_years: float) -> dict:
     avg_loss = abs(float(np.mean(losses))) * 100 if len(losses) > 0 else 1e-9
     rr = avg_win / avg_loss if avg_loss > 0 else 999.0
     pf = pf_from_pnl(pnl)
-    ev = float(np.mean(pnl)) * 10000        # basis points
+    ev = float(np.mean(pnl)) * 10000  # basis points
     se = float(np.std(pnl) / np.sqrt(n)) * 10000
     t_stat = ev / se if se > 0 else 0.0
 
@@ -552,13 +561,21 @@ def build_resampled(data_15m: dict, ratio: int) -> dict:
     data_htf: dict = {}
     for sym, d in data_15m.items():
         c, h, lo, v = resample_ohlcv(
-            d["close"], d["high"], d["low"], d["volume"], ratio,
+            d["close"],
+            d["high"],
+            d["low"],
+            d["volume"],
+            ratio,
         )
         if len(c) < 100:
             continue
         data_htf[sym] = {
-            "close": c, "high": h, "low": lo, "volume": v,
-            "bars": len(c), "days": d.get("days", 0),
+            "close": c,
+            "high": h,
+            "low": lo,
+            "volume": v,
+            "bars": len(c),
+            "days": d.get("days", 0),
         }
     return data_htf
 
@@ -587,11 +604,11 @@ def _vol_percentile_vec(vol: np.ndarray, lookback: int) -> np.ndarray:
     # sliding_window_view: shape (n-lookback+1, lookback)
     # windows[j] = vol[j : j+lookback], corresponds to position i = j+lookback-1
     windows = np.lib.stride_tricks.sliding_window_view(vol, lookback)
-    cur = vol[lookback - 1:, None]          # broadcast column
-    valid = (windows > 0).sum(axis=1)       # count non-zero per window
-    below = (windows < cur).sum(axis=1)     # count strictly-below-cur
+    cur = vol[lookback - 1 :, None]  # broadcast column
+    valid = (windows > 0).sum(axis=1)  # count non-zero per window
+    below = (windows < cur).sum(axis=1)  # count strictly-below-cur
     pct_vals = np.where(valid > 0, below / valid * 100.0, 50.0)
-    vol_pct[lookback - 1:] = pct_vals
+    vol_pct[lookback - 1 :] = pct_vals
     return vol_pct
 
 
@@ -624,10 +641,10 @@ def precompute(
     def _process_sym(item: tuple) -> None:
         sym, d = item
         c, h, lo, vol = d["close"], d["high"], d["low"], d["volume"]
-        d["vr"]    = compute_vr(c, h, lo, vr_sp, vr_lp)
+        d["vr"] = compute_vr(c, h, lo, vr_sp, vr_lp)
         d["mom_8"] = compute_momentum(c, mom_lb)
-        lookback   = min(200, len(vol) // 2)
-        d["vol_pct"]    = _vol_percentile_vec(vol, lookback)
+        lookback = min(200, len(vol) // 2)
+        d["vol_pct"] = _vol_percentile_vec(vol, lookback)
         d["sq_dur_055"] = compute_squeeze_dur(d["vr"], sq_thresh)
 
     items = list(data.items())

@@ -29,6 +29,7 @@ from quantbox.strategy.rubberband import (
 
 # ── Fixtures ──
 
+
 @pytest.fixture
 def default_cfg():
     """Production v10.1 config (matches .env defaults)."""
@@ -47,6 +48,7 @@ def default_cfg():
 
 
 # ── Test 1: MTF confirmation tracking ──
+
 
 def test_mtf_confirmed_flag_set_on_entry(default_cfg):
     """was_mtf_confirmed() must return True when signal survives MTF filter."""
@@ -100,6 +102,7 @@ def test_mtf_confirmed_default_false(default_cfg):
 
 # ── Test 2: Leverage parity ──
 
+
 def test_backtest_live_leverage_parity(default_cfg):
     """Backtest signal magnitude must equal live effective leverage.
 
@@ -126,10 +129,12 @@ def test_backtest_live_leverage_parity(default_cfg):
     )
     live_mtf_leverage = live_base_leverage * cfg.mtf_leverage_mult
 
-    assert live_base_leverage == pytest.approx(backtest_base_leverage, abs=1e-6), \
+    assert live_base_leverage == pytest.approx(backtest_base_leverage, abs=1e-6), (
         f"Base leverage mismatch: backtest={backtest_base_leverage}, live={live_base_leverage}"
-    assert live_mtf_leverage == pytest.approx(backtest_mtf_leverage, abs=1e-6), \
+    )
+    assert live_mtf_leverage == pytest.approx(backtest_mtf_leverage, abs=1e-6), (
         f"MTF leverage mismatch: backtest={backtest_mtf_leverage}, live={live_mtf_leverage}"
+    )
 
 
 def test_exchange_leverage_uses_ceil():
@@ -151,6 +156,7 @@ def test_exchange_leverage_uses_ceil():
 
 
 # ── Test 3: Signal pipeline parity ──
+
 
 def test_signal_direction_preserved(default_cfg):
     """on_bar signal direction must match backtest signal sign."""
@@ -175,10 +181,18 @@ def test_signal_direction_preserved(default_cfg):
     # Backtest signal
     cfg = default_cfg
     bt_sigs = compute_signals_v9(
-        close, high, low, volume, taker, btc,
-        cfg.lookback, cfg.threshold,
-        cfg.target_retrace, cfg.stop_mult,
-        cfg.max_hold, cfg.stop_decay,
+        close,
+        high,
+        low,
+        volume,
+        taker,
+        btc,
+        cfg.lookback,
+        cfg.threshold,
+        cfg.target_retrace,
+        cfg.stop_mult,
+        cfg.max_hold,
+        cfg.stop_decay,
         cfg.btc_directional_period,
         cfg.btc_regime_period,
         cfg.asset_trend_period,
@@ -208,11 +222,11 @@ def test_signal_direction_preserved(default_cfg):
     bt_last = bt_sigs[-1]
     bt_direction = 1 if bt_last > 0 else (-1 if bt_last < 0 else 0)
 
-    assert live_sig == bt_direction, \
-        f"Direction mismatch: live={live_sig}, backtest_raw={bt_last}"
+    assert live_sig == bt_direction, f"Direction mismatch: live={live_sig}, backtest_raw={bt_last}"
 
 
 # ── Test 4: CLI defaults don't override .env ──
+
 
 def test_cli_defaults_are_none():
     """Argparse defaults must be None so .env values take precedence.
@@ -221,12 +235,13 @@ def test_cli_defaults_are_none():
     This caused live trading at different threshold than backtested.
     """
     import argparse
+
     # Simulate the parser from scalper.main()
     # We can't import main() easily, so just verify the pattern
     parser = argparse.ArgumentParser()
-    parser.add_argument('--lookback', type=int, default=None)
-    parser.add_argument('--threshold', type=float, default=None)
-    parser.add_argument('--max-slots', type=int, default=None)
+    parser.add_argument("--lookback", type=int, default=None)
+    parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument("--max-slots", type=int, default=None)
 
     args = parser.parse_args([])  # No CLI args
 
@@ -242,6 +257,7 @@ def test_cli_defaults_are_none():
 
 # ── Test 5: MTF leverage is NOT double-applied in on_bar ──
 
+
 def test_on_bar_does_not_apply_mtf_leverage():
     """on_bar must NOT call apply_mtf_leverage (it's done in _open_position).
 
@@ -252,7 +268,7 @@ def test_on_bar_does_not_apply_mtf_leverage():
         mtf_confirmation_enabled=True,
         mtf_sma_period=6,
         mtf_leverage_mult=2.5,
-        entry_mode='confidence',
+        entry_mode="confidence",
         min_confidence=1,
         threshold=0.032,
     )
@@ -279,6 +295,7 @@ def test_on_bar_does_not_apply_mtf_leverage():
 
 # ── Test 6: 4h data alignment (inline vs array-based) ──
 
+
 def test_live_mtf_uses_latest_4h_bar():
     """Live MTF confirmation must use the LATEST 4h bar, not index i//16.
 
@@ -293,7 +310,7 @@ def test_live_mtf_uses_latest_4h_bar():
     cfg = RubberBandConfig(
         mtf_confirmation_enabled=True,
         mtf_sma_period=6,
-        entry_mode='confidence',
+        entry_mode="confidence",
         min_confidence=1,
         threshold=0.032,
     )
@@ -333,7 +350,7 @@ def test_live_mtf_blocks_counter_trend():
     cfg = RubberBandConfig(
         mtf_confirmation_enabled=True,
         mtf_sma_period=6,
-        entry_mode='confidence',
+        entry_mode="confidence",
         min_confidence=1,
         threshold=0.032,
     )
@@ -360,6 +377,7 @@ def test_live_mtf_blocks_counter_trend():
 
 # ── Test 7: btc_directional_period matches backtest ──
 
+
 def test_btc_directional_period_default_matches_backtest():
     """btc_directional_period must be 48 (v11.0 A/B validated).
 
@@ -368,11 +386,13 @@ def test_btc_directional_period_default_matches_backtest():
     Robust across all periods (16-96).
     """
     cfg = RubberBandConfig()
-    assert cfg.btc_directional_period == 48, \
+    assert cfg.btc_directional_period == 48, (
         f"btc_directional_period={cfg.btc_directional_period}, should be 48 (v11.0)"
+    )
 
 
 # ── Test 8: Incomplete bar exclusion (critical parity fix) ──
+
 
 def test_download_klines_drops_incomplete_bar():
     """download_klines must drop the last (incomplete) candle from Binance.
@@ -396,20 +416,22 @@ def test_download_klines_drops_incomplete_bar():
         # [open_time, open, high, low, close, volume, close_time,
         #  quote_vol, n_trades, taker_buy_base, taker_buy_quote, ignore]
         price = 100.0 + i * 0.1
-        fake_klines.append([
-            1000000 + i * 900000,    # open_time
-            str(price),              # open
-            str(price + 0.5),        # high
-            str(price - 0.5),        # low
-            str(price),              # close
-            str(1000.0),             # volume
-            1000000 + (i + 1) * 900000,  # close_time
-            str(10000.0),            # quote volume
-            100,                     # n_trades
-            str(400.0),              # taker buy base
-            str(4000.0),             # taker buy quote
-            '0',                     # ignore
-        ])
+        fake_klines.append(
+            [
+                1000000 + i * 900000,  # open_time
+                str(price),  # open
+                str(price + 0.5),  # high
+                str(price - 0.5),  # low
+                str(price),  # close
+                str(1000.0),  # volume
+                1000000 + (i + 1) * 900000,  # close_time
+                str(10000.0),  # quote volume
+                100,  # n_trades
+                str(400.0),  # taker buy base
+                str(4000.0),  # taker buy quote
+                "0",  # ignore
+            ]
+        )
 
     # The last kline is the incomplete candle (current bar)
     # Set it to a wildly different price to make the bug obvious
@@ -421,7 +443,7 @@ def test_download_klines_drops_incomplete_bar():
     scalper.paper_mode = True
 
     # Test basic (close only)
-    close = scalper.download_klines('BTCUSDT', 200)
+    close = scalper.download_klines("BTCUSDT", 200)
     assert close is not None
     assert len(close) == 200, f"Expected 200 completed bars, got {len(close)}"
     # Last bar should be the penultimate kline, not the incomplete one
@@ -430,7 +452,7 @@ def test_download_klines_drops_incomplete_bar():
 
     # Test full (close + high + low + volume + taker)
     mock_client.futures_klines.return_value = fake_klines
-    result = scalper.download_klines('BTCUSDT', 200, full=True)
+    result = scalper.download_klines("BTCUSDT", 200, full=True)
     assert result is not None
     close_f, high_f, low_f, vol_f, taker_f = result
     assert len(close_f) == 200
@@ -438,6 +460,7 @@ def test_download_klines_drops_incomplete_bar():
 
 
 # ── Test 9: Stateless on_bar (ghost-position prevention) ──
+
 
 def test_on_bar_stateless_no_ghost_position():
     """on_bar must evaluate ONLY the last bar, not carry forward virtual state.
@@ -449,7 +472,7 @@ def test_on_bar_stateless_no_ghost_position():
     Fix: on_bar now evaluates the last bar statelessly.
     """
     cfg = RubberBandConfig(
-        entry_mode='confidence',
+        entry_mode="confidence",
         min_confidence=1,
         threshold=0.032,
         lookback=8,
@@ -470,7 +493,7 @@ def test_on_bar_stateless_no_ghost_position():
     low = close.copy()
 
     # Inject a big dip at bar 150 (would trigger virtual entry in old code)
-    close[150] = 95.0   # -5% dip
+    close[150] = 95.0  # -5% dip
     high[150] = 100.0
     low[150] = 94.5
 
@@ -499,7 +522,7 @@ def test_on_bar_stateless_detects_fresh_entry():
     Fix: on_bar evaluates bar 199 independently.
     """
     cfg = RubberBandConfig(
-        entry_mode='confidence',
+        entry_mode="confidence",
         min_confidence=1,
         threshold=0.032,
         lookback=8,

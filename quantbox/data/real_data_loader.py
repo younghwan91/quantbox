@@ -20,7 +20,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-logger = logging.getLogger('RealDataLoader')
+logger = logging.getLogger("RealDataLoader")
 
 
 class RealDataLoader:
@@ -37,10 +37,7 @@ class RealDataLoader:
     """
 
     # Standard symbols for testing when specific symbols are not required
-    DEFAULT_SYMBOLS = [
-        'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT',
-        'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT'
-    ]
+    DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"]
 
     def __init__(self, cache_dir: str = None):
         """
@@ -53,21 +50,21 @@ class RealDataLoader:
             # Try to find project root by looking for cache_index.json
             current = Path(__file__).resolve().parent
             for parent in [current] + list(current.parents):
-                test_path = parent / 'data' / 'cache' / 'cache_index.json'
+                test_path = parent / "data" / "cache" / "cache_index.json"
                 if test_path.exists():
-                    cache_dir = parent / 'data' / 'cache'
+                    cache_dir = parent / "data" / "cache"
                     break
 
             # Fallback: look for pyproject.toml and use data/cache
             if cache_dir is None:
                 current = Path(__file__).resolve().parent
                 for parent in list(current.parents):
-                    if (parent / 'pyproject.toml').exists():
-                        cache_dir = parent / 'data' / 'cache'
+                    if (parent / "pyproject.toml").exists():
+                        cache_dir = parent / "data" / "cache"
                         break
 
             if cache_dir is None:
-                cache_dir = Path('data/cache')
+                cache_dir = Path("data/cache")
 
         self.cache_dir = Path(cache_dir)
         self._index = None
@@ -89,8 +86,8 @@ class RealDataLoader:
         """Get list of all available symbols in cache."""
         symbols = set()
         for key, info in self.index.items():
-            symbol = info.get('metadata', {}).get('symbol', key.split('_')[0])
-            if symbol and 'USDC' not in symbol:  # Skip stablecoins
+            symbol = info.get("metadata", {}).get("symbol", key.split("_")[0])
+            if symbol and "USDC" not in symbol:  # Skip stablecoins
                 symbols.add(symbol)
         return sorted(symbols)
 
@@ -108,20 +105,20 @@ class RealDataLoader:
             return self._data_cache[symbol].copy()
 
         for key, info in self.index.items():
-            cached_symbol = info.get('metadata', {}).get('symbol', key.split('_')[0])
+            cached_symbol = info.get("metadata", {}).get("symbol", key.split("_")[0])
             if cached_symbol != symbol:
                 continue
 
-            filepath = Path(info['filepath'])
+            filepath = Path(info["filepath"])
             if not filepath.exists():
                 continue
 
             try:
-                with gzip.open(filepath, 'rb') as f:
+                with gzip.open(filepath, "rb") as f:
                     obj = pickle.load(f)
 
                 # Handle CacheEntry objects
-                if hasattr(obj, 'data'):
+                if hasattr(obj, "data"):
                     df = obj.data
                 else:
                     df = obj
@@ -132,7 +129,7 @@ class RealDataLoader:
                 # Normalize column names
                 df = self._normalize_columns(df)
 
-                if 'Close' not in df.columns:
+                if "Close" not in df.columns:
                     logger.warning(f"No Close column in {symbol}")
                     continue
 
@@ -145,10 +142,7 @@ class RealDataLoader:
         return None
 
     def load_data(
-        self,
-        symbols: List[str] = None,
-        min_bars: int = 100,
-        align_data: bool = True
+        self, symbols: List[str] = None, min_bars: int = 100, align_data: bool = True
     ) -> Dict[str, pd.DataFrame]:
         """
         Load data for multiple symbols.
@@ -198,13 +192,7 @@ class RealDataLoader:
 
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Normalize column names to standard format."""
-        rename_map = {
-            'open': 'Open',
-            'high': 'High',
-            'low': 'Low',
-            'close': 'Close',
-            'volume': 'Volume'
-        }
+        rename_map = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
 
         for old, new in rename_map.items():
             if old in df.columns and new not in df.columns:
@@ -233,22 +221,19 @@ class RealDataLoader:
     def get_data_info(self) -> Dict:
         """Get information about available cached data."""
         info = {
-            'cache_dir': str(self.cache_dir),
-            'cache_exists': self.cache_dir.exists(),
-            'symbols': self.get_available_symbols(),
-            'n_symbols': len(self.get_available_symbols()),
+            "cache_dir": str(self.cache_dir),
+            "cache_exists": self.cache_dir.exists(),
+            "symbols": self.get_available_symbols(),
+            "n_symbols": len(self.get_available_symbols()),
         }
 
-        if info['n_symbols'] > 0:
+        if info["n_symbols"] > 0:
             # Get sample info
-            sample_symbol = info['symbols'][0]
+            sample_symbol = info["symbols"][0]
             sample_df = self.load_symbol(sample_symbol)
             if sample_df is not None:
-                info['sample_bars'] = len(sample_df)
-                info['date_range'] = {
-                    'start': str(sample_df.index.min()),
-                    'end': str(sample_df.index.max())
-                }
+                info["sample_bars"] = len(sample_df)
+                info["date_range"] = {"start": str(sample_df.index.min()), "end": str(sample_df.index.max())}
 
         return info
 
@@ -258,10 +243,7 @@ _default_loader = None
 
 
 def get_real_data(
-    symbols: List[str] = None,
-    min_bars: int = 100,
-    align_data: bool = True,
-    cache_dir: str = None
+    symbols: List[str] = None, min_bars: int = 100, align_data: bool = True, cache_dir: str = None
 ) -> Dict[str, pd.DataFrame]:
     """
     Convenient function to load real market data.
@@ -287,8 +269,4 @@ def get_real_data(
     if _default_loader is None or (cache_dir is not None):
         _default_loader = RealDataLoader(cache_dir)
 
-    return _default_loader.load_data(
-        symbols=symbols,
-        min_bars=min_bars,
-        align_data=align_data
-    )
+    return _default_loader.load_data(symbols=symbols, min_bars=min_bars, align_data=align_data)

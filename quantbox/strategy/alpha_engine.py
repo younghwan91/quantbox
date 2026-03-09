@@ -33,40 +33,40 @@ class AlphaConfig:
     """
 
     # ── Rubber Band Base ──
-    lookback: int = 8              # Bars to measure move (2h at 15m)
-    threshold: float = 0.025      # Minimum move to trigger (2.5%)
-    target_retrace: float = 0.6   # Take profit at 60% retracement (was 50%)
-    stop_mult: float = 1.0        # Stop at 1x the move size
-    max_hold: int = 12            # Max holding period (was 8, now 3h)
+    lookback: int = 8  # Bars to measure move (2h at 15m)
+    threshold: float = 0.025  # Minimum move to trigger (2.5%)
+    target_retrace: float = 0.6  # Take profit at 60% retracement (was 50%)
+    stop_mult: float = 1.0  # Stop at 1x the move size
+    max_hold: int = 12  # Max holding period (was 8, now 3h)
 
     # ── Volume Filter ──
-    vol_filter: bool = True        # Enable volume confirmation
-    vol_lookback: int = 48         # 12h volume average baseline
-    vol_mult: float = 1.5          # Require 1.5x average volume
+    vol_filter: bool = True  # Enable volume confirmation
+    vol_lookback: int = 48  # 12h volume average baseline
+    vol_mult: float = 1.5  # Require 1.5x average volume
 
     # ── Momentum Filter ──
-    momentum_filter: bool = True   # Only trade with the trend
-    momentum_lookback: int = 96    # 24h momentum direction
-    momentum_mode: int = 0         # 0=with_trend, 1=counter_trend
+    momentum_filter: bool = True  # Only trade with the trend
+    momentum_lookback: int = 96  # 24h momentum direction
+    momentum_mode: int = 0  # 0=with_trend, 1=counter_trend
 
     # ── Adaptive Threshold ──
     adaptive_threshold: bool = True
-    atr_lookback: int = 48         # 12h for ATR calculation
-    atr_mult: float = 2.5          # threshold = atr_mult × ATR
+    atr_lookback: int = 48  # 12h for ATR calculation
+    atr_mult: float = 2.5  # threshold = atr_mult × ATR
 
     # ── Enhanced Trailing Stop ──
     trailing_stop: bool = True
     trail_activation: float = 0.3  # Activate after 30% of target reached
-    trail_distance: float = 0.4    # Trail at 40% of peak unrealized PnL
+    trail_distance: float = 0.4  # Trail at 40% of peak unrealized PnL
 
     # ── Taker Buy Ratio Filter ──
-    taker_filter: bool = False     # Taker buy ratio confirmation
-    taker_lookback: int = 16       # 4h for taker ratio baseline
+    taker_filter: bool = False  # Taker buy ratio confirmation
+    taker_lookback: int = 16  # 4h for taker ratio baseline
     taker_threshold: float = 0.55  # 55% taker buy = bullish bias
 
     # ── Momentum Breakout (alternative strategy) ──
-    breakout_mode: bool = False    # Pure momentum breakout
-    breakout_lookback: int = 32    # 8h high/low breakout
+    breakout_mode: bool = False  # Pure momentum breakout
+    breakout_lookback: int = 32  # 8h high/low breakout
 
     # ── Costs ──
     fee_rate: float = 0.0002
@@ -96,23 +96,19 @@ class AlphaConfig:
 #  NUMBA SIGNAL ENGINES
 # ═══════════════════════════════════════════════════════════════════════
 
+
 @numba.jit(nopython=True, cache=True)
-def _compute_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray,
-                 period: int) -> np.ndarray:
+def _compute_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> np.ndarray:
     """Compute Average True Range (rolling)."""
     n = len(close)
     atr = np.zeros(n)
     for i in range(1, n):
-        tr = max(high[i] - low[i],
-                 abs(high[i] - close[i - 1]),
-                 abs(low[i] - close[i - 1]))
+        tr = max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
         if i < period:
             # Simple average for warmup
             total = 0.0
             for j in range(max(1, i - period + 1), i + 1):
-                total += max(high[j] - low[j],
-                             abs(high[j] - close[j - 1]),
-                             abs(low[j] - close[j - 1]))
+                total += max(high[j] - low[j], abs(high[j] - close[j - 1]), abs(low[j] - close[j - 1]))
             atr[i] = total / min(i, period)
         else:
             atr[i] = (atr[i - 1] * (period - 1) + tr) / period
@@ -135,8 +131,7 @@ def _compute_vol_ratio(volume: np.ndarray, lookback: int) -> np.ndarray:
 
 
 @numba.jit(nopython=True, cache=True)
-def _compute_taker_ratio(taker_buy_vol: np.ndarray, total_vol: np.ndarray,
-                          lookback: int) -> np.ndarray:
+def _compute_taker_ratio(taker_buy_vol: np.ndarray, total_vol: np.ndarray, lookback: int) -> np.ndarray:
     """Compute rolling taker buy ratio."""
     n = len(taker_buy_vol)
     ratio = np.full(n, 0.5)
@@ -251,7 +246,7 @@ def compute_alpha_signals(
             else:
                 # Rubber band: fade extreme moves
                 if ret < -current_threshold:
-                    entry_signal = 1   # Long: fade the drop
+                    entry_signal = 1  # Long: fade the drop
                 elif ret > current_threshold:
                     entry_signal = -1  # Short: fade the spike
 
@@ -589,6 +584,7 @@ def compute_hybrid_signals(
 #  LIVE STRATEGY WRAPPER
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class AlphaStrategy:
     """Stateful wrapper for live trading with any alpha signal engine."""
 
@@ -608,35 +604,57 @@ class AlphaStrategy:
         """Process a new bar and return signal."""
         cfg = self.config
         n = len(close)
-        if n < max(cfg.lookback, cfg.momentum_lookback, cfg.vol_lookback,
-                   cfg.atr_lookback) + 1:
+        if n < max(cfg.lookback, cfg.momentum_lookback, cfg.vol_lookback, cfg.atr_lookback) + 1:
             return 0
 
         if taker_buy_volume is None:
             taker_buy_volume = volume * 0.5  # Default 50/50 split
 
         sigs = compute_alpha_signals(
-            close, high, low, volume, taker_buy_volume,
-            cfg.lookback, cfg.threshold, cfg.target_retrace,
-            cfg.stop_mult, cfg.max_hold,
-            cfg.vol_filter, cfg.vol_lookback, cfg.vol_mult,
-            cfg.momentum_filter, cfg.momentum_lookback, cfg.momentum_mode,
-            cfg.adaptive_threshold, cfg.atr_lookback, cfg.atr_mult,
-            cfg.trailing_stop, cfg.trail_activation, cfg.trail_distance,
-            cfg.taker_filter, cfg.taker_lookback, cfg.taker_threshold,
-            cfg.breakout_mode, cfg.breakout_lookback,
+            close,
+            high,
+            low,
+            volume,
+            taker_buy_volume,
+            cfg.lookback,
+            cfg.threshold,
+            cfg.target_retrace,
+            cfg.stop_mult,
+            cfg.max_hold,
+            cfg.vol_filter,
+            cfg.vol_lookback,
+            cfg.vol_mult,
+            cfg.momentum_filter,
+            cfg.momentum_lookback,
+            cfg.momentum_mode,
+            cfg.adaptive_threshold,
+            cfg.atr_lookback,
+            cfg.atr_mult,
+            cfg.trailing_stop,
+            cfg.trail_activation,
+            cfg.trail_distance,
+            cfg.taker_filter,
+            cfg.taker_lookback,
+            cfg.taker_threshold,
+            cfg.breakout_mode,
+            cfg.breakout_lookback,
         )
         return int(sigs[-1])
 
     def has_position(self, symbol: str) -> bool:
         return symbol in self._positions
 
-    def open_position(self, symbol: str, signal: int, entry_price: float,
-                      notional: float, leverage: float, move_size: float):
+    def open_position(
+        self, symbol: str, signal: int, entry_price: float, notional: float, leverage: float, move_size: float
+    ):
         self._positions[symbol] = {
-            'signal': signal, 'entry_price': entry_price,
-            'notional': notional, 'leverage': leverage,
-            'move_size': move_size, 'bars_held': 0, 'best_pnl': 0.0,
+            "signal": signal,
+            "entry_price": entry_price,
+            "notional": notional,
+            "leverage": leverage,
+            "move_size": move_size,
+            "bars_held": 0,
+            "best_pnl": 0.0,
         }
 
     def close_position(self, symbol: str) -> dict | None:

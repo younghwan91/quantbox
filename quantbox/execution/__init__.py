@@ -10,4 +10,4 @@ from quantbox.execution.brackets import BracketMixin
 from quantbox.execution.positions import PositionMixin
 from quantbox.execution.reconciliation import ReconciliationMixin
 
-__all__ = ['BracketMixin', 'ReconciliationMixin', 'PositionMixin']
+__all__ = ["BracketMixin", "ReconciliationMixin", "PositionMixin"]

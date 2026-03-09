@@ -26,8 +26,14 @@ __author__ = "QuantBox Team"
 # Core components
 from quantbox.core.config import Config, TradingMode
 from quantbox.core.events import (
-    Event, EventType, MarketEvent, SignalEvent,
-    OrderEvent, FillEvent, EventQueue, SignalType
+    Event,
+    EventType,
+    MarketEvent,
+    SignalEvent,
+    OrderEvent,
+    FillEvent,
+    EventQueue,
+    SignalType,
 )
 
 # Data components
@@ -52,7 +58,6 @@ from quantbox.backtest.vectorized_backtest import (
 __all__ = [
     # Version
     "__version__",
-
     # Core
     "Config",
     "TradingMode",
@@ -64,18 +69,15 @@ __all__ = [
     "FillEvent",
     "EventQueue",
     "SignalType",
-
     # Data
     "DataCache",
     "TimeframedCache",
     "DataDownloader",
-
     # Strategy
     "RubberBandConfig",
     "RubberBandStrategy",
     "compute_signals",
     "calculate_position_size",
-
     # Backtest
     "BacktestConfig",
     "BacktestResult",
