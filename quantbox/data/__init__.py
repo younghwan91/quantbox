@@ -8,7 +8,7 @@ from quantbox.data.real_data_loader import RealDataLoader
 
 __all__ = [
     "DataCache",
-    "CacheEntry", 
+    "CacheEntry",
     "DataDownloader",
     "RealDataLoader",
 ]

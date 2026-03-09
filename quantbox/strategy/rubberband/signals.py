@@ -63,9 +63,9 @@ def compute_signals(
         else:
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain
@@ -147,9 +147,9 @@ def compute_signals_with_regime(
         else:
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain
@@ -241,9 +241,9 @@ def compute_signals_with_btc_directional(
         else:
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain
@@ -388,9 +388,9 @@ def compute_signals_regime_switch(
             # ═══ EXIT LOGIC (same regardless of regime) ═══
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain
@@ -787,11 +787,11 @@ def compute_signals_confidence(
             # ═══ EXIT LOGIC ═══
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
                 worst_gain = (low[i] - entry_price) / entry_price
                 best_gain = (high[i] - entry_price) / entry_price
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
                 worst_gain = (entry_price - high[i]) / entry_price
                 best_gain = (entry_price - low[i]) / entry_price
 
@@ -1103,11 +1103,11 @@ def compute_signals_v9(
             # ═══ EXIT LOGIC ═══
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
                 worst_gain = (low[i] - entry_price) / entry_price
                 best_gain = (high[i] - entry_price) / entry_price
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
                 worst_gain = (entry_price - high[i]) / entry_price
                 best_gain = (entry_price - low[i]) / entry_price
 
@@ -1306,9 +1306,9 @@ def compute_signals_4h_independent(
         else:
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain
@@ -1407,11 +1407,11 @@ def compute_signals_with_partial_exit(
             # ── Full position: check exits, then partial close ──
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
                 worst_gain = (low[i] - entry_price) / entry_price
                 best_gain = (high[i] - entry_price) / entry_price
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
                 worst_gain = (entry_price - high[i]) / entry_price
                 best_gain = (entry_price - low[i]) / entry_price
 
@@ -1447,11 +1447,11 @@ def compute_signals_with_partial_exit(
             # ── Half position: break-even stop, target still active ──
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
                 worst_gain = (low[i] - entry_price) / entry_price
                 best_gain = (high[i] - entry_price) / entry_price
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
                 worst_gain = (entry_price - high[i]) / entry_price
                 best_gain = (entry_price - low[i]) / entry_price
 
@@ -1543,9 +1543,9 @@ def compute_signals_partial_exit_btc_directional(
         elif phase == 1:
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain
@@ -1574,9 +1574,9 @@ def compute_signals_partial_exit_btc_directional(
         elif phase == 2:
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain
@@ -1852,9 +1852,9 @@ def compute_signals_mtf(
         else:
             hold_count += 1
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain
