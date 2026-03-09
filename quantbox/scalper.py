@@ -75,6 +75,8 @@ from quantbox.execution.brackets import BracketMixin
 from quantbox.execution.data_mixin import DataMixin
 from quantbox.execution.positions import PositionMixin
 from quantbox.execution.reconciliation import ReconciliationMixin
+from quantbox.core.trade_journal import TradeJournal
+from quantbox.core.divergence_monitor import DivergenceMonitor
 
 load_dotenv()
 
@@ -183,6 +185,20 @@ class RubberBandScalper(
         # Trade history
         self._trade_history: list[dict] = []
         self._cycle_count: int = 0
+
+        # Trade journal (persistent SQLite)
+        _session_str = "paper" if paper_mode else "live"
+        _db_path = "data/journal_paper.sqlite" if paper_mode else "data/journal.sqlite"
+        self._journal = TradeJournal(db_path=_db_path, session=_session_str)
+
+        # Live-Backtest divergence monitor
+        _vs_cfg = self.vs_config if strategy_name == "vol_straddle" else None
+        self._divergence_monitor = DivergenceMonitor(
+            min_trades=_vs_cfg.divergence_min_trades if _vs_cfg else 30,
+            pf_threshold=_vs_cfg.divergence_pf_threshold if _vs_cfg else 0.80,
+            wr_gap_pp=_vs_cfg.divergence_wr_gap_pp if _vs_cfg else 10.0,
+            cooldown_hours=_vs_cfg.divergence_cooldown_hours if _vs_cfg else 24.0,
+        )
 
         # Control flags
         self._stop_requested: bool = False
@@ -678,6 +694,9 @@ class RubberBandScalper(
         # 6. Save state
         self._save_state()
 
+        # 8. Divergence check (every 10 trades)
+        self._check_divergence()
+
         # 7. Periodic summary (every cycle for active positions, full every hour)
         if self.strategy.n_active > 0 or self._cycle_count % 4 == 0:
             self._log_summary(balance)
@@ -910,6 +929,20 @@ class RubberBandScalper(
             logger.info(f"Opened {entries_made} new positions (from {len(candidates)} candidates)")
 
     # ==================== State Persistence ====================
+
+    def _check_divergence(self) -> None:
+        """Check live performance vs backtest baseline every 10 trades."""
+        n_trades = len(self._trade_history)
+        if n_trades == 0 or n_trades % 10 != 0:
+            return
+        try:
+            stats = self._journal.get_stats(session=self._journal.session)
+            alert = self._divergence_monitor.check(stats)
+            if alert:
+                logger.warning("Divergence alert fired: %s", alert.message)
+                self.discord.notify_divergence_alert(alert)
+        except Exception as exc:
+            logger.warning("Divergence check error: %s", exc)
 
     def _save_state(self) -> None:
         """Persist positions and trade history."""
