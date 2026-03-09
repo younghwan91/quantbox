@@ -363,11 +363,41 @@ docs/backtest_results/YYYYMM/YYYYMMDD_{commit_short}_{description}.md
 | 2026-03-06 | 알고 주문 상태 미검출 | SL/TP 체결 누락 | `TRIGGERED`만 확인, `FINISHED` 누락 | `TRIGGERED` + `FINISHED` 둘 다 |
 | 2026-02-21 | Reduce-only 레버리지 | -2028 API 에러 | 청산 주문에 `change_leverage()` 호출 | 청산 시 레버리지 변경 금지 |
 | 2026-03-08 | Hedge Mode trail abort | trail exit 실패 (-2028) | close가 `leverage=1` 기본값 전달 → 변경 시도 | `if not reduce_only and leverage > 1` (v14.4.2) |
+| 2026-03-09 | `.env` VS_ 파라미터 덮어쓰기 | config.py 변경 적용 안 됨 | 38개 VS_ 중복 in `.env` (pydantic-settings 우선순위) | `.env`는 override만. 기본값은 `config.py`만. |
 | (반복) | 복리 모델 혼동 | CAGR 보고 오류 | `compute_metrics` 1x ≠ 프로덕션 L/N | 레버리지 모델 항상 명시 |
 
 ---
 
-## 12. 연구 브랜치 컨벤션
+## 12. `.env` 운영 원칙 — 중복 추가 금지
+
+> **규칙: `config.py`가 source of truth. `.env`는 override 전용.**
+
+```bash
+# ❌ 금지: config.py default와 같은 값을 .env에 중복 추가
+VS_D_TRAIL_ACTIVATE=0.005   # config.py도 0.005 → 중복, 제거
+
+# ✅ 허용: config.py default와 다른 값만 .env에 추가 (환경별 override)
+VS_MAX_CONCURRENT=5          # 이 환경에서만 5슬롯으로 제한
+```
+
+**새 파라미터 추가 워크플로:**
+1. `config.py`에 기본값 추가 → 이것이 source of truth
+2. `.env`는 건드리지 않음 (기본값과 같으면 중복)
+3. 봇 재시작하면 새 기본값 자동 적용
+
+**파라미터 변경 워크플로 (config.py만 수정):**
+1. `config.py` default 변경
+2. `.env` 확인: 같은 파라미터의 VS_ 변수가 있으면 **반드시** 삭제 or 같이 변경
+3. `grep -E "VS_변수명" .env` 로 확인 필수
+
+**왜 이게 중요한가?**
+- pydantic-settings는 `.env`의 `VS_*`를 `config.py` 기본값보다 항상 우선 적용
+- `.env`에 구버전 값이 있으면 `config.py`만 바꿔도 라이브 봇에 반영 안 됨
+- 2026-03-09 발견: `.env`에 37개 VS_ 중복 → 매 파라미터 변경마다 2파일 수정 필요
+
+---
+
+## 13. 연구 브랜치 컨벤션
 
 ```bash
 git checkout -b research/r{N}-{description}   # 브랜치 생성
