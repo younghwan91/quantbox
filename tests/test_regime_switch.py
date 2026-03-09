@@ -233,7 +233,7 @@ class TestRegimeSwitchConfigV5:
         assert cfg.btc_regime_period == 96
         assert cfg.asset_trend_period == 192
         assert cfg.btc_directional_period == 48  # v11.0: A/B validated
-        assert cfg.min_confidence == 1  # v10.0: lowered, MTF as quality gate
+        assert cfg.min_confidence == 3  # v12.3: M-2SSTSX validated (Sharpe 5.50)
         assert cfg.confidence_leverage_step == 0.0
         assert cfg.rsi_period == 14
         assert cfg.vol_period == 20
