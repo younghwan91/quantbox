@@ -1,7 +1,7 @@
 # QuantBox Agent Instructions
 
 > 코드 사실(Facts) 레퍼런스. 원칙은 `copilot-instructions.md` 참조.  
-> **현재 프로덕션:** VolStraddle v14.4.x (--strategy vol_straddle)
+> **현재 프로덕션:** VolStraddle v14.8.0 (--strategy vol_straddle)
 
 ---
 
@@ -35,7 +35,7 @@ Exit (VR):   hard TP=12%, trailing activate=+0.5%, trail_distance=0.2%  ← r47 
 TBR Gate:    f5_tbr_enabled=False  ← r47 이후 비활성
 MaxHold:     48h (192바 @15m)
 비용 (RT):   0.08% (0.04%/side × 2)
-베이스라인:  VR+MA Combined PF≈1.521, Sharpe≈5.06 (TBR OFF, 2020-2025)
+베이스라인:  v14.5.0 PF=1.563, Calmar=57.9 (S_d8 trailing, 60 syms, 6yr, 2026-03-08)
 ```
 
 ---
@@ -88,6 +88,9 @@ MaxHold:     48h (192바 @15m)
 | `events.py` | `SignalEvent`, `OrderEvent`, `FillEvent`, `EventQueue` | 이벤트 드리븐 아키텍처 기반 |
 | `limit_chaser.py` | `LimitOrderChaser`, `ChaseResult` | 메이커 주문 추격 + 시장가 폴백 |
 | `state_persistence.py` | `save_state`, `load_state`, `clear_state` | JSON 원자적 쓰기/읽기. 포지션 직렬화 |
+| `bot_utils.py` | `get_git_commit()`, `setup_logging()`, `GIT_COMMIT` | 봇 시작 유틸리티. 커밋 SHA 추적, 로그 핸들러 설정. `GIT_COMMIT`은 import 시 1회 평가 |
+| `scalper_state.py` | `save_scalper_state()`, `load_scalper_state()`, `rotate_state_backups()`, `STATE_FILE`, `PAPER_STATE_FILE` | 라이브 봇 JSON 상태 영속화. tmpfile→os.replace 원자적 쓰기. 크래시 복구 지원 |
+| `loop_mixin.py` | `LoopMixin` | 타이밍/디스플레이. `_wait_for_bar()`, `_next_bar_time()`, `_log_summary()`, `_log_vr_distribution()`, `_print_startup_banner()` |
 
 ### 3.2 `quantbox/strategy/`
 
@@ -105,7 +108,16 @@ MaxHold:     48h (192바 @15m)
 |------|------------------|------|
 | `vectorized_backtest.py` | `VectorizedBacktest`, `BacktestConfig`, `BacktestResult`, `_backtest_core_partial` | Numba 가속 백테스트. 단일/포트폴리오 지원. Delta-based 비용 모델 (부분 청산 대응) |
 
-### 3.4 `quantbox/data/`
+### 3.4 `quantbox/execution/`
+
+| 파일 | 역할 |
+|------|------|
+| `brackets.py` | `BracketMixin` — SL/TP 알고주문 배치/감지/repair |
+| `positions.py` | `PositionMixin` — 포지션 진입/청산/사이징 |
+| `reconciliation.py` | `ReconciliationMixin` — 거래소 상태 동기화, ghost 감지 |
+| `data_mixin.py` | `DataMixin` — `get_trading_symbols()`, `get_symbol_info()`, `download_klines()`. 마지막 미완성 캔들 자동 제거 (backtest-live parity) |
+
+### 3.5 `quantbox/data/`
 
 | 파일 | 역할 |
 |------|------|
@@ -113,7 +125,15 @@ MaxHold:     48h (192바 @15m)
 | `cache.py` | Memory(LRU) + Disk(gzip pickle) 2계층 캐시 |
 | `real_data_loader.py` | 캐시된 parquet/csv 로딩. 백테스트 데이터 소스 |
 
-### 3.5 `quantbox/notifications/`
+### 3.5 `quantbox/data/`
+
+| 파일 | 역할 |
+|------|------|
+| `downloader.py` | Binance API ← klines 다운로드. 1000개씩 배치 |
+| `cache.py` | Memory(LRU) + Disk(gzip pickle) 2계층 캐시 |
+| `real_data_loader.py` | 캐시된 parquet/csv 로딩. 백테스트 데이터 소스 |
+
+### 3.6 `quantbox/notifications/`
 
 | 파일 | 역할 |
 |------|------|
@@ -122,11 +142,20 @@ MaxHold:     48h (192바 @15m)
 
 > **Discord 알림 언어:** 모든 Discord 메시지는 **한국어**로 작성. 서버/클라이언트 TP/SL 체결방식, 활성 포지션 목록, 세션 현황(누적PnL/승률/잔고)을 포함한 구조화된 embed 사용.
 
-### 3.6 `quantbox/` (최상위)
+### 3.6 `quantbox/notifications/`
 
 | 파일 | 역할 |
 |------|------|
-| `scalper.py` | `RubberBandScalper` 라이브 트레이더. CLI 진입점 (`python -m quantbox.scalper`). 커밋 자동추적(로그 헤더, Discord 시작알림). |
+| `discord.py` | Webhook 기반 알림 (진입/청산/에러/일일보고) |
+| `bot.py` | Discord Bot 기반 원격 제어 (!status, !close, !pause 등) |
+
+> **Discord 알림 언어:** 모든 Discord 메시지는 **한국어**로 작성. 서버/클라이언트 TP/SL 체결방식, 활성 포지션 목록, 세션 현황(누적PnL/승률/잔고)을 포함한 구조화된 embed 사용.
+
+### 3.7 `quantbox/` (최상위)
+
+| 파일 | 역할 |
+|------|------|
+| `scalper.py` | `RubberBandScalper(LoopMixin, DataMixin, BracketMixin, ReconciliationMixin, PositionMixin, CommandsMixin)`. 1,371줄. CLI 진입점 (`python -m quantbox.scalper`). `_cycle()`, `_scan_entries()`, `_place_order()`, `_save_state()`, `_load_state()` 포함. |
 
 ---
 
@@ -153,8 +182,8 @@ MaxHold:     48h (192바 @15m)
 - [ ] max_hold 강제 청산 (192바 = 48h)
 
 ### 4.4 상태 영속화 & 복구
-- [ ] `_save_scalper_state()` — tmpfile → os.replace 원자적 쓰기
-- [ ] `_load_scalper_state()` — 시작 시 크래시 전 상태 복원
+- [ ] `save_scalper_state()` (`core/scalper_state.py`) — tmpfile → os.replace 원자적 쓰기
+- [ ] `load_scalper_state()` (`core/scalper_state.py`) — 시작 시 크래시 전 상태 복원
 - [ ] compound key 파싱 (`SYM:LONG` → `api_sym=SYM, position_side=LONG`) — v14.4.1 수정
 - [ ] 로그 파일 로테이션 — RotatingFileHandler 50MB/5백업
 - [ ] **Bracket Repair** — 복원된 포지션의 누락 SL/TP 자동 배치 (`_sync_server_orders`)
@@ -182,9 +211,12 @@ MaxHold:     48h (192바 @15m)
 | `LimitOrderChaser` 수정 | `limit_chaser.py`, `scalper.py`, `test_limit_chaser.py` |
 | `scalper.py` 트레이딩 로직 | `vectorized_backtest.py` 동기화 확인, `test_scalper.py` |
 | `vectorized_backtest.py` 수정 | 모든 `scripts/` 백테스트, `scalper.py`와 패리티 확인 |
-| State Persistence 수정 | `state_persistence.py`, `scalper.py`, `test_state_persistence.py` |
+| `core/scalper_state.py` 수정 | `scalper.py` (`_save_state`/`_load_state`), `tests/conftest.py` (isolate fixture), `test_scalper.py`, `test_hwm_reset.py`, `test_state_restore_ratchet.py` |
+| `core/loop_mixin.py` 수정 | `scalper.py`, `test_discord_bot.py` (datetime/time patch 경로) |
+| `execution/data_mixin.py` 수정 | `scalper.py`, 백테스트 klines 로직 패리티 확인 |
+| `core/bot_utils.py` 수정 | `scalper.py`, `loop_mixin.py` (GIT_COMMIT import) |
 | Discord 명령어 추가 | `bot.py`, `test_discord_bot.py` |
-| 새 모듈/파일 추가 | `README.md` 프로젝트 구조, 해당 `__init__.py`, 테스트 파일 |
+| 새 모듈/파일 추가 | `README.md` 프로젝트 구조, 해당 `__init__.py`, 테스트 파일, `agents.md` |
 
 ---
 
@@ -219,7 +251,7 @@ MaxHold:     48h (192바 @15m)
 
 ---
 
-## 7. 테스트 현황 (994+ tests)
+## 7. 테스트 현황 (1011+ tests)
 
 **VolStraddle 핵심 테스트:**
 
