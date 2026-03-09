@@ -271,7 +271,8 @@ class PositionMixin:
         if not self.paper_mode and self.strategy_name == 'vol_straddle':
             try:
                 ex_positions = self.client.futures_position_information(symbol=symbol)
-                wanted_side = pos_side  # 'LONG' or 'SHORT'
+                # hedge_mode: pos_side='LONG'/'SHORT'; one-way mode: pos_side=None → 'BOTH'
+                wanted_side = pos_side or 'BOTH'
                 already_open = any(
                     p.get('positionSide') == wanted_side
                     and abs(float(p.get('positionAmt', 0))) > 0
