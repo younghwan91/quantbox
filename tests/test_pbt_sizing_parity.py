@@ -475,40 +475,40 @@ class TestStandardExitMode:
 # ════════════════════════════════════════════════════════
 
 class TestSettingsParity:
-    """Verify settings.py defaults match the target config."""
+    """Verify RubberBandConfig defaults match the v12.3 production values (SSoT)."""
 
     def test_settings_has_v123_fields(self):
-        """All v12.3 fields exist in QuantBoxSettings."""
-        from quantbox.core.settings import QuantBoxSettings
-        field_names = list(QuantBoxSettings.model_fields.keys())
+        """All v12.3 fields exist in RubberBandConfig (settings.rb_* removed)."""
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        cfg = RubberBandConfig()
         required = [
-            'rb_target_retrace', 'rb_stop_mult', 'rb_min_confidence',
-            'rb_max_concurrent', 'rb_partial_exit_enabled',
-            'rb_trail_atr_mult', 'rb_breakeven_after_partial',
-            'rb_steep_cap_curve', 'rb_cap_mult_conf2', 'rb_cap_mult_conf5',
-            'rb_soft_equity_scale', 'rb_soft_eq_dd1', 'rb_soft_eq_scale1',
-            'rb_vol_adjusted_size', 'rb_vol_adj_median_atr',
-            'rb_dir_diversity_enabled', 'rb_max_same_direction',
+            'target_retrace', 'stop_mult', 'min_confidence',
+            'max_concurrent', 'partial_exit_enabled',
+            'trail_atr_mult', 'breakeven_after_partial',
+            'steep_cap_curve', 'cap_mult_conf2', 'cap_mult_conf5',
+            'soft_equity_scale', 'soft_eq_dd1', 'soft_eq_scale1',
+            'vol_adjusted_size', 'vol_adj_median_atr',
+            'dir_diversity_enabled', 'max_same_direction',
         ]
         for f in required:
-            assert f in field_names, f"Missing settings field: {f}"
+            assert hasattr(cfg, f), f"Missing RubberBandConfig field: {f}"
 
     def test_settings_defaults_match(self):
-        """Settings defaults should match T100_S38_PBT champion."""
-        from quantbox.core.settings import QuantBoxSettings
-        fields = QuantBoxSettings.model_fields
-        assert fields['rb_target_retrace'].default == pytest.approx(1.5)  # v12.4 HybTight
-        assert fields['rb_stop_mult'].default == pytest.approx(0.382)
-        assert fields['rb_min_confidence'].default == 3
-        assert fields['rb_max_concurrent'].default == 2
-        assert fields['rb_partial_exit_enabled'].default is True
-        assert fields['rb_trail_atr_mult'].default == pytest.approx(1.0)  # v12.4 HybTight
-        assert fields['rb_breakeven_after_partial'].default is True
-        assert fields['rb_steep_cap_curve'].default is True
-        assert fields['rb_soft_equity_scale'].default is True
-        assert fields['rb_vol_adjusted_size'].default is True
-        assert fields['rb_dir_diversity_enabled'].default is True
-        assert fields['rb_max_same_direction'].default == 2
+        """RubberBandConfig defaults should match T100_S38_PBT v12.3 champion."""
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        cfg = RubberBandConfig()
+        assert cfg.target_retrace == pytest.approx(1.5)
+        assert cfg.stop_mult == pytest.approx(0.382)
+        assert cfg.min_confidence == 3
+        assert cfg.max_concurrent == 2
+        assert cfg.partial_exit_enabled is True
+        assert cfg.trail_atr_mult == pytest.approx(1.0)
+        assert cfg.breakeven_after_partial is True
+        assert cfg.steep_cap_curve is True
+        assert cfg.soft_equity_scale is True
+        assert cfg.vol_adjusted_size is True
+        assert cfg.dir_diversity_enabled is True
+        assert cfg.max_same_direction == 2
 
 
 # ═══════════════════════════════════════════════════════════
