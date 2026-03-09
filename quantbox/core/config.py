@@ -9,14 +9,13 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from enum import Enum
 import json
-import os
 from pathlib import Path
 
 
 class TradingMode(Enum):
     """Trading execution mode."""
     BACKTEST = "backtest"
-    PAPER = "paper"  
+    PAPER = "paper"
     LIVE = "live"
 
 
@@ -31,7 +30,7 @@ class Interval(Enum):
     H2 = "2h"
     H4 = "4h"
     D1 = "1d"
-    
+
     @property
     def minutes(self) -> int:
         """Convert interval to minutes."""
@@ -40,7 +39,7 @@ class Interval(Enum):
             "1h": 60, "2h": 120, "4h": 240, "1d": 1440
         }
         return mapping[self.value]
-    
+
     @property
     def milliseconds(self) -> int:
         """Convert interval to milliseconds."""
@@ -56,7 +55,7 @@ class ExchangeConfig:
     rate_limit: float = 0.5  # seconds between requests
     max_retries: int = 3
     retry_delay: float = 2.0
-    
+
     @classmethod
     def from_file(cls, filepath: str) -> "ExchangeConfig":
         """Load exchange config from JSON file."""
@@ -92,13 +91,13 @@ class StrategyConfig:
     min_half_life: float = 1.0
     max_half_life: float = 100.0
     hedge_ratio_bounds: tuple = (0.25, 4.0)
-    
-    # Entry/Exit parameters  
+
+    # Entry/Exit parameters
     entry_zscore: float = 2.0
     exit_zscore: float = 0.0
     stop_loss_zscore: float = 3.5
     max_holding_periods: int = 80  # 20h @ 15m (parity with settings.max_holding_hours)
-    
+
     # Formation/Trading window
     formation_periods: int = 240  # in bars
     trading_periods: int = 24  # in bars
@@ -128,7 +127,7 @@ class BacktestConfig:
     monte_carlo_runs: int = 1000
 
 
-@dataclass 
+@dataclass
 class OptimizationConfig:
     """Optimization parameters configuration."""
     method: str = "differential_evolution"  # or "grid_search", "bayesian"
@@ -136,7 +135,7 @@ class OptimizationConfig:
     population_size: int = 50
     tolerance: float = 0.001
     n_jobs: int = -1  # Use all CPUs
-    
+
     # Parameter bounds for optimization
     param_bounds: Dict[str, tuple] = field(default_factory=lambda: {
         "entry_zscore": (1.5, 3.5),
@@ -150,7 +149,7 @@ class OptimizationConfig:
 class Config:
     """
     Master configuration class that aggregates all config components.
-    
+
     Usage:
         config = Config.from_file("config.json")
         # or
@@ -168,41 +167,41 @@ class Config:
     risk: RiskConfig = field(default_factory=RiskConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
-    
+
     # Logging
     log_level: str = "INFO"
     log_file: str = "quantbox.log"
-    
+
     def __post_init__(self):
         """Validate configuration after initialization."""
         self._validate()
         self._create_directories()
-    
+
     def _validate(self):
         """Validate configuration values."""
         if self.strategy.entry_zscore <= self.strategy.exit_zscore:
             raise ValueError("entry_zscore must be greater than exit_zscore")
-        
+
         if self.strategy.stop_loss_zscore <= self.strategy.entry_zscore:
             raise ValueError("stop_loss_zscore must be greater than entry_zscore")
-        
+
         if not 0 < self.backtest.train_test_split < 1:
             raise ValueError("train_test_split must be between 0 and 1")
-        
+
         if self.risk.max_position_size <= 0 or self.risk.max_position_size > 1:
             raise ValueError("max_position_size must be between 0 and 1")
-    
+
     def _create_directories(self):
         """Create necessary directories if they don't exist."""
         for dir_path in [self.data.cache_dir, self.data.raw_dir, self.data.processed_dir]:
             Path(dir_path).mkdir(parents=True, exist_ok=True)
-    
+
     @classmethod
     def from_file(cls, filepath: str) -> "Config":
         """Load configuration from JSON file."""
         with open(filepath, 'r') as f:
             data = json.load(f)
-        
+
         return cls(
             mode=TradingMode(data.get('mode', 'backtest')),
             interval=data.get('interval', '15m'),
@@ -215,7 +214,7 @@ class Config:
             log_level=data.get('log_level', 'INFO'),
             log_file=data.get('log_file', 'quantbox.log'),
         )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
         return {
@@ -251,7 +250,7 @@ class Config:
                 'train_test_split': self.backtest.train_test_split,
             },
         }
-    
+
     def save(self, filepath: str):
         """Save configuration to JSON file."""
         with open(filepath, 'w') as f:

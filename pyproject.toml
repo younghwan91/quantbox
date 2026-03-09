@@ -31,8 +31,35 @@ markers = [
 addopts = "-m 'not slow'"
 asyncio_mode = "strict"
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "E701",   # multiple statements on one line (intentional in hot paths)
+    "E731",   # lambda assignment (intentional)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]   # re-exports are intentional
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+warn_unused_ignores = false
+follow_imports = "skip"
+# Scope: SSoT config files only. Expand as codebase gets typed.
+files = [
+    "quantbox/strategy/vol_straddle/config.py",
+    "quantbox/strategy/rubberband/config.py",
+]
+
 [dependency-groups]
 dev = [
+    "mypy>=1.19.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "ruff>=0.15.5",
 ]

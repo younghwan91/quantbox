@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run tests (fast, no slow marker)
+        env:
+          BINANCE_API_KEY: ci_placeholder
+          BINANCE_API_SECRET: ci_placeholder
+        run: uv run pytest tests/ -m "not slow" -q --tb=short
+
+      - name: Ruff lint
+        run: uv run ruff check quantbox/
+
+      - name: Mypy type check (SSoT config files)
+        run: uv run mypy
