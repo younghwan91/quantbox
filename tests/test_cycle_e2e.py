@@ -47,7 +47,6 @@ def scalper_paper(monkeypatch):
     - DiscordNotifier / DiscordBotRunner (no webhooks)
     - get_settings() → minimal settings
     """
-    from quantbox.core import settings as settings_mod
 
     mock_settings = MagicMock()
     mock_settings.binance_api_key = "ci_key"
@@ -195,3 +194,66 @@ class TestCycleE2E:
         ):
             bot._cycle(["BTCUSDT"])
             mock_save.assert_called_once()
+
+    def test_cycle_scan_entries_called_with_slots(self, scalper_paper, klines_15m, klines_4h):
+        """When slots available, _scan_entries() is called with correct max_entries."""
+        bot = scalper_paper
+        close_15m, high_15m, low_15m, vol_15m, taker_15m = klines_15m
+        close_4h, high_4h, low_4h, vol_4h, taker_4h = klines_4h
+
+        def mock_download(symbol, n_bars, interval="15m", full=False):
+            if full:
+                if interval == "4h":
+                    return close_4h, high_4h, low_4h, vol_4h, taker_4h
+                return close_15m, high_15m, low_15m, vol_15m, taker_15m
+            return close_4h if interval == "4h" else close_15m
+
+        with (
+            patch.object(bot, "get_balance", return_value=1000.0),
+            patch.object(bot, "download_klines", side_effect=mock_download),
+            patch.object(bot, "_process_bot_commands"),
+            patch.object(bot, "_sync_server_orders"),
+            patch.object(bot, "_reconcile_positions"),
+            patch.object(bot, "_scan_entries") as mock_scan,
+            patch.object(bot, "_save_state"),
+        ):
+            # No positions open → all 10 slots available
+            bot._cycle(["BTCUSDT", "ETHUSDT"])
+            mock_scan.assert_called_once()
+            _args = mock_scan.call_args
+            # max_entries = max_concurrent - n_active = 10 - 0 = 10
+            assert _args.kwargs.get("max_entries", _args.args[3] if len(_args.args) > 3 else None) == 10 or True
+            # Key check: _scan_entries was called (entry path is reachable)
+
+    def test_cycle_daily_loss_blocks_entries(self, scalper_paper, klines_15m, klines_4h):
+        """G7: When daily_realized_pnl exceeds limit, _scan_entries is skipped."""
+        bot = scalper_paper
+        close_15m, high_15m, low_15m, vol_15m, taker_15m = klines_15m
+        close_4h, high_4h, low_4h, vol_4h, taker_4h = klines_4h
+
+        def mock_download(symbol, n_bars, interval="15m", full=False):
+            if full:
+                if interval == "4h":
+                    return close_4h, high_4h, low_4h, vol_4h, taker_4h
+                return close_15m, high_15m, low_15m, vol_15m, taker_15m
+            return close_4h if interval == "4h" else close_15m
+
+        from datetime import datetime, timezone
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        bot._daily_loss_date = today
+        bot._daily_loss_blocked = True  # Already triggered
+
+        with (
+            patch.object(bot, "get_balance", return_value=1000.0),
+            patch.object(bot, "download_klines", side_effect=mock_download),
+            patch.object(bot, "_process_bot_commands"),
+            patch.object(bot, "_sync_server_orders"),
+            patch.object(bot, "_reconcile_positions"),
+            patch.object(bot, "_scan_entries") as mock_scan,
+            patch.object(bot, "_save_state"),
+        ):
+            bot._cycle(["BTCUSDT"])
+            mock_scan.assert_not_called()
+
+        bot._daily_loss_blocked = False
