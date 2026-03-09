@@ -356,7 +356,7 @@ class LimitOrderChaser:
                             if recheck["status"] == "FILLED":
                                 filled_qty = float(recheck["executedQty"])
                                 avg_p = float(recheck.get("avgPrice", limit_price))
-                                extra = filled_qty - (total_filled - remaining_qty + quantity - remaining_qty)
+                                extra = filled_qty - (total_filled - remaining_qty + quantity - remaining_qty)  # noqa: F841
                                 weighted_price_sum = filled_qty * avg_p
                                 total_filled = filled_qty
                                 return ChaseResult(
