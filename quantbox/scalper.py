@@ -41,7 +41,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from dotenv import load_dotenv
@@ -51,10 +50,7 @@ from quantbox.core.limit_chaser import (
 )
 from quantbox.core.settings import get_settings
 from quantbox.core.terminal_ui import (
-    Color,
     format_cycle_header,
-    format_entry,
-    format_exit,
     format_scan_summary,
     format_session_summary,
     print_banner,
@@ -62,12 +58,11 @@ from quantbox.core.terminal_ui import (
     print_system_info,
 )
 from quantbox.notifications.bot import (
-    BotCommand, CommandType, DiscordBotRunner,
+    DiscordBotRunner,
 )
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.rubberband import (
-    RubberBandConfig, RubberBandStrategy, calculate_position_size,
-    compute_atr_pct, compute_confidence_leverage,
+    RubberBandConfig, RubberBandStrategy, compute_atr_pct,
 )
 from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
@@ -151,7 +146,7 @@ logger = logging.getLogger('Scalper')
 
 
 # ──────────────── Diagnostic Logger ─────────────────────
-from quantbox.utils.diagnostics import DiagnosticLogger, _diag_logger  # noqa: E402
+from quantbox.utils.diagnostics import _diag_logger  # noqa: E402
 
 # ──────────────────────── State File ──────────────────────────────────
 
@@ -1487,8 +1482,8 @@ class RubberBandScalper(
             elif '-4068' in str(e):
                 # Cannot change while positions are open
                 logger.error(
-                    f"Cannot switch position mode — open positions exist. "
-                    f"Close all positions first, then restart."
+                    "Cannot switch position mode — open positions exist. "
+                    "Close all positions first, then restart."
                 )
                 self.discord.send(content=(
                     "\U0001f6a8 **포지션 모드 전환 실패** — "
@@ -1553,8 +1548,8 @@ class RubberBandScalper(
                 'title': '🚀 QuantBox VolStraddle 시작',
                 'color': 0x2979FF,
                 'description': (
-                    f"VolStraddle D_mom8 (A1-D50) 초기화 완료.\n"
-                    f"`!help`로 명령어 확인."
+                    "VolStraddle D_mom8 (A1-D50) 초기화 완료.\n"
+                    "`!help`로 명령어 확인."
                 ),
                 'fields': [
                     {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},
@@ -1593,8 +1588,8 @@ class RubberBandScalper(
                 'title': '🚀 QuantBox 스캘퍼 시작',
                 'color': 0x2979FF,
                 'description': (
-                    f"러버밴드 평균회귀 스캘퍼 초기화 완료.\n"
-                    f"`!help`로 명령어 확인."
+                    "러버밴드 평균회귀 스캘퍼 초기화 완료.\n"
+                    "`!help`로 명령어 확인."
                 ),
                 'fields': [
                     {'name': '모드', 'value': f"**{mode_str}**", 'inline': True},

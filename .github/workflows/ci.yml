@@ -29,3 +29,9 @@ jobs:
           BINANCE_API_KEY: ci_placeholder
           BINANCE_API_SECRET: ci_placeholder
         run: uv run pytest tests/ -m "not slow" -q --tb=short
+
+      - name: Ruff lint
+        run: uv run ruff check quantbox/
+
+      - name: Mypy type check (SSoT config files)
+        run: uv run mypy

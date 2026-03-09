@@ -19,7 +19,7 @@ filters remove low-conviction entries → fewer but much better trades.
 
 import numpy as np
 import numba
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -298,11 +298,11 @@ def compute_alpha_signals(
             hold_count += 1
 
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
                 worst_gain = (low[i] - entry_price) / entry_price
                 best_gain = (high[i] - entry_price) / entry_price
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
                 worst_gain = (entry_price - high[i]) / entry_price
                 best_gain = (entry_price - low[i]) / entry_price
 
@@ -430,7 +430,7 @@ def compute_momentum_signals(
             hold_count += 1
 
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
                 # Update trailing stop
                 new_trail = close[i] - atr[i] * trail_atr_mult
                 if new_trail > trail_stop:
@@ -439,7 +439,7 @@ def compute_momentum_signals(
                 if close[i] < trail_stop:
                     position = 0
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
                 new_trail = close[i] + atr[i] * trail_atr_mult
                 if new_trail < trail_stop:
                     trail_stop = new_trail
@@ -559,9 +559,9 @@ def compute_hybrid_signals(
             hold_count += 1
 
             if position == 1:
-                gain = (close[i] - entry_price) / entry_price
+                gain = (close[i] - entry_price) / entry_price  # noqa: F841
             else:
-                gain = (entry_price - close[i]) / entry_price
+                gain = (entry_price - close[i]) / entry_price  # noqa: F841
 
             if gain > best_pnl:
                 best_pnl = gain

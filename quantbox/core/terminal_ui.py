@@ -7,9 +7,7 @@ Provides:
 - Color constants for terminal readability
 """
 
-import os
 import sys
-import time
 from datetime import datetime, timezone
 
 # ─────────────────── ANSI Color Codes ────────────────────────────────

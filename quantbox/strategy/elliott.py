@@ -1,5 +1,5 @@
 """
-Elliott Wave Strategy 
+Elliott Wave Strategy
 
 Captures new impulse waves emerging after ABC corrective wave completion.
 Implements the exact method from winning_strategy.md:
@@ -32,7 +32,7 @@ Timeframes:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numba
 import numpy as np
