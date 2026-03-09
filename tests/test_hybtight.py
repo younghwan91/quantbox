@@ -252,27 +252,21 @@ class TestRunnerTimeExitLive:
 # ════════════════════════════════════════════════════════
 
 class TestSettingsWiring:
-    """Verify runner_max_hold_mult flows from settings to config."""
+    """Verify RubberBandConfig is the SSoT for RB params (settings.rb_* removed)."""
 
     def test_settings_default(self):
-        from quantbox.core.settings import QuantBoxSettings
-        s = QuantBoxSettings(
-            binance_api_key="test",
-            binance_api_secret="test",
-        )
-        assert s.rb_runner_max_hold_mult == 3.0
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        cfg = RubberBandConfig()
+        assert cfg.runner_max_hold_mult == 3.0
 
     def test_settings_hybtight_params(self):
-        """All four HybTight params have correct defaults in settings."""
-        from quantbox.core.settings import QuantBoxSettings
-        s = QuantBoxSettings(
-            binance_api_key="test",
-            binance_api_secret="test",
-        )
-        assert s.rb_target_retrace == 1.5
-        assert s.rb_max_hold == 25
-        assert s.rb_trail_atr_mult == 1.0
-        assert s.rb_runner_max_hold_mult == 3.0
+        """All four HybTight params have correct defaults in RubberBandConfig."""
+        from quantbox.strategy.rubberband.config import RubberBandConfig
+        cfg = RubberBandConfig()
+        assert cfg.target_retrace == 1.5
+        assert cfg.max_hold == 25
+        assert cfg.trail_atr_mult == 1.0
+        assert cfg.runner_max_hold_mult == 3.0
 
 
 # ════════════════════════════════════════════════════════

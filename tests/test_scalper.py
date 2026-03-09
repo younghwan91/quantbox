@@ -112,7 +112,7 @@ class TestScalperConfig:
         cfg = RubberBandConfig()
         assert cfg.lookback == 8
         assert cfg.threshold == 0.032  # v10.0
-        assert cfg.max_concurrent == 5
+        assert cfg.max_concurrent == 2  # v12.3: M-2SSTSX optimal (2 slots)
         assert cfg.cost_per_side == 0.0004
 
     def test_custom_config(self):
