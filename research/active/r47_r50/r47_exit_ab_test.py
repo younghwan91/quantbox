@@ -60,9 +60,10 @@ from quantbox.strategy.vol_straddle.signals import (
 )
 from research.active.r31_r40.scaling_r38 import CFG_V13
 from research.active.r41_r45.backtest_v14_3_0 import (
+    # ⚠️ D_TRAIL_ACTIVATE/D_TRAIL_DISTANCE from backtest_v14_3_0 are PRE-r47 STALE values.
+    # They are intentionally the OLD baseline for this research sweep.
+    # Overridden below with current production values.
     D_SL,
-    D_TRAIL_ACTIVATE,
-    D_TRAIL_DISTANCE,
     D_TP,
     MA_CLUSTER_PCT,
     MA_LN,
@@ -84,17 +85,19 @@ from research.active.r41_r45.r45_param_sweep import (
     collect_enhanced_trades,
     sim_ma_cluster_enhanced,
 )
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _VSCfg
 
-# ── Constants (verified from quantbox/strategy/vol_straddle/config.py) ──────
-# config.py: d_sl=0.01, d_tp=0.12, d_trail_activate=0.02, d_trail_distance=0.003
-# config.py: max_concurrent=10
-# config.py: base_leverage=30  → VR_LN = 30/10 = 3.0
-# config.py: ma_cluster_leverage=21 → MA_LN = 21/10 = 2.1
-# config.py: s_sl=0.015, s_tp=0.05, s_vr_threshold=0.55, s_squeeze_dur=4
-# config.py: ma_cluster_sl=0.02, ma_cluster_tp=0.08, ma_cluster_max_hold_4h=12
-# D_SL, D_TP, D_TRAIL_ACTIVATE, D_TRAIL_DISTANCE, VR_LN, MA_LN imported above.
-MAX_CONCURRENT: int = 10        # config.py: max_concurrent = 10
-MA_MAX_HOLD_4H: int = 12        # config.py: ma_cluster_max_hold_4h = 12
+# ── Constants — read from config.py (single source of truth) ────────────────
+_cfg = _VSCfg()
+MAX_CONCURRENT: int = _cfg.max_concurrent   # 10 slots
+MA_MAX_HOLD_4H: int = _cfg.ma_cluster_max_hold_4h  # 12
+
+# D_TRAIL_ACTIVATE / D_TRAIL_DISTANCE: use current production values from config.py.
+# Note: backtest_v14_3_0 exported the PRE-r47 values (0.02/0.003) — this was
+# the OLD baseline that this A/B test compared against. The sweep discovered that
+# 0.005/0.002 is better. Those are now the production defaults in config.py.
+D_TRAIL_ACTIVATE: float = _cfg.d_trail_activate   # 0.005 (r47 winner)
+D_TRAIL_DISTANCE: float = _cfg.d_trail_distance   # 0.002 (r47 winner)
 
 # Baseline reference (D_mom8 trailing, no TBR + S_d8, portfolio_sim(10))
 BASELINE_N_REF: int = 3713
@@ -1211,10 +1214,10 @@ def phase4_combination(
     split67 = int(avg_bars * 0.67)
     n_floor = int(bl_N * N_FLOOR_FRAC)
 
-    # Collect D trades with best 1A params (ta=0.5%, td=0.2%) once
+    # Collect D trades with best 1A params (ta=0.5%, td=0.2%) — matches D_TRAIL_ACTIVATE/DISTANCE
     d_opt = collect_d_trades_custom_trail(
         cfg, data_15m, data_1h, data_4h,
-        trail_activate=0.005, trail_distance=0.002,
+        trail_activate=D_TRAIL_ACTIVATE, trail_distance=D_TRAIL_DISTANCE,
     )
 
     rows = []
