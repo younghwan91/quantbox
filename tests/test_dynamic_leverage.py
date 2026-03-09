@@ -25,16 +25,22 @@ class TestComputeConfidenceLeverage:
     def test_threshold_level_move_returns_base(self):
         """Move exactly at threshold → base leverage (no excess)."""
         lev = compute_confidence_leverage(
-            move_size=0.045, threshold=0.045,
-            base_leverage=3.0, leverage_scale=10.0, max_leverage=7.0,
+            move_size=0.045,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         assert lev == pytest.approx(3.0)
 
     def test_below_threshold_returns_base(self):
         """Move below threshold → still base leverage (excess clamped to 0)."""
         lev = compute_confidence_leverage(
-            move_size=0.03, threshold=0.045,
-            base_leverage=3.0, leverage_scale=10.0, max_leverage=7.0,
+            move_size=0.03,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         assert lev == pytest.approx(3.0)
 
@@ -42,40 +48,55 @@ class TestComputeConfidenceLeverage:
         """Move = 2× threshold → excess = 1.0 → lev = base + scale*1.0."""
         # excess = (0.09 - 0.045) / 0.045 = 1.0
         lev = compute_confidence_leverage(
-            move_size=0.09, threshold=0.045,
-            base_leverage=3.0, leverage_scale=10.0, max_leverage=20.0,
+            move_size=0.09,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=20.0,
         )
         assert lev == pytest.approx(13.0)  # 3 + 10*1.0
 
     def test_max_leverage_cap(self):
         """Extreme move → leverage capped at max."""
         lev = compute_confidence_leverage(
-            move_size=0.20, threshold=0.045,
-            base_leverage=3.0, leverage_scale=10.0, max_leverage=7.0,
+            move_size=0.20,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         assert lev == pytest.approx(7.0)
 
     def test_zero_move_returns_base(self):
         """Zero move size → base leverage (safety)."""
         lev = compute_confidence_leverage(
-            move_size=0.0, threshold=0.045,
-            base_leverage=5.0, leverage_scale=20.0, max_leverage=15.0,
+            move_size=0.0,
+            threshold=0.045,
+            base_leverage=5.0,
+            leverage_scale=20.0,
+            max_leverage=15.0,
         )
         assert lev == pytest.approx(5.0)
 
     def test_negative_move_returns_base(self):
         """Negative move size → base leverage (safety)."""
         lev = compute_confidence_leverage(
-            move_size=-0.05, threshold=0.045,
-            base_leverage=3.0, leverage_scale=10.0, max_leverage=7.0,
+            move_size=-0.05,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         assert lev == pytest.approx(3.0)
 
     def test_zero_threshold_returns_base(self):
         """Zero threshold → base leverage (avoid division by zero)."""
         lev = compute_confidence_leverage(
-            move_size=0.05, threshold=0.0,
-            base_leverage=3.0, leverage_scale=10.0, max_leverage=7.0,
+            move_size=0.05,
+            threshold=0.0,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         assert lev == pytest.approx(3.0)
 
@@ -83,8 +104,11 @@ class TestComputeConfidenceLeverage:
         """A/B validated competition mode: Base=5, Scale=20, Max=15."""
         # 6% move, threshold 4.5%: excess = (0.06-0.045)/0.045 = 0.333
         lev = compute_confidence_leverage(
-            move_size=0.06, threshold=0.045,
-            base_leverage=5.0, leverage_scale=20.0, max_leverage=15.0,
+            move_size=0.06,
+            threshold=0.045,
+            base_leverage=5.0,
+            leverage_scale=20.0,
+            max_leverage=15.0,
         )
         expected = 5.0 + 20.0 * (0.06 - 0.045) / 0.045  # 5 + 6.667 = 11.667
         assert lev == pytest.approx(expected)
@@ -106,9 +130,13 @@ class TestApplyConfidenceLeverage:
         close = np.linspace(100, 110, 100)
         signals = np.zeros(100)
         result = apply_confidence_leverage(
-            close, signals, lookback=8,
-            threshold=0.045, base_leverage=3.0,
-            leverage_scale=10.0, max_leverage=7.0,
+            close,
+            signals,
+            lookback=8,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         np.testing.assert_array_equal(result, 0.0)
 
@@ -118,9 +146,13 @@ class TestApplyConfidenceLeverage:
         signals = np.zeros(20)
         signals[15] = 1.0  # Long entry at bar 15
         result = apply_confidence_leverage(
-            close, signals, lookback=8,
-            threshold=0.045, base_leverage=3.0,
-            leverage_scale=10.0, max_leverage=7.0,
+            close,
+            signals,
+            lookback=8,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         # move_size = |100/100 - 1| = 0 → excess = negative → base_leverage
         assert result[15] == pytest.approx(3.0)
@@ -131,9 +163,13 @@ class TestApplyConfidenceLeverage:
         signals = np.zeros(20)
         signals[15] = -1.0
         result = apply_confidence_leverage(
-            close, signals, lookback=8,
-            threshold=0.045, base_leverage=3.0,
-            leverage_scale=10.0, max_leverage=7.0,
+            close,
+            signals,
+            lookback=8,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         assert result[15] == pytest.approx(-3.0)
 
@@ -150,9 +186,13 @@ class TestApplyConfidenceLeverage:
         close_5pct[12] = 95.24  # 20-8=12, move = 100/95.24 - 1 ≈ 5%
 
         lev_5 = apply_confidence_leverage(
-            close_5pct, signals_5pct, lookback=8,
-            threshold=0.045, base_leverage=3.0,
-            leverage_scale=10.0, max_leverage=20.0,
+            close_5pct,
+            signals_5pct,
+            lookback=8,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=20.0,
         )
 
         # Simulate a 10% move at bar 20
@@ -163,9 +203,13 @@ class TestApplyConfidenceLeverage:
         close_10pct[12] = 90.91  # move = 100/90.91 - 1 ≈ 10%
 
         lev_10 = apply_confidence_leverage(
-            close_10pct, signals_10pct, lookback=8,
-            threshold=0.045, base_leverage=3.0,
-            leverage_scale=10.0, max_leverage=20.0,
+            close_10pct,
+            signals_10pct,
+            lookback=8,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=20.0,
         )
 
         assert lev_10[20] > lev_5[20], "Bigger move should get bigger leverage"
@@ -179,9 +223,13 @@ class TestApplyConfidenceLeverage:
         signals[13] = 1.0  # 13-8=5
 
         result = apply_confidence_leverage(
-            close, signals, lookback=8,
-            threshold=0.045, base_leverage=3.0,
-            leverage_scale=10.0, max_leverage=7.0,
+            close,
+            signals,
+            lookback=8,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         assert abs(result[13]) <= 7.0
 
@@ -192,9 +240,13 @@ class TestApplyConfidenceLeverage:
         signals[3] = 1.0  # Before lookback=8
 
         result = apply_confidence_leverage(
-            close, signals, lookback=8,
-            threshold=0.045, base_leverage=3.0,
-            leverage_scale=10.0, max_leverage=7.0,
+            close,
+            signals,
+            lookback=8,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
         assert result[3] == 1.0  # Passed through as-is
 
@@ -215,15 +267,22 @@ class TestBacktestLiveParity:
 
         # Python function (live)
         live_lev = compute_confidence_leverage(
-            move_size=move_size, threshold=0.045,
-            base_leverage=3.0, leverage_scale=10.0, max_leverage=7.0,
+            move_size=move_size,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
 
         # Numba function (backtest)
         bt_signals = apply_confidence_leverage(
-            close, signals, lookback=8,
-            threshold=0.045, base_leverage=3.0,
-            leverage_scale=10.0, max_leverage=7.0,
+            close,
+            signals,
+            lookback=8,
+            threshold=0.045,
+            base_leverage=3.0,
+            leverage_scale=10.0,
+            max_leverage=7.0,
         )
 
         assert bt_signals[15] == pytest.approx(live_lev, abs=1e-10), (

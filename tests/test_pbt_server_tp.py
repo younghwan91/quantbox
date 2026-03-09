@@ -19,25 +19,28 @@ from quantbox.strategy.rubberband import RubberBandConfig, RubberBandStrategy
 # Fixtures
 # ═══════════════════════════════════════════════════════════════════
 
+
 def _make_scalper(paper: bool = True, **config_overrides):
     """Create a minimal RubberBandScalper for testing."""
     from quantbox.scalper import RubberBandScalper
 
     mock_client = MagicMock()
     mock_client.futures_account_balance.return_value = [
-        {'asset': 'USDT', 'availableBalance': '1000.0'},
+        {"asset": "USDT", "availableBalance": "1000.0"},
     ]
     mock_client.futures_create_order.return_value = {
-        'orderId': 12345,
-        'avgPrice': '100.0',
-        'executedQty': '1.0',
-        'status': 'FILLED',
+        "orderId": 12345,
+        "avgPrice": "100.0",
+        "executedQty": "1.0",
+        "status": "FILLED",
     }
-    mock_client._request_futures_api.return_value = {'algoId': 99999}
+    mock_client._request_futures_api.return_value = {"algoId": 99999}
 
-    with patch('quantbox.scalper.load_dotenv'), \
-         patch('quantbox.scalper.Client', return_value=mock_client), \
-         patch('quantbox.scalper.LimitOrderChaser'):
+    with (
+        patch("quantbox.scalper.load_dotenv"),
+        patch("quantbox.scalper.Client", return_value=mock_client),
+        patch("quantbox.scalper.LimitOrderChaser"),
+    ):
         scalper = RubberBandScalper(paper_mode=paper)
 
     scalper.client = mock_client
@@ -48,8 +51,7 @@ def _make_scalper(paper: bool = True, **config_overrides):
     return scalper
 
 
-def _make_strategy_with_data(*, btc_declining=True, min_confidence=3,
-                             big_volume=False, low_taker=False):
+def _make_strategy_with_data(*, btc_declining=True, min_confidence=3, big_volume=False, low_taker=False):
     """Create strategy with realistic data for on_bar signal testing.
 
     Args:
@@ -69,7 +71,7 @@ def _make_strategy_with_data(*, btc_declining=True, min_confidence=3,
         vol_period=20,
         stoch_enabled=False,
         macd_enabled=False,
-        entry_mode='confidence',
+        entry_mode="confidence",
     )
     strategy = RubberBandStrategy(cfg)
 
@@ -94,7 +96,7 @@ def _make_strategy_with_data(*, btc_declining=True, min_confidence=3,
     high = close_prices * 1.005
     low = close_prices * 0.995
 
-    strategy.update_market_data('ETHUSDT', volume, taker_buy, high, low)
+    strategy.update_market_data("ETHUSDT", volume, taker_buy, high, low)
 
     return strategy, close_prices, btc_prices
 
@@ -103,6 +105,7 @@ def _make_strategy_with_data(*, btc_declining=True, min_confidence=3,
 # CRITICAL #1: Server TP skipped in PBT mode
 # ═══════════════════════════════════════════════════════════════════
 
+
 class TestServerTPInPBT:
     """v12.5: PBT mode places server TP with 50% qty for intra-bar TP1."""
 
@@ -110,15 +113,19 @@ class TestServerTPInPBT:
         """When partial_exit_enabled=True, _open_position MUST place 50% server TP."""
         scalper = _make_scalper(paper=False, partial_exit_enabled=True)
         scalper._save_state = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_123')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_456')
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': '100.0', 'executedQty': '1.0', 'status': 'FILLED',
-        })
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_123")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_456")
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": "100.0",
+                "executedQty": "1.0",
+                "status": "FILLED",
+            }
+        )
         scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
 
         closes = np.array([95.0] * 20 + [100.0])
-        scalper._open_position('BTCUSDT', 1, closes, 1000.0)
+        scalper._open_position("BTCUSDT", 1, closes, 1000.0)
 
         # Server SL must be placed
         scalper._place_server_stop_loss.assert_called_once()
@@ -129,15 +136,19 @@ class TestServerTPInPBT:
         """When partial_exit_enabled=False, server TP is placed normally."""
         scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper._save_state = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_123')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_456')
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': '100.0', 'executedQty': '1.0', 'status': 'FILLED',
-        })
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_123")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_456")
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": "100.0",
+                "executedQty": "1.0",
+                "status": "FILLED",
+            }
+        )
         scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
 
         closes = np.array([95.0] * 20 + [100.0])
-        scalper._open_position('BTCUSDT', 1, closes, 1000.0)
+        scalper._open_position("BTCUSDT", 1, closes, 1000.0)
 
         scalper._place_server_stop_loss.assert_called_once()
         scalper._place_server_take_profit.assert_called_once()
@@ -147,12 +158,12 @@ class TestServerTPInPBT:
         scalper = _make_scalper(paper=True, partial_exit_enabled=True)
 
         closes = np.array([95.0] * 20 + [100.0])
-        scalper._open_position('BTCUSDT', 1, closes, 1000.0)
+        scalper._open_position("BTCUSDT", 1, closes, 1000.0)
 
-        pos = scalper.strategy._positions.get('BTCUSDT')
+        pos = scalper.strategy._positions.get("BTCUSDT")
         assert pos is not None
         # Paper mode doesn't actually place server orders, but flag should be set
-        assert pos.get('server_tp_is_partial') is True
+        assert pos.get("server_tp_is_partial") is True
 
 
 class TestBracketRepairPBT:
@@ -162,66 +173,83 @@ class TestBracketRepairPBT:
         """Missing TP should be repaired with 50% qty in PBT mode (pre-partial)."""
         scalper = _make_scalper(paper=False, partial_exit_enabled=True)
         scalper._save_state = MagicMock()
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'qty_precision': 3,
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "qty_precision": 3,
+            }
+        )
 
         scalper.strategy.open_position(
-            symbol='BTCUSDT', signal=1, entry_price=100.0,
-            notional=100.0, leverage=2, move_size=0.05,
-            server_sl_order_id='sl_existing',
+            symbol="BTCUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=100.0,
+            leverage=2,
+            move_size=0.05,
+            server_sl_order_id="sl_existing",
             server_tp_order_id=None,
         )
 
         def mock_algo_check(method, path, signed=True, data=None):
-            if method == 'get':
-                return {'algoStatus': 'NEW', 'orderType': 'STOP'}
-            return {'algoId': 88888}
+            if method == "get":
+                return {"algoStatus": "NEW", "orderType": "STOP"}
+            return {"algoId": 88888}
 
         scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_check)
-        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_server_take_profit = MagicMock(return_value="tp_new")
 
         scalper._sync_server_orders()
 
         # v12.5: TP should be placed with 50% qty in PBT mode
         scalper._place_server_take_profit.assert_called_once()
-        pos = scalper.strategy._positions.get('BTCUSDT')
-        assert pos['server_tp_order_id'] == 'tp_new'
-        assert pos.get('server_tp_is_partial') is True
+        pos = scalper.strategy._positions.get("BTCUSDT")
+        assert pos["server_tp_order_id"] == "tp_new"
+        assert pos.get("server_tp_is_partial") is True
 
     def test_bracket_repair_places_tp_in_non_pbt_mode(self):
         """Missing TP should be repaired when partial_exit_enabled=False."""
         scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper._save_state = MagicMock()
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'qty_precision': 3,
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "qty_precision": 3,
+            }
+        )
 
         scalper.strategy.open_position(
-            symbol='BTCUSDT', signal=1, entry_price=100.0,
-            notional=100.0, leverage=2, move_size=0.05,
-            server_sl_order_id='sl_existing',
+            symbol="BTCUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=100.0,
+            leverage=2,
+            move_size=0.05,
+            server_sl_order_id="sl_existing",
             server_tp_order_id=None,
         )
 
         def mock_algo_check(method, path, signed=True, data=None):
-            if method == 'get':
-                return {'algoStatus': 'NEW', 'orderType': 'STOP'}
-            return {'algoId': 88888}
+            if method == "get":
+                return {"algoStatus": "NEW", "orderType": "STOP"}
+            return {"algoId": 88888}
 
         scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_check)
 
         scalper._sync_server_orders()
 
-        pos = scalper.strategy._positions.get('BTCUSDT')
-        assert pos['server_tp_order_id'] is not None
+        pos = scalper.strategy._positions.get("BTCUSDT")
+        assert pos["server_tp_order_id"] is not None
 
 
 # ═══════════════════════════════════════════════════════════════════
 # CRITICAL #2: Confidence base = 0
 # ═══════════════════════════════════════════════════════════════════
+
 
 class TestConfidenceBase:
     """v12.4.1: Confidence must start at 0, not 1."""
@@ -229,15 +257,14 @@ class TestConfidenceBase:
     def test_confidence_starts_at_zero(self):
         """With neutral indicators, confidence should be 0 (not 1)."""
         strategy, close_prices, btc_prices = _make_strategy_with_data(
-            btc_declining=True, min_confidence=3,
+            btc_declining=True,
+            min_confidence=3,
         )
-        signal = strategy.on_bar('ETHUSDT', close_prices, btc_prices)
-        last_conf = strategy.get_last_confidence('ETHUSDT')
+        signal = strategy.on_bar("ETHUSDT", close_prices, btc_prices)
+        last_conf = strategy.get_last_confidence("ETHUSDT")
         # btc_mom < -0.01 scores +1, but rest are neutral → conf=1
         # With base=0, this is correct (1 < 3 → no signal)
-        assert last_conf < 3, (
-            f"Confidence should be well below min_confidence=3 with few evidence, got {last_conf}"
-        )
+        assert last_conf < 3, f"Confidence should be well below min_confidence=3 with few evidence, got {last_conf}"
         assert signal == 0
 
     def test_two_evidence_blocked_at_min3(self):
@@ -247,18 +274,19 @@ class TestConfidenceBase:
         After v12.4.1: confidence=0(base)+2=2 < 3 → blocked.
         """
         strategy, close_prices, btc_prices = _make_strategy_with_data(
-            btc_declining=True, min_confidence=3, big_volume=True,
+            btc_declining=True,
+            min_confidence=3,
+            big_volume=True,
         )
-        signal = strategy.on_bar('ETHUSDT', close_prices, btc_prices)
+        signal = strategy.on_bar("ETHUSDT", close_prices, btc_prices)
         # btc_mom < -0.01 (+1), vol_ratio > 1.5 (+1) = 2 < 3 → blocked
-        assert signal == 0, (
-            f"2 evidence with base=0 should be blocked at min_confidence=3, got signal={signal}"
-        )
+        assert signal == 0, f"2 evidence with base=0 should be blocked at min_confidence=3, got signal={signal}"
 
 
 # ═══════════════════════════════════════════════════════════════════
 # HIGH #1: Risk-Off only signal path
 # ═══════════════════════════════════════════════════════════════════
+
 
 class TestRiskOffOnly:
     """v12.4.1: on_bar uses Risk-Off logic regardless of BTC regime."""
@@ -271,11 +299,9 @@ class TestRiskOffOnly:
             big_volume=True,
             low_taker=True,
         )
-        signal = strategy.on_bar('ETHUSDT', close_prices, btc_prices)
+        signal = strategy.on_bar("ETHUSDT", close_prices, btc_prices)
         # Risk-Off long requires btc_mom < 0; btc_mom > 0 here → blocked
-        assert signal == 0, (
-            f"Risk-On regime dips must be blocked (btc_mom>0), got signal={signal}"
-        )
+        assert signal == 0, f"Risk-On regime dips must be blocked (btc_mom>0), got signal={signal}"
 
     def test_signal_fires_in_risk_off_regime(self):
         """In Risk-Off (BTC declining), sympathy dip with evidence fires."""
@@ -284,11 +310,9 @@ class TestRiskOffOnly:
             min_confidence=2,
             big_volume=True,
         )
-        signal = strategy.on_bar('ETHUSDT', close_prices, btc_prices)
+        signal = strategy.on_bar("ETHUSDT", close_prices, btc_prices)
         # btc_mom < -0.01 (+1), vol_ratio > 1.5 (+1) = 2 >= min_confidence(2)
-        assert signal == 1, (
-            f"Risk-Off sympathy long should fire with 2 evidence, got signal={signal}"
-        )
+        assert signal == 1, f"Risk-Off sympathy long should fire with 2 evidence, got signal={signal}"
 
 
 class TestDiagnoseSignalParity:
@@ -302,15 +326,16 @@ class TestDiagnoseSignalParity:
             big_volume=True,
             low_taker=True,
         )
-        diag = strategy.diagnose_bar('ETHUSDT', close_prices, btc_prices)
+        diag = strategy.diagnose_bar("ETHUSDT", close_prices, btc_prices)
         # Should NOT see old Risk-On types
-        assert diag.get('entry_type') != 'classic_long'
-        assert diag.get('entry_type') != 'classic_short'
+        assert diag.get("entry_type") != "classic_long"
+        assert diag.get("entry_type") != "classic_short"
 
 
 # ═══════════════════════════════════════════════════════════════════
 # v12.4.2: Partial close failure path must not re-place server TP
 # ═══════════════════════════════════════════════════════════════════
+
 
 class TestPartialCloseFailureNoTP:
     """When partial close fails and we restore brackets, server TP must
@@ -322,19 +347,24 @@ class TestPartialCloseFailureNoTP:
         scalper._save_state = MagicMock()
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_new")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_new")
         # Simulate market order failure (returns None)
         scalper._place_order = MagicMock(return_value=None)
 
         # Set up position
         scalper.strategy.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=100.0,
-            notional=100.0, leverage=2, move_size=0.05,
-            server_sl_order_id='sl_old', server_tp_order_id=None,
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=100.0,
+            leverage=2,
+            move_size=0.05,
+            server_sl_order_id="sl_old",
+            server_tp_order_id=None,
         )
 
-        result = scalper._partial_close_position('ETHUSDT', 101.5)
+        result = scalper._partial_close_position("ETHUSDT", 101.5)
         assert result is False  # partial close failed
 
         # SL should be re-placed to restore protection
@@ -343,11 +373,11 @@ class TestPartialCloseFailureNoTP:
         scalper._place_server_take_profit.assert_called_once()
 
         # Verify position still tracked with both SL and partial TP
-        pos = scalper.strategy._positions.get('ETHUSDT')
+        pos = scalper.strategy._positions.get("ETHUSDT")
         assert pos is not None
-        assert pos['server_sl_order_id'] == 'sl_new'
-        assert pos['server_tp_order_id'] == 'tp_new'
-        assert pos.get('server_tp_is_partial') is True
+        assert pos["server_sl_order_id"] == "sl_new"
+        assert pos["server_tp_order_id"] == "tp_new"
+        assert pos.get("server_tp_is_partial") is True
 
     def test_non_pbt_failure_path_restores_both(self):
         """If partial close fails in non-PBT mode, both SL and TP are restored."""
@@ -355,31 +385,37 @@ class TestPartialCloseFailureNoTP:
         scalper._save_state = MagicMock()
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_new")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_new")
         scalper._place_order = MagicMock(return_value=None)
 
         scalper.strategy.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=100.0,
-            notional=100.0, leverage=2, move_size=0.05,
-            server_sl_order_id='sl_old', server_tp_order_id='tp_old',
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=100.0,
+            leverage=2,
+            move_size=0.05,
+            server_sl_order_id="sl_old",
+            server_tp_order_id="tp_old",
         )
 
-        result = scalper._partial_close_position('ETHUSDT', 101.5)
+        result = scalper._partial_close_position("ETHUSDT", 101.5)
         assert result is False
 
         # Both SL and TP should be re-placed
         scalper._place_server_stop_loss.assert_called_once()
         scalper._place_server_take_profit.assert_called_once()
 
-        pos = scalper.strategy._positions.get('ETHUSDT')
-        assert pos['server_sl_order_id'] == 'sl_new'
-        assert pos['server_tp_order_id'] == 'tp_new'
+        pos = scalper.strategy._positions.get("ETHUSDT")
+        assert pos["server_sl_order_id"] == "sl_new"
+        assert pos["server_tp_order_id"] == "tp_new"
 
 
 # ═══════════════════════════════════════════════════════════════════
 # v12.4.3: _close_position failure path must not re-place server TP
 # ═══════════════════════════════════════════════════════════════════
+
 
 class TestClosePositionFailureNoTP:
     """When _close_position fails and we restore brackets, server TP must
@@ -397,18 +433,23 @@ class TestClosePositionFailureNoTP:
         scalper._save_state = MagicMock()
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_new")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_new")
         # Close order FAILS
         scalper._place_order = MagicMock(return_value=None)
 
         scalper.strategy.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=100.0,
-            notional=100.0, leverage=2, move_size=0.05,
-            server_sl_order_id='sl_old', server_tp_order_id=None,
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=100.0,
+            leverage=2,
+            move_size=0.05,
+            server_sl_order_id="sl_old",
+            server_tp_order_id=None,
         )
 
-        result = scalper._close_position('ETHUSDT', 'trailing_stop', 99.0)
+        result = scalper._close_position("ETHUSDT", "trailing_stop", 99.0)
         assert result is False  # close failed
 
         # SL must be re-placed
@@ -416,10 +457,10 @@ class TestClosePositionFailureNoTP:
         # TP must NOT be re-placed in PBT mode
         scalper._place_server_take_profit.assert_not_called()
 
-        pos = scalper.strategy._positions.get('ETHUSDT')
+        pos = scalper.strategy._positions.get("ETHUSDT")
         assert pos is not None
-        assert pos['server_sl_order_id'] == 'sl_new'
-        assert pos['server_tp_order_id'] is None
+        assert pos["server_sl_order_id"] == "sl_new"
+        assert pos["server_tp_order_id"] is None
 
     def test_non_pbt_close_failure_restores_both(self):
         """Non-PBT close failure: both SL and TP restored."""
@@ -427,47 +468,58 @@ class TestClosePositionFailureNoTP:
         scalper._save_state = MagicMock()
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_new")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_new")
         scalper._place_order = MagicMock(return_value=None)
 
         scalper.strategy.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=100.0,
-            notional=100.0, leverage=2, move_size=0.05,
-            server_sl_order_id='sl_old', server_tp_order_id='tp_old',
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=100.0,
+            leverage=2,
+            move_size=0.05,
+            server_sl_order_id="sl_old",
+            server_tp_order_id="tp_old",
         )
 
-        result = scalper._close_position('ETHUSDT', 'stop_loss', 97.0)
+        result = scalper._close_position("ETHUSDT", "stop_loss", 97.0)
         assert result is False
 
         scalper._place_server_stop_loss.assert_called_once()
         scalper._place_server_take_profit.assert_called_once()
 
-        pos = scalper.strategy._positions.get('ETHUSDT')
-        assert pos['server_sl_order_id'] == 'sl_new'
-        assert pos['server_tp_order_id'] == 'tp_new'
+        pos = scalper.strategy._positions.get("ETHUSDT")
+        assert pos["server_sl_order_id"] == "sl_new"
+        assert pos["server_tp_order_id"] == "tp_new"
 
     def test_runner_close_failure_skips_tp(self):
         """Runner close failure: BE SL restored, no TP (already correct pre-fix)."""
         scalper = _make_scalper(
-            paper=False, partial_exit_enabled=True,
+            paper=False,
+            partial_exit_enabled=True,
             breakeven_after_partial=True,
         )
         scalper._save_state = MagicMock()
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_be')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_be")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_new")
         scalper._place_order = MagicMock(return_value=None)
 
         scalper.strategy.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=100.0,
-            notional=50.0, leverage=2, move_size=0.05,
-            server_sl_order_id='sl_old', server_tp_order_id=None,
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=100.0,
+            notional=50.0,
+            leverage=2,
+            move_size=0.05,
+            server_sl_order_id="sl_old",
+            server_tp_order_id=None,
         )
-        scalper.strategy._positions['ETHUSDT']['partial_closed'] = True
+        scalper.strategy._positions["ETHUSDT"]["partial_closed"] = True
 
-        result = scalper._close_position('ETHUSDT', 'trail_runner', 100.5)
+        result = scalper._close_position("ETHUSDT", "trail_runner", 100.5)
         assert result is False
 
         # SL re-placed with BE stop
@@ -475,6 +527,6 @@ class TestClosePositionFailureNoTP:
         # TP must NOT be re-placed for runner
         scalper._place_server_take_profit.assert_not_called()
 
-        pos = scalper.strategy._positions.get('ETHUSDT')
-        assert pos['server_sl_order_id'] == 'sl_be'
-        assert pos['server_tp_order_id'] is None
+        pos = scalper.strategy._positions.get("ETHUSDT")
+        assert pos["server_sl_order_id"] == "sl_be"
+        assert pos["server_tp_order_id"] is None

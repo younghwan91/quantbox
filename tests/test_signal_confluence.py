@@ -27,12 +27,14 @@ from quantbox.strategy.rubberband import (
 
 # ── Fixtures ──
 
+
 @pytest.fixture
 def btc_close(real_data_available):
     """Real BTC close prices."""
     if not real_data_available:
         pytest.skip("Real data not available")
     from quantbox.data.real_data_loader import RealDataLoader
+
     loader = RealDataLoader()
     df = loader.load_symbol("BTCUSDT")
     if df is None:
@@ -46,6 +48,7 @@ def btc_ohlcv(real_data_available):
     if not real_data_available:
         pytest.skip("Real data not available")
     from quantbox.data.real_data_loader import RealDataLoader
+
     loader = RealDataLoader()
     df = loader.load_symbol("BTCUSDT")
     if df is None:
@@ -67,6 +70,7 @@ def eth_ohlcv(real_data_available):
     if not real_data_available:
         pytest.skip("Real data not available")
     from quantbox.data.real_data_loader import RealDataLoader
+
     loader = RealDataLoader()
     df = loader.load_symbol("ETHUSDT")
     if df is None:
@@ -83,6 +87,7 @@ def eth_ohlcv(real_data_available):
 
 
 # ══════════════ 1. Numba Helper Functions ══════════════
+
 
 class TestEMAInline:
     """Test _compute_ema_inline Numba function."""
@@ -108,25 +113,19 @@ class TestStochasticInline:
     """Test _compute_stochastic_inline Numba function."""
 
     def test_output_shapes(self, btc_ohlcv):
-        k, d = _compute_stochastic_inline(
-            btc_ohlcv["high"], btc_ohlcv["low"], btc_ohlcv["close"], 5, 3
-        )
+        k, d = _compute_stochastic_inline(btc_ohlcv["high"], btc_ohlcv["low"], btc_ohlcv["close"], 5, 3)
         assert k.shape == btc_ohlcv["close"].shape
         assert d.shape == btc_ohlcv["close"].shape
 
     def test_k_range(self, btc_ohlcv):
         """Stochastic %K must be in [0, 100]."""
-        k, _ = _compute_stochastic_inline(
-            btc_ohlcv["high"], btc_ohlcv["low"], btc_ohlcv["close"], 5, 3
-        )
+        k, _ = _compute_stochastic_inline(btc_ohlcv["high"], btc_ohlcv["low"], btc_ohlcv["close"], 5, 3)
         assert k.min() >= 0.0
         assert k.max() <= 100.0
 
     def test_d_is_smoothed_k(self, btc_ohlcv):
         """%D should be smoother (lower std) than %K."""
-        k, d = _compute_stochastic_inline(
-            btc_ohlcv["high"], btc_ohlcv["low"], btc_ohlcv["close"], 14, 3
-        )
+        k, d = _compute_stochastic_inline(btc_ohlcv["high"], btc_ohlcv["low"], btc_ohlcv["close"], 14, 3)
         # After warmup, D should be smoother
         assert np.std(d[20:]) <= np.std(k[20:])
 
@@ -150,6 +149,7 @@ class TestMACDInline:
 
 # ══════════════ 2. compute_signals_v9 ══════════════
 
+
 class TestComputeSignalsV9:
     """Test the v9.0 Numba signal engine."""
 
@@ -157,12 +157,38 @@ class TestComputeSignalsV9:
         """Signal array must be same length as input."""
         eth_close = btc_close  # use BTC as both for shape test
         sigs = compute_signals_v9(
-            eth_close, btc_ohlcv["high"], btc_ohlcv["low"],
-            btc_ohlcv["volume"], btc_ohlcv["taker_buy"], btc_close,
-            8, 0.045, 0.382, 0.786, 10, 0.0,
-            32, 96, 192, 2, 1.5, 0.0, 1.5, 14, 20,
-            False, 0.45, 0.5, 0.55,
-            True, 5, 3, True, 12, 26, 14,
+            eth_close,
+            btc_ohlcv["high"],
+            btc_ohlcv["low"],
+            btc_ohlcv["volume"],
+            btc_ohlcv["taker_buy"],
+            btc_close,
+            8,
+            0.045,
+            0.382,
+            0.786,
+            10,
+            0.0,
+            32,
+            96,
+            192,
+            2,
+            1.5,
+            0.0,
+            1.5,
+            14,
+            20,
+            False,
+            0.45,
+            0.5,
+            0.55,
+            True,
+            5,
+            3,
+            True,
+            12,
+            26,
+            14,
         )
         assert sigs.shape == btc_close.shape
 
@@ -170,12 +196,38 @@ class TestComputeSignalsV9:
         """Signals should be 0 or ±leverage values."""
         n = min(len(eth_ohlcv["close"]), len(btc_close))
         sigs = compute_signals_v9(
-            eth_ohlcv["close"][:n], eth_ohlcv["high"][:n], eth_ohlcv["low"][:n],
-            eth_ohlcv["volume"][:n], eth_ohlcv["taker_buy"][:n], btc_close[:n],
-            8, 0.045, 0.382, 0.786, 10, 0.0,
-            32, 96, 192, 2, 1.5, 0.0, 1.5, 14, 20,
-            False, 0.45, 0.5, 0.55,
-            True, 5, 3, True, 12, 26, 14,
+            eth_ohlcv["close"][:n],
+            eth_ohlcv["high"][:n],
+            eth_ohlcv["low"][:n],
+            eth_ohlcv["volume"][:n],
+            eth_ohlcv["taker_buy"][:n],
+            btc_close[:n],
+            8,
+            0.045,
+            0.382,
+            0.786,
+            10,
+            0.0,
+            32,
+            96,
+            192,
+            2,
+            1.5,
+            0.0,
+            1.5,
+            14,
+            20,
+            False,
+            0.45,
+            0.5,
+            0.55,
+            True,
+            5,
+            3,
+            True,
+            12,
+            26,
+            14,
         )
         non_zero = sigs[sigs != 0]
         if len(non_zero) > 0:
@@ -186,8 +238,10 @@ class TestComputeSignalsV9:
         """With stoch+macd disabled, v9 should produce identical signals to v8."""
         n = min(len(eth_ohlcv["close"]), len(btc_close))
         c, v, t, b = (
-            eth_ohlcv["close"][:n], eth_ohlcv["volume"][:n],
-            eth_ohlcv["taker_buy"][:n], btc_close[:n],
+            eth_ohlcv["close"][:n],
+            eth_ohlcv["volume"][:n],
+            eth_ohlcv["taker_buy"][:n],
+            btc_close[:n],
         )
         h, lo = eth_ohlcv["high"][:n], eth_ohlcv["low"][:n]
         params = (8, 0.045, 0.382, 0.786, 10, 0.0, 32, 96, 192, 2, 1.5, 0.0, 1.5, 14, 20)
@@ -199,6 +253,7 @@ class TestComputeSignalsV9:
 
 
 # ══════════════ 3. Config Defaults ══════════════
+
 
 class TestV9ConfigDefaults:
     """Validate v9.0 config defaults match winning strategy parameters."""
@@ -231,6 +286,7 @@ class TestV9ConfigDefaults:
 
 # ══════════════ 4. Strategy Dispatch ══════════════
 
+
 class TestV9StrategyDispatch:
     """Test on_bar() correctly dispatches to v9 vs v8 path."""
 
@@ -258,7 +314,8 @@ class TestV9StrategyDispatch:
     def test_on_bar_uses_v9_when_enabled(self, eth_ohlcv, btc_close):
         """When macd/stoch enabled, on_bar should use v9 path (no crash)."""
         cfg = RubberBandConfig(
-            macd_enabled=True, stoch_enabled=True,
+            macd_enabled=True,
+            stoch_enabled=True,
             mtf_confirmation_enabled=False,
         )
         strategy = RubberBandStrategy(cfg)
@@ -266,8 +323,11 @@ class TestV9StrategyDispatch:
         close = eth_ohlcv["close"][:n]
         btc = btc_close[:n]
         strategy.update_market_data(
-            "ETHUSDT", eth_ohlcv["volume"][:n], eth_ohlcv["taker_buy"][:n],
-            high=eth_ohlcv["high"][:n], low=eth_ohlcv["low"][:n],
+            "ETHUSDT",
+            eth_ohlcv["volume"][:n],
+            eth_ohlcv["taker_buy"][:n],
+            high=eth_ohlcv["high"][:n],
+            low=eth_ohlcv["low"][:n],
         )
         sig = strategy.on_bar("ETHUSDT", close, btc)
         assert sig in (-1, 0, 1)
@@ -275,7 +335,8 @@ class TestV9StrategyDispatch:
     def test_on_bar_falls_back_without_high_low(self, eth_ohlcv, btc_close):
         """v9 path should use close as fallback for missing high/low."""
         cfg = RubberBandConfig(
-            macd_enabled=True, stoch_enabled=False,
+            macd_enabled=True,
+            stoch_enabled=False,
             mtf_confirmation_enabled=False,
         )
         strategy = RubberBandStrategy(cfg)
@@ -284,7 +345,9 @@ class TestV9StrategyDispatch:
         btc = btc_close[:n]
         # Only pass volume/taker, no high/low
         strategy.update_market_data(
-            "ETHUSDT", eth_ohlcv["volume"][:n], eth_ohlcv["taker_buy"][:n],
+            "ETHUSDT",
+            eth_ohlcv["volume"][:n],
+            eth_ohlcv["taker_buy"][:n],
         )
         sig = strategy.on_bar("ETHUSDT", close, btc)
         assert sig in (-1, 0, 1)
@@ -292,7 +355,8 @@ class TestV9StrategyDispatch:
     def test_on_bar_uses_v8_when_disabled(self, eth_ohlcv, btc_close):
         """When both macd+stoch disabled, should use v8 compute_signals_confidence."""
         cfg = RubberBandConfig(
-            macd_enabled=False, stoch_enabled=False,
+            macd_enabled=False,
+            stoch_enabled=False,
             mtf_confirmation_enabled=False,
         )
         strategy = RubberBandStrategy(cfg)
@@ -300,7 +364,9 @@ class TestV9StrategyDispatch:
         close = eth_ohlcv["close"][:n]
         btc = btc_close[:n]
         strategy.update_market_data(
-            "ETHUSDT", eth_ohlcv["volume"][:n], eth_ohlcv["taker_buy"][:n],
+            "ETHUSDT",
+            eth_ohlcv["volume"][:n],
+            eth_ohlcv["taker_buy"][:n],
         )
         sig = strategy.on_bar("ETHUSDT", close, btc)
         assert sig in (-1, 0, 1)

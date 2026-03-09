@@ -20,6 +20,7 @@ import math
 import time
 from dataclasses import dataclass
 from enum import Enum
+
 logger = logging.getLogger("LimitChaser")
 
 
@@ -125,9 +126,7 @@ class LimitOrderChaser:
         else:
             return float(book["askPrice"])
 
-    def round_price(
-        self, price: float, tick_size: float, price_precision: int
-    ) -> float:
+    def round_price(self, price: float, tick_size: float, price_precision: int) -> float:
         """가격을 거래소 tick_size에 맞게 반올림.
 
         Args:
@@ -141,9 +140,7 @@ class LimitOrderChaser:
         rounded = round(price / tick_size) * tick_size
         return round(rounded, price_precision)
 
-    def round_quantity(
-        self, quantity: float, step_size: float, quantity_precision: int
-    ) -> float:
+    def round_quantity(self, quantity: float, step_size: float, quantity_precision: int) -> float:
         """수량을 거래소 step_size에 맞게 내림 반올림.
 
         바이낸스 LOT_SIZE 필터: (quantity - minQty) % stepSize == 0 이어야 함.
@@ -229,10 +226,7 @@ class LimitOrderChaser:
         while chase_count <= self.config.max_chase_ticks:
             elapsed = time.monotonic() - start_time
             if self.config.timeout_seconds > 0 and elapsed >= self.config.timeout_seconds:
-                logger.warning(
-                    f"[{symbol}] Chase timeout after {elapsed:.1f}s, "
-                    f"filled {total_filled}/{quantity}"
-                )
+                logger.warning(f"[{symbol}] Chase timeout after {elapsed:.1f}s, filled {total_filled}/{quantity}")
                 break
 
             # 1. Get best price
@@ -264,9 +258,9 @@ class LimitOrderChaser:
                 )
                 # Hedge Mode: positionSide is mutually exclusive with reduceOnly
                 if position_side is not None:
-                    order_params['positionSide'] = position_side
+                    order_params["positionSide"] = position_side
                 elif reduce_only:
-                    order_params['reduceOnly'] = 'true'
+                    order_params["reduceOnly"] = "true"
                 order = self.client.futures_create_order(**order_params)
                 last_order_id = str(order["orderId"])
                 logger.debug(
@@ -278,12 +272,12 @@ class LimitOrderChaser:
                 logger.error(f"[{symbol}] Limit order failed: {e}")
                 # -4118: ReduceOnly order failed (no position exists)
                 # -2022: ReduceOnly order rejected
-                if '-4118' in err_str or '-2022' in err_str:
+                if "-4118" in err_str or "-2022" in err_str:
                     return ChaseResult(
                         status=ChaseFillStatus.NO_POSITION,
                         filled_quantity=0.0,
                         avg_price=0.0,
-                        order_id='',
+                        order_id="",
                         chase_count=chase_count,
                         elapsed_seconds=time.monotonic() - start_time,
                         maker_fill=False,
@@ -294,9 +288,7 @@ class LimitOrderChaser:
             time.sleep(self.config.chase_interval_seconds)
 
             try:
-                order_status = self.client.futures_get_order(
-                    symbol=symbol, orderId=int(last_order_id)
-                )
+                order_status = self.client.futures_get_order(symbol=symbol, orderId=int(last_order_id))
                 status = order_status["status"]
                 filled_qty = float(order_status["executedQty"])
                 avg_price = float(order_status.get("avgPrice", limit_price))
@@ -307,9 +299,7 @@ class LimitOrderChaser:
                     remaining_qty = quantity - total_filled
                     # 부분 체결 후 남은 수량을 step_size에 맞게 반올림
                     if step_size > 0:
-                        remaining_qty = self.round_quantity(
-                            remaining_qty, step_size, quantity_precision
-                        )
+                        remaining_qty = self.round_quantity(remaining_qty, step_size, quantity_precision)
 
                 if status == "FILLED":
                     logger.info(
@@ -341,18 +331,12 @@ class LimitOrderChaser:
                 # 5. Cancel unfilled order
                 if status in ("NEW", "PARTIALLY_FILLED"):
                     try:
-                        self.client.futures_cancel_order(
-                            symbol=symbol, orderId=int(last_order_id)
-                        )
+                        self.client.futures_cancel_order(symbol=symbol, orderId=int(last_order_id))
                     except Exception as cancel_err:
-                        logger.warning(
-                            f"[{symbol}] Cancel failed (may already be filled): {cancel_err}"
-                        )
+                        logger.warning(f"[{symbol}] Cancel failed (may already be filled): {cancel_err}")
                         # Re-check after cancel failure
                         try:
-                            recheck = self.client.futures_get_order(
-                                symbol=symbol, orderId=int(last_order_id)
-                            )
+                            recheck = self.client.futures_get_order(symbol=symbol, orderId=int(last_order_id))
                             if recheck["status"] == "FILLED":
                                 filled_qty = float(recheck["executedQty"])
                                 avg_p = float(recheck.get("avgPrice", limit_price))
@@ -375,9 +359,7 @@ class LimitOrderChaser:
                 logger.error(f"[{symbol}] Order status check failed: {e}")
                 # Try to cancel just in case
                 try:
-                    self.client.futures_cancel_order(
-                        symbol=symbol, orderId=int(last_order_id)
-                    )
+                    self.client.futures_cancel_order(symbol=symbol, orderId=int(last_order_id))
                 except Exception:
                     pass
                 break
@@ -401,9 +383,7 @@ class LimitOrderChaser:
         if self.config.fallback_to_market and remaining_qty > 0:
             # Market fallback 전 수량 재확인
             if step_size > 0:
-                remaining_qty = self.round_quantity(
-                    remaining_qty, step_size, quantity_precision
-                )
+                remaining_qty = self.round_quantity(remaining_qty, step_size, quantity_precision)
             if remaining_qty <= 0:
                 # 반올림으로 남은 수량이 0이 된 경우 — 성공 처리
                 if total_filled > 0:
@@ -421,18 +401,21 @@ class LimitOrderChaser:
                 f"{remaining_qty:.6f} (filled {total_filled:.6f} via limit)"
             )
             market_result = self._market_fallback(
-                symbol, side, remaining_qty, step_size, quantity_precision,
+                symbol,
+                side,
+                remaining_qty,
+                step_size,
+                quantity_precision,
                 reduce_only=reduce_only,
                 position_side=position_side,
             )
-            if market_result == 'NO_POSITION':
+            if market_result == "NO_POSITION":
                 # v12.3.1: If we already had partial limit fills before
                 # NO_POSITION, report them — otherwise the caller thinks
                 # nothing filled but there's phantom quantity on exchange.
                 if total_filled > 0:
                     logger.warning(
-                        f"[{symbol}] NO_POSITION but had {total_filled:.6f} "
-                        f"prior limit fills — reporting as FILLED"
+                        f"[{symbol}] NO_POSITION but had {total_filled:.6f} prior limit fills — reporting as FILLED"
                     )
                     return ChaseResult(
                         status=ChaseFillStatus.FILLED,
@@ -447,7 +430,7 @@ class LimitOrderChaser:
                     status=ChaseFillStatus.NO_POSITION,
                     filled_quantity=0.0,
                     avg_price=0.0,
-                    order_id='',
+                    order_id="",
                     chase_count=chase_count,
                     elapsed_seconds=time.monotonic() - start_time,
                     maker_fill=False,
@@ -460,11 +443,7 @@ class LimitOrderChaser:
                 return ChaseResult(
                     status=ChaseFillStatus.FALLBACK_MARKET,
                     filled_quantity=total_filled,
-                    avg_price=(
-                        weighted_price_sum / total_filled
-                        if total_filled > 0
-                        else 0
-                    ),
+                    avg_price=(weighted_price_sum / total_filled if total_filled > 0 else 0),
                     order_id=mkt_oid,
                     chase_count=chase_count,
                     elapsed_seconds=time.monotonic() - start_time,
@@ -475,9 +454,7 @@ class LimitOrderChaser:
         return ChaseResult(
             status=ChaseFillStatus.FAILED,
             filled_quantity=total_filled,
-            avg_price=(
-                weighted_price_sum / total_filled if total_filled > 0 else 0
-            ),
+            avg_price=(weighted_price_sum / total_filled if total_filled > 0 else 0),
             order_id=last_order_id,
             chase_count=chase_count,
             elapsed_seconds=elapsed,
@@ -516,10 +493,7 @@ class LimitOrderChaser:
         if step_size > 0:
             quantity = self.round_quantity(quantity, step_size, quantity_precision)
             if quantity <= 0:
-                logger.error(
-                    f"[{symbol}] Market fallback quantity rounded to 0 "
-                    f"(step_size={step_size})"
-                )
+                logger.error(f"[{symbol}] Market fallback quantity rounded to 0 (step_size={step_size})")
                 return None
         try:
             order_params = dict(
@@ -531,9 +505,9 @@ class LimitOrderChaser:
             )
             # Hedge Mode: positionSide is mutually exclusive with reduceOnly
             if position_side is not None:
-                order_params['positionSide'] = position_side
+                order_params["positionSide"] = position_side
             elif reduce_only:
-                order_params['reduceOnly'] = 'true'
+                order_params["reduceOnly"] = "true"
             order = self.client.futures_create_order(**order_params)
             order_id = str(order["orderId"])
 
@@ -551,8 +525,7 @@ class LimitOrderChaser:
                     filled_qty = total_qty
                     avg_price = total_cost / total_qty
                     logger.info(
-                        f"[{symbol}] Market fallback FILLED: {side} "
-                        f"{filled_qty} @ {avg_price:.4f} ({len(fills)} fills)"
+                        f"[{symbol}] Market fallback FILLED: {side} {filled_qty} @ {avg_price:.4f} ({len(fills)} fills)"
                     )
                     return filled_qty, avg_price, order_id
 
@@ -560,36 +533,27 @@ class LimitOrderChaser:
             filled_qty = float(order.get("executedQty", 0))
             avg_price = float(order.get("avgPrice", 0))
             if filled_qty > 0 and avg_price > 0:
-                logger.info(
-                    f"[{symbol}] Market fallback FILLED: {side} "
-                    f"{filled_qty} @ {avg_price:.4f}"
-                )
+                logger.info(f"[{symbol}] Market fallback FILLED: {side} {filled_qty} @ {avg_price:.4f}")
                 return filled_qty, avg_price, order_id
 
             # 3차: cumQuote에서 역산 (최후 수단)
             cum_quote = float(order.get("cumQuote", 0))
             if filled_qty > 0 and cum_quote > 0:
                 avg_price = cum_quote / filled_qty
-                logger.info(
-                    f"[{symbol}] Market fallback FILLED (cumQuote): {side} "
-                    f"{filled_qty} @ {avg_price:.4f}"
-                )
+                logger.info(f"[{symbol}] Market fallback FILLED (cumQuote): {side} {filled_qty} @ {avg_price:.4f}")
                 return filled_qty, avg_price, order_id
 
             # 4차: 응답 파싱 실패 → 거래소에 직접 주문 상태 조회
             logger.warning(
-                f"[{symbol}] Market response has no fill data, "
-                f"querying order status (orderId={order_id})..."
+                f"[{symbol}] Market response has no fill data, querying order status (orderId={order_id})..."
             )
-            return self._verify_market_order(
-                symbol, side, quantity, order_id
-            )
+            return self._verify_market_order(symbol, side, quantity, order_id)
         except Exception as e:
             err_str = str(e)
             logger.error(f"[{symbol}] Market fallback FAILED: {e}")
             # -4118/-2022: position already gone — not a real error
-            if '-4118' in err_str or '-2022' in err_str:
-                return 'NO_POSITION'
+            if "-4118" in err_str or "-2022" in err_str:
+                return "NO_POSITION"
             return None
 
     def _verify_market_order(
@@ -620,9 +584,7 @@ class LimitOrderChaser:
         """
         for attempt in range(max_retries):
             try:
-                status = self.client.futures_get_order(
-                    symbol=symbol, orderId=int(order_id)
-                )
+                status = self.client.futures_get_order(symbol=symbol, orderId=int(order_id))
                 exec_qty = float(status.get("executedQty", 0))
                 avg_price = float(status.get("avgPrice", 0))
                 order_status = status.get("status", "UNKNOWN")
@@ -653,31 +615,21 @@ class LimitOrderChaser:
                     return None
 
                 if order_status in ("CANCELED", "REJECTED", "EXPIRED"):
-                    logger.error(
-                        f"[{symbol}] Market order {order_status}: "
-                        f"orderId={order_id}"
-                    )
+                    logger.error(f"[{symbol}] Market order {order_status}: orderId={order_id}")
                     return None
 
                 # 아직 NEW — 재시도
-                logger.debug(
-                    f"[{symbol}] Order still {order_status}, "
-                    f"retrying ({attempt + 1}/{max_retries})..."
-                )
+                logger.debug(f"[{symbol}] Order still {order_status}, retrying ({attempt + 1}/{max_retries})...")
                 time.sleep(retry_interval)
 
             except Exception as e:
-                logger.error(
-                    f"[{symbol}] Order query failed (attempt {attempt + 1}): {e}"
-                )
+                logger.error(f"[{symbol}] Order query failed (attempt {attempt + 1}): {e}")
                 time.sleep(retry_interval)
 
         # 최대 재시도 초과 — 체결 미확인
         # MARKET 주문이 여전히 NEW면 취소 시도 (유령 주문 방지)
         try:
-            cancel_status = self.client.futures_get_order(
-                symbol=symbol, orderId=int(order_id)
-            )
+            cancel_status = self.client.futures_get_order(symbol=symbol, orderId=int(order_id))
             cancel_order_status = cancel_status.get("status", "UNKNOWN")
             cancel_exec_qty = float(cancel_status.get("executedQty", 0))
 
@@ -687,23 +639,16 @@ class LimitOrderChaser:
                     f"cancelling to prevent orphaned order..."
                 )
                 try:
-                    self.client.futures_cancel_order(
-                        symbol=symbol, orderId=int(order_id)
-                    )
+                    self.client.futures_cancel_order(symbol=symbol, orderId=int(order_id))
                     logger.info(f"[{symbol}] Orphaned market order cancelled: {order_id}")
                 except Exception as cancel_err:
-                    logger.error(
-                        f"[{symbol}] Failed to cancel orphaned market order: {cancel_err}"
-                    )
+                    logger.error(f"[{symbol}] Failed to cancel orphaned market order: {cancel_err}")
             elif cancel_order_status == "FILLED":
                 # 최종 확인에서 체결이 확인됨
                 avg_p = float(cancel_status.get("avgPrice", 0))
                 cum_q = float(cancel_status.get("cumQuote", 0))
                 if avg_p > 0:
-                    logger.info(
-                        f"[{symbol}] Market order confirmed on final check: "
-                        f"{cancel_exec_qty} @ {avg_p:.4f}"
-                    )
+                    logger.info(f"[{symbol}] Market order confirmed on final check: {cancel_exec_qty} @ {avg_p:.4f}")
                     return cancel_exec_qty, avg_p, order_id
                 elif cum_q > 0 and cancel_exec_qty > 0:
                     avg_p = cum_q / cancel_exec_qty
@@ -718,9 +663,7 @@ class LimitOrderChaser:
         )
         return None
 
-    def _paper_fill(
-        self, symbol: str, side: str, quantity: float
-    ) -> ChaseResult:
+    def _paper_fill(self, symbol: str, side: str, quantity: float) -> ChaseResult:
         """Paper mode: 즉시 체결 시뮬레이션 (best bid/ask 기준).
 
         Args:
@@ -738,9 +681,7 @@ class LimitOrderChaser:
             price = 0.0
             logger.warning(f"[PAPER] Could not get price for {symbol}, using 0")
 
-        logger.info(
-            f"[PAPER] Limit chase FILLED: {side} {quantity:.6f} {symbol} @ {price}"
-        )
+        logger.info(f"[PAPER] Limit chase FILLED: {side} {quantity:.6f} {symbol} @ {price}")
         return ChaseResult(
             status=ChaseFillStatus.FILLED,
             filled_quantity=quantity,

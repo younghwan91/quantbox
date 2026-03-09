@@ -42,9 +42,9 @@ class TestBotCommand:
     def test_create_with_args(self):
         cmd = BotCommand(
             command=CommandType.CLOSE_SLOT,
-            args={'slot_id': 2},
+            args={"slot_id": 2},
         )
-        assert cmd.args['slot_id'] == 2
+        assert cmd.args["slot_id"] == 2
 
     def test_set_response_without_future(self):
         """Future 없이 set_response 호출 시 에러 없음."""
@@ -80,48 +80,48 @@ class TestParseCommand:
         return TradingBot(command_queue=q, channel_id=12345)
 
     def test_status(self, bot):
-        cmd = bot._parse_command('!status', ['!status'])
+        cmd = bot._parse_command("!status", ["!status"])
         assert cmd.command == CommandType.STATUS
 
     def test_close_all(self, bot):
-        cmd = bot._parse_command('!close', ['!close', 'all'])
+        cmd = bot._parse_command("!close", ["!close", "all"])
         assert cmd.command == CommandType.CLOSE_ALL
 
     def test_close_slot(self, bot):
-        cmd = bot._parse_command('!close', ['!close', '3'])
+        cmd = bot._parse_command("!close", ["!close", "3"])
         assert cmd.command == CommandType.CLOSE_SLOT
-        assert cmd.args['slot_id'] == 3
+        assert cmd.args["slot_id"] == 3
 
     def test_close_no_arg(self, bot):
         with pytest.raises(ValueError, match="형식으로"):
-            bot._parse_command('!close', ['!close'])
+            bot._parse_command("!close", ["!close"])
 
     def test_close_invalid_arg(self, bot):
         with pytest.raises(ValueError, match="숫자"):
-            bot._parse_command('!close', ['!close', 'abc'])
+            bot._parse_command("!close", ["!close", "abc"])
 
     def test_pause(self, bot):
-        cmd = bot._parse_command('!pause', ['!pause'])
+        cmd = bot._parse_command("!pause", ["!pause"])
         assert cmd.command == CommandType.PAUSE
 
     def test_resume(self, bot):
-        cmd = bot._parse_command('!resume', ['!resume'])
+        cmd = bot._parse_command("!resume", ["!resume"])
         assert cmd.command == CommandType.RESUME
 
     def test_stop(self, bot):
-        cmd = bot._parse_command('!stop', ['!stop'])
+        cmd = bot._parse_command("!stop", ["!stop"])
         assert cmd.command == CommandType.STOP
 
     def test_pnl(self, bot):
-        cmd = bot._parse_command('!pnl', ['!pnl'])
+        cmd = bot._parse_command("!pnl", ["!pnl"])
         assert cmd.command == CommandType.PNL
 
     def test_help(self, bot):
-        cmd = bot._parse_command('!help', ['!help'])
+        cmd = bot._parse_command("!help", ["!help"])
         assert cmd.command == CommandType.HELP
 
     def test_unknown_command(self, bot):
-        result = bot._parse_command('!foobar', ['!foobar'])
+        result = bot._parse_command("!foobar", ["!foobar"])
         assert result is None
 
 
@@ -244,6 +244,7 @@ class TestScalperCommandHandlers:
         monkeypatch.setenv("BINANCE_TESTNET", "true")
         with patch("quantbox.scalper.Client"):
             from quantbox.scalper import RubberBandScalper
+
             s = RubberBandScalper(paper_mode=True)
             s.discord = MagicMock()
             s._initial_balance = 1000.0
@@ -257,8 +258,12 @@ class TestScalperCommandHandlers:
 
     def test_cmd_status_with_position(self, scalper):
         scalper.strategy.open_position(
-            symbol='BTCUSDT', signal=1, entry_price=50000.0,
-            notional=1000.0, leverage=2, move_size=0.04,
+            symbol="BTCUSDT",
+            signal=1,
+            entry_price=50000.0,
+            notional=1000.0,
+            leverage=2,
+            move_size=0.04,
         )
         result = scalper._cmd_status()
         assert "BTCUSDT" in result
@@ -276,12 +281,28 @@ class TestScalperCommandHandlers:
 
     def test_cmd_pnl_with_trades(self, scalper):
         scalper._trade_history = [
-            {'symbol': 'BTCUSDT', 'pnl_usd': 5.0, 'pnl_pct': 0.5,
-             'signal': 1, 'entry_price': 50000, 'exit_price': 50250,
-             'notional': 1000, 'bars_held': 3, 'reason': 'target'},
-            {'symbol': 'ETHUSDT', 'pnl_usd': -2.0, 'pnl_pct': -0.2,
-             'signal': -1, 'entry_price': 3000, 'exit_price': 3006,
-             'notional': 1000, 'bars_held': 5, 'reason': 'stop'},
+            {
+                "symbol": "BTCUSDT",
+                "pnl_usd": 5.0,
+                "pnl_pct": 0.5,
+                "signal": 1,
+                "entry_price": 50000,
+                "exit_price": 50250,
+                "notional": 1000,
+                "bars_held": 3,
+                "reason": "target",
+            },
+            {
+                "symbol": "ETHUSDT",
+                "pnl_usd": -2.0,
+                "pnl_pct": -0.2,
+                "signal": -1,
+                "entry_price": 3000,
+                "exit_price": 3006,
+                "notional": 1000,
+                "bars_held": 5,
+                "reason": "stop",
+            },
         ]
         scalper.get_balance = MagicMock(return_value=1003.0)
         result = scalper._cmd_pnl()
@@ -326,28 +347,24 @@ class TestScalperCommandHandlers:
         assert "No positions" in result
 
     def test_cmd_blacklist_view(self, scalper):
-        scalper.config.exclude_symbols.append('XYZUSDT')
+        scalper.config.exclude_symbols.append("XYZUSDT")
         result = scalper._cmd_blacklist()
         assert "XYZUSDT" in result
         assert "Blacklist" in result
 
     def test_cmd_blacklist_clear(self, scalper):
-        scalper.config.exclude_symbols.append('XYZUSDT')
+        scalper.config.exclude_symbols.append("XYZUSDT")
         original_len = len(scalper.config.exclude_symbols)
-        result = scalper._cmd_blacklist({'action': 'clear'})
+        result = scalper._cmd_blacklist({"action": "clear"})
         assert "cleared" in result.lower()
         assert len(scalper.config.exclude_symbols) == 0
 
     def test_handle_command_dispatches(self, scalper):
         """_handle_command가 각 CommandType을 올바른 핸들러로 보낸다."""
-        result = scalper._handle_command(
-            BotCommand(command=CommandType.STATUS)
-        )
+        result = scalper._handle_command(BotCommand(command=CommandType.STATUS))
         assert "QuantBox Status" in result
 
-        result = scalper._handle_command(
-            BotCommand(command=CommandType.PAUSE)
-        )
+        result = scalper._handle_command(BotCommand(command=CommandType.PAUSE))
         assert scalper._paused is True
 
     def test_process_bot_commands_no_runner(self, scalper):
@@ -382,6 +399,7 @@ class TestPollingLoop:
         monkeypatch.setenv("BINANCE_TESTNET", "true")
         with patch("quantbox.scalper.Client"):
             from quantbox.scalper import RubberBandScalper
+
             s = RubberBandScalper(paper_mode=True)
             s.discord = MagicMock()
             s._bot_runner = None
@@ -390,6 +408,7 @@ class TestPollingLoop:
     def test_next_bar_time_aligned(self):
         """14:03 → 다음 바 14:15:05."""
         from quantbox.scalper import RubberBandScalper
+
         fake_now = datetime(2026, 2, 17, 14, 3, 0, tzinfo=timezone.utc)
         with patch("quantbox.core.loop_mixin.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
@@ -404,6 +423,7 @@ class TestPollingLoop:
     def test_next_bar_time_near_hour(self):
         """14:47 → 다음 바 15:00:05."""
         from quantbox.scalper import RubberBandScalper
+
         fake_now = datetime(2026, 2, 17, 14, 47, 0, tzinfo=timezone.utc)
         with patch("quantbox.core.loop_mixin.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
@@ -427,7 +447,7 @@ class TestPollingLoop:
             datetime(2026, 2, 17, 14, 14, 58, tzinfo=timezone.utc),  # _next_bar_time
             datetime(2026, 2, 17, 14, 14, 58, tzinfo=timezone.utc),  # first loop check
             datetime(2026, 2, 17, 14, 14, 58, tzinfo=timezone.utc),  # remaining calc
-            datetime(2026, 2, 17, 14, 15, 6, tzinfo=timezone.utc),   # after sleep: past target
+            datetime(2026, 2, 17, 14, 15, 6, tzinfo=timezone.utc),  # after sleep: past target
         ]
         call_idx = [0]
 
@@ -436,8 +456,7 @@ class TestPollingLoop:
             call_idx[0] += 1
             return fake_times[idx]
 
-        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, \
-             patch("quantbox.core.loop_mixin.time") as mock_time:
+        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, patch("quantbox.core.loop_mixin.time") as mock_time:
             mock_dt.now = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             mock_time.sleep = MagicMock()
@@ -458,8 +477,7 @@ class TestPollingLoop:
 
         fake_now_val = datetime(2026, 2, 17, 14, 1, 0, tzinfo=timezone.utc)
 
-        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, \
-             patch("quantbox.core.loop_mixin.time") as mock_time:
+        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, patch("quantbox.core.loop_mixin.time") as mock_time:
             mock_dt.now.return_value = fake_now_val
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             mock_time.sleep = MagicMock()
@@ -480,7 +498,7 @@ class TestPollingLoop:
             datetime(2026, 2, 17, 14, 14, 50, tzinfo=timezone.utc),  # _next_bar_time
             datetime(2026, 2, 17, 14, 14, 50, tzinfo=timezone.utc),  # loop check
             datetime(2026, 2, 17, 14, 14, 50, tzinfo=timezone.utc),  # remaining
-            datetime(2026, 2, 17, 14, 15, 6, tzinfo=timezone.utc),   # past target
+            datetime(2026, 2, 17, 14, 15, 6, tzinfo=timezone.utc),  # past target
         ]
         call_idx = [0]
 
@@ -498,8 +516,7 @@ class TestPollingLoop:
             mono_idx[0] += 1
             return mono_values[idx]
 
-        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, \
-             patch("quantbox.core.loop_mixin.time") as mock_time:
+        with patch("quantbox.core.loop_mixin.datetime") as mock_dt, patch("quantbox.core.loop_mixin.time") as mock_time:
             mock_dt.now = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             mock_time.sleep = MagicMock()

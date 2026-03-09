@@ -33,14 +33,14 @@ from quantbox.strategy.rubberband.signals import (
 from quantbox.strategy.rubberband.strategy import RubberBandStrategy
 
 __all__ = [
-    'RubberBandConfig',
-    'RubberBandStrategy',
-    'calculate_position_size',
-    'compute_atr_pct',
-    'compute_confidence_leverage',
-    'compute_rr_gated_leverage',
-    'compute_signals',
-    'compute_signals_confidence',
-    'compute_signals_v9',
-    'compute_signals_with_regime',
+    "RubberBandConfig",
+    "RubberBandStrategy",
+    "calculate_position_size",
+    "compute_atr_pct",
+    "compute_confidence_leverage",
+    "compute_rr_gated_leverage",
+    "compute_signals",
+    "compute_signals_confidence",
+    "compute_signals_v9",
+    "compute_signals_with_regime",
 ]

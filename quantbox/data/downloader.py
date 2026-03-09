@@ -18,7 +18,7 @@ from tqdm import tqdm
 from quantbox.core.config import Config
 
 
-logger = logging.getLogger('DataDownloader')
+logger = logging.getLogger("DataDownloader")
 
 
 class DataDownloader:
@@ -28,17 +28,21 @@ class DataDownloader:
 
     # Column names for OHLCV data
     KLINE_COLUMNS = [
-        'Open Time', 'Open', 'High', 'Low', 'Close', 'Volume',
-        'Close Time', 'Quote Asset Volume', 'Number of Trades',
-        'Taker Buy Base Asset Volume', 'Taker Buy Quote Asset Volume', 'Ignore'
+        "Open Time",
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Volume",
+        "Close Time",
+        "Quote Asset Volume",
+        "Number of Trades",
+        "Taker Buy Base Asset Volume",
+        "Taker Buy Quote Asset Volume",
+        "Ignore",
     ]
 
-    def __init__(
-        self,
-        client,
-        config: Config,
-        cache=None
-    ):
+    def __init__(self, client, config: Config, cache=None):
         self.client = client
         self.config = config
         self.cache = cache
@@ -62,15 +66,15 @@ class DataDownloader:
     def _interval_to_ms(self, interval: str) -> int:
         """Convert interval string to milliseconds."""
         mapping = {
-            '1m': 60 * 1000,
-            '3m': 3 * 60 * 1000,
-            '5m': 5 * 60 * 1000,
-            '15m': 15 * 60 * 1000,
-            '30m': 30 * 60 * 1000,
-            '1h': 60 * 60 * 1000,
-            '2h': 2 * 60 * 60 * 1000,
-            '4h': 4 * 60 * 60 * 1000,
-            '1d': 24 * 60 * 60 * 1000,
+            "1m": 60 * 1000,
+            "3m": 3 * 60 * 1000,
+            "5m": 5 * 60 * 1000,
+            "15m": 15 * 60 * 1000,
+            "30m": 30 * 60 * 1000,
+            "1h": 60 * 60 * 1000,
+            "2h": 2 * 60 * 60 * 1000,
+            "4h": 4 * 60 * 60 * 1000,
+            "1d": 24 * 60 * 60 * 1000,
         }
         return mapping.get(interval, 60 * 60 * 1000)
 
@@ -83,10 +87,7 @@ class DataDownloader:
         return datetime.utcfromtimestamp(ms / 1000)
 
     def get_trading_coins(
-        self,
-        quote_currency: str = "USDT",
-        n_coins: int = 50,
-        sort_by_volume: bool = True
+        self, quote_currency: str = "USDT", n_coins: int = 50, sort_by_volume: bool = True
     ) -> List[str]:
         """
         Get list of trading coins.
@@ -104,10 +105,9 @@ class DataDownloader:
 
             # Filter active trading pairs
             trading_coins = [
-                info['symbol']
-                for info in exchange_info['symbols']
-                if info['symbol'].endswith(quote_currency)
-                and info['status'] == 'TRADING'
+                info["symbol"]
+                for info in exchange_info["symbols"]
+                if info["symbol"].endswith(quote_currency) and info["status"] == "TRADING"
             ]
 
             logger.info(f"Found {len(trading_coins)} tradable pairs")
@@ -119,16 +119,12 @@ class DataDownloader:
                     try:
                         self._rate_limit_wait()
                         ticker = self.client.get_ticker(symbol=coin)
-                        volume_dict[coin] = float(ticker['quoteVolume'])
+                        volume_dict[coin] = float(ticker["quoteVolume"])
                     except Exception as e:
                         logger.debug(f"Failed to get volume for {coin}: {e}")
 
                 # Sort by volume
-                sorted_coins = sorted(
-                    volume_dict.items(),
-                    key=lambda x: x[1],
-                    reverse=True
-                )
+                sorted_coins = sorted(volume_dict.items(), key=lambda x: x[1], reverse=True)
                 trading_coins = [coin for coin, _ in sorted_coins[:n_coins]]
             else:
                 trading_coins = trading_coins[:n_coins]
@@ -141,12 +137,7 @@ class DataDownloader:
             return []
 
     def download_klines(
-        self,
-        symbol: str,
-        interval: str,
-        start: datetime,
-        end: datetime,
-        use_cache: bool = True
+        self, symbol: str, interval: str, start: datetime, end: datetime, use_cache: bool = True
     ) -> Optional[pd.DataFrame]:
         """
         Download kline data for a symbol.
@@ -186,7 +177,7 @@ class DataDownloader:
                     interval=interval,
                     start_str=str(current_ms),
                     end_str=str(batch_end),
-                    limit=self.batch_limit
+                    limit=self.batch_limit,
                 )
 
                 if not klines:
@@ -206,12 +197,12 @@ class DataDownloader:
         # Convert to DataFrame
         df = pd.DataFrame(all_klines, columns=self.KLINE_COLUMNS)
         df = df.astype(float)
-        df['Open Time'] = pd.to_datetime(df['Open Time'], unit='ms')
-        df.set_index('Open Time', inplace=True)
+        df["Open Time"] = pd.to_datetime(df["Open Time"], unit="ms")
+        df.set_index("Open Time", inplace=True)
         df.sort_index(inplace=True)
 
         # Remove duplicates
-        df = df[~df.index.duplicated(keep='first')]
+        df = df[~df.index.duplicated(keep="first")]
 
         # Cache result
         if use_cache and self.cache:
@@ -227,7 +218,7 @@ class DataDownloader:
         start: datetime,
         end: datetime,
         use_cache: bool = True,
-        progress: bool = True
+        progress: bool = True,
     ) -> Dict[str, pd.DataFrame]:
         """
         Download kline data for multiple symbols.
@@ -259,12 +250,7 @@ class DataDownloader:
         return results
 
     def download_multi_timeframe(
-        self,
-        symbols: List[str],
-        intervals: List[str],
-        start: datetime,
-        end: datetime,
-        use_cache: bool = True
+        self, symbols: List[str], intervals: List[str], start: datetime, end: datetime, use_cache: bool = True
     ) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
         Download data for multiple symbols and timeframes.
@@ -287,9 +273,7 @@ class DataDownloader:
                 results[symbol] = {}
                 for interval in intervals:
                     try:
-                        df = self.download_klines(
-                            symbol, interval, start, end, use_cache
-                        )
+                        df = self.download_klines(symbol, interval, start, end, use_cache)
                         if df is not None:
                             results[symbol][interval] = df
                     except Exception as e:
@@ -303,7 +287,7 @@ class DataDownloader:
         try:
             self._rate_limit_wait()
             ticker = self.client.futures_symbol_ticker(symbol=symbol)
-            return float(ticker['price'])
+            return float(ticker["price"])
         except Exception as e:
             logger.error(f"Failed to get price for {symbol}: {e}")
             return 0.0

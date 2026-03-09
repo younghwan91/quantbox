@@ -34,39 +34,46 @@ class TestStateRestoration:
     def test_load_restores_server_sl_pct(self):
         """_server_sl_pct survives save→load cycle."""
         scalper = _make_scalper(
-            paper=True, breakeven_after_partial=True,
-            partial_exit_enabled=True, partial_exit_fraction=0.5,
+            paper=True,
+            breakeven_after_partial=True,
+            partial_exit_enabled=True,
+            partial_exit_fraction=0.5,
         )
         scalper._save_state = MagicMock()
 
         # Create position with ratchet fields
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.05,
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.05,
         )
-        pos = scalper.strategy._positions['TESTUSDT']
-        pos['partial_closed'] = True
-        pos['_computed_trail_stop'] = 0.015
-        pos['_server_sl_pct'] = 0.012
+        pos = scalper.strategy._positions["TESTUSDT"]
+        pos["partial_closed"] = True
+        pos["_computed_trail_stop"] = 0.015
+        pos["_server_sl_pct"] = 0.012
 
         # Simulate save state
         state = {
-            'paper_balance': 1000.0,
-            'initial_balance': 1000.0,
-            'high_water_mark': 1000.0,
-            'trade_history': [],
-            'positions': {
-                'TESTUSDT': dict(pos),  # copy current state
+            "paper_balance": 1000.0,
+            "initial_balance": 1000.0,
+            "high_water_mark": 1000.0,
+            "trade_history": [],
+            "positions": {
+                "TESTUSDT": dict(pos),  # copy current state
             },
         }
 
         # Clear and reload
         scalper.strategy._positions.clear()
-        with patch('quantbox.scalper.load_scalper_state', return_value=state):
+        with patch("quantbox.scalper.load_scalper_state", return_value=state):
             scalper._load_state()
 
-        restored = scalper.strategy._positions['TESTUSDT']
-        assert restored['_computed_trail_stop'] == 0.015
-        assert restored['_server_sl_pct'] == 0.012
+        restored = scalper.strategy._positions["TESTUSDT"]
+        assert restored["_computed_trail_stop"] == 0.015
+        assert restored["_server_sl_pct"] == 0.012
 
     def test_load_defaults_missing_ratchet_fields(self):
         """Missing fields default gracefully (pre-v12.3.3 state files)."""
@@ -74,28 +81,28 @@ class TestStateRestoration:
         scalper._save_state = MagicMock()
 
         state = {
-            'paper_balance': 1000.0,
-            'initial_balance': 1000.0,
-            'high_water_mark': 1000.0,
-            'trade_history': [],
-            'positions': {
-                'TESTUSDT': {
-                    'signal': 1,
-                    'entry_price': 100.0,
-                    'notional': 100.0,
-                    'leverage': 1.5,
-                    'move_size': 0.05,
+            "paper_balance": 1000.0,
+            "initial_balance": 1000.0,
+            "high_water_mark": 1000.0,
+            "trade_history": [],
+            "positions": {
+                "TESTUSDT": {
+                    "signal": 1,
+                    "entry_price": 100.0,
+                    "notional": 100.0,
+                    "leverage": 1.5,
+                    "move_size": 0.05,
                     # No _computed_trail_stop or _server_sl_pct
                 },
             },
         }
 
-        with patch('quantbox.scalper.load_scalper_state', return_value=state):
+        with patch("quantbox.scalper.load_scalper_state", return_value=state):
             scalper._load_state()
 
-        restored = scalper.strategy._positions['TESTUSDT']
-        assert restored.get('_computed_trail_stop') is None
-        assert restored.get('_server_sl_pct', 0.0) == 0.0
+        restored = scalper.strategy._positions["TESTUSDT"]
+        assert restored.get("_computed_trail_stop") is None
+        assert restored.get("_server_sl_pct", 0.0) == 0.0
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -110,7 +117,8 @@ class TestPaperModeCost:
         """Paper balance after partial close = pnl - exit_cost, not round_trip."""
         scalper = _make_scalper(
             paper=True,
-            partial_exit_enabled=True, partial_exit_fraction=0.5,
+            partial_exit_enabled=True,
+            partial_exit_fraction=0.5,
             breakeven_after_partial=True,
         )
         scalper._save_state = MagicMock()
@@ -118,8 +126,14 @@ class TestPaperModeCost:
 
         # Entry: $1000 @ $100, qty=10
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 1000.0, 1.5, 0.05,
-            server_sl_order_id='sl_1', server_tp_order_id='tp_1',
+            "TESTUSDT",
+            1,
+            100.0,
+            1000.0,
+            1.5,
+            0.05,
+            server_sl_order_id="sl_1",
+            server_tp_order_id="tp_1",
         )
         # Entry cost was already charged
         entry_cost = 10.0 * 100.0 * scalper.config.cost_per_side
@@ -127,21 +141,27 @@ class TestPaperModeCost:
 
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_2')
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'quantity_precision': 3,
-        })
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_2")
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "quantity_precision": 3,
+            }
+        )
 
         balance_before = scalper._paper_balance
         fill_price = 101.0  # +1% profit
 
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': str(fill_price),
-            'executedQty': '5.0',
-            'status': 'FILLED',
-        })
-        scalper._partial_close_position('TESTUSDT', fill_price)
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": str(fill_price),
+                "executedQty": "5.0",
+                "status": "FILLED",
+            }
+        )
+        scalper._partial_close_position("TESTUSDT", fill_price)
 
         # Expected: pnl for 50% portion + exit-side cost only
         partial_notional = 5.0 * 100.0  # entry-price based
@@ -151,8 +171,7 @@ class TestPaperModeCost:
 
         expected_balance = balance_before + pnl_usd - exit_cost_only
         assert abs(scalper._paper_balance - expected_balance) < 0.001, (
-            f"Paper balance {scalper._paper_balance:.4f} != "
-            f"expected {expected_balance:.4f} (exit-side cost only)"
+            f"Paper balance {scalper._paper_balance:.4f} != expected {expected_balance:.4f} (exit-side cost only)"
         )
 
 
@@ -188,7 +207,15 @@ class TestBacktestPBTParity:
         """At TP1 hit, signal should transition to ±0.5 (Phase 2), not 0."""
         prices = self._make_tp1_prices()
         sigs = compute_signals_with_partial_exit(
-            prices, prices, prices, 8, 0.045, 1.0, 0.382, 10, 0.0,
+            prices,
+            prices,
+            prices,
+            8,
+            0.045,
+            1.0,
+            0.382,
+            10,
+            0.0,
         )
         # After entry (±1.0), if TP is hit, should see ±0.5 (Phase 2 runner)
         abs_sigs = np.abs(sigs)
@@ -202,9 +229,7 @@ class TestBacktestPBTParity:
             half_bars = np.where(abs_sigs == 0.5)[0]
             if len(half_bars) > 0:
                 # Phase 2 runner exists — this is the correct PBT behavior
-                assert half_bars[0] > full_bars[0], (
-                    "Phase 2 (half) must come after Phase 1 (full)"
-                )
+                assert half_bars[0] > full_bars[0], "Phase 2 (half) must come after Phase 1 (full)"
 
     def test_runner_has_extended_max_hold(self):
         """Phase 2 runner should hold up to 2× max_hold (not just max_hold)."""
@@ -222,7 +247,15 @@ class TestBacktestPBTParity:
 
         max_hold = 10
         sigs = compute_signals_with_partial_exit(
-            prices, prices, prices, 8, 0.045, 1.0, 0.382, max_hold, 0.0,
+            prices,
+            prices,
+            prices,
+            8,
+            0.045,
+            1.0,
+            0.382,
+            max_hold,
+            0.0,
         )
         # Check that runner (0.5) can exist beyond original max_hold
         abs_sigs = np.abs(sigs)
@@ -256,7 +289,15 @@ class TestBacktestPBTParity:
             btc[i] = btc_bottom
 
         sigs = compute_signals_partial_exit_btc_directional(
-            prices, btc, 8, 0.045, 1.0, 0.382, 10, 0.0, 8,
+            prices,
+            btc,
+            8,
+            0.045,
+            1.0,
+            0.382,
+            10,
+            0.0,
+            8,
         )
         # Should not crash and should produce valid signals
         assert sigs.shape == (n,)
@@ -278,19 +319,19 @@ class TestEntryPriceGuard:
         cfg = RubberBandConfig()
         strategy = RubberBandStrategy(cfg)
         with pytest.raises(ValueError, match="Invalid entry_price"):
-            strategy.open_position('TESTUSDT', 1, 0.0, 100.0, 1.5, 0.05)
+            strategy.open_position("TESTUSDT", 1, 0.0, 100.0, 1.5, 0.05)
 
     def test_negative_entry_price_raises(self):
         cfg = RubberBandConfig()
         strategy = RubberBandStrategy(cfg)
         with pytest.raises(ValueError, match="Invalid entry_price"):
-            strategy.open_position('TESTUSDT', -1, -50.0, 100.0, 1.5, 0.05)
+            strategy.open_position("TESTUSDT", -1, -50.0, 100.0, 1.5, 0.05)
 
     def test_valid_entry_price_ok(self):
         cfg = RubberBandConfig()
         strategy = RubberBandStrategy(cfg)
-        strategy.open_position('TESTUSDT', 1, 42000.0, 100.0, 1.5, 0.05)
-        assert 'TESTUSDT' in strategy._positions
+        strategy.open_position("TESTUSDT", 1, 42000.0, 100.0, 1.5, 0.05)
+        assert "TESTUSDT" in strategy._positions
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -311,20 +352,29 @@ class TestRatchetRunnerSL:
         )
         scalper._save_state = MagicMock()
         scalper._round_qty = MagicMock(side_effect=lambda q, s: round(q, 3))
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'quantity_precision': 3,
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "quantity_precision": 3,
+            }
+        )
 
         # Create runner position with existing SL
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 50.0, 1.5, 0.05,
-            server_sl_order_id='old_sl_123',
+            "TESTUSDT",
+            1,
+            100.0,
+            50.0,
+            1.5,
+            0.05,
+            server_sl_order_id="old_sl_123",
         )
-        pos = scalper.strategy._positions['TESTUSDT']
-        pos['partial_closed'] = True
-        pos['_computed_trail_stop'] = 0.02  # 2% trail floor
-        pos['_server_sl_pct'] = 0.01  # currently at 1%
+        pos = scalper.strategy._positions["TESTUSDT"]
+        pos["partial_closed"] = True
+        pos["_computed_trail_stop"] = 0.02  # 2% trail floor
+        pos["_server_sl_pct"] = 0.01  # currently at 1%
 
         return scalper, pos
 
@@ -334,20 +384,18 @@ class TestRatchetRunnerSL:
         call_order = []
 
         def track_place(*args, **kwargs):
-            call_order.append('place')
-            return 'new_sl_456'
+            call_order.append("place")
+            return "new_sl_456"
 
         def track_cancel(*args, **kwargs):
-            call_order.append('cancel')
+            call_order.append("cancel")
 
         scalper._place_algo_order = track_place
         scalper._cancel_server_stop_loss = track_cancel
 
-        scalper._ratchet_runner_sl('TESTUSDT', pos)
+        scalper._ratchet_runner_sl("TESTUSDT", pos)
 
-        assert call_order == ['place', 'cancel'], (
-            f"Expected [place, cancel], got {call_order}"
-        )
+        assert call_order == ["place", "cancel"], f"Expected [place, cancel], got {call_order}"
 
     def test_failed_place_keeps_old_sl(self):
         """If new SL placement fails, old SL stays active."""
@@ -356,33 +404,33 @@ class TestRatchetRunnerSL:
         scalper._place_algo_order = MagicMock(return_value=None)  # fail
         scalper._cancel_server_stop_loss = MagicMock()
 
-        scalper._ratchet_runner_sl('TESTUSDT', pos)
+        scalper._ratchet_runner_sl("TESTUSDT", pos)
 
         # Old SL must NOT be cancelled
         scalper._cancel_server_stop_loss.assert_not_called()
         # Order ID unchanged
-        assert pos['server_sl_order_id'] == 'old_sl_123'
+        assert pos["server_sl_order_id"] == "old_sl_123"
 
     def test_would_trigger_keeps_old_sl(self):
         """WOULD_TRIGGER keeps old SL — no cancel."""
         scalper, pos = self._make_runner_scalper()
 
-        scalper._place_algo_order = MagicMock(return_value='WOULD_TRIGGER')
+        scalper._place_algo_order = MagicMock(return_value="WOULD_TRIGGER")
         scalper._cancel_server_stop_loss = MagicMock()
 
-        scalper._ratchet_runner_sl('TESTUSDT', pos)
+        scalper._ratchet_runner_sl("TESTUSDT", pos)
 
         scalper._cancel_server_stop_loss.assert_not_called()
-        assert pos['server_sl_order_id'] == 'old_sl_123'
+        assert pos["server_sl_order_id"] == "old_sl_123"
 
     def test_no_ratchet_below_threshold(self):
         """Skip ratchet if improvement < 0.5%."""
         scalper, pos = self._make_runner_scalper()
-        pos['_computed_trail_stop'] = 0.014  # 1.4%, only 0.4% above 1.0%
-        pos['_server_sl_pct'] = 0.01
+        pos["_computed_trail_stop"] = 0.014  # 1.4%, only 0.4% above 1.0%
+        pos["_server_sl_pct"] = 0.01
 
         scalper._place_algo_order = MagicMock()
-        scalper._ratchet_runner_sl('TESTUSDT', pos)
+        scalper._ratchet_runner_sl("TESTUSDT", pos)
 
         scalper._place_algo_order.assert_not_called()
 
@@ -390,13 +438,13 @@ class TestRatchetRunnerSL:
         """After successful ratchet, state is updated and saved."""
         scalper, pos = self._make_runner_scalper()
 
-        scalper._place_algo_order = MagicMock(return_value='new_sl_789')
+        scalper._place_algo_order = MagicMock(return_value="new_sl_789")
         scalper._cancel_server_stop_loss = MagicMock()
 
-        scalper._ratchet_runner_sl('TESTUSDT', pos)
+        scalper._ratchet_runner_sl("TESTUSDT", pos)
 
-        assert pos['server_sl_order_id'] == 'new_sl_789'
-        assert pos['_server_sl_pct'] == 0.02
+        assert pos["server_sl_order_id"] == "new_sl_789"
+        assert pos["_server_sl_pct"] == 0.02
         scalper._save_state.assert_called_once()
 
 
@@ -434,19 +482,24 @@ class TestPreTP1TrailConfig:
         )
         strategy = RubberBandStrategy(cfg)
         strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.10,
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.10,
         )
-        pos = strategy._positions['TESTUSDT']
+        pos = strategy._positions["TESTUSDT"]
         target = 0.10 * 1.0  # move_size * target_retrace = 10%
 
         # Set best_pnl high enough for activation (>= target * 0.7)
-        pos['best_pnl'] = target * 0.8  # 80% of target > 70% activation
-        pos['bars_held'] = 3
+        pos["best_pnl"] = target * 0.8  # 80% of target > 70% activation
+        pos["bars_held"] = 3
 
         # Current price gives gain that would fail at factor=0.2
         # gain < best_pnl * 0.2 should trigger trail stop exit
-        current_price = 100.0 * (1.0 + pos['best_pnl'] * 0.15)
+        current_price = 100.0 * (1.0 + pos["best_pnl"] * 0.15)
 
-        result = strategy.update_position('TESTUSDT', current_price)
+        result = strategy.update_position("TESTUSDT", current_price)
         # Should trigger pre-TP1 trail stop (gave back >80% of best_pnl)
-        assert result in ('close', 'trail_stop', 'trailing_stop', None)
+        assert result in ("close", "trail_stop", "trailing_stop", None)

@@ -6,6 +6,7 @@ zero lookahead.  All functions operate on COMPLETED bars only.
 VR = ATR(short) / ATR(long) — measuring relative volatility compression.
 When VR drops below a threshold, a squeeze is detected and entry signals fire.
 """
+
 from __future__ import annotations
 
 import numba
@@ -19,7 +20,10 @@ import numpy as np
 
 @numba.jit(nopython=True, cache=True)
 def _atr_pct(
-    close: np.ndarray, high: np.ndarray, low: np.ndarray, period: int,
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    period: int,
 ) -> np.ndarray:
     """EMA-based ATR expressed as percentage of close price.
 
@@ -56,8 +60,11 @@ def _atr_pct(
 
 @numba.jit(nopython=True, cache=True)
 def compute_vr(
-    close: np.ndarray, high: np.ndarray, low: np.ndarray,
-    short_period: int, long_period: int,
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    short_period: int,
+    long_period: int,
 ) -> np.ndarray:
     """Compute Volatility Ratio = ATR(short) / ATR(long).
 
@@ -138,7 +145,9 @@ def compute_squeeze_dur(vr: np.ndarray, threshold: float) -> np.ndarray:
 
 @numba.jit(nopython=True, cache=True)
 def gen_vr_signal(
-    vr: np.ndarray, threshold: float, warmup: int,
+    vr: np.ndarray,
+    threshold: float,
+    warmup: int,
 ) -> np.ndarray:
     """Generate D_mom8 raw signal: 1 where VR < threshold (after warmup).
 
@@ -162,7 +171,10 @@ def gen_vr_signal(
 
 @numba.jit(nopython=True, cache=True)
 def gen_vr_dur_signal(
-    vr: np.ndarray, threshold: float, min_dur: int, warmup: int,
+    vr: np.ndarray,
+    threshold: float,
+    min_dur: int,
+    warmup: int,
 ) -> np.ndarray:
     """Generate S_d8 raw signal: 1 where VR < threshold AND squeeze ≥ min_dur.
 
@@ -192,7 +204,8 @@ def gen_vr_dur_signal(
 
 @numba.jit(nopython=True, cache=True)
 def make_direction_momentum(
-    sig: np.ndarray, momentum: np.ndarray,
+    sig: np.ndarray,
+    momentum: np.ndarray,
 ) -> np.ndarray:
     """Assign direction to raw signals based on momentum.
 
@@ -226,8 +239,11 @@ def make_direction_momentum(
 
 @numba.jit(nopython=True, cache=True)
 def resample_ohlcv(
-    close: np.ndarray, high: np.ndarray, low: np.ndarray,
-    volume: np.ndarray, ratio: int,
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    volume: np.ndarray,
+    ratio: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Resample OHLCV from lower TF to higher TF using COMPLETED bars only.
 

@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 @dataclass
 class _MockSlot:
     """Minimal slot mock for state persistence tests."""
+
     slot_id: int = 0
     position_open: bool = False
     current_pair: tuple | None = None
@@ -47,21 +48,21 @@ def sample_slots():
     slots[0].position_open = True
     slots[0].current_pair = ("BTCUSDT", "ETHUSDT")
     slots[0].position_info = {
-        'symbol1': 'BTCUSDT',
-        'symbol2': 'ETHUSDT',
-        'entry_price1': 50000.0,
-        'entry_price2': 3000.0,
-        'hedge_ratio': 0.5,
-        'qty1': 0.001,
-        'qty2': -0.01,
-        'entry_zscore': -2.5,
-        'signal': 1,
-        'spread_mean': 0.1,
-        'spread_std': 0.01,
-        'half_life': 10.0,
-        'capital': 100.0,
-        'notional': 500.0,
-        'leverage': 5.0,
+        "symbol1": "BTCUSDT",
+        "symbol2": "ETHUSDT",
+        "entry_price1": 50000.0,
+        "entry_price2": 3000.0,
+        "hedge_ratio": 0.5,
+        "qty1": 0.001,
+        "qty2": -0.01,
+        "entry_zscore": -2.5,
+        "signal": 1,
+        "spread_mean": 0.1,
+        "spread_std": 0.01,
+        "half_life": 10.0,
+        "capital": 100.0,
+        "notional": 500.0,
+        "leverage": 5.0,
     }
     return slots
 
@@ -71,22 +72,22 @@ def sample_positions():
     """테스트용 포지션 dict."""
     return {
         0: {
-            'symbol1': 'BTCUSDT',
-            'symbol2': 'ETHUSDT',
-            'entry_price1': 50000.0,
-            'entry_price2': 3000.0,
-            'hedge_ratio': 0.5,
-            'qty1': 0.001,
-            'qty2': -0.01,
-            'entry_zscore': -2.5,
-            'signal': 1,
-            'spread_mean': 0.1,
-            'spread_std': 0.01,
-            'half_life': 10.0,
-            'capital': 100.0,
-            'notional': 500.0,
-            'leverage': 5.0,
-            '_df1': 'should_be_excluded',  # underscore prefix → skip
+            "symbol1": "BTCUSDT",
+            "symbol2": "ETHUSDT",
+            "entry_price1": 50000.0,
+            "entry_price2": 3000.0,
+            "hedge_ratio": 0.5,
+            "qty1": 0.001,
+            "qty2": -0.01,
+            "entry_zscore": -2.5,
+            "signal": 1,
+            "spread_mean": 0.1,
+            "spread_std": 0.01,
+            "half_life": 10.0,
+            "capital": 100.0,
+            "notional": 500.0,
+            "leverage": 5.0,
+            "_df1": "should_be_excluded",  # underscore prefix → skip
         },
     }
 
@@ -104,14 +105,14 @@ def sample_trade_history():
     """테스트용 트레이드 이력."""
     return [
         {
-            'slot_id': 0,
-            'symbol1': 'BTCUSDT',
-            'symbol2': 'ETHUSDT',
-            'entry_time': datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
-            'exit_time': datetime(2025, 6, 1, 14, 0, 0, tzinfo=timezone.utc),
-            'pnl': 5.50,
-            'pnl_pct': 1.1,
-            'reason': 'mean_reversion',
+            "slot_id": 0,
+            "symbol1": "BTCUSDT",
+            "symbol2": "ETHUSDT",
+            "entry_time": datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
+            "exit_time": datetime(2025, 6, 1, 14, 0, 0, tzinfo=timezone.utc),
+            "pnl": 5.50,
+            "pnl_pct": 1.1,
+            "reason": "mean_reversion",
         },
     ]
 
@@ -122,14 +123,14 @@ class TestSerializeSlots:
     def test_serialize_dataclass_slots(self, sample_slots):
         result = _serialize_slots(sample_slots)
         assert len(result) == 3
-        assert result[0]['slot_id'] == 0
-        assert result[0]['position_open'] is True
-        assert result[0]['current_pair'] == ['BTCUSDT', 'ETHUSDT']
-        assert result[1]['position_open'] is False
-        assert result[1]['current_pair'] is None
+        assert result[0]["slot_id"] == 0
+        assert result[0]["position_open"] is True
+        assert result[0]["current_pair"] == ["BTCUSDT", "ETHUSDT"]
+        assert result[1]["position_open"] is False
+        assert result[1]["current_pair"] is None
 
     def test_serialize_dict_slots(self):
-        slots = [{'slot_id': 0, 'position_open': False}]
+        slots = [{"slot_id": 0, "position_open": False}]
         result = _serialize_slots(slots)
         assert result == slots
 
@@ -139,13 +140,13 @@ class TestSerializePositions:
 
     def test_int_keys_to_str(self, sample_positions):
         result = _serialize_positions(sample_positions)
-        assert '0' in result
+        assert "0" in result
         assert 0 not in result
 
     def test_underscore_fields_excluded(self, sample_positions):
         result = _serialize_positions(sample_positions)
-        assert '_df1' not in result['0']
-        assert 'symbol1' in result['0']
+        assert "_df1" not in result["0"]
+        assert "symbol1" in result["0"]
 
 
 class TestSerializeEntryTimes:
@@ -153,8 +154,8 @@ class TestSerializeEntryTimes:
 
     def test_datetime_to_iso(self, sample_entry_times):
         result = _serialize_entry_times(sample_entry_times)
-        assert '0' in result
-        assert '2025-06-01' in result['0']
+        assert "0" in result
+        assert "2025-06-01" in result["0"]
 
 
 class TestSerializeTradeHistory:
@@ -162,15 +163,16 @@ class TestSerializeTradeHistory:
 
     def test_datetime_fields_converted(self, sample_trade_history):
         result = _serialize_trade_history(sample_trade_history)
-        assert isinstance(result[0]['entry_time'], str)
-        assert result[0]['pnl'] == 5.50
+        assert isinstance(result[0]["entry_time"], str)
+        assert result[0]["pnl"] == 5.50
 
 
 class TestSaveLoadClear:
     """전체 save/load/clear 사이클 테스트."""
 
-    def test_save_and_load(self, tmp_state_file, sample_slots, sample_positions,
-                           sample_entry_times, sample_trade_history):
+    def test_save_and_load(
+        self, tmp_state_file, sample_slots, sample_positions, sample_entry_times, sample_trade_history
+    ):
         save_state(
             slots=sample_slots,
             slot_positions=sample_positions,
@@ -185,11 +187,11 @@ class TestSaveLoadClear:
 
         state = load_state(tmp_state_file)
         assert state is not None
-        assert state['version'] == '1.8.0'
-        assert state['paper_mode'] is True
-        assert state['paper_balance'] == 1000.0
-        assert state['initial_balance'] == 1000.0
-        assert state['session_high_water_mark'] == 1050.0
+        assert state["version"] == "1.8.0"
+        assert state["paper_mode"] is True
+        assert state["paper_balance"] == 1000.0
+        assert state["initial_balance"] == 1000.0
+        assert state["session_high_water_mark"] == 1050.0
 
     def test_load_nonexistent_returns_none(self, tmp_path):
         result = load_state(tmp_path / "nonexistent.json")
@@ -225,8 +227,7 @@ class TestSaveLoadClear:
         )
         assert nested.exists()
 
-    def test_atomic_write_no_corruption(self, tmp_state_file, sample_slots,
-                                        sample_positions, sample_entry_times):
+    def test_atomic_write_no_corruption(self, tmp_state_file, sample_slots, sample_positions, sample_entry_times):
         """파일이 완전히 쓰여진 후에만 접근 가능해야 함."""
         save_state(
             slots=sample_slots,
@@ -240,8 +241,8 @@ class TestSaveLoadClear:
         # 파일이 유효한 JSON인지 확인
         with open(tmp_state_file) as f:
             data = json.load(f)
-        assert 'slots' in data
-        assert 'positions' in data
+        assert "slots" in data
+        assert "positions" in data
 
     def test_load_corrupted_file_returns_none(self, tmp_state_file):
         """손상된 JSON 파일 로드 시 None 반환."""
@@ -256,8 +257,8 @@ class TestDeserialize:
 
     def test_deserialize_entry_times(self):
         raw = {
-            '0': '2025-06-01T12:00:00+00:00',
-            '1': '2025-06-01T14:00:00+00:00',
+            "0": "2025-06-01T12:00:00+00:00",
+            "1": "2025-06-01T14:00:00+00:00",
         }
         result = deserialize_entry_times(raw)
         assert 0 in result
@@ -266,30 +267,30 @@ class TestDeserialize:
         assert result[0].year == 2025
 
     def test_deserialize_entry_times_naive_gets_utc(self):
-        raw = {'0': '2025-06-01T12:00:00'}
+        raw = {"0": "2025-06-01T12:00:00"}
         result = deserialize_entry_times(raw)
         assert result[0].tzinfo == timezone.utc
 
     def test_deserialize_entry_times_invalid_skipped(self):
-        raw = {'0': 'not-a-date', '1': '2025-06-01T12:00:00+00:00'}
+        raw = {"0": "not-a-date", "1": "2025-06-01T12:00:00+00:00"}
         result = deserialize_entry_times(raw)
         assert 0 not in result
         assert 1 in result
 
     def test_deserialize_positions(self):
-        raw = {'0': {'symbol1': 'BTCUSDT'}, '2': {'symbol1': 'ETHUSDT'}}
+        raw = {"0": {"symbol1": "BTCUSDT"}, "2": {"symbol1": "ETHUSDT"}}
         result = deserialize_positions(raw)
         assert 0 in result
         assert 2 in result
-        assert result[0]['symbol1'] == 'BTCUSDT'
+        assert result[0]["symbol1"] == "BTCUSDT"
 
 
 class TestRoundTrip:
     """저장 → 로드 → 역직렬화 전체 라운드트립 테스트."""
 
-    def test_positions_round_trip(self, tmp_state_file, sample_slots,
-                                  sample_positions, sample_entry_times,
-                                  sample_trade_history):
+    def test_positions_round_trip(
+        self, tmp_state_file, sample_slots, sample_positions, sample_entry_times, sample_trade_history
+    ):
         save_state(
             slots=sample_slots,
             slot_positions=sample_positions,
@@ -301,17 +302,17 @@ class TestRoundTrip:
         )
 
         state = load_state(tmp_state_file)
-        positions = deserialize_positions(state['positions'])
-        entry_times = deserialize_entry_times(state['entry_times'])
+        positions = deserialize_positions(state["positions"])
+        entry_times = deserialize_entry_times(state["entry_times"])
 
         assert 0 in positions
-        assert positions[0]['symbol1'] == 'BTCUSDT'
-        assert positions[0]['entry_price1'] == 50000.0
+        assert positions[0]["symbol1"] == "BTCUSDT"
+        assert positions[0]["entry_price1"] == 50000.0
         assert 0 in entry_times
         assert entry_times[0].year == 2025
 
         # _df1 제외 확인
-        assert '_df1' not in positions[0]
+        assert "_df1" not in positions[0]
 
     def test_trade_history_round_trip(self, tmp_state_file, sample_trade_history):
         save_state(
@@ -325,7 +326,7 @@ class TestRoundTrip:
         )
 
         state = load_state(tmp_state_file)
-        trades = state['trade_history']
+        trades = state["trade_history"]
         assert len(trades) == 1
-        assert trades[0]['pnl'] == 5.50
-        assert trades[0]['reason'] == 'mean_reversion'
+        assert trades[0]["pnl"] == 5.50
+        assert trades[0]["reason"] == "mean_reversion"

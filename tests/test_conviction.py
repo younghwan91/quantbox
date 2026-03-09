@@ -4,6 +4,7 @@ Validates the 4 conviction conditions (E2, C2, B3, A3) and CW-Tier
 position sizing multiplier. Each condition is tested in isolation
 and combined to verify score 0-4.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -46,7 +47,9 @@ def _make_flat_price(n: int = 300, base: float = 100.0) -> np.ndarray:
 
 
 def _make_ohlc_squeeze(
-    n: int = 300, base: float = 100.0, squeeze_range: float = 0.001,
+    n: int = 300,
+    base: float = 100.0,
+    squeeze_range: float = 0.001,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Create OHLC data with very tight range (low VR / deep squeeze)."""
     close = np.full(n, base)
@@ -68,9 +71,13 @@ class TestE2SMAProximity:
         close = _make_flat_price(300, 100.0)
         vr = np.full(300, 0.40)  # Doesn't matter for E2
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['e2_sma'] is True
+        assert cond["e2_sma"] is True
 
     def test_far_from_sma_fails(self, strategy: VolStraddleStrategy):
         """Close 2% above SMA → E2 fails."""
@@ -79,9 +86,13 @@ class TestE2SMAProximity:
         close[-1] = 102.0
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['e2_sma'] is False
+        assert cond["e2_sma"] is False
 
     def test_just_below_threshold(self, strategy: VolStraddleStrategy):
         """Close 0.49% from SMA → E2 passes."""
@@ -89,9 +100,13 @@ class TestE2SMAProximity:
         close[-1] = 100.49  # 0.49% above SMA of 100
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['e2_sma'] is True
+        assert cond["e2_sma"] is True
 
     def test_just_above_threshold(self, strategy: VolStraddleStrategy):
         """Close 0.6% from SMA → E2 fails."""
@@ -99,9 +114,13 @@ class TestE2SMAProximity:
         close[-1] = 100.60  # 0.6% above SMA (SMA ≈ 100.03 with last bar)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['e2_sma'] is False
+        assert cond["e2_sma"] is False
 
     def test_disabled(self, strategy: VolStraddleStrategy):
         """E2 disabled → always False."""
@@ -109,9 +128,13 @@ class TestE2SMAProximity:
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['e2_sma'] is False
+        assert cond["e2_sma"] is False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -128,9 +151,13 @@ class TestC2BTCNeutral:
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['c2_btc'] is True
+        assert cond["c2_btc"] is True
 
     def test_btc_trending_fails(self, strategy: VolStraddleStrategy):
         """BTC +5% over 8 bars → C2 fails."""
@@ -140,9 +167,13 @@ class TestC2BTCNeutral:
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['c2_btc'] is False
+        assert cond["c2_btc"] is False
 
     def test_btc_slightly_moving_passes(self, strategy: VolStraddleStrategy):
         """BTC +0.5% → C2 passes (below 1% threshold)."""
@@ -152,9 +183,13 @@ class TestC2BTCNeutral:
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['c2_btc'] is True
+        assert cond["c2_btc"] is True
 
     def test_no_btc_data(self, strategy: VolStraddleStrategy):
         """No BTC data → C2 fails."""
@@ -162,9 +197,13 @@ class TestC2BTCNeutral:
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['c2_btc'] is False
+        assert cond["c2_btc"] is False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -180,18 +219,26 @@ class TestB3Confluence:
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=True, d_overlap=True,
+            close,
+            vr,
+            "15m",
+            is_straddle=True,
+            d_overlap=True,
         )
-        assert cond['b3_confluence'] is True
+        assert cond["b3_confluence"] is True
 
     def test_no_overlap_fails(self, strategy: VolStraddleStrategy):
         """d_overlap=False → B3 fails."""
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=True, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=True,
+            d_overlap=False,
         )
-        assert cond['b3_confluence'] is False
+        assert cond["b3_confluence"] is False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -207,38 +254,54 @@ class TestA3Quality:
         close = _make_flat_price(300)
         vr = np.full(300, 0.30)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['a3_quality'] is True
+        assert cond["a3_quality"] is True
 
     def test_d_shallow_vr_fails(self, strategy: VolStraddleStrategy):
         """D_mom8 with VR=0.45 → A3 fails."""
         close = _make_flat_price(300)
         vr = np.full(300, 0.45)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
-        assert cond['a3_quality'] is False
+        assert cond["a3_quality"] is False
 
     def test_s_long_squeeze_passes(self, strategy: VolStraddleStrategy):
         """S_d8 with squeeze_dur=20 ≥ 16 → A3 passes."""
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=True,
-            d_overlap=False, squeeze_dur=20,
+            close,
+            vr,
+            "15m",
+            is_straddle=True,
+            d_overlap=False,
+            squeeze_dur=20,
         )
-        assert cond['a3_quality'] is True
+        assert cond["a3_quality"] is True
 
     def test_s_short_squeeze_fails(self, strategy: VolStraddleStrategy):
         """S_d8 with squeeze_dur=10 < 16 → A3 fails."""
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=True,
-            d_overlap=False, squeeze_dur=10,
+            close,
+            vr,
+            "15m",
+            is_straddle=True,
+            d_overlap=False,
+            squeeze_dur=10,
         )
-        assert cond['a3_quality'] is False
+        assert cond["a3_quality"] is False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -259,7 +322,11 @@ class TestScoreAggregation:
         vr = np.full(300, 0.30)
         # B3: both D and S overlap
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=True,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=True,
         )
         assert score == 4
         assert all(cond.values())
@@ -273,7 +340,11 @@ class TestScoreAggregation:
         vr = np.full(300, 0.49)  # A3 fails (not deep enough)
         # B3 fails: no overlap
         score, cond = strategy._compute_conviction_score(
-            close, vr, '15m', is_straddle=False, d_overlap=False,
+            close,
+            vr,
+            "15m",
+            is_straddle=False,
+            d_overlap=False,
         )
         assert score == 0
         assert not any(cond.values())
@@ -318,19 +389,19 @@ class TestMinConvictionFilter:
             high[i] = close[i] + 0.01
             low[i] = close[i] - 0.01
 
-        strategy.update_market_data('TEST', np.ones(n), np.ones(n), high, low)
+        strategy.update_market_data("TEST", np.ones(n), np.ones(n), high, low)
         strategy._btc_close = np.full(200, 50000.0)
         strategy._btc_close[-1] = 55000.0  # C2 fails
 
-        signal = strategy.on_bar('TEST', close, strategy._btc_close)
+        signal = strategy.on_bar("TEST", close, strategy._btc_close)
         # Signal should be 0 because conviction < 3
         # (Even if VR fires, conviction filter blocks)
         assert signal == 0 or signal != 0  # VR may or may not fire
         # But if signal fired, check conviction in metadata
-        meta = strategy.get_last_signal_meta('TEST')
-        if meta and 'conviction_score' in meta:
+        meta = strategy.get_last_signal_meta("TEST")
+        if meta and "conviction_score" in meta:
             # If it passed min_conviction filter, score must be ≥ 3
-            assert meta['conviction_score'] >= 3
+            assert meta["conviction_score"] >= 3
 
     def test_score_stored_in_metadata(self):
         """Conviction score stored in signal metadata when signal fires."""
@@ -349,13 +420,13 @@ class TestMinConvictionFilter:
         high = close + 0.01  # Very tight range → low VR
         low = close - 0.01
 
-        strategy.update_market_data('TEST', np.ones(n), np.ones(n), high, low)
+        strategy.update_market_data("TEST", np.ones(n), np.ones(n), high, low)
         strategy._btc_close = np.full(200, 50000.0)
 
-        signal = strategy.on_bar('TEST', close, strategy._btc_close)
+        signal = strategy.on_bar("TEST", close, strategy._btc_close)
         if signal != 0:
-            meta = strategy.get_last_signal_meta('TEST')
-            assert 'conviction_score' in meta
-            assert 'conviction_cond' in meta
-            assert isinstance(meta['conviction_score'], int)
-            assert 0 <= meta['conviction_score'] <= 4
+            meta = strategy.get_last_signal_meta("TEST")
+            assert "conviction_score" in meta
+            assert "conviction_cond" in meta
+            assert isinstance(meta["conviction_score"], int)
+            assert 0 <= meta["conviction_score"] <= 4

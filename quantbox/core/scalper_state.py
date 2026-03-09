@@ -16,17 +16,17 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-logger = logging.getLogger('Scalper')
+logger = logging.getLogger("Scalper")
 
-STATE_DIR = Path('data/state')
-STATE_FILE = STATE_DIR / 'scalper_state.json'
-PAPER_STATE_FILE = STATE_DIR / 'scalper_state_paper.json'
+STATE_DIR = Path("data/state")
+STATE_FILE = STATE_DIR / "scalper_state.json"
+PAPER_STATE_FILE = STATE_DIR / "scalper_state_paper.json"
 
 
 def rotate_state_backups(filepath: Path, keep: int = 5) -> None:
     """Delete oldest backup files, keeping only the N most recent."""
-    pattern = filepath.stem + '_backup_'
-    backups = sorted(filepath.parent.glob(f'{pattern}*.json'))
+    pattern = filepath.stem + "_backup_"
+    backups = sorted(filepath.parent.glob(f"{pattern}*.json"))
     for old in backups[:-keep]:
         try:
             old.unlink()
@@ -45,17 +45,17 @@ def save_scalper_state(state: dict, filepath: Path | None = None) -> None:
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
     if filepath.exists():
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup = filepath.parent / f'{filepath.stem}_backup_{ts}.json'
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup = filepath.parent / f"{filepath.stem}_backup_{ts}.json"
         try:
             shutil.copy2(filepath, backup)
             rotate_state_backups(filepath, keep=5)
         except OSError:
             pass
 
-    fd, tmp = tempfile.mkstemp(dir=str(filepath.parent), suffix='.tmp')
+    fd, tmp = tempfile.mkstemp(dir=str(filepath.parent), suffix=".tmp")
     try:
-        with os.fdopen(fd, 'w') as f:
+        with os.fdopen(fd, "w") as f:
             json.dump(state, f, indent=2, default=str)
         os.replace(tmp, str(filepath))
     except Exception:

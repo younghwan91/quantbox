@@ -14,6 +14,7 @@ from pathlib import Path
 
 class TradingMode(Enum):
     """Trading execution mode."""
+
     BACKTEST = "backtest"
     PAPER = "paper"
     LIVE = "live"
@@ -21,6 +22,7 @@ class TradingMode(Enum):
 
 class Interval(Enum):
     """Supported trading intervals."""
+
     M1 = "1m"
     M3 = "3m"
     M5 = "5m"
@@ -34,10 +36,7 @@ class Interval(Enum):
     @property
     def minutes(self) -> int:
         """Convert interval to minutes."""
-        mapping = {
-            "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
-            "1h": 60, "2h": 120, "4h": 240, "1d": 1440
-        }
+        mapping = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240, "1d": 1440}
         return mapping[self.value]
 
     @property
@@ -49,6 +48,7 @@ class Interval(Enum):
 @dataclass
 class ExchangeConfig:
     """Exchange connection configuration."""
+
     api_key: str = ""
     api_secret: str = ""
     testnet: bool = False
@@ -59,18 +59,17 @@ class ExchangeConfig:
     @classmethod
     def from_file(cls, filepath: str) -> "ExchangeConfig":
         """Load exchange config from JSON file."""
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             data = json.load(f)
         return cls(
-            api_key=data.get('api_key', ''),
-            api_secret=data.get('api_secret', ''),
-            testnet=data.get('testnet', False)
+            api_key=data.get("api_key", ""), api_secret=data.get("api_secret", ""), testnet=data.get("testnet", False)
         )
 
 
 @dataclass
 class DataConfig:
     """Data handling configuration."""
+
     cache_dir: str = "data/cache"
     raw_dir: str = "data/raw"
     processed_dir: str = "data/processed"
@@ -84,6 +83,7 @@ class DataConfig:
 @dataclass
 class StrategyConfig:
     """Strategy-specific configuration."""
+
     # Pair selection parameters
     correlation_threshold: float = 0.5
     cointegration_pvalue: float = 0.05
@@ -106,6 +106,7 @@ class StrategyConfig:
 @dataclass
 class RiskConfig:
     """Risk management configuration."""
+
     max_position_size: float = 0.1  # 10% of portfolio
     max_drawdown: float = 0.2  # 20% max drawdown
     leverage: int = 1
@@ -118,6 +119,7 @@ class RiskConfig:
 @dataclass
 class BacktestConfig:
     """Backtesting-specific configuration."""
+
     initial_capital: float = 10000.0
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -130,6 +132,7 @@ class BacktestConfig:
 @dataclass
 class OptimizationConfig:
     """Optimization parameters configuration."""
+
     method: str = "differential_evolution"  # or "grid_search", "bayesian"
     max_iterations: int = 100
     population_size: int = 50
@@ -137,12 +140,14 @@ class OptimizationConfig:
     n_jobs: int = -1  # Use all CPUs
 
     # Parameter bounds for optimization
-    param_bounds: Dict[str, tuple] = field(default_factory=lambda: {
-        "entry_zscore": (1.5, 3.5),
-        "stop_loss_zscore": (2.0, 5.0),
-        "exit_zscore": (-0.5, 0.5),
-        "max_holding_periods": (10, 200),
-    })
+    param_bounds: Dict[str, tuple] = field(
+        default_factory=lambda: {
+            "entry_zscore": (1.5, 3.5),
+            "stop_loss_zscore": (2.0, 5.0),
+            "exit_zscore": (-0.5, 0.5),
+            "max_holding_periods": (10, 200),
+        }
+    )
 
 
 @dataclass
@@ -159,6 +164,7 @@ class Config:
             ...
         )
     """
+
     mode: TradingMode = TradingMode.BACKTEST
     interval: str = "15m"
     exchange: ExchangeConfig = field(default_factory=ExchangeConfig)
@@ -199,61 +205,61 @@ class Config:
     @classmethod
     def from_file(cls, filepath: str) -> "Config":
         """Load configuration from JSON file."""
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             data = json.load(f)
 
         return cls(
-            mode=TradingMode(data.get('mode', 'backtest')),
-            interval=data.get('interval', '15m'),
-            exchange=ExchangeConfig(**data.get('exchange', {})),
-            data=DataConfig(**data.get('data', {})),
-            strategy=StrategyConfig(**data.get('strategy', {})),
-            risk=RiskConfig(**data.get('risk', {})),
-            backtest=BacktestConfig(**data.get('backtest', {})),
-            optimization=OptimizationConfig(**data.get('optimization', {})),
-            log_level=data.get('log_level', 'INFO'),
-            log_file=data.get('log_file', 'quantbox.log'),
+            mode=TradingMode(data.get("mode", "backtest")),
+            interval=data.get("interval", "15m"),
+            exchange=ExchangeConfig(**data.get("exchange", {})),
+            data=DataConfig(**data.get("data", {})),
+            strategy=StrategyConfig(**data.get("strategy", {})),
+            risk=RiskConfig(**data.get("risk", {})),
+            backtest=BacktestConfig(**data.get("backtest", {})),
+            optimization=OptimizationConfig(**data.get("optimization", {})),
+            log_level=data.get("log_level", "INFO"),
+            log_file=data.get("log_file", "quantbox.log"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
         return {
-            'mode': self.mode.value,
-            'interval': self.interval,
-            'exchange': {
-                'testnet': self.exchange.testnet,
-                'rate_limit': self.exchange.rate_limit,
+            "mode": self.mode.value,
+            "interval": self.interval,
+            "exchange": {
+                "testnet": self.exchange.testnet,
+                "rate_limit": self.exchange.rate_limit,
             },
-            'data': {
-                'cache_dir': self.data.cache_dir,
-                'quote_currency': self.data.quote_currency,
-                'n_coins': self.data.n_coins,
-                'intervals': self.data.intervals,
+            "data": {
+                "cache_dir": self.data.cache_dir,
+                "quote_currency": self.data.quote_currency,
+                "n_coins": self.data.n_coins,
+                "intervals": self.data.intervals,
             },
-            'strategy': {
-                'correlation_threshold': self.strategy.correlation_threshold,
-                'cointegration_pvalue': self.strategy.cointegration_pvalue,
-                'entry_zscore': self.strategy.entry_zscore,
-                'exit_zscore': self.strategy.exit_zscore,
-                'stop_loss_zscore': self.strategy.stop_loss_zscore,
-                'formation_periods': self.strategy.formation_periods,
-                'trading_periods': self.strategy.trading_periods,
+            "strategy": {
+                "correlation_threshold": self.strategy.correlation_threshold,
+                "cointegration_pvalue": self.strategy.cointegration_pvalue,
+                "entry_zscore": self.strategy.entry_zscore,
+                "exit_zscore": self.strategy.exit_zscore,
+                "stop_loss_zscore": self.strategy.stop_loss_zscore,
+                "formation_periods": self.strategy.formation_periods,
+                "trading_periods": self.strategy.trading_periods,
             },
-            'risk': {
-                'max_position_size': self.risk.max_position_size,
-                'leverage': self.risk.leverage,
-                'trading_fee': self.risk.trading_fee,
-                'slippage': self.risk.slippage,
+            "risk": {
+                "max_position_size": self.risk.max_position_size,
+                "leverage": self.risk.leverage,
+                "trading_fee": self.risk.trading_fee,
+                "slippage": self.risk.slippage,
             },
-            'backtest': {
-                'initial_capital': self.backtest.initial_capital,
-                'train_test_split': self.backtest.train_test_split,
+            "backtest": {
+                "initial_capital": self.backtest.initial_capital,
+                "train_test_split": self.backtest.train_test_split,
             },
         }
 
     def save(self, filepath: str):
         """Save configuration to JSON file."""
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
 
 

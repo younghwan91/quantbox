@@ -10,7 +10,7 @@ import logging
 
 from quantbox.notifications.bot import BotCommand, CommandType
 
-logger = logging.getLogger('Scalper')
+logger = logging.getLogger("Scalper")
 
 
 class CommandsMixin:
@@ -45,7 +45,7 @@ class CommandsMixin:
             CommandType.STATUS: lambda: self._cmd_status(),
             CommandType.CLOSE_ALL: lambda: self._cmd_close_all(),
             CommandType.CLOSE_SLOT: lambda: self._cmd_close_slot(
-                cmd.args.get('slot_id', -1) if cmd.args else -1,
+                cmd.args.get("slot_id", -1) if cmd.args else -1,
             ),
             CommandType.PAUSE: lambda: self._cmd_pause(),
             CommandType.RESUME: lambda: self._cmd_resume(),
@@ -72,7 +72,7 @@ class CommandsMixin:
         balance = self.get_balance()
         positions = self.strategy.active_positions
         n_trades = len(self._trade_history)
-        total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        total_pnl = sum(t["pnl_usd"] for t in self._trade_history)
 
         status = "⏸️ PAUSED" if self._paused else "▶️ ACTIVE"
         if self._drawdown_halt:
@@ -91,18 +91,18 @@ class CommandsMixin:
 
         if positions:
             for sym, pos in positions.items():
-                direction = "L" if pos['signal'] == 1 else "S"
-                bars = pos.get('bars_held', 0)
-                best = pos.get('best_pnl', 0) * 100  # noqa: F841
-                notional = pos.get('notional', 0)
+                direction = "L" if pos["signal"] == 1 else "S"
+                bars = pos.get("bars_held", 0)
+                best = pos.get("best_pnl", 0) * 100  # noqa: F841
+                notional = pos.get("notional", 0)
                 # Extract Binance symbol from compound key
-                api_sym = pos.get('symbol', sym.split(':')[0])
+                api_sym = pos.get("symbol", sym.split(":")[0])
                 # v12.5.2: Show real-time mark price uPnL
                 try:
                     mark = self.client.futures_mark_price(symbol=api_sym)
-                    cur_px = float(mark['markPrice'])
-                    entry_px = pos['entry_price']
-                    if pos['signal'] == 1:
+                    cur_px = float(mark["markPrice"])
+                    entry_px = pos["entry_price"]
+                    if pos["signal"] == 1:
                         upnl_pct = (cur_px - entry_px) / entry_px * 100
                     else:
                         upnl_pct = (entry_px - cur_px) / entry_px * 100
@@ -118,7 +118,7 @@ class CommandsMixin:
             lines.append("  No open positions")
 
         lines.append("```")
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def _cmd_close_all(self) -> str:
         """!close all — Close all open positions."""
@@ -130,10 +130,10 @@ class CommandsMixin:
         for sym in positions:
             # Extract Binance symbol from compound key for kline download
             pos = self.strategy._positions.get(sym, {})
-            api_sym = pos.get('symbol', sym.split(':')[0])
+            api_sym = pos.get("symbol", sym.split(":")[0])
             price_arr = self.download_klines(api_sym, 2)
             price = price_arr[-1] if price_arr is not None else 0
-            if self._close_position(sym, 'bot_close_all', price):
+            if self._close_position(sym, "bot_close_all", price):
                 closed += 1
 
         self._save_state()
@@ -154,17 +154,14 @@ class CommandsMixin:
 
         if slot_id < 0 or slot_id >= len(positions):
             symbols = [f"{i}: {s}" for i, (s, _) in enumerate(positions)]
-            return (
-                f"❌ Invalid index {slot_id}. "
-                f"Active positions:\n" + '\n'.join(symbols)
-            )
+            return f"❌ Invalid index {slot_id}. Active positions:\n" + "\n".join(symbols)
 
         sym, pos = positions[slot_id]
         # Extract Binance symbol from compound key for kline download
-        api_sym = pos.get('symbol', sym.split(':')[0])
+        api_sym = pos.get("symbol", sym.split(":")[0])
         price_arr = self.download_klines(api_sym, 2)
         price = price_arr[-1] if price_arr is not None else 0
-        if self._close_position(sym, 'bot_close', price):
+        if self._close_position(sym, "bot_close", price):
             self._save_state()
             return f"✅ Closed position {slot_id}: {sym}"
         return f"❌ Failed to close {sym}"
@@ -194,17 +191,14 @@ class CommandsMixin:
         for sym in positions:
             # Extract Binance symbol from compound key for kline download
             pos = self.strategy._positions.get(sym, {})
-            api_sym = pos.get('symbol', sym.split(':')[0])
+            api_sym = pos.get("symbol", sym.split(":")[0])
             price_arr = self.download_klines(api_sym, 2)
             price = price_arr[-1] if price_arr is not None else 0
-            if self._close_position(sym, 'bot_stop', price):
+            if self._close_position(sym, "bot_stop", price):
                 closed += 1
         self._save_state()
         logger.info(f"Bot command: STOP (closed {closed} positions)")
-        return (
-            f"🛑 Stopping... Closed {closed} positions. "
-            f"Scalper will exit after this cycle."
-        )
+        return f"🛑 Stopping... Closed {closed} positions. Scalper will exit after this cycle."
 
     def _cmd_pnl(self) -> str:
         """!pnl — Session PnL summary."""
@@ -212,21 +206,18 @@ class CommandsMixin:
         if not trades:
             return "📭 No trades this session"
 
-        total_pnl = sum(t['pnl_usd'] for t in trades)
-        wins = [t for t in trades if t['pnl_usd'] > 0]
-        losses = [t for t in trades if t['pnl_usd'] <= 0]
+        total_pnl = sum(t["pnl_usd"] for t in trades)
+        wins = [t for t in trades if t["pnl_usd"] > 0]
+        losses = [t for t in trades if t["pnl_usd"] <= 0]
         wr = len(wins) / len(trades) * 100 if trades else 0
-        avg_win = (sum(t['pnl_usd'] for t in wins) / len(wins)) if wins else 0
-        avg_loss = (
-            sum(t['pnl_usd'] for t in losses) / len(losses)
-        ) if losses else 0
-        best = max(trades, key=lambda t: t['pnl_usd'])
-        worst = min(trades, key=lambda t: t['pnl_usd'])
+        avg_win = (sum(t["pnl_usd"] for t in wins) / len(wins)) if wins else 0
+        avg_loss = (sum(t["pnl_usd"] for t in losses) / len(losses)) if losses else 0
+        best = max(trades, key=lambda t: t["pnl_usd"])
+        worst = min(trades, key=lambda t: t["pnl_usd"])
 
         balance = self.get_balance()
         session_return = (
-            (balance - self._initial_balance) / self._initial_balance * 100
-            if self._initial_balance > 0 else 0
+            (balance - self._initial_balance) / self._initial_balance * 100 if self._initial_balance > 0 else 0
         )
 
         return (
@@ -252,14 +243,13 @@ class CommandsMixin:
         Args:
             args: Optional dict with 'action': 'clear' to reset.
         """
-        if args and args.get('action') == 'clear':
+        if args and args.get("action") == "clear":
             self.config.exclude_symbols.clear()
             return "✅ Blacklist cleared"
 
         excludes = self.config.exclude_symbols
         if not excludes:
             return "📭 Blacklist is empty"
-        return f"🚫 Blacklist ({len(excludes)}): " + ', '.join(sorted(excludes))
+        return f"🚫 Blacklist ({len(excludes)}): " + ", ".join(sorted(excludes))
 
     # ==================== State Persistence ====================
-

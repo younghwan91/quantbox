@@ -35,11 +35,12 @@ from typing import Any
 
 import discord
 
-logger = logging.getLogger('DiscordBot')
+logger = logging.getLogger("DiscordBot")
 
 
 class CommandType(Enum):
     """봇 명령 타입."""
+
     STATUS = auto()
     CLOSE_ALL = auto()
     CLOSE_SLOT = auto()
@@ -54,6 +55,7 @@ class CommandType(Enum):
 @dataclass
 class BotCommand:
     """큐에 넣을 명령 객체."""
+
     command: CommandType
     args: dict[str, Any] | None = None
     response_future: asyncio.Future | None = None
@@ -62,9 +64,7 @@ class BotCommand:
     def set_response(self, text: str):
         """비동기 스레드에서 응답을 설정."""
         if self.response_future and self.loop:
-            self.loop.call_soon_threadsafe(
-                self.response_future.set_result, text
-            )
+            self.loop.call_soon_threadsafe(self.response_future.set_result, text)
 
 
 HELP_TEXT = """```
@@ -118,7 +118,7 @@ class TradingBot(discord.Client):
             return
 
         content = message.content.strip()
-        if not content.startswith('!'):
+        if not content.startswith("!"):
             return
 
         parts = content.split()
@@ -154,9 +154,7 @@ class TradingBot(discord.Client):
         except asyncio.TimeoutError:
             await message.channel.send("⚠️ 명령 타임아웃 (30초)")
 
-    def _parse_command(
-        self, cmd: str, parts: list[str]
-    ) -> BotCommand | None:
+    def _parse_command(self, cmd: str, parts: list[str]) -> BotCommand | None:
         """메시지를 BotCommand로 파싱.
 
         Args:
@@ -169,13 +167,13 @@ class TradingBot(discord.Client):
         Raises:
             ValueError: 인자가 잘못된 경우.
         """
-        if cmd == '!status':
+        if cmd == "!status":
             return BotCommand(command=CommandType.STATUS)
-        elif cmd == '!close':
+        elif cmd == "!close":
             if len(parts) < 2:
                 raise ValueError("`!close all` 또는 `!close <슬롯번호>` 형식으로 입력")
             arg = parts[1].lower()
-            if arg == 'all':
+            if arg == "all":
                 return BotCommand(command=CommandType.CLOSE_ALL)
             else:
                 try:
@@ -184,24 +182,24 @@ class TradingBot(discord.Client):
                     raise ValueError(f"슬롯 번호는 숫자여야 합니다: `{arg}`")
                 return BotCommand(
                     command=CommandType.CLOSE_SLOT,
-                    args={'slot_id': slot_id},
+                    args={"slot_id": slot_id},
                 )
-        elif cmd == '!pause':
+        elif cmd == "!pause":
             return BotCommand(command=CommandType.PAUSE)
-        elif cmd == '!resume':
+        elif cmd == "!resume":
             return BotCommand(command=CommandType.RESUME)
-        elif cmd == '!stop':
+        elif cmd == "!stop":
             return BotCommand(command=CommandType.STOP)
-        elif cmd == '!pnl':
+        elif cmd == "!pnl":
             return BotCommand(command=CommandType.PNL)
-        elif cmd == '!blacklist':
-            if len(parts) >= 2 and parts[1].lower() == 'clear':
+        elif cmd == "!blacklist":
+            if len(parts) >= 2 and parts[1].lower() == "clear":
                 return BotCommand(
                     command=CommandType.BLACKLIST,
-                    args={'action': 'clear'},
+                    args={"action": "clear"},
                 )
             return BotCommand(command=CommandType.BLACKLIST)
-        elif cmd == '!help':
+        elif cmd == "!help":
             return BotCommand(command=CommandType.HELP)
         else:
             return None
@@ -239,7 +237,7 @@ class DiscordBotRunner:
         self._thread = threading.Thread(
             target=self._run_bot,
             daemon=True,
-            name='discord-bot',
+            name="discord-bot",
         )
         self._thread.start()
         logger.info("Discord Bot thread started")
@@ -262,9 +260,7 @@ class DiscordBotRunner:
             # 잔여 태스크 정리 — "Task was destroyed but it is pending" 방지
             pending = asyncio.all_tasks(self._loop)
             if pending:
-                self._loop.run_until_complete(
-                    asyncio.gather(*pending, return_exceptions=True)
-                )
+                self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             self._loop.run_until_complete(self._loop.shutdown_asyncgens())
             self._loop.close()
 
@@ -304,9 +300,7 @@ class DiscordBotRunner:
         """
         if self._bot and self._loop and not self._loop.is_closed():
             try:
-                future = asyncio.run_coroutine_threadsafe(
-                    self._bot.close(), self._loop
-                )
+                future = asyncio.run_coroutine_threadsafe(self._bot.close(), self._loop)
                 future.result(timeout=timeout)
             except Exception as e:
                 logger.warning(f"Discord Bot close error (non-fatal): {e}")
@@ -314,10 +308,7 @@ class DiscordBotRunner:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
             if self._thread.is_alive():
-                logger.warning(
-                    "Discord Bot thread did not terminate within "
-                    f"{timeout}s — proceeding anyway"
-                )
+                logger.warning(f"Discord Bot thread did not terminate within {timeout}s — proceeding anyway")
 
         logger.info("Discord Bot stopped")
 

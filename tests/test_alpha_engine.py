@@ -24,6 +24,7 @@ from quantbox.backtest.vectorized_backtest import _backtest_core
 
 # ── Helper indicators ──
 
+
 class TestHelperFunctions:
     """Tests for ATR, volume ratio, and taker ratio."""
 
@@ -63,12 +64,14 @@ class TestHelperFunctions:
 
 # ── compute_alpha_signals ──
 
+
 class TestAlphaSignals:
     """Tests for the enhanced rubber band signal engine."""
 
     @pytest.fixture
     def make_price_data(self):
         """Create OHLCV arrays for testing."""
+
         def _make(n=500, seed=42):
             rng = np.random.RandomState(seed)
             close = 100.0 * np.cumprod(1.0 + rng.normal(0, 0.003, n))
@@ -77,20 +80,40 @@ class TestAlphaSignals:
             volume = rng.uniform(500, 2000, n)
             taker = volume * rng.uniform(0.4, 0.6, n)
             return close, high, low, volume, taker
+
         return _make
 
     def test_output_shape(self, make_price_data):
         """Output length matches input."""
         close, high, low, vol, taker = make_price_data(500)
         sigs = compute_alpha_signals(
-            close, high, low, vol, taker,
-            8, 0.025, 0.5, 1.0, 8,
-            False, 48, 1.5,
-            False, 96, 0,
-            False, 48, 2.5,
-            False, 0.3, 0.4,
-            False, 16, 0.55,
-            False, 32,
+            close,
+            high,
+            low,
+            vol,
+            taker,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            False,
+            48,
+            1.5,
+            False,
+            96,
+            0,
+            False,
+            48,
+            2.5,
+            False,
+            0.3,
+            0.4,
+            False,
+            16,
+            0.55,
+            False,
+            32,
         )
         assert len(sigs) == 500
 
@@ -98,14 +121,33 @@ class TestAlphaSignals:
         """Signals are only -1, 0, or +1."""
         close, high, low, vol, taker = make_price_data(500)
         sigs = compute_alpha_signals(
-            close, high, low, vol, taker,
-            8, 0.025, 0.5, 1.0, 8,
-            True, 48, 1.5,
-            True, 96, 0,
-            True, 48, 2.5,
-            True, 0.3, 0.4,
-            True, 16, 0.55,
-            False, 32,
+            close,
+            high,
+            low,
+            vol,
+            taker,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            True,
+            48,
+            1.5,
+            True,
+            96,
+            0,
+            True,
+            48,
+            2.5,
+            True,
+            0.3,
+            0.4,
+            True,
+            16,
+            0.55,
+            False,
+            32,
         )
         unique = set(sigs)
         assert unique.issubset({-1.0, 0.0, 1.0})
@@ -115,25 +157,63 @@ class TestAlphaSignals:
         close, high, low, vol, taker = make_price_data(2000, seed=99)
         # No filter
         sigs_no = compute_alpha_signals(
-            close, high, low, vol, taker,
-            8, 0.025, 0.5, 1.0, 8,
-            False, 48, 1.5,
-            False, 96, 0,
-            False, 48, 2.5,
-            False, 0.3, 0.4,
-            False, 16, 0.55,
-            False, 32,
+            close,
+            high,
+            low,
+            vol,
+            taker,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            False,
+            48,
+            1.5,
+            False,
+            96,
+            0,
+            False,
+            48,
+            2.5,
+            False,
+            0.3,
+            0.4,
+            False,
+            16,
+            0.55,
+            False,
+            32,
         )
         # With strict vol filter
         sigs_yes = compute_alpha_signals(
-            close, high, low, vol, taker,
-            8, 0.025, 0.5, 1.0, 8,
-            True, 48, 3.0,  # Very strict: 3x average
-            False, 96, 0,
-            False, 48, 2.5,
-            False, 0.3, 0.4,
-            False, 16, 0.55,
-            False, 32,
+            close,
+            high,
+            low,
+            vol,
+            taker,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            True,
+            48,
+            3.0,  # Very strict: 3x average
+            False,
+            96,
+            0,
+            False,
+            48,
+            2.5,
+            False,
+            0.3,
+            0.4,
+            False,
+            16,
+            0.55,
+            False,
+            32,
         )
         trades_no = np.sum(np.abs(np.diff(sigs_no)) > 0)
         trades_yes = np.sum(np.abs(np.diff(sigs_yes)) > 0)
@@ -144,14 +224,33 @@ class TestAlphaSignals:
         close, high, low, vol, taker = make_price_data(2000)
         max_hold = 4
         sigs = compute_alpha_signals(
-            close, high, low, vol, taker,
-            8, 0.025, 0.5, 1.0, max_hold,
-            False, 48, 1.5,
-            False, 96, 0,
-            False, 48, 2.5,
-            False, 0.3, 0.4,
-            False, 16, 0.55,
-            False, 32,
+            close,
+            high,
+            low,
+            vol,
+            taker,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            max_hold,
+            False,
+            48,
+            1.5,
+            False,
+            96,
+            0,
+            False,
+            48,
+            2.5,
+            False,
+            0.3,
+            0.4,
+            False,
+            16,
+            0.55,
+            False,
+            32,
         )
         # Find any trade and check it doesn't exceed max_hold
         in_pos = 0
@@ -166,6 +265,7 @@ class TestAlphaSignals:
 
 # ── compute_hybrid_signals ──
 
+
 class TestHybridSignals:
     """Tests for the trend+rubber band hybrid strategy."""
 
@@ -179,9 +279,24 @@ class TestHybridSignals:
         vol = np.full(n, 1000.0)
         taker = vol * 0.5
         sigs = compute_hybrid_signals(
-            close, high, low, vol, taker,
-            64, 0.02, 8, 0.025, 0.6, 1.0, 12,
-            48, 1.5, 48, 2.0, 0.3, 0.4,
+            close,
+            high,
+            low,
+            vol,
+            taker,
+            64,
+            0.02,
+            8,
+            0.025,
+            0.6,
+            1.0,
+            12,
+            48,
+            1.5,
+            48,
+            2.0,
+            0.3,
+            0.4,
         )
         assert len(sigs) == n
 
@@ -201,15 +316,31 @@ class TestHybridSignals:
         taker = vol * 0.5
 
         sigs = compute_hybrid_signals(
-            close, high, low, vol, taker,
-            64, 0.01, 8, 0.02, 0.6, 1.0, 12,
-            48, 1.0, 48, 2.0, 0.3, 0.4,
+            close,
+            high,
+            low,
+            vol,
+            taker,
+            64,
+            0.01,
+            8,
+            0.02,
+            0.6,
+            1.0,
+            12,
+            48,
+            1.0,
+            48,
+            2.0,
+            0.3,
+            0.4,
         )
         unique = set(sigs)
         assert unique.issubset({-1.0, 0.0, 1.0})
 
 
 # ── AlphaStrategy wrapper ──
+
 
 class TestAlphaStrategy:
     """Tests for the live trading wrapper."""
@@ -224,12 +355,12 @@ class TestAlphaStrategy:
     def test_position_management(self):
         """Open/close position tracking works."""
         strat = AlphaStrategy()
-        assert not strat.has_position('BTCUSDT')
-        strat.open_position('BTCUSDT', 1, 50000.0, 10000.0, 2.0, 0.03)
-        assert strat.has_position('BTCUSDT')
+        assert not strat.has_position("BTCUSDT")
+        strat.open_position("BTCUSDT", 1, 50000.0, 10000.0, 2.0, 0.03)
+        assert strat.has_position("BTCUSDT")
         assert strat.n_active == 1
-        pos = strat.close_position('BTCUSDT')
-        assert pos['signal'] == 1
+        pos = strat.close_position("BTCUSDT")
+        assert pos["signal"] == 1
         assert strat.n_active == 0
 
     def test_config_cost_properties(self):
@@ -242,6 +373,7 @@ class TestAlphaStrategy:
 
 # ── Integration with backtest engine ──
 
+
 class TestBacktestIntegration:
     """Test that alpha signals produce valid backtest results."""
 
@@ -251,30 +383,49 @@ class TestBacktestIntegration:
             pytest.skip("Real data not available")
 
         from quantbox.data.real_data_loader import RealDataLoader
+
         loader = RealDataLoader()
-        df = loader.load_symbol('BTCUSDT')
+        df = loader.load_symbol("BTCUSDT")
         if df is None:
             pytest.skip("BTCUSDT data not available")
 
-        close = df['Close'].values.astype(np.float64)
-        high = df['High'].values.astype(np.float64)
-        low = df['Low'].values.astype(np.float64)
-        vol = df['Volume'].values.astype(np.float64)
+        close = df["Close"].values.astype(np.float64)
+        high = df["High"].values.astype(np.float64)
+        low = df["Low"].values.astype(np.float64)
+        vol = df["Volume"].values.astype(np.float64)
         taker = vol * 0.5
 
         sigs = compute_alpha_signals(
-            close, high, low, vol, taker,
-            8, 0.025, 0.5, 1.0, 8,
-            True, 48, 1.5,
-            False, 96, 0,
-            True, 48, 2.5,
-            True, 0.3, 0.4,
-            False, 16, 0.55,
-            False, 32,
+            close,
+            high,
+            low,
+            vol,
+            taker,
+            8,
+            0.025,
+            0.5,
+            1.0,
+            8,
+            True,
+            48,
+            1.5,
+            False,
+            96,
+            0,
+            True,
+            48,
+            2.5,
+            True,
+            0.3,
+            0.4,
+            False,
+            16,
+            0.55,
+            False,
+            32,
         )
 
-        eq, ret, sharpe, dd, wr, trades, bars_in, pf, avg_ret, _ = _backtest_core(
-            close, sigs, 0.0004, 0.0001 / 32)
+        eq, ret, sharpe, dd, wr, trades, bars_in, pf, avg_ret, _ = _backtest_core(close, sigs, 0.0004, 0.0001 / 32)
 
         assert len(eq) == len(close)
         assert eq[0] == 1.0
