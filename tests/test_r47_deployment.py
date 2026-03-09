@@ -548,8 +548,9 @@ class TestPastIncidentPrevention:
         # 두 상태가 OR 조건으로 처리되는지 확인
         assert (
             "('TRIGGERED', 'FINISHED')" in src
+            or '("TRIGGERED", "FINISHED")' in src
             or '["TRIGGERED", "FINISHED"]' in src
-            or "in ('TRIGGERED', 'FINISHED')" in src
+            or '["TRIGGERED", "FINISHED"]' in src
         ), "TRIGGERED와 FINISHED가 동일하게 처리되지 않음"
 
     def test_d_trail_activate_faster_than_previous(self, cfg):
