@@ -12,11 +12,17 @@ Provides rich embed notifications for live trading events:
     DISCORD_WEBHOOK_URL: Discord 웹훅 URL (미설정 시 알림 비활성화)
 """
 
+from __future__ import annotations
+
 import os
 import logging
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import requests
+
+if TYPE_CHECKING:
+    from quantbox.core.divergence_monitor import DivergenceAlert
 
 logger = logging.getLogger("DiscordNotifier")
 
@@ -442,6 +448,41 @@ class DiscordNotifier:
                     {"name": "현재 낙폭", "value": f"{current_dd_pct:.2f}%", "inline": True},
                     {"name": "임계치", "value": f"{threshold_pct:.2f}%", "inline": True},
                     {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
+                ],
+                "footer": {"text": _now_str()},
+            }
+        )
+
+    def notify_divergence_alert(self, alert: "DivergenceAlert") -> None:
+        """라이브-백테스트 성과 괴리 경보.
+
+        Args:
+            alert: DivergenceAlert from DivergenceMonitor.check().
+        """
+        triggered = ", ".join(t.upper() for t in alert.triggered_by)
+        pf_gap = alert.pf_live - alert.pf_baseline
+        wr_gap_pp = (alert.wr_live - alert.wr_baseline) * 100
+        self.send(
+            embed={
+                "title": f"⚠️ Live-Backtest 괴리 경보 [{triggered}]",
+                "description": alert.message,
+                "color": COLOR_RED,
+                "fields": [
+                    {
+                        "name": "PF (라이브 / 백테스트)",
+                        "value": f"{alert.pf_live:.3f} / {alert.pf_baseline:.3f}  ({pf_gap:+.3f})",
+                        "inline": True,
+                    },
+                    {
+                        "name": "WR (라이브 / 백테스트)",
+                        "value": f"{alert.wr_live * 100:.1f}% / {alert.wr_baseline * 100:.1f}%  ({wr_gap_pp:+.1f}pp)",
+                        "inline": True,
+                    },
+                    {
+                        "name": "거래 수",
+                        "value": str(alert.n_trades),
+                        "inline": True,
+                    },
                 ],
                 "footer": {"text": _now_str()},
             }
