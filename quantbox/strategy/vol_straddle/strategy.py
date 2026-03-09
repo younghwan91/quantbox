@@ -16,6 +16,7 @@ ZERO LOOKAHEAD:
   - Cross-TF signals use only their own completed TF data.
   - MA cluster uses only completed 4h bars (directly fetched).
 """
+
 from __future__ import annotations
 
 import logging
@@ -36,11 +37,11 @@ from quantbox.strategy.vol_straddle.signals import (
     resample_ohlcv,
 )
 
-logger = logging.getLogger('VolStraddle')
+logger = logging.getLogger("VolStraddle")
 
 # bars_held increments per 15m cycle, so max_hold must be in 15m bars.
 # Config stores max_hold in native TF bars — multiply to convert.
-_TF_TO_15M = {'15m': 1, '1h': 4, '4h': 16}
+_TF_TO_15M = {"15m": 1, "1h": 4, "4h": 16}
 
 
 class VolStraddleStrategy:
@@ -106,7 +107,9 @@ class VolStraddleStrategy:
     # ══════════════════════════════════════════════════════════════════
 
     def on_bar(
-        self, symbol: str, close_prices: np.ndarray,
+        self,
+        symbol: str,
+        close_prices: np.ndarray,
         btc_close: np.ndarray | None = None,
     ) -> int:
         """Check VR compression signal across all enabled TFs.
@@ -166,8 +169,10 @@ class VolStraddleStrategy:
             data_4h = self._htf_4h.get(symbol)
             if data_4h is not None:
                 sig_4h = self._check_tf_signal(
-                    data_4h['close'], data_4h['high'], data_4h['low'],
-                    '4h',
+                    data_4h["close"],
+                    data_4h["high"],
+                    data_4h["low"],
+                    "4h",
                 )
                 if sig_4h != 0:
                     return sig_4h
@@ -179,13 +184,13 @@ class VolStraddleStrategy:
             if min_len >= 4 * (cfg.warmup_1h + 1):
                 c1h, h1h, l1h, v1h = resample_ohlcv(c15, h15, l15, v15, 4)
                 if len(c1h) >= cfg.warmup_1h + 1:
-                    sig_1h = self._check_tf_signal(c1h, h1h, l1h, '1h')
+                    sig_1h = self._check_tf_signal(c1h, h1h, l1h, "1h")
                     if sig_1h != 0:
                         return sig_1h
 
         # 15m: direct from downloaded data
         if cfg.enable_15m:
-            sig_15m = self._check_tf_signal(c15, h15, l15, '15m')
+            sig_15m = self._check_tf_signal(c15, h15, l15, "15m")
             if sig_15m != 0:
                 return sig_15m
 
@@ -196,7 +201,9 @@ class VolStraddleStrategy:
             data_4h = self._htf_4h.get(symbol)
             if data_4h is not None:
                 sig_ma = self._check_ma_cluster_signal(
-                    data_4h['close'], data_4h['high'], data_4h['low'],
+                    data_4h["close"],
+                    data_4h["high"],
+                    data_4h["low"],
                     symbol,
                 )
                 if sig_ma != 0:
@@ -206,7 +213,9 @@ class VolStraddleStrategy:
 
     def _check_tf_signal(
         self,
-        close: np.ndarray, high: np.ndarray, low: np.ndarray,
+        close: np.ndarray,
+        high: np.ndarray,
+        low: np.ndarray,
         tf: str,
     ) -> int:
         """Check VR compression signal for a single timeframe.
@@ -235,18 +244,21 @@ class VolStraddleStrategy:
         vr_val = float(vr[-1]) if len(vr) > 0 and not np.isnan(vr[-1]) else 999.0
         self._last_vr[self._current_symbol] = vr_val
         # Store per-TF VR
-        if tf == '15m':
+        if tf == "15m":
             self._last_vr_15m[self._current_symbol] = vr_val
-        elif tf == '1h':
+        elif tf == "1h":
             self._last_vr_1h[self._current_symbol] = vr_val
-        elif tf == '4h':
+        elif tf == "4h":
             self._last_vr_4h[self._current_symbol] = vr_val
 
         # ── S_d8 straddle check (higher priority) ──
         # Requires sustained VR compression for min_dur bars.
         if cfg.straddle_enabled:
             s_sig = gen_vr_dur_signal(
-                vr, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup,
+                vr,
+                cfg.s_vr_threshold,
+                cfg.s_squeeze_dur,
+                warmup,
             )
             if s_sig[-1] == 1:
                 # Parity audit: check if D_mom8 would also fire
@@ -269,7 +281,9 @@ class VolStraddleStrategy:
                 sq_dur_val = int(sq_dur[-1])
                 # B3: For S_d8, check if D_mom8 would also fire
                 score, cond = self._compute_conviction_score(
-                    close, vr, tf,
+                    close,
+                    vr,
+                    tf,
                     is_straddle=True,
                     d_overlap=d_overlap,
                     squeeze_dur=sq_dur_val,
@@ -285,16 +299,16 @@ class VolStraddleStrategy:
                     # Don't return — fall through to D_mom8 check
                 else:
                     self._last_signal_meta[self._current_symbol] = {
-                        'tf': tf,
-                        'sl': cfg.s_sl,
-                        'tp': cfg.s_tp,
-                        'max_hold': cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
-                        'vr': vr_val,
-                        'momentum': 0.0,
-                        'straddle': True,
-                        'd_overlap': d_overlap,
-                        'conviction_score': score,
-                        'conviction_cond': cond,
+                        "tf": tf,
+                        "sl": cfg.s_sl,
+                        "tp": cfg.s_tp,
+                        "max_hold": cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
+                        "vr": vr_val,
+                        "momentum": 0.0,
+                        "straddle": True,
+                        "d_overlap": d_overlap,
+                        "conviction_score": score,
+                        "conviction_cond": cond,
                     }
                     logger.info(
                         f"[{self._current_symbol}] S_d8 straddle signal "
@@ -322,9 +336,10 @@ class VolStraddleStrategy:
         # ── F5: TBR z-score Gate (R46 validated, D_mom8 only) ──
         if self.config.f5_tbr_enabled:
             tbr_z = self._compute_tbr_zscore(self._current_symbol)
-            is_long = (direction == 1)
-            blocked = (is_long and tbr_z > self.config.f5_tbr_z_threshold) or \
-                      (not is_long and tbr_z < -self.config.f5_tbr_z_threshold)
+            is_long = direction == 1
+            blocked = (is_long and tbr_z > self.config.f5_tbr_z_threshold) or (
+                not is_long and tbr_z < -self.config.f5_tbr_z_threshold
+            )
             if blocked:
                 logger.info(
                     f"[{self._current_symbol}] D_mom8 BLOCKED by F5-TBR: "
@@ -338,12 +353,17 @@ class VolStraddleStrategy:
         s_overlap = False
         if cfg.straddle_enabled and cfg.b3_enabled:
             s_sig = gen_vr_dur_signal(
-                vr, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup,
+                vr,
+                cfg.s_vr_threshold,
+                cfg.s_squeeze_dur,
+                warmup,
             )
             s_overlap = bool(s_sig[-1] == 1)
 
         score, cond = self._compute_conviction_score(
-            close, vr, tf,
+            close,
+            vr,
+            tf,
             is_straddle=False,
             d_overlap=s_overlap,  # B3: S would also fire
             squeeze_dur=0,  # Not relevant for D_mom8
@@ -362,14 +382,14 @@ class VolStraddleStrategy:
         # (which TF, SL/TP, max_hold for this specific signal)
         mom_val = float(mom[-1])
         self._last_signal_meta[self._current_symbol] = {
-            'tf': tf,
-            'sl': cfg.d_sl,
-            'tp': cfg.d_tp,
-            'max_hold': cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
-            'vr': float(vr[-1]) if not np.isnan(vr[-1]) else 0.0,
-            'momentum': mom_val,
-            'conviction_score': score,
-            'conviction_cond': cond,
+            "tf": tf,
+            "sl": cfg.d_sl,
+            "tp": cfg.d_tp,
+            "max_hold": cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
+            "vr": float(vr[-1]) if not np.isnan(vr[-1]) else 0.0,
+            "momentum": mom_val,
+            "conviction_score": score,
+            "conviction_cond": cond,
         }
         logger.info(
             f"[{self._current_symbol}] D_mom8 signal "
@@ -380,7 +400,7 @@ class VolStraddleStrategy:
         return direction
 
     # Track current symbol for signal metadata storage
-    _current_symbol: str = ''
+    _current_symbol: str = ""
 
     # ══════════════════════════════════════════════════════════════════
     #  MA Cluster Squeeze Signal (R44d V17)
@@ -441,17 +461,23 @@ class VolStraddleStrategy:
         duration_out = np.zeros(1, dtype=np.int64)
 
         sig = check_ma_cluster(
-            close_4h, sma20, sma50, sma100, sma200, mom,
-            cfg.ma_cluster_pct, cfg.ma_cluster_min_duration,
-            cooldown_arr, duration_out,
+            close_4h,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            cfg.ma_cluster_pct,
+            cfg.ma_cluster_min_duration,
+            cooldown_arr,
+            duration_out,
             max_duration=cfg.ma_cluster_max_duration,
             min_momentum=cfg.ma_cluster_min_momentum,
         )
 
         # ── Always compute metrics (needed for near-miss logging + monitor) ──
         idx = len(close_4h) - 1
-        ma_vals = [float(sma20[idx]), float(sma50[idx]),
-                   float(sma100[idx]), float(sma200[idx])]
+        ma_vals = [float(sma20[idx]), float(sma50[idx]), float(sma100[idx]), float(sma200[idx])]
         ma_max = max(ma_vals)
         ma_min = min(ma_vals)
         spread = (ma_max - ma_min) / close_4h[idx] * 100 if close_4h[idx] > 0 else 0.0
@@ -460,58 +486,55 @@ class VolStraddleStrategy:
 
         # ── Determine rejection reason (for monitor + near-miss log) ──
         if sig != 0:
-            rejection = 'fired'
+            rejection = "fired"
         elif dur == 0:
-            rejection = 'no_cluster'
+            rejection = "no_cluster"
         elif dur < cfg.ma_cluster_min_duration:
-            rejection = f'pre_duration({dur}<{cfg.ma_cluster_min_duration})'
+            rejection = f"pre_duration({dur}<{cfg.ma_cluster_min_duration})"
         elif cfg.ma_cluster_max_duration > 0 and dur > cfg.ma_cluster_max_duration:
-            rejection = f'zombie({dur}>{cfg.ma_cluster_max_duration})'
+            rejection = f"zombie({dur}>{cfg.ma_cluster_max_duration})"
         elif cooldown_arr[0] == 1:
-            rejection = 'cooldown'
+            rejection = "cooldown"
         elif ma_min <= close_4h[idx] <= ma_max:
-            rejection = 'no_breakout'
+            rejection = "no_breakout"
         elif abs(mom_val) < cfg.ma_cluster_min_momentum:
-            rejection = f'momentum_fail(|{mom_val:.4f}|<{cfg.ma_cluster_min_momentum:.3f})'
+            rejection = f"momentum_fail(|{mom_val:.4f}|<{cfg.ma_cluster_min_momentum:.3f})"
         else:
-            rejection = 'unknown'
+            rejection = "unknown"
 
         # ── Store per-symbol state for MA Cluster monitor line in scalper ──
         self._ma_cluster_state[symbol] = {
-            'duration': dur,
-            'spread': spread,
-            'momentum': mom_val,
-            'rejection': rejection,
+            "duration": dur,
+            "spread": spread,
+            "momentum": mom_val,
+            "rejection": rejection,
         }
 
         # ── Log near-miss: cluster forming but signal rejected ──
         # Only log when cluster has been active long enough to be interesting
         # (dur >= 1) and not just absent (no_cluster). Silent no_cluster is fine.
         if sig == 0 and dur >= 1:
-            if rejection.startswith('zombie'):
+            if rejection.startswith("zombie"):
                 logger.info(
                     f"[{symbol}] MA_CLUSTER zombie(skip): "
                     f"dur={dur}>{cfg.ma_cluster_max_duration} "
                     f"spread={spread:.2f}% mom={mom_val:.6f}"
                 )
-            elif rejection == 'cooldown':
-                logger.info(
-                    f"[{symbol}] MA_CLUSTER cooldown(skip): "
-                    f"dur={dur} spread={spread:.2f}% mom={mom_val:.6f}"
-                )
-            elif rejection == 'no_breakout':
+            elif rejection == "cooldown":
+                logger.info(f"[{symbol}] MA_CLUSTER cooldown(skip): dur={dur} spread={spread:.2f}% mom={mom_val:.6f}")
+            elif rejection == "no_breakout":
                 logger.info(
                     f"[{symbol}] MA_CLUSTER forming(no breakout yet): "
                     f"dur={dur} spread={spread:.2f}% "
                     f"price_inside_band mom={mom_val:.6f}"
                 )
-            elif rejection.startswith('momentum_fail'):
+            elif rejection.startswith("momentum_fail"):
                 logger.info(
                     f"[{symbol}] MA_CLUSTER momentum_fail(skip): "
                     f"dur={dur} spread={spread:.2f}% "
                     f"|mom|={abs(mom_val):.4f}<{cfg.ma_cluster_min_momentum:.3f}"
                 )
-            elif rejection.startswith('pre_duration'):
+            elif rejection.startswith("pre_duration"):
                 # Only log if more than half the minimum duration (near-miss)
                 if dur >= cfg.ma_cluster_min_duration / 2:
                     logger.info(
@@ -522,23 +545,23 @@ class VolStraddleStrategy:
 
         if sig != 0:
             self._last_signal_meta[symbol] = {
-                'tf': '4h',
-                'sl': cfg.ma_cluster_sl,
-                'tp': cfg.ma_cluster_tp,
-                'max_hold': cfg.ma_cluster_max_hold_4h * _TF_TO_15M['4h'],
-                'vr': 0.0,  # Not a VR signal
-                'momentum': mom_val,
-                'strategy_type': 'ma_cluster',
-                'ma_cluster_spread': spread,
-                'ma_cluster_duration': dur,
-                'leverage_override': cfg.ma_cluster_leverage,
+                "tf": "4h",
+                "sl": cfg.ma_cluster_sl,
+                "tp": cfg.ma_cluster_tp,
+                "max_hold": cfg.ma_cluster_max_hold_4h * _TF_TO_15M["4h"],
+                "vr": 0.0,  # Not a VR signal
+                "momentum": mom_val,
+                "strategy_type": "ma_cluster",
+                "ma_cluster_spread": spread,
+                "ma_cluster_duration": dur,
+                "leverage_override": cfg.ma_cluster_leverage,
             }
             logger.info(
                 f"[{symbol}] MA_CLUSTER signal "
                 f"TF=4h {'LONG' if sig == 1 else 'SHORT'} "
                 f"spread={spread:.2f}% duration={dur} "
                 f"mom={mom_val:.6f} "
-                f"SL={cfg.ma_cluster_sl*100:.0f}% TP={cfg.ma_cluster_tp*100:.0f}% "
+                f"SL={cfg.ma_cluster_sl * 100:.0f}% TP={cfg.ma_cluster_tp * 100:.0f}% "
                 f"leverage={cfg.ma_cluster_leverage:.0f}x"
             )
         return sig
@@ -578,19 +601,19 @@ class VolStraddleStrategy:
         cfg = self.config
         score = 0
         conditions: dict[str, bool] = {
-            'e2_sma': False,
-            'c2_btc': False,
-            'b3_confluence': False,
-            'a3_quality': False,
+            "e2_sma": False,
+            "c2_btc": False,
+            "b3_confluence": False,
+            "a3_quality": False,
         }
 
         # ── E2: SMA Proximity ──
         if cfg.e2_enabled and len(close) >= cfg.e2_sma_period:
-            sma = np.mean(close[-cfg.e2_sma_period:])
+            sma = np.mean(close[-cfg.e2_sma_period :])
             if sma > 0:
                 proximity = abs(close[-1] - sma) / sma
                 if proximity < cfg.e2_threshold:
-                    conditions['e2_sma'] = True
+                    conditions["e2_sma"] = True
                     score += 1
 
         # ── C2: BTC Neutral ──
@@ -600,7 +623,7 @@ class VolStraddleStrategy:
             if len(btc) > mom_period:
                 btc_mom = btc[-1] / btc[-mom_period - 1] - 1.0
                 if abs(btc_mom) < cfg.c2_btc_mom_threshold:
-                    conditions['c2_btc'] = True
+                    conditions["c2_btc"] = True
                     score += 1
 
         # ── B3: Confluence (both D_mom8 and S_d8 would fire) ──
@@ -608,7 +631,7 @@ class VolStraddleStrategy:
             if d_overlap:
                 # When S_d8 fires: d_overlap was checked in _check_tf_signal
                 # When D_mom8 fires: we need to check if S_d8 would also fire
-                conditions['b3_confluence'] = True
+                conditions["b3_confluence"] = True
                 score += 1
 
         # ── A3: Quality+ ──
@@ -617,12 +640,12 @@ class VolStraddleStrategy:
             if is_straddle:
                 # S_d8: extended squeeze duration
                 if squeeze_dur >= cfg.a3_long_squeeze_dur:
-                    conditions['a3_quality'] = True
+                    conditions["a3_quality"] = True
                     score += 1
             else:
                 # D_mom8: extra deep VR compression
                 if vr_val < cfg.a3_deep_vr_threshold:
-                    conditions['a3_quality'] = True
+                    conditions["a3_quality"] = True
                     score += 1
 
         return score, conditions
@@ -647,8 +670,8 @@ class VolStraddleStrategy:
             return 0.0  # Insufficient data → pass filter (don't block)
 
         # Exclude current bar [−1] to match backtest: window = [−w−1 : −1]
-        tb_window = tb[-(w + 1):-1]
-        vol_window = vol[-(w + 1):-1]
+        tb_window = tb[-(w + 1) : -1]
+        vol_window = vol[-(w + 1) : -1]
         current_tb = tb[-1]
         current_vol = vol[-1]
 
@@ -691,9 +714,9 @@ class VolStraddleStrategy:
         Returns dict with '15m', '1h', '4h' keys.
         """
         return {
-            '15m': self._last_vr_15m.get(symbol, 999.0),
-            '1h': self._last_vr_1h.get(symbol, 999.0),
-            '4h': self._last_vr_4h.get(symbol, 999.0),
+            "15m": self._last_vr_15m.get(symbol, 999.0),
+            "1h": self._last_vr_1h.get(symbol, 999.0),
+            "4h": self._last_vr_4h.get(symbol, 999.0),
         }
 
     # ══════════════════════════════════════════════════════════════════
@@ -707,13 +730,15 @@ class VolStraddleStrategy:
         Compound keys: 'BTCUSDT:LONG' → ('BTCUSDT', 'LONG')
         Simple keys: 'BTCUSDT' → ('BTCUSDT', None)
         """
-        if ':' in key:
-            symbol, side = key.split(':', 1)
+        if ":" in key:
+            symbol, side = key.split(":", 1)
             return symbol, side
         return key, None
 
     def update_position(
-        self, symbol: str, current_price: float,
+        self,
+        symbol: str,
+        current_price: float,
         current_atr_pct: float | None = None,
         current_high: float | None = None,
         current_low: float | None = None,
@@ -744,43 +769,42 @@ class VolStraddleStrategy:
         if pos is None:
             return None
 
-        pos['bars_held'] += 1
-        entry = pos['entry_price']
-        sl_pct = pos.get('sl', self.config.d_sl)
-        tp_pct = pos.get('tp', self.config.d_tp)
-        max_hold = pos.get('max_hold', self.config.max_hold_15m)
+        pos["bars_held"] += 1
+        entry = pos["entry_price"]
+        sl_pct = pos.get("sl", self.config.d_sl)
+        tp_pct = pos.get("tp", self.config.d_tp)
+        max_hold = pos.get("max_hold", self.config.max_hold_15m)
 
         # Intra-bar extremes for SL/TP check (parity with backtest
         # which checks high/low within each bar)
         if current_high is not None and current_low is not None:
-            if pos['signal'] == 1:  # LONG
+            if pos["signal"] == 1:  # LONG
                 worst_gain = (current_low - entry) / entry
                 best_gain = (current_high - entry) / entry
             else:  # SHORT
                 worst_gain = (entry - current_high) / entry
                 best_gain = (entry - current_low) / entry
         else:
-            gain = ((current_price - entry) / entry if pos['signal'] == 1
-                    else (entry - current_price) / entry)
+            gain = (current_price - entry) / entry if pos["signal"] == 1 else (entry - current_price) / entry
             worst_gain = gain
             best_gain = gain
 
         # Track best PnL (MFE — Maximum Favorable Excursion)
-        if best_gain > pos.get('best_pnl', 0.0):
-            pos['best_pnl'] = best_gain
+        if best_gain > pos.get("best_pnl", 0.0):
+            pos["best_pnl"] = best_gain
 
         # Track worst gain (MAE — Maximum Adverse Excursion, stored as negative)
-        if worst_gain < pos.get('worst_pnl', 0.0):
-            pos['worst_pnl'] = worst_gain
+        if worst_gain < pos.get("worst_pnl", 0.0):
+            pos["worst_pnl"] = worst_gain
 
         # ── Select trail params based on position type ──
-        is_straddle = pos.get('is_straddle', False)
-        strategy_type = pos.get('strategy_type', 'vr_squeeze')
+        is_straddle = pos.get("is_straddle", False)
+        strategy_type = pos.get("strategy_type", "vr_squeeze")
         if is_straddle:
             # r53 Option A: per-leg trailing for S_d8 straddle
             trail_activate = self.config.s_trail_activate
             trail_distance = self.config.s_trail_distance
-        elif strategy_type == 'ma_cluster':
+        elif strategy_type == "ma_cluster":
             trail_activate = self.config.ma_cluster_trail_activate
             trail_distance = self.config.ma_cluster_trail_distance
         else:
@@ -788,20 +812,20 @@ class VolStraddleStrategy:
             trail_distance = self.config.d_trail_distance
 
         # Update peak gain tracking
-        peak_gain = pos.get('peak_gain', 0.0)
+        peak_gain = pos.get("peak_gain", 0.0)
         if best_gain > peak_gain:
             peak_gain = best_gain
-            pos['peak_gain'] = peak_gain
+            pos["peak_gain"] = peak_gain
 
-        trail_active = pos.get('trail_active', False)
+        trail_active = pos.get("trail_active", False)
 
         # Activate trailing stop when peak gain reaches threshold
         if not trail_active and peak_gain >= trail_activate:
             trail_active = True
-            pos['trail_active'] = True
+            pos["trail_active"] = True
             logger.info(
-                f"[{symbol}] Trail ACTIVATED: peak_gain={peak_gain*100:+.3f}% "
-                f"≥ activate={trail_activate*100:.1f}% "
+                f"[{symbol}] Trail ACTIVATED: peak_gain={peak_gain * 100:+.3f}% "
+                f"≥ activate={trail_activate * 100:.1f}% "
                 f"trail_stop={peak_gain - trail_distance:.4f}"
             )
 
@@ -811,66 +835,69 @@ class VolStraddleStrategy:
             if worst_gain <= trail_stop_gain:
                 exit_pnl = max(trail_stop_gain, -sl_pct)
                 logger.info(
-                    f"[{symbol}] TRAIL HIT: worst={worst_gain*100:+.3f}% "
-                    f"≤ trail_stop={trail_stop_gain*100:+.3f}% "
-                    f"(peak={peak_gain*100:+.3f}% - dist={trail_distance*100:.1f}%) "
-                    f"bars={pos['bars_held']} exit_pnl≈{exit_pnl*100:+.3f}%"
+                    f"[{symbol}] TRAIL HIT: worst={worst_gain * 100:+.3f}% "
+                    f"≤ trail_stop={trail_stop_gain * 100:+.3f}% "
+                    f"(peak={peak_gain * 100:+.3f}% - dist={trail_distance * 100:.1f}%) "
+                    f"bars={pos['bars_held']} exit_pnl≈{exit_pnl * 100:+.3f}%"
                 )
-                return 'trailing_stop'
+                return "trailing_stop"
 
         # SL check (only when trailing is NOT active — same as backtest)
         if not trail_active and worst_gain <= -sl_pct:
             logger.info(
-                f"[{symbol}] SL hit: worst_gain={worst_gain*100:+.3f}% "
-                f"vs SL={sl_pct*100:.1f}% bars={pos['bars_held']} "
+                f"[{symbol}] SL hit: worst_gain={worst_gain * 100:+.3f}% "
+                f"vs SL={sl_pct * 100:.1f}% bars={pos['bars_held']} "
                 f"entry={entry:.6f} "
-                f"{'low' if pos['signal']==1 else 'high'}="
-                f"{current_low if pos['signal']==1 else current_high}"
+                f"{'low' if pos['signal'] == 1 else 'high'}="
+                f"{current_low if pos['signal'] == 1 else current_high}"
             )
-            return 'stop_loss'
+            return "stop_loss"
 
         # Hard TP check (safety ceiling at 12%)
         if best_gain >= tp_pct:
             logger.info(
-                f"[{symbol}] Hard TP hit: best_gain={best_gain*100:+.3f}% "
-                f"≥ TP={tp_pct*100:.1f}% bars={pos['bars_held']} "
+                f"[{symbol}] Hard TP hit: best_gain={best_gain * 100:+.3f}% "
+                f"≥ TP={tp_pct * 100:.1f}% bars={pos['bars_held']} "
                 f"entry={entry:.6f}"
             )
-            return 'target'
+            return "target"
 
         # Max hold (time-based exit)
-        if pos['bars_held'] >= max_hold:
+        if pos["bars_held"] >= max_hold:
             logger.info(
                 f"[{symbol}] Max hold reached: bars={pos['bars_held']}/{max_hold} "
-                f"best_gain={best_gain*100:+.3f}% worst_gain={worst_gain*100:+.3f}%"
+                f"best_gain={best_gain * 100:+.3f}% worst_gain={worst_gain * 100:+.3f}%"
             )
-            return 'max_hold'
+            return "max_hold"
 
         return None
 
     def _exit_simple(
-        self, pos: dict, symbol: str,
-        worst_gain: float, best_gain: float,
-        sl_pct: float, tp_pct: float, max_hold: int,
+        self,
+        pos: dict,
+        symbol: str,
+        worst_gain: float,
+        best_gain: float,
+        sl_pct: float,
+        tp_pct: float,
+        max_hold: int,
     ) -> str | None:
         """Simple SL/TP/max_hold exit for straddle legs."""
         if worst_gain <= -sl_pct:
             logger.info(
-                f"[{symbol}] SL hit: worst_gain={worst_gain*100:+.3f}% "
-                f"vs SL={sl_pct*100:.1f}% bars={pos['bars_held']}"
+                f"[{symbol}] SL hit: worst_gain={worst_gain * 100:+.3f}% "
+                f"vs SL={sl_pct * 100:.1f}% bars={pos['bars_held']}"
             )
-            return 'stop_loss'
+            return "stop_loss"
         if best_gain >= tp_pct:
             logger.info(
-                f"[{symbol}] TP hit: best_gain={best_gain*100:+.3f}% "
-                f"vs TP={tp_pct*100:.1f}% bars={pos['bars_held']}"
+                f"[{symbol}] TP hit: best_gain={best_gain * 100:+.3f}% "
+                f"vs TP={tp_pct * 100:.1f}% bars={pos['bars_held']}"
             )
-            return 'target'
-        if pos['bars_held'] >= max_hold:
-            logger.info(
-                f"[{symbol}] Max hold reached: bars={pos['bars_held']}/{max_hold}"
-            )
-            return 'max_hold'
+            return "target"
+        if pos["bars_held"] >= max_hold:
+            logger.info(f"[{symbol}] Max hold reached: bars={pos['bars_held']}/{max_hold}")
+            return "max_hold"
         return None
 
     # ══════════════════════════════════════════════════════════════════
@@ -885,15 +912,18 @@ class VolStraddleStrategy:
         """
         if self.config.hedge_mode:
             return (
-                f"{symbol}:LONG" in self._positions
-                or f"{symbol}:SHORT" in self._positions
-                or symbol in self._positions
+                f"{symbol}:LONG" in self._positions or f"{symbol}:SHORT" in self._positions or symbol in self._positions
             )
         return symbol in self._positions
 
     def open_position(
-        self, symbol: str, signal: int, entry_price: float,
-        notional: float, leverage: float, move_size: float,
+        self,
+        symbol: str,
+        signal: int,
+        entry_price: float,
+        notional: float,
+        leverage: float,
+        move_size: float,
         entry_stop_mult: float | None = None,
         server_sl_order_id: str | None = None,
         server_tp_order_id: str | None = None,
@@ -917,12 +947,10 @@ class VolStraddleStrategy:
             **kwargs: Extra fields (sl, tp, tf, max_hold, position_side).
         """
         if entry_price <= 0:
-            raise ValueError(
-                f"Invalid entry_price for {symbol}: {entry_price}"
-            )
+            raise ValueError(f"Invalid entry_price for {symbol}: {entry_price}")
 
         # Determine position key (compound in hedge mode)
-        position_side = kwargs.get('position_side')
+        position_side = kwargs.get("position_side")
         if position_side:
             pos_key = f"{symbol}:{position_side}"
         else:
@@ -930,50 +958,54 @@ class VolStraddleStrategy:
 
         # Get TF-specific parameters from signal metadata or kwargs
         meta = self._last_signal_meta.get(symbol, {})
-        sl = kwargs.get('sl', meta.get('sl', self.config.d_sl))
-        tp = kwargs.get('tp', meta.get('tp', self.config.d_tp))
-        tf = kwargs.get('tf', meta.get('tf', '15m'))
-        max_hold = kwargs.get('max_hold', meta.get(
-            'max_hold', self.config.get_max_hold(tf),
-        ))
+        sl = kwargs.get("sl", meta.get("sl", self.config.d_sl))
+        tp = kwargs.get("tp", meta.get("tp", self.config.d_tp))
+        tf = kwargs.get("tf", meta.get("tf", "15m"))
+        max_hold = kwargs.get(
+            "max_hold",
+            meta.get(
+                "max_hold",
+                self.config.get_max_hold(tf),
+            ),
+        )
 
         self._positions[pos_key] = {
-            'symbol': symbol,  # Actual Binance symbol (for API calls)
-            'signal': signal,
-            'entry_price': entry_price,
-            'notional': notional,
-            'leverage': leverage,
-            'move_size': move_size,
-            'bars_held': 0,
-            'best_pnl': 0.0,
+            "symbol": symbol,  # Actual Binance symbol (for API calls)
+            "signal": signal,
+            "entry_price": entry_price,
+            "notional": notional,
+            "leverage": leverage,
+            "move_size": move_size,
+            "bars_held": 0,
+            "best_pnl": 0.0,
             # VolStraddle-specific
-            'sl': sl,
-            'tp': tp,
-            'tf': tf,
-            'max_hold': max_hold,
-            'is_straddle': kwargs.get('is_straddle', False),
-            'strategy_type': meta.get('strategy_type', 'vr_squeeze'),
+            "sl": sl,
+            "tp": tp,
+            "tf": tf,
+            "max_hold": max_hold,
+            "is_straddle": kwargs.get("is_straddle", False),
+            "strategy_type": meta.get("strategy_type", "vr_squeeze"),
             # R43 Trailing Stop (directional only, VR squeeze only)
-            'trail_active': False,
-            'peak_gain': 0.0,
+            "trail_active": False,
+            "peak_gain": 0.0,
             # Server bracket IDs
-            'server_sl_order_id': server_sl_order_id,
-            'server_tp_order_id': server_tp_order_id,
+            "server_sl_order_id": server_sl_order_id,
+            "server_tp_order_id": server_tp_order_id,
             # Compatibility fields (used by scalper internals)
-            'entry_stop_mult': entry_stop_mult or sl,
-            'partial_closed': False,
-            'confidence': 0,
-            'highest_since_tp1': 0.0,
-            'trail_floor': None,
+            "entry_stop_mult": entry_stop_mult or sl,
+            "partial_closed": False,
+            "confidence": 0,
+            "highest_since_tp1": 0.0,
+            "trail_floor": None,
             # Hedge mode
-            'position_side': position_side,
+            "position_side": position_side,
         }
 
-        strategy_label = meta.get('strategy_type', 'vr_squeeze')
-        extra = ''
-        if strategy_label == 'ma_cluster':
-            spread = meta.get('ma_cluster_spread', 0)
-            dur = meta.get('ma_cluster_duration', 0)
+        strategy_label = meta.get("strategy_type", "vr_squeeze")
+        extra = ""
+        if strategy_label == "ma_cluster":
+            spread = meta.get("ma_cluster_spread", 0)
+            dur = meta.get("ma_cluster_duration", 0)
             extra = f" MA_spread={spread:.2f}% dur={dur}"
         else:
             extra = f" VR={meta.get('vr', 0):.3f}"
@@ -981,7 +1013,7 @@ class VolStraddleStrategy:
         logger.info(
             f"[{symbol}] Position opened: "
             f"{'LONG' if signal == 1 else 'SHORT'} "
-            f"TF={tf} SL={sl*100:.1f}% TP={tp*100:.1f}% "
+            f"TF={tf} SL={sl * 100:.1f}% TP={tp * 100:.1f}% "
             f"max_hold={max_hold} ({strategy_label}){extra}"
             f"{f' (hedge:{position_side})' if position_side else ''}"
         )
@@ -1008,8 +1040,12 @@ class VolStraddleStrategy:
     # ══════════════════════════════════════════════════════════════════
 
     def update_market_data(
-        self, symbol: str, volume: np.ndarray, taker_buy: np.ndarray,
-        high: np.ndarray, low: np.ndarray,
+        self,
+        symbol: str,
+        volume: np.ndarray,
+        taker_buy: np.ndarray,
+        high: np.ndarray,
+        low: np.ndarray,
     ) -> None:
         """Store 15m OHLCV data for VR computation.
 
@@ -1028,7 +1064,8 @@ class VolStraddleStrategy:
         self._taker_buy_data[symbol] = taker_buy  # F5 TBR gate (R46)
 
     def update_htf_data(
-        self, symbol: str,
+        self,
+        symbol: str,
         close_4h: np.ndarray,
         high_4h: np.ndarray | None = None,
         low_4h: np.ndarray | None = None,
@@ -1047,9 +1084,9 @@ class VolStraddleStrategy:
         """
         if high_4h is not None and low_4h is not None:
             self._htf_4h[symbol] = {
-                'close': close_4h,
-                'high': high_4h,
-                'low': low_4h,
+                "close": close_4h,
+                "high": high_4h,
+                "low": low_4h,
             }
         else:
             # Without high/low, we can't compute VR on raw 4h data.
@@ -1061,7 +1098,8 @@ class VolStraddleStrategy:
     # ══════════════════════════════════════════════════════════════════
 
     def get_effective_stop_mult(
-        self, close_prices: np.ndarray,
+        self,
+        close_prices: np.ndarray,
         symbol: str | None = None,
         move_size: float | None = None,
     ) -> float:
@@ -1073,7 +1111,7 @@ class VolStraddleStrategy:
         Compatible with scalper's _open_position interface.
         """
         meta = self._last_signal_meta.get(symbol, {}) if symbol else {}
-        return meta.get('sl', self.config.d_sl)
+        return meta.get("sl", self.config.d_sl)
 
     def get_last_confidence(self, symbol: str) -> int:
         """Return confidence level (always 0 — vol straddle has no scoring)."""
@@ -1098,7 +1136,9 @@ class VolStraddleStrategy:
         return atr_sum / n
 
     def diagnose_bar(
-        self, symbol: str, close_prices: np.ndarray,
+        self,
+        symbol: str,
+        close_prices: np.ndarray,
         btc_close: np.ndarray | None = None,
     ) -> dict:
         """Return diagnostic info for the current bar (for JSONL logging).
@@ -1111,15 +1151,15 @@ class VolStraddleStrategy:
         # Use per-TF VR (always available after on_bar), not just signal meta
         min_vr = min(vr_all.values())
         return {
-            'symbol': symbol,
-            'strategy': 'vol_straddle',
-            'vr': meta.get('vr', None),
-            'vr_15m': vr_all['15m'] if vr_all['15m'] < 999.0 else None,
-            'vr_1h': vr_all['1h'] if vr_all['1h'] < 999.0 else None,
-            'vr_4h': vr_all['4h'] if vr_all['4h'] < 999.0 else None,
-            'vr_min': min_vr if min_vr < 999.0 else None,
-            'tf': meta.get('tf', None),
-            'momentum': meta.get('momentum', None),
+            "symbol": symbol,
+            "strategy": "vol_straddle",
+            "vr": meta.get("vr", None),
+            "vr_15m": vr_all["15m"] if vr_all["15m"] < 999.0 else None,
+            "vr_1h": vr_all["1h"] if vr_all["1h"] < 999.0 else None,
+            "vr_4h": vr_all["4h"] if vr_all["4h"] < 999.0 else None,
+            "vr_min": min_vr if min_vr < 999.0 else None,
+            "tf": meta.get("tf", None),
+            "momentum": meta.get("momentum", None),
         }
 
     # ══════════════════════════════════════════════════════════════════
@@ -1130,18 +1170,15 @@ class VolStraddleStrategy:
         """Serialize strategy state for persistence."""
         positions = {}
         for sym, pos in self._positions.items():
-            positions[sym] = {
-                k: v for k, v in pos.items()
-                if not k.startswith('_')
-            }
+            positions[sym] = {k: v for k, v in pos.items() if not k.startswith("_")}
         return {
-            'strategy_name': 'vol_straddle',
-            'positions': positions,
+            "strategy_name": "vol_straddle",
+            "positions": positions,
         }
 
     def from_state_dict(self, state: dict) -> None:
         """Restore strategy state from persisted data."""
         self._positions = {}
-        positions = state.get('positions', {})
+        positions = state.get("positions", {})
         for sym, pos_data in positions.items():
             self._positions[sym] = pos_data

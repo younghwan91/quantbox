@@ -9,9 +9,9 @@ from quantbox.notifications.bot import (
 )
 
 __all__ = [
-    'DiscordNotifier',
-    'DiscordBotRunner',
-    'BotCommand',
-    'CommandType',
-    'TradingBot',
+    "DiscordNotifier",
+    "DiscordBotRunner",
+    "BotCommand",
+    "CommandType",
+    "TradingBot",
 ]

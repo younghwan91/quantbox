@@ -31,74 +31,104 @@ class TestPartialCloseNotional:
         """After partial close at profit, remaining notional is entry-based."""
         scalper = _make_scalper(
             paper=True,
-            partial_exit_enabled=True, partial_exit_fraction=0.5,
+            partial_exit_enabled=True,
+            partial_exit_fraction=0.5,
             breakeven_after_partial=True,
         )
         scalper._save_state = MagicMock()
 
         # Manually create a position: entry $100, notional $100, qty 1.0
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.05,
-            server_sl_order_id='sl_1', server_tp_order_id='tp_1',
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.05,
+            server_sl_order_id="sl_1",
+            server_tp_order_id="tp_1",
         )
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_2')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_2")
         scalper._round_qty = MagicMock(side_effect=lambda q, s: round(q, 3))
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'quantity_precision': 3,
-            'min_notional': 5.0,
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "quantity_precision": 3,
+                "min_notional": 5.0,
+            }
+        )
 
         # Partial close fills at $103 (3% profit)
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': '103.0', 'executedQty': '0.5', 'status': 'FILLED',
-        })
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": "103.0",
+                "executedQty": "0.5",
+                "status": "FILLED",
+            }
+        )
 
-        result = scalper._partial_close_position('TESTUSDT', 103.0)
+        result = scalper._partial_close_position("TESTUSDT", 103.0)
         assert result is True
 
-        pos = scalper.strategy._positions['TESTUSDT']
+        pos = scalper.strategy._positions["TESTUSDT"]
 
         # BUG-A fix: remaining notional = (1.0 - 0.5) * 100 = 50.0
         # Old buggy: 100 - 0.5 * 103 = 48.5 (WRONG)
-        assert pos['notional'] == pytest.approx(50.0, abs=0.01), \
+        assert pos["notional"] == pytest.approx(50.0, abs=0.01), (
             f"Runner notional must be entry-based: got {pos['notional']}"
+        )
 
     def test_runner_close_quantity_exact(self):
         """Runner close sends exactly remaining_qty to exchange (no dust)."""
         scalper = _make_scalper(
             paper=True,
-            partial_exit_enabled=True, partial_exit_fraction=0.5,
+            partial_exit_enabled=True,
+            partial_exit_fraction=0.5,
             breakeven_after_partial=True,
         )
         scalper._save_state = MagicMock()
 
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.05,
-            server_sl_order_id='sl_1', server_tp_order_id='tp_1',
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.05,
+            server_sl_order_id="sl_1",
+            server_tp_order_id="tp_1",
         )
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_2')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_2")
         scalper._round_qty = MagicMock(side_effect=lambda q, s: round(q, 3))
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'quantity_precision': 3,
-            'min_notional': 5.0,
-        })
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': '103.0', 'executedQty': '0.5', 'status': 'FILLED',
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "quantity_precision": 3,
+                "min_notional": 5.0,
+            }
+        )
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": "103.0",
+                "executedQty": "0.5",
+                "status": "FILLED",
+            }
+        )
 
-        scalper._partial_close_position('TESTUSDT', 103.0)
-        pos = scalper.strategy._positions['TESTUSDT']
+        scalper._partial_close_position("TESTUSDT", 103.0)
+        pos = scalper.strategy._positions["TESTUSDT"]
 
         # Verify remaining qty computable from notional
-        remaining_qty = pos['notional'] / pos['entry_price']
-        assert remaining_qty == pytest.approx(0.5, abs=0.001), \
-            f"remaining_qty must be 0.5, got {remaining_qty}"
+        remaining_qty = pos["notional"] / pos["entry_price"]
+        assert remaining_qty == pytest.approx(0.5, abs=0.001), f"remaining_qty must be 0.5, got {remaining_qty}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -119,12 +149,18 @@ class TestServerFillPnL:
 
         # Position: entry $100, notional $100 (qty=1.0)
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.05,
-            server_sl_order_id='sl_1', server_tp_order_id='tp_1',
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.05,
+            server_sl_order_id="sl_1",
+            server_tp_order_id="tp_1",
         )
 
         # Server TP fill at $105 (5% gain)
-        scalper._record_server_fill('TESTUSDT', 105.0, 1.0, 'server_tp')
+        scalper._record_server_fill("TESTUSDT", 105.0, 1.0, "server_tp")
 
         assert len(scalper._trade_history) == 1
         trade = scalper._trade_history[0]
@@ -136,10 +172,9 @@ class TestServerFillPnL:
         cost = 100.0 * scalper.config.round_trip_cost
         expected_net = expected_gross - cost
 
-        assert trade['pnl_pct'] == pytest.approx(expected_pnl_pct, abs=0.01)
-        assert trade['pnl_usd'] == pytest.approx(expected_net, abs=0.01)
-        assert trade['notional'] == pytest.approx(100.0, abs=0.01), \
-            "Trade record should show entry-based notional"
+        assert trade["pnl_pct"] == pytest.approx(expected_pnl_pct, abs=0.01)
+        assert trade["pnl_usd"] == pytest.approx(expected_net, abs=0.01)
+        assert trade["notional"] == pytest.approx(100.0, abs=0.01), "Trade record should show entry-based notional"
 
     def test_server_sl_pnl_not_understated(self):
         """Server SL fill loss must not be understated by exit-price."""
@@ -149,12 +184,18 @@ class TestServerFillPnL:
         scalper.discord = MagicMock()
 
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.05,
-            server_sl_order_id='sl_1', server_tp_order_id='tp_1',
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.05,
+            server_sl_order_id="sl_1",
+            server_tp_order_id="tp_1",
         )
 
         # Server SL fill at $96 (4% loss)
-        scalper._record_server_fill('TESTUSDT', 96.0, 1.0, 'server_sl')
+        scalper._record_server_fill("TESTUSDT", 96.0, 1.0, "server_sl")
 
         trade = scalper._trade_history[0]
         # Correct loss: -4% * $100 = -$4.0
@@ -163,7 +204,7 @@ class TestServerFillPnL:
         cost = 100.0 * scalper.config.round_trip_cost
         expected_net = expected_gross - cost
 
-        assert trade['pnl_usd'] == pytest.approx(expected_net, abs=0.01)
+        assert trade["pnl_usd"] == pytest.approx(expected_net, abs=0.01)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -178,29 +219,45 @@ class TestPBTCostParity:
         """Partial close trade records round_trip_cost, not cost_per_side."""
         scalper = _make_scalper(
             paper=True,
-            partial_exit_enabled=True, partial_exit_fraction=0.5,
+            partial_exit_enabled=True,
+            partial_exit_fraction=0.5,
             breakeven_after_partial=True,
         )
         scalper._save_state = MagicMock()
         scalper.discord = MagicMock()
 
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.05,
-            server_sl_order_id='sl_1', server_tp_order_id='tp_1',
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.05,
+            server_sl_order_id="sl_1",
+            server_tp_order_id="tp_1",
         )
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_2')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_2")
         scalper._round_qty = MagicMock(side_effect=lambda q, s: round(q, 3))
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'quantity_precision': 3, 'min_notional': 5.0,
-        })
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': '103.0', 'executedQty': '0.5', 'status': 'FILLED',
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "quantity_precision": 3,
+                "min_notional": 5.0,
+            }
+        )
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": "103.0",
+                "executedQty": "0.5",
+                "status": "FILLED",
+            }
+        )
 
-        scalper._partial_close_position('TESTUSDT', 103.0)
+        scalper._partial_close_position("TESTUSDT", 103.0)
 
         assert len(scalper._trade_history) == 1
         trade = scalper._trade_history[0]
@@ -212,14 +269,14 @@ class TestPBTCostParity:
         pnl_pct = (103.0 - 100.0) / 100.0  # 3%
         expected_net = pnl_pct * partial_notional - expected_cost
 
-        assert trade['pnl_usd'] == pytest.approx(expected_net, abs=0.01), \
-            f"Cost must be round_trip, not cost_per_side"
+        assert trade["pnl_usd"] == pytest.approx(expected_net, abs=0.01), f"Cost must be round_trip, not cost_per_side"
 
     def test_runner_close_charges_round_trip(self):
         """Runner close trade records round_trip_cost, not cost_per_side."""
         scalper = _make_scalper(
             paper=True,
-            partial_exit_enabled=True, partial_exit_fraction=0.5,
+            partial_exit_enabled=True,
+            partial_exit_fraction=0.5,
             breakeven_after_partial=True,
         )
         scalper._save_state = MagicMock()
@@ -227,25 +284,39 @@ class TestPBTCostParity:
         scalper.get_balance = MagicMock(return_value=1000.0)
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_2')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_2")
         scalper._round_qty = MagicMock(side_effect=lambda q, s: round(q, 3))
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'quantity_precision': 3, 'min_notional': 5.0,
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "quantity_precision": 3,
+                "min_notional": 5.0,
+            }
+        )
 
         # Create position and manually set to runner state
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 50.0, 1.5, 0.05,
+            "TESTUSDT",
+            1,
+            100.0,
+            50.0,
+            1.5,
+            0.05,
         )
-        scalper.strategy._positions['TESTUSDT']['partial_closed'] = True
-        scalper.strategy._positions['TESTUSDT']['trail_floor'] = 0.0
+        scalper.strategy._positions["TESTUSDT"]["partial_closed"] = True
+        scalper.strategy._positions["TESTUSDT"]["trail_floor"] = 0.0
 
         # Close runner at $110
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': '110.0', 'executedQty': '0.5', 'status': 'FILLED',
-        })
-        result = scalper._close_position('TESTUSDT', 'trail_runner', 110.0)
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": "110.0",
+                "executedQty": "0.5",
+                "status": "FILLED",
+            }
+        )
+        result = scalper._close_position("TESTUSDT", "trail_runner", 110.0)
         assert result is True
 
         trade = scalper._trade_history[-1]
@@ -254,8 +325,7 @@ class TestPBTCostParity:
         pnl_pct = (110.0 - 100.0) / 100.0
         expected_net = pnl_pct * runner_notional - expected_cost
 
-        assert trade['pnl_usd'] == pytest.approx(expected_net, abs=0.01), \
-            f"Runner must charge round_trip_cost"
+        assert trade["pnl_usd"] == pytest.approx(expected_net, abs=0.01), f"Runner must charge round_trip_cost"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -271,7 +341,8 @@ class TestPartialNoPositionRecording:
         """NO_POSITION during partial close records a trade."""
         scalper = _make_scalper(
             paper=False,
-            partial_exit_enabled=True, partial_exit_fraction=0.5,
+            partial_exit_enabled=True,
+            partial_exit_fraction=0.5,
             breakeven_after_partial=True,
         )
         scalper._save_state = MagicMock()
@@ -279,32 +350,44 @@ class TestPartialNoPositionRecording:
         scalper.client.futures_account_trades = MagicMock(return_value=[])
 
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.05,
-            server_sl_order_id='sl_1', server_tp_order_id='tp_1',
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.05,
+            server_sl_order_id="sl_1",
+            server_tp_order_id="tp_1",
         )
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
         scalper._round_qty = MagicMock(side_effect=lambda q, s: round(q, 3))
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'quantity_precision': 3, 'min_notional': 5.0,
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "quantity_precision": 3,
+                "min_notional": 5.0,
+            }
+        )
 
         # Return NO_POSITION (server already closed it)
-        scalper._place_order = MagicMock(return_value={
-            'status': 'NO_POSITION',
-        })
+        scalper._place_order = MagicMock(
+            return_value={
+                "status": "NO_POSITION",
+            }
+        )
 
-        result = scalper._partial_close_position('TESTUSDT', 103.0)
+        result = scalper._partial_close_position("TESTUSDT", 103.0)
         assert result is False  # Partial close "failed" (position gone)
 
         # Trade MUST be recorded (this was the old bug — silently dropped)
-        assert len(scalper._trade_history) == 1, \
-            "NO_POSITION trade must be recorded!"
-        assert scalper._trade_history[0]['reason'] == 'server_fill_race'
+        assert len(scalper._trade_history) == 1, "NO_POSITION trade must be recorded!"
+        assert scalper._trade_history[0]["reason"] == "server_fill_race"
 
         # Position must be removed from internal state
-        assert not scalper.strategy.has_position('TESTUSDT')
+        assert not scalper.strategy.has_position("TESTUSDT")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -324,45 +407,54 @@ class TestPartialCloseFailureProtection:
         """Failed partial close re-places server SL; skips TP in PBT mode."""
         scalper = _make_scalper(
             paper=False,
-            partial_exit_enabled=True, partial_exit_fraction=0.5,
+            partial_exit_enabled=True,
+            partial_exit_fraction=0.5,
         )
         scalper._save_state = MagicMock()
 
         scalper.strategy.open_position(
-            'TESTUSDT', 1, 100.0, 100.0, 1.5, 0.05,
-            server_sl_order_id='sl_old', server_tp_order_id='tp_old',
+            "TESTUSDT",
+            1,
+            100.0,
+            100.0,
+            1.5,
+            0.05,
+            server_sl_order_id="sl_old",
+            server_tp_order_id="tp_old",
         )
         # Simulate: strategy.update_position() has already set flag
-        scalper.strategy._positions['TESTUSDT']['partial_closed'] = True
+        scalper.strategy._positions["TESTUSDT"]["partial_closed"] = True
 
         scalper._cancel_server_stop_loss = MagicMock()
         scalper._cancel_server_take_profit = MagicMock()
         scalper._round_qty = MagicMock(side_effect=lambda q, s: round(q, 3))
-        scalper.get_symbol_info = MagicMock(return_value={
-            'tick_size': 0.01, 'price_precision': 2,
-            'step_size': 0.001, 'quantity_precision': 3, 'min_notional': 5.0,
-        })
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "tick_size": 0.01,
+                "price_precision": 2,
+                "step_size": 0.001,
+                "quantity_precision": 3,
+                "min_notional": 5.0,
+            }
+        )
 
         # Place order FAILS
         scalper._place_order = MagicMock(return_value=None)
         # New server orders
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_new')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_new')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_new")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_new")
 
-        result = scalper._partial_close_position('TESTUSDT', 103.0)
+        result = scalper._partial_close_position("TESTUSDT", 103.0)
         assert result is False
 
         # SL MUST be re-placed to protect the downside
-        pos = scalper.strategy._positions['TESTUSDT']
-        assert pos['server_sl_order_id'] == 'sl_new', \
-            "Failed partial close must re-place server SL"
+        pos = scalper.strategy._positions["TESTUSDT"]
+        assert pos["server_sl_order_id"] == "sl_new", "Failed partial close must re-place server SL"
         # v12.5: In PBT mode, server TP IS re-placed with 50% qty
         # (server TP now fires for partial qty only, enabling Phase 2 runner).
-        assert pos['server_tp_order_id'] == 'tp_new', \
-            "PBT mode: failed partial close must re-place 50% server TP"
-        assert pos.get('server_tp_is_partial') is True, \
-            "Re-placed TP must be flagged as partial"
-        assert pos['partial_closed'] is False, "Must revert partial_closed flag"
+        assert pos["server_tp_order_id"] == "tp_new", "PBT mode: failed partial close must re-place 50% server TP"
+        assert pos.get("server_tp_is_partial") is True, "Re-placed TP must be flagged as partial"
+        assert pos["partial_closed"] is False, "Must revert partial_closed flag"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -405,13 +497,13 @@ class TestFreshATRForRunners:
         low[50:] = 98.0
 
         atr = compute_atr_pct(high, low, close, period=14)
-        atr_early = float(atr[30])   # Low vol period
-        atr_late = float(atr[-1])    # High vol period
+        atr_early = float(atr[30])  # Low vol period
+        atr_late = float(atr[-1])  # High vol period
 
-        assert atr_late > atr_early * 1.5, \
-            "ATR should increase with volatility"
+        assert atr_late > atr_early * 1.5, "ATR should increase with volatility"
 
     def test_scalper_imports_compute_atr_pct(self):
         """scalper.py imports compute_atr_pct for fresh ATR in cycle."""
         from quantbox.scalper import compute_atr_pct as imported_fn
+
         assert callable(imported_fn)

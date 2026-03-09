@@ -21,11 +21,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger('LiveTrader')
+logger = logging.getLogger("LiveTrader")
 
 # 기본 상태 파일 경로
-DEFAULT_STATE_DIR = Path('data/state')
-DEFAULT_STATE_FILE = DEFAULT_STATE_DIR / 'live_state.json'
+DEFAULT_STATE_DIR = Path("data/state")
+DEFAULT_STATE_FILE = DEFAULT_STATE_DIR / "live_state.json"
 
 
 def save_state(
@@ -56,24 +56,22 @@ def save_state(
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
     state = {
-        'version': '1.8.0',
-        'saved_at': datetime.now(timezone.utc).isoformat(),
-        'paper_mode': paper_mode,
-        'paper_balance': paper_balance,
-        'initial_balance': initial_balance,
-        'session_high_water_mark': session_high_water_mark,
-        'slots': _serialize_slots(slots),
-        'positions': _serialize_positions(slot_positions),
-        'entry_times': _serialize_entry_times(slot_entry_times),
-        'trade_history': _serialize_trade_history(trade_history),
+        "version": "1.8.0",
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "paper_mode": paper_mode,
+        "paper_balance": paper_balance,
+        "initial_balance": initial_balance,
+        "session_high_water_mark": session_high_water_mark,
+        "slots": _serialize_slots(slots),
+        "positions": _serialize_positions(slot_positions),
+        "entry_times": _serialize_entry_times(slot_entry_times),
+        "trade_history": _serialize_trade_history(trade_history),
     }
 
     # Atomic write: tmp 파일에 쓰고 rename (OS-level atomic on same filesystem)
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(filepath.parent), suffix='.tmp', prefix='state_'
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=str(filepath.parent), suffix=".tmp", prefix="state_")
     try:
-        with os.fdopen(fd, 'w') as f:
+        with os.fdopen(fd, "w") as f:
             json.dump(state, f, indent=2, default=str)
         os.replace(tmp_path, str(filepath))
         logger.debug(f"State saved to {filepath}")
@@ -101,12 +99,9 @@ def load_state(filepath: Path = DEFAULT_STATE_FILE) -> dict[str, Any] | None:
         return None
 
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             state = json.load(f)
-        logger.info(
-            f"State loaded from {filepath} "
-            f"(saved_at={state.get('saved_at', 'unknown')})"
-        )
+        logger.info(f"State loaded from {filepath} (saved_at={state.get('saved_at', 'unknown')})")
         return state
     except (json.JSONDecodeError, IOError) as e:
         logger.error(f"Failed to load state from {filepath}: {e}")
@@ -129,13 +124,15 @@ def _serialize_slots(slots: list) -> list[dict]:
     """TraderSlotState 리스트를 JSON-safe dict 리스트로 변환."""
     result = []
     for s in slots:
-        if hasattr(s, 'slot_id'):
+        if hasattr(s, "slot_id"):
             # TraderSlotState dataclass
-            result.append({
-                'slot_id': s.slot_id,
-                'position_open': s.position_open,
-                'current_pair': list(s.current_pair) if s.current_pair else None,
-            })
+            result.append(
+                {
+                    "slot_id": s.slot_id,
+                    "position_open": s.position_open,
+                    "current_pair": list(s.current_pair) if s.current_pair else None,
+                }
+            )
         else:
             # 이미 dict
             result.append(s)
@@ -149,7 +146,7 @@ def _serialize_positions(positions: dict[int, dict]) -> dict[str, dict]:
         safe_pos = {}
         for k, v in pos.items():
             # DataFrame은 저장하지 않음
-            if k.startswith('_'):
+            if k.startswith("_"):
                 continue
             safe_pos[k] = v
         result[str(slot_id)] = safe_pos
@@ -159,8 +156,7 @@ def _serialize_positions(positions: dict[int, dict]) -> dict[str, dict]:
 def _serialize_entry_times(entry_times: dict[int, datetime]) -> dict[str, str]:
     """slot_entry_times를 ISO format 문자열로 변환."""
     return {
-        str(slot_id): dt.isoformat() if isinstance(dt, datetime) else str(dt)
-        for slot_id, dt in entry_times.items()
+        str(slot_id): dt.isoformat() if isinstance(dt, datetime) else str(dt) for slot_id, dt in entry_times.items()
     }
 
 

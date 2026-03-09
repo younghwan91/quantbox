@@ -29,7 +29,7 @@ from quantbox.core.terminal_ui import (
     print_system_info,
 )
 
-logger = logging.getLogger('Scalper')
+logger = logging.getLogger("Scalper")
 
 
 class LoopMixin:
@@ -39,24 +39,25 @@ class LoopMixin:
         """Log periodic summary — always, even with 0 trades."""
         positions = self.strategy.active_positions
         n_trades = len(self._trade_history)
-        wins = sum(1 for t in self._trade_history if t['pnl_usd'] > 0)
-        total_pnl = sum(t['pnl_usd'] for t in self._trade_history)
+        wins = sum(1 for t in self._trade_history if t["pnl_usd"] > 0)
+        total_pnl = sum(t["pnl_usd"] for t in self._trade_history)
         wr = wins / n_trades * 100 if n_trades > 0 else 0
 
         hwm = self._high_water_mark if self._high_water_mark > 0 else balance
         dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
 
         # Time since last trade
-        last_trade_ago = ''
+        last_trade_ago = ""
         if self._trade_history:
-            last_t = self._trade_history[-1].get('time', '')
+            last_t = self._trade_history[-1].get("time", "")
             if last_t:
                 try:
                     from datetime import datetime as _dt
+
                     lt = _dt.fromisoformat(last_t)
                     delta = datetime.now(timezone.utc) - lt
                     hours = delta.total_seconds() / 3600
-                    last_trade_ago = f', LastTrade={hours:.1f}h ago'
+                    last_trade_ago = f", LastTrade={hours:.1f}h ago"
                 except Exception:
                     pass
 
@@ -73,16 +74,14 @@ class LoopMixin:
                 f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
                 f"entry=${pos['entry_price']:.4f} "
                 f"bars={pos['bars_held']}/{pos.get('max_hold', self.config.max_hold)} "
-                f"MFE={pos.get('best_pnl', 0)*100:+.2f}% "
-                f"MAE={pos.get('worst_pnl', 0)*100:+.2f}% "
+                f"MFE={pos.get('best_pnl', 0) * 100:+.2f}% "
+                f"MAE={pos.get('worst_pnl', 0) * 100:+.2f}% "
                 f"SL={pos.get('server_sl_order_id') or 'NONE'} "
                 f"TP={pos.get('server_tp_order_id') or 'NONE'}"
             )
 
         # Periodic VR distribution (every 16 cycles ≈ 4h) when no positions
-        if (self.strategy_name == 'vol_straddle'
-                and len(positions) == 0
-                and self._cycle_count % 16 == 0):
+        if self.strategy_name == "vol_straddle" and len(positions) == 0 and self._cycle_count % 16 == 0:
             self._log_vr_distribution()
 
     def _log_vr_distribution(self) -> None:
@@ -91,10 +90,10 @@ class LoopMixin:
         Provides visibility into market state during extended no-signal
         periods. Fires every ~4h (16 cycles × 15m).
         """
-        if not hasattr(self.strategy, 'get_vr_all_tf'):
+        if not hasattr(self.strategy, "get_vr_all_tf"):
             return
         vr_entries: list[tuple[str, float, dict[str, float]]] = []
-        for sym in (self._cfg.symbol_whitelist or []):
+        for sym in self._cfg.symbol_whitelist or []:
             vr_all = self.strategy.get_vr_all_tf(sym)
             min_vr = min(vr_all.values())
             if min_vr < 999.0:
@@ -109,22 +108,20 @@ class LoopMixin:
                 f"    {rank:2d}. {sym:<16s} min={min_vr:.3f} "
                 f"(15m={vr_all['15m']:.3f} 1h={vr_all['1h']:.3f} 4h={vr_all['4h']:.3f})"
             )
-        logger.info('\n'.join(lines))
+        logger.info("\n".join(lines))
 
     def _print_startup_banner(self, balance: float, n_symbols: int) -> None:
         """Print the startup banner with system info."""
         settings = get_settings()
-        mode_str = 'PAPER' if self.paper_mode else 'LIVE'
+        mode_str = "PAPER" if self.paper_mode else "LIVE"
         print_banner()
-        if GIT_COMMIT['short']:
-            logger.info(
-                f"Git: {GIT_COMMIT['short']} — {GIT_COMMIT['message']}"
-            )
-        if self.strategy_name == 'vol_straddle':
+        if GIT_COMMIT["short"]:
+            logger.info(f"Git: {GIT_COMMIT['short']} — {GIT_COMMIT['message']}")
+        if self.strategy_name == "vol_straddle":
             vc = self.vs_config
             print_system_info(
                 mode=mode_str,
-                strategy='vol_straddle',
+                strategy="vol_straddle",
                 balance=balance,
                 n_symbols=n_symbols,
                 max_slots=vc.max_concurrent,
@@ -135,7 +132,7 @@ class LoopMixin:
                 target=vc.d_tp,
                 stop_mult=vc.d_sl,
                 max_hold=vc.max_hold_15m,
-                entry_mode='vr_compression',
+                entry_mode="vr_compression",
                 min_confidence=0.0,
                 testnet=settings.binance_testnet,
                 ma_cluster_enabled=vc.ma_cluster_enabled,
@@ -172,13 +169,9 @@ class LoopMixin:
         now = datetime.now(timezone.utc)
         next_boundary = ((now.minute // 15) + 1) * 15
         if next_boundary >= 60:
-            target = now.replace(
-                minute=0, second=5, microsecond=0
-            ) + timedelta(hours=1)
+            target = now.replace(minute=0, second=5, microsecond=0) + timedelta(hours=1)
         else:
-            target = now.replace(
-                minute=next_boundary, second=5, microsecond=0
-            )
+            target = now.replace(minute=next_boundary, second=5, microsecond=0)
         return target
 
     def _wait_for_bar(self) -> None:
@@ -192,11 +185,11 @@ class LoopMixin:
         target = self._next_bar_time()
         remaining = (target - datetime.now(timezone.utc)).total_seconds()
         if remaining > 0:
-            next_str = target.strftime('%H:%M:%S UTC')
+            next_str = target.strftime("%H:%M:%S UTC")
             logger.info(f"Waiting {remaining:.0f}s for next bar close ({next_str})")
 
-        BOT_POLL_INTERVAL = 5.0    # Check bot commands every 5s
-        SYNC_INTERVAL = 60.0       # Sync server orders every 60s
+        BOT_POLL_INTERVAL = 5.0  # Check bot commands every 5s
+        SYNC_INTERVAL = 60.0  # Sync server orders every 60s
         last_sync = time.monotonic()
 
         while True:

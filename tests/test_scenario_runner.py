@@ -27,9 +27,10 @@ from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 #  Helpers
 # ──────────────────────────────────────────────────────────
 
+
 def _open_vr_long(
     strategy: VolStraddleStrategy,
-    symbol: str = 'TESTUSDT',
+    symbol: str = "TESTUSDT",
     entry_price: float = 100.0,
     notional: float = 1000.0,
     leverage: float = 25.0,
@@ -45,18 +46,23 @@ def _open_vr_long(
 
     pos_key = f"{symbol}:LONG" if cfg.hedge_mode else symbol
     strategy.open_position(
-        symbol=symbol, signal=1,
-        entry_price=entry_price, notional=notional,
-        leverage=leverage, move_size=1.0,
-        sl=_sl, tp=_tp, max_hold=_max_hold,
-        position_side='LONG' if cfg.hedge_mode else None,
+        symbol=symbol,
+        signal=1,
+        entry_price=entry_price,
+        notional=notional,
+        leverage=leverage,
+        move_size=1.0,
+        sl=_sl,
+        tp=_tp,
+        max_hold=_max_hold,
+        position_side="LONG" if cfg.hedge_mode else None,
     )
     return pos_key
 
 
 def _open_vr_short(
     strategy: VolStraddleStrategy,
-    symbol: str = 'TESTUSDT',
+    symbol: str = "TESTUSDT",
     entry_price: float = 100.0,
     notional: float = 1000.0,
     leverage: float = 25.0,
@@ -72,18 +78,23 @@ def _open_vr_short(
 
     pos_key = f"{symbol}:SHORT" if cfg.hedge_mode else symbol
     strategy.open_position(
-        symbol=symbol, signal=-1,
-        entry_price=entry_price, notional=notional,
-        leverage=leverage, move_size=1.0,
-        sl=_sl, tp=_tp, max_hold=_max_hold,
-        position_side='SHORT' if cfg.hedge_mode else None,
+        symbol=symbol,
+        signal=-1,
+        entry_price=entry_price,
+        notional=notional,
+        leverage=leverage,
+        move_size=1.0,
+        sl=_sl,
+        tp=_tp,
+        max_hold=_max_hold,
+        position_side="SHORT" if cfg.hedge_mode else None,
     )
     return pos_key
 
 
 def _open_ma_cluster(
     strategy: VolStraddleStrategy,
-    symbol: str = 'TESTUSDT',
+    symbol: str = "TESTUSDT",
     signal: int = 1,
     entry_price: float = 100.0,
     notional: float = 1000.0,
@@ -95,24 +106,28 @@ def _open_ma_cluster(
 
     # Set signal metadata to ma_cluster type
     strategy._last_signal_meta[symbol] = {
-        'tf': '4h',
-        'sl': cfg.ma_cluster_sl,
-        'tp': cfg.ma_cluster_tp,
-        'max_hold': cfg.ma_cluster_max_hold_4h * 16,
-        'vr': 0.0,
-        'momentum': 0.05,
-        'strategy_type': 'ma_cluster',
-        'ma_cluster_spread': 1.5,
-        'ma_cluster_duration': 10,
-        'leverage_override': leverage,
+        "tf": "4h",
+        "sl": cfg.ma_cluster_sl,
+        "tp": cfg.ma_cluster_tp,
+        "max_hold": cfg.ma_cluster_max_hold_4h * 16,
+        "vr": 0.0,
+        "momentum": 0.05,
+        "strategy_type": "ma_cluster",
+        "ma_cluster_spread": 1.5,
+        "ma_cluster_duration": 10,
+        "leverage_override": leverage,
     }
     strategy.open_position(
-        symbol=symbol, signal=signal,
-        entry_price=entry_price, notional=notional,
-        leverage=leverage, move_size=1.0,
-        sl=cfg.ma_cluster_sl, tp=cfg.ma_cluster_tp,
+        symbol=symbol,
+        signal=signal,
+        entry_price=entry_price,
+        notional=notional,
+        leverage=leverage,
+        move_size=1.0,
+        sl=cfg.ma_cluster_sl,
+        tp=cfg.ma_cluster_tp,
         max_hold=cfg.ma_cluster_max_hold_4h * 16,
-        position_side=('LONG' if signal == 1 else 'SHORT') if cfg.hedge_mode else None,
+        position_side=("LONG" if signal == 1 else "SHORT") if cfg.hedge_mode else None,
     )
     return pos_key
 
@@ -128,7 +143,8 @@ def _tick(
     _high = high if high is not None else price
     _low = low if low is not None else price
     return strategy.update_position(
-        pos_key, price,
+        pos_key,
+        price,
         current_atr_pct=0.02,
         current_high=_high,
         current_low=_low,
@@ -138,6 +154,7 @@ def _tick(
 # ──────────────────────────────────────────────────────────
 #  Fixtures
 # ──────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def strategy() -> VolStraddleStrategy:
@@ -155,6 +172,7 @@ def cfg() -> VolStraddleConfig:
 #  Scenario 1: STOP LOSS — LONG
 # ══════════════════════════════════════════════════════════
 
+
 class TestStopLoss:
     """가격 역행 → SL hit 검증."""
 
@@ -170,7 +188,7 @@ class TestStopLoss:
 
         # Bar 2: low touches SL level exactly
         reason = _tick(strategy, pos_key, 99.0, high=99.5, low=sl_price)
-        assert reason == 'stop_loss', f"Expected stop_loss, got {reason}"
+        assert reason == "stop_loss", f"Expected stop_loss, got {reason}"
 
     def test_short_sl_hit(self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig):
         """SHORT entry=100, SL=1% → high=101.1 triggers SL."""
@@ -184,10 +202,12 @@ class TestStopLoss:
 
         # Bar 2: high pierces SL
         reason = _tick(strategy, pos_key, 100.8, high=sl_price + 0.1, low=100.5)
-        assert reason == 'stop_loss'
+        assert reason == "stop_loss"
 
     def test_sl_not_triggered_when_trailing_active(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """SL check is skipped when trailing stop is active (R43 parity).
 
@@ -205,19 +225,21 @@ class TestStopLoss:
         assert reason is None, "Should activate trail but not exit yet"
 
         pos = strategy._positions[pos_key]
-        assert pos['trail_active'] is True, "Trail should be active"
+        assert pos["trail_active"] is True, "Trail should be active"
 
         # Drop past where SL would be (entry * 0.99 = 99.0)
         # Since trail is active, this should trigger trailing_stop not stop_loss
         sl_breach = 100.0 * (1.0 - cfg.d_sl - 0.001)  # ~98.9
         reason = _tick(strategy, pos_key, sl_breach, high=100.0, low=sl_breach)
-        assert reason == 'trailing_stop', \
+        assert reason == "trailing_stop", (
             f"When trailing active, exit must be trailing_stop not stop_loss, got {reason}"
+        )
 
 
 # ══════════════════════════════════════════════════════════
 #  Scenario 2: TAKE PROFIT — Hard TP ceiling
 # ══════════════════════════════════════════════════════════
+
 
 class TestTakeProfit:
     """가격 순행 → TP hit 검증."""
@@ -239,7 +261,7 @@ class TestTakeProfit:
 
         # Hit TP with tight bar
         reason = _tick(strategy, pos_key, tp_price, high=tp_price + 0.1, low=tp_price - 0.05)
-        assert reason == 'target', f"Expected target, got {reason}"
+        assert reason == "target", f"Expected target, got {reason}"
 
     def test_short_tp_hit(self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig):
         """SHORT entry=100, TP=12% → low=87.9 triggers TP.
@@ -257,18 +279,21 @@ class TestTakeProfit:
 
         # Hit TP with tight bar
         reason = _tick(strategy, pos_key, tp_price, high=tp_price + 0.05, low=tp_price - 0.1)
-        assert reason == 'target', f"Expected target, got {reason}"
+        assert reason == "target", f"Expected target, got {reason}"
 
 
 # ══════════════════════════════════════════════════════════
 #  Scenario 3: TRAILING STOP
 # ══════════════════════════════════════════════════════════
 
+
 class TestTrailingStop:
     """Trailing stop activation + hit 검증 (R43)."""
 
     def test_trail_activation_and_hit_long(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """LONG: price rises to activate → retraces → trail_stop hit.
 
@@ -287,8 +312,8 @@ class TestTrailingStop:
         assert reason is None, f"Should activate trail but not exit, got {reason}"
 
         pos = strategy._positions[pos_key]
-        assert pos['trail_active'] is True
-        assert pos['peak_gain'] >= trail_activate
+        assert pos["trail_active"] is True
+        assert pos["peak_gain"] >= trail_activate
 
         # Phase 2: Continue rising (update peak) — tight bar
         higher_peak = peak * 1.005  # ~103.0
@@ -296,14 +321,16 @@ class TestTrailingStop:
         assert reason is None
 
         # Phase 3: Retrace past trail distance → exit
-        peak_gain = pos['peak_gain']
+        peak_gain = pos["peak_gain"]
         trail_stop_level = 100.0 * (1.0 + peak_gain - trail_distance)
         low_breach = trail_stop_level - 0.5
         reason = _tick(strategy, pos_key, trail_stop_level, high=higher_peak - 1, low=low_breach)
-        assert reason == 'trailing_stop', f"Expected trailing_stop, got {reason}"
+        assert reason == "trailing_stop", f"Expected trailing_stop, got {reason}"
 
     def test_trail_activation_and_hit_short(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """SHORT: price drops to activate → bounces → trail_stop hit.
 
@@ -321,7 +348,7 @@ class TestTrailingStop:
         assert reason is None, f"Should activate trail but not exit, got {reason}"
 
         pos = strategy._positions[pos_key]
-        assert pos['trail_active'] is True
+        assert pos["trail_active"] is True
 
         # Phase 2: Drop more with tight bar
         lower = trough * 0.995  # ~97.0
@@ -329,17 +356,19 @@ class TestTrailingStop:
         assert reason is None
 
         # Phase 3: Bounce past trail distance → exit
-        peak_gain = pos['peak_gain']
+        peak_gain = pos["peak_gain"]
         trail_stop_gain = peak_gain - trail_distance
         # SHORT worst_gain = (entry - high) / entry
         # Trail fires when worst_gain <= trail_stop_gain
         # high that triggers: entry * (1 - trail_stop_gain) + margin
         high_breach = 100.0 * (1.0 - trail_stop_gain) + 0.5
         reason = _tick(strategy, pos_key, high_breach - 1, high=high_breach, low=lower + 1)
-        assert reason == 'trailing_stop', f"Expected trailing_stop, got {reason}"
+        assert reason == "trailing_stop", f"Expected trailing_stop, got {reason}"
 
     def test_trail_not_activated_below_threshold(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """Trailing stop should NOT activate below threshold."""
         pos_key = _open_vr_long(strategy, entry_price=100.0)
@@ -351,12 +380,13 @@ class TestTrailingStop:
         assert reason is None
 
         pos = strategy._positions[pos_key]
-        assert pos['trail_active'] is False
+        assert pos["trail_active"] is False
 
 
 # ══════════════════════════════════════════════════════════
 #  Scenario 4: MAX HOLD — time-based exit
 # ══════════════════════════════════════════════════════════
+
 
 class TestMaxHold:
     """보유 기간 초과 → 강제 청산."""
@@ -365,24 +395,29 @@ class TestMaxHold:
         """Position held exactly max_hold bars → triggers exit."""
         max_bars = 10  # Short for testing
         pos_key = _open_vr_long(
-            strategy, entry_price=100.0, max_hold=max_bars,
+            strategy,
+            entry_price=100.0,
+            max_hold=max_bars,
         )
 
         # Tick max_hold-1 times at breakeven (no SL/TP hit)
         for i in range(max_bars - 1):
             reason = _tick(strategy, pos_key, 100.0)
-            assert reason is None, f"Premature exit at bar {i+1}: {reason}"
+            assert reason is None, f"Premature exit at bar {i + 1}: {reason}"
 
         # Bar max_hold → exit
         reason = _tick(strategy, pos_key, 100.0)
-        assert reason == 'max_hold', f"Expected max_hold, got {reason}"
+        assert reason == "max_hold", f"Expected max_hold, got {reason}"
 
     def test_max_hold_not_triggered_before_limit(
-        self, strategy: VolStraddleStrategy,
+        self,
+        strategy: VolStraddleStrategy,
     ):
         """3/10 bars held → no exit."""
         pos_key = _open_vr_long(
-            strategy, entry_price=100.0, max_hold=10,
+            strategy,
+            entry_price=100.0,
+            max_hold=10,
         )
         for _ in range(3):
             reason = _tick(strategy, pos_key, 100.0)
@@ -393,11 +428,14 @@ class TestMaxHold:
 #  Scenario 5: MA CLUSTER — different SL/TP
 # ══════════════════════════════════════════════════════════
 
+
 class TestMACluster:
     """MA Cluster 전략의 SL/TP/max_hold 검증 (simple exit, no trailing)."""
 
     def test_ma_cluster_sl_hit(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """MA Cluster LONG, SL=2% → low=97.9 → stop_loss."""
         pos_key = _open_ma_cluster(strategy, signal=1, entry_price=100.0)
@@ -405,7 +443,7 @@ class TestMACluster:
 
         # Verify strategy_type stored correctly
         pos = strategy._positions[pos_key]
-        assert pos.get('strategy_type') == 'ma_cluster'
+        assert pos.get("strategy_type") == "ma_cluster"
 
         # Hold
         reason = _tick(strategy, pos_key, 99.0, high=99.5, low=98.5)
@@ -414,10 +452,12 @@ class TestMACluster:
         # Hit SL
         sl_price = 100.0 * (1.0 - sl) - 0.1
         reason = _tick(strategy, pos_key, sl_price, high=99.0, low=sl_price)
-        assert reason == 'stop_loss'
+        assert reason == "stop_loss"
 
     def test_ma_cluster_tp_hit(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """MA Cluster LONG hard TP ceiling at 8% (r47: trailing fires first normally).
 
@@ -435,10 +475,12 @@ class TestMACluster:
         # Hit hard TP ceiling
         tp_price = 100.0 * (1.0 + tp)
         reason = _tick(strategy, pos_key, tp_price, high=tp_price + 0.05, low=tp_price)
-        assert reason == 'target', f"Expected target, got {reason}"
+        assert reason == "target", f"Expected target, got {reason}"
 
     def test_ma_cluster_uses_ma_trail_params(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """MA Cluster uses ma_cluster_trail_activate (4%), not d_trail_activate (0.5%).
 
@@ -453,11 +495,14 @@ class TestMACluster:
         assert reason is None
 
         pos = strategy._positions[pos_key]
-        assert pos.get('trail_active', False) is False, \
+        assert pos.get("trail_active", False) is False, (
             "MA cluster should NOT activate trail below ma_cluster_trail_activate"
+        )
 
     def test_ma_cluster_max_hold(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """MA Cluster max_hold = ma_cluster_max_hold_4h * 16 bars."""
         max_bars = cfg.ma_cluster_max_hold_4h * 16
@@ -466,16 +511,17 @@ class TestMACluster:
         # Tick up to max_hold-1
         for i in range(max_bars - 1):
             reason = _tick(strategy, pos_key, 100.0)
-            assert reason is None, f"Premature exit at bar {i+1}: {reason}"
+            assert reason is None, f"Premature exit at bar {i + 1}: {reason}"
 
         # Max hold bar
         reason = _tick(strategy, pos_key, 100.0)
-        assert reason == 'max_hold'
+        assert reason == "max_hold"
 
 
 # ══════════════════════════════════════════════════════════
 #  Scenario 6: MFE / MAE TRACKING
 # ══════════════════════════════════════════════════════════
+
 
 class TestMFEMAE:
     """MFE(best_pnl)와 MAE(worst_pnl)가 정확히 기록되는지 검증."""
@@ -486,11 +532,11 @@ class TestMFEMAE:
 
         _tick(strategy, pos_key, 103, high=105, low=101)
         pos = strategy._positions[pos_key]
-        assert pos['best_pnl'] == pytest.approx(0.05, abs=0.001)
+        assert pos["best_pnl"] == pytest.approx(0.05, abs=0.001)
 
         # Next bar lower → MFE stays at peak
         _tick(strategy, pos_key, 101, high=102, low=100.5)
-        assert pos['best_pnl'] == pytest.approx(0.05, abs=0.001)
+        assert pos["best_pnl"] == pytest.approx(0.05, abs=0.001)
 
     def test_mae_records_trough(self, strategy: VolStraddleStrategy):
         """LONG: low=97 → MAE should be ~-3%."""
@@ -498,11 +544,11 @@ class TestMFEMAE:
 
         _tick(strategy, pos_key, 99, high=100, low=97)
         pos = strategy._positions[pos_key]
-        assert pos['worst_pnl'] == pytest.approx(-0.03, abs=0.001)
+        assert pos["worst_pnl"] == pytest.approx(-0.03, abs=0.001)
 
         # Next bar higher → MAE stays at trough
         _tick(strategy, pos_key, 100, high=100.5, low=99)
-        assert pos['worst_pnl'] == pytest.approx(-0.03, abs=0.001)
+        assert pos["worst_pnl"] == pytest.approx(-0.03, abs=0.001)
 
     def test_short_mfe_mae(self, strategy: VolStraddleStrategy):
         """SHORT: best when price drops, worst when price rises."""
@@ -511,14 +557,15 @@ class TestMFEMAE:
         _tick(strategy, pos_key, 98, high=101, low=96)
         pos = strategy._positions[pos_key]
         # MFE = (entry - low) / entry = (100-96)/100 = 0.04
-        assert pos['best_pnl'] == pytest.approx(0.04, abs=0.001)
+        assert pos["best_pnl"] == pytest.approx(0.04, abs=0.001)
         # MAE = (entry - high) / entry = (100-101)/100 = -0.01
-        assert pos['worst_pnl'] == pytest.approx(-0.01, abs=0.001)
+        assert pos["worst_pnl"] == pytest.approx(-0.01, abs=0.001)
 
 
 # ══════════════════════════════════════════════════════════
 #  Scenario 7: POSITION SIZING VERIFICATION
 # ══════════════════════════════════════════════════════════
+
 
 class TestPositionSizing:
     """Position sizing 공식 검증 (전략 레벨)."""
@@ -552,11 +599,14 @@ class TestPositionSizing:
 #  Scenario 8: SL/TP PRIORITY ORDER
 # ══════════════════════════════════════════════════════════
 
+
 class TestExitPriority:
     """같은 바에서 SL과 TP가 동시에 가능할 때 우선순위 검증."""
 
     def test_sl_and_tp_same_bar_long(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """LONG: high hits TP AND low hits SL in same bar.
 
@@ -575,11 +625,12 @@ class TestExitPriority:
         reason = _tick(strategy, pos_key, 100.0, high=extreme_high, low=extreme_low)
         # Trail activates (high is +12% > 2%) and immediately fires
         # (low is way below peak - 0.3%)
-        assert reason == 'trailing_stop', \
-            f"Trail activates+fires on extreme bar, got {reason}"
+        assert reason == "trailing_stop", f"Trail activates+fires on extreme bar, got {reason}"
 
     def test_sl_and_tp_same_bar_ma_cluster(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """MA Cluster r47: trailing stop checked before SL.
 
@@ -591,57 +642,63 @@ class TestExitPriority:
         sl_pct = cfg.ma_cluster_sl  # 2%
 
         # Bar that hits SL but NOT trail_activate (price dips -3%, never rises above +4%)
-        sl_low = 100.0 * (1.0 - sl_pct) - 1.0   # 97 — breaches SL
-        below_trail_high = 100.0 * 1.03           # 103 — 3% gain, below ma_cluster_trail_activate (4%)
+        sl_low = 100.0 * (1.0 - sl_pct) - 1.0  # 97 — breaches SL
+        below_trail_high = 100.0 * 1.03  # 103 — 3% gain, below ma_cluster_trail_activate (4%)
         reason = _tick(strategy, pos_key, sl_low, high=below_trail_high, low=sl_low)
-        assert reason == 'stop_loss', f"Expected stop_loss when trail not active, got {reason}"
+        assert reason == "stop_loss", f"Expected stop_loss when trail not active, got {reason}"
 
 
 # ══════════════════════════════════════════════════════════
 #  Scenario 9: DIRECTION COVERAGE (long + short symmetry)
 # ══════════════════════════════════════════════════════════
 
+
 class TestDirectionSymmetry:
     """LONG과 SHORT이 대칭적으로 동작하는지 검증."""
 
     def test_long_and_short_sl_symmetric(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """Same % move triggers SL for both directions."""
         sl_pct = cfg.d_sl
 
         # LONG: SL at entry * (1 - sl_pct)
-        long_key = _open_vr_long(strategy, symbol='TEST1USDT', entry_price=100.0)
+        long_key = _open_vr_long(strategy, symbol="TEST1USDT", entry_price=100.0)
         long_sl = 100.0 * (1.0 - sl_pct) - 0.01
         reason = _tick(strategy, long_key, long_sl, low=long_sl)
-        assert reason == 'stop_loss'
+        assert reason == "stop_loss"
 
         # SHORT: SL at entry * (1 + sl_pct)
-        short_key = _open_vr_short(strategy, symbol='TEST2USDT', entry_price=100.0)
+        short_key = _open_vr_short(strategy, symbol="TEST2USDT", entry_price=100.0)
         short_sl = 100.0 * (1.0 + sl_pct) + 0.01
         reason = _tick(strategy, short_key, short_sl, high=short_sl)
-        assert reason == 'stop_loss'
+        assert reason == "stop_loss"
 
     def test_long_and_short_tp_symmetric(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """Same % move triggers TP for both directions."""
         tp_pct = cfg.d_tp
 
-        long_key = _open_vr_long(strategy, symbol='TEST3USDT', entry_price=100.0)
+        long_key = _open_vr_long(strategy, symbol="TEST3USDT", entry_price=100.0)
         long_tp = 100.0 * (1.0 + tp_pct) + 0.01
         reason = _tick(strategy, long_key, long_tp, high=long_tp)
-        assert reason == 'target'
+        assert reason == "target"
 
-        short_key = _open_vr_short(strategy, symbol='TEST4USDT', entry_price=100.0)
+        short_key = _open_vr_short(strategy, symbol="TEST4USDT", entry_price=100.0)
         short_tp = 100.0 * (1.0 - tp_pct) - 0.01
         reason = _tick(strategy, short_key, short_tp, low=short_tp)
-        assert reason == 'target'
+        assert reason == "target"
 
 
 # ══════════════════════════════════════════════════════════
 #  Scenario 10: EDGE CASES
 # ══════════════════════════════════════════════════════════
+
 
 class TestEdgeCases:
     """경계값 및 에지 케이스 검증."""
@@ -651,10 +708,12 @@ class TestEdgeCases:
         pos_key = _open_vr_long(strategy, entry_price=100.0)
         sl_price = 100.0 * (1.0 - cfg.d_sl)
         reason = _tick(strategy, pos_key, sl_price, high=100.0, low=sl_price)
-        assert reason == 'stop_loss'
+        assert reason == "stop_loss"
 
     def test_just_above_sl_boundary_long(
-        self, strategy: VolStraddleStrategy, cfg: VolStraddleConfig,
+        self,
+        strategy: VolStraddleStrategy,
+        cfg: VolStraddleConfig,
     ):
         """Low just above SL → should NOT trigger."""
         pos_key = _open_vr_long(strategy, entry_price=100.0)
@@ -670,11 +729,12 @@ class TestEdgeCases:
             assert reason is None
 
     def test_multiple_positions_independent(
-        self, strategy: VolStraddleStrategy,
+        self,
+        strategy: VolStraddleStrategy,
     ):
         """Multiple positions exit independently."""
-        key1 = _open_vr_long(strategy, symbol='AAAUSDT', entry_price=100.0, max_hold=5)
-        key2 = _open_vr_long(strategy, symbol='BBBUSDT', entry_price=200.0, max_hold=10)
+        key1 = _open_vr_long(strategy, symbol="AAAUSDT", entry_price=100.0, max_hold=5)
+        key2 = _open_vr_long(strategy, symbol="BBBUSDT", entry_price=200.0, max_hold=10)
 
         for _ in range(4):
             _tick(strategy, key1, 100.0)
@@ -683,5 +743,5 @@ class TestEdgeCases:
         # key1 exits at bar 5
         reason1 = _tick(strategy, key1, 100.0)
         reason2 = _tick(strategy, key2, 200.0)
-        assert reason1 == 'max_hold'
+        assert reason1 == "max_hold"
         assert reason2 is None  # still 5 bars to go

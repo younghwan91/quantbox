@@ -9,6 +9,7 @@ BUG3: Diagnostic log used rubber band config instead of vol_straddle config
 
 Commit: fix(v2.0.1) vol_straddle signal flow
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -97,8 +98,7 @@ class TestSignalFlowBarCounts:
         # With 500 bars and warmup=200, signal can fire on bars 200-499
         assert len(sig) == 500
         assert sig[-1] == 1, (
-            f"15m signal should fire on last bar with squeeze. "
-            f"VR[-1]={vr[-1]:.4f}, threshold={cfg.d_vr_threshold}"
+            f"15m signal should fire on last bar with squeeze. VR[-1]={vr[-1]:.4f}, threshold={cfg.d_vr_threshold}"
         )
 
     def test_15m_signal_blocked_with_200_bars(self):
@@ -124,25 +124,22 @@ class TestSignalFlowBarCounts:
         assert old_guard is True, "Old guard should pass with 500 (but not 200)"
 
         # OLD guard with 200 bars (the bug):
-        assert not (200 >= 4 * (cfg.vr_long + cfg.warmup_1h)), (
-            "Old guard correctly fails with 200 bars"
-        )
+        assert not (200 >= 4 * (cfg.vr_long + cfg.warmup_1h)), "Old guard correctly fails with 200 bars"
 
         # NEW guard: 4 * (warmup_1h + 1) = 4 * 51 = 204
         new_guard = min_len >= 4 * (cfg.warmup_1h + 1)
         assert new_guard is True, "New guard must pass with 500 bars"
 
         # NEW guard with 210 bars (minimal viable):
-        assert 210 >= 4 * (cfg.warmup_1h + 1), (
-            "New guard should pass with 210 bars"
-        )
+        assert 210 >= 4 * (cfg.warmup_1h + 1), "New guard should pass with 210 bars"
 
     def test_1h_signal_fires_with_500_bars(self):
         """BUG2 regression: 1h signal MUST fire with 500 bars and squeeze."""
         cfg = VolStraddleConfig()
         n_bars = 500
         close, high, low, vol = _make_squeeze_data(
-            n_bars, squeeze_bars=120,  # squeeze covers ~30 1h bars
+            n_bars,
+            squeeze_bars=120,  # squeeze covers ~30 1h bars
         )
 
         # Resample to 1h
@@ -155,8 +152,7 @@ class TestSignalFlowBarCounts:
         # warmup_1h=50, so can fire on bars 50-124
         assert len(sig) == 125
         assert sig[-1] == 1, (
-            f"1h signal should fire on last bar with squeeze. "
-            f"VR[-1]={vr[-1]:.4f}, threshold={cfg.d_vr_threshold}"
+            f"1h signal should fire on last bar with squeeze. VR[-1]={vr[-1]:.4f}, threshold={cfg.d_vr_threshold}"
         )
 
     def test_4h_signal_fires(self):
@@ -164,7 +160,8 @@ class TestSignalFlowBarCounts:
         cfg = VolStraddleConfig()
         n_bars = 100
         close, high, low, vol = _make_squeeze_data(
-            n_bars, squeeze_bars=20,
+            n_bars,
+            squeeze_bars=20,
         )
 
         vr = compute_vr(close, high, low, cfg.vr_short, cfg.vr_long)
@@ -172,25 +169,25 @@ class TestSignalFlowBarCounts:
 
         # warmup_4h=13, 100 bars → can fire on bars 13-99
         assert len(sig) == 100
-        assert sig[-1] == 1, (
-            f"4h signal should fire with squeeze. "
-            f"VR[-1]={vr[-1]:.4f}, threshold={cfg.d_vr_threshold}"
-        )
+        assert sig[-1] == 1, f"4h signal should fire with squeeze. VR[-1]={vr[-1]:.4f}, threshold={cfg.d_vr_threshold}"
 
 
 class TestStrategyOnBar:
     """Integration test: VolStraddleStrategy.on_bar with production bar counts."""
 
     def _setup_strategy_with_data(
-        self, n_15m: int = 500, n_4h: int = 100,
+        self,
+        n_15m: int = 500,
+        n_4h: int = 100,
     ) -> tuple[VolStraddleStrategy, str, np.ndarray]:
         """Create a strategy with properly sized squeeze data."""
         strategy = VolStraddleStrategy()
-        symbol = 'TESTUSDT'
+        symbol = "TESTUSDT"
 
         # 15m data with squeeze at end
         close, high, low, vol = _make_squeeze_data(
-            n_15m, squeeze_bars=60,
+            n_15m,
+            squeeze_bars=60,
         )
         taker = vol * 0.5
 
@@ -209,15 +206,12 @@ class TestStrategyOnBar:
         signal = strategy.on_bar(symbol, close, None)
 
         # With squeeze data on all TFs, at least one should fire
-        assert signal != 0, (
-            f"on_bar should produce a signal with squeeze data. "
-            f"Got signal={signal}"
-        )
+        assert signal != 0, f"on_bar should produce a signal with squeeze data. Got signal={signal}"
 
     def test_on_bar_blocked_with_200_bars(self):
         """Confirm old bug: on_bar returns 0 with only 200 bars (regression)."""
         strategy = VolStraddleStrategy()
-        symbol = 'TESTUSDT'
+        symbol = "TESTUSDT"
 
         # Use only 200 bars — this was the old download count
         close, high, low, vol = _make_squeeze_data(200, squeeze_bars=30)
@@ -229,9 +223,7 @@ class TestStrategyOnBar:
         signal = strategy.on_bar(symbol, close, None)
 
         # 15m: 200 < 201 → blocked. 1h: 200 < 204 → blocked. No 4h data → 0
-        assert signal == 0, (
-            "With 200 bars and no 4h data, on_bar should return 0 (bug repro)"
-        )
+        assert signal == 0, "With 200 bars and no 4h data, on_bar should return 0 (bug repro)"
 
     def test_signal_metadata_populated(self):
         """Signal metadata (tf, sl, tp) is populated after on_bar fires."""
@@ -240,10 +232,10 @@ class TestStrategyOnBar:
 
         if signal != 0:
             meta = strategy.get_last_signal_meta(symbol)
-            assert 'tf' in meta, "Signal metadata must include timeframe"
-            assert 'sl' in meta, "Signal metadata must include stop loss"
-            assert 'tp' in meta, "Signal metadata must include take profit"
-            assert meta['tf'] in ('15m', '1h', '4h'), f"Unknown TF: {meta['tf']}"
+            assert "tf" in meta, "Signal metadata must include timeframe"
+            assert "sl" in meta, "Signal metadata must include stop loss"
+            assert "tp" in meta, "Signal metadata must include take profit"
+            assert meta["tf"] in ("15m", "1h", "4h"), f"Unknown TF: {meta['tf']}"
 
 
 class TestDiagnosticConfig:
@@ -252,9 +244,7 @@ class TestDiagnosticConfig:
     def test_vs_config_threshold_is_zero(self):
         """vol_straddle compatibility threshold should be 0.0 (not 3.2%)."""
         cfg = VolStraddleConfig()
-        assert cfg.threshold == 0.0, (
-            f"vol_straddle threshold should be 0.0, got {cfg.threshold}"
-        )
+        assert cfg.threshold == 0.0, f"vol_straddle threshold should be 0.0, got {cfg.threshold}"
 
     def test_vs_config_lookback_is_8(self):
         """vol_straddle compatibility lookback is 8 (for move diagnostics)."""

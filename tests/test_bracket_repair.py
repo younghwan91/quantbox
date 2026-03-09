@@ -33,39 +33,49 @@ class TestWouldTriggerAtEntry:
         scalper = _make_scalper(paper=False, partial_exit_enabled=False)
         scalper._save_state = MagicMock()
         # _place_order succeeds (position opened)
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': '100.0', 'executedQty': '1.0', 'status': 'FILLED',
-        })
-        scalper._place_server_stop_loss = MagicMock(return_value='WOULD_TRIGGER')
-        scalper._place_server_take_profit = MagicMock(return_value='tp_999')
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": "100.0",
+                "executedQty": "1.0",
+                "status": "FILLED",
+            }
+        )
+        scalper._place_server_stop_loss = MagicMock(return_value="WOULD_TRIGGER")
+        scalper._place_server_take_profit = MagicMock(return_value="tp_999")
         scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
 
         import numpy as np
+
         closes = np.array([95.0] * 20 + [100.0])
-        result = scalper._open_position('TESTUSDT', 1, closes, 1000.0)
+        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
 
         assert result is True
-        pos = scalper.strategy._positions['TESTUSDT']
-        assert pos['server_sl_order_id'] is None, "WOULD_TRIGGER must be None"
-        assert pos['server_tp_order_id'] == 'tp_999'
+        pos = scalper.strategy._positions["TESTUSDT"]
+        assert pos["server_sl_order_id"] is None, "WOULD_TRIGGER must be None"
+        assert pos["server_tp_order_id"] == "tp_999"
 
     def test_tp_would_trigger_stored_as_none(self):
         scalper = _make_scalper(paper=False)
         scalper._save_state = MagicMock()
-        scalper._place_order = MagicMock(return_value={
-            'avgPrice': '100.0', 'executedQty': '1.0', 'status': 'FILLED',
-        })
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_888')
-        scalper._place_server_take_profit = MagicMock(return_value='WOULD_TRIGGER')
+        scalper._place_order = MagicMock(
+            return_value={
+                "avgPrice": "100.0",
+                "executedQty": "1.0",
+                "status": "FILLED",
+            }
+        )
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_888")
+        scalper._place_server_take_profit = MagicMock(return_value="WOULD_TRIGGER")
         scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
 
         import numpy as np
-        closes = np.array([95.0] * 20 + [100.0])
-        scalper._open_position('TESTUSDT', -1, closes, 1000.0)
 
-        pos = scalper.strategy._positions['TESTUSDT']
-        assert pos['server_tp_order_id'] is None, "WOULD_TRIGGER must be None"
-        assert pos['server_sl_order_id'] == 'sl_888'
+        closes = np.array([95.0] * 20 + [100.0])
+        scalper._open_position("TESTUSDT", -1, closes, 1000.0)
+
+        pos = scalper.strategy._positions["TESTUSDT"]
+        assert pos["server_tp_order_id"] is None, "WOULD_TRIGGER must be None"
+        assert pos["server_sl_order_id"] == "sl_888"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -81,13 +91,14 @@ class TestExternallyCancelledOrders:
         """Algo with CANCELLED status returns {'status': 'CANCELLED'}."""
         scalper = _make_scalper(paper=False)
         scalper.client._request_futures_api.return_value = {
-            'algoStatus': 'CANCELLED', 'orderType': 'STOP',
+            "algoStatus": "CANCELLED",
+            "orderType": "STOP",
         }
 
-        result = scalper._check_order_filled('BTCUSDT', '12345')
+        result = scalper._check_order_filled("BTCUSDT", "12345")
 
         assert result is not None
-        assert result['status'] == 'CANCELLED'
+        assert result["status"] == "CANCELLED"
 
     def test_cancelled_tp_triggers_bracket_repair(self):
         """Externally cancelled TP → ID cleared → bracket repair places new TP (non-PBT)."""
@@ -96,28 +107,32 @@ class TestExternallyCancelledOrders:
         scalper._save_state = MagicMock()
 
         scalper.strategy.open_position(
-            symbol='ETHUSDT', signal=1, entry_price=3000.0,
-            notional=300.0, leverage=3, move_size=0.03,
-            server_sl_order_id='1001',
-            server_tp_order_id='2002',
+            symbol="ETHUSDT",
+            signal=1,
+            entry_price=3000.0,
+            notional=300.0,
+            leverage=3,
+            move_size=0.03,
+            server_sl_order_id="1001",
+            server_tp_order_id="2002",
         )
 
         def mock_algo_api(method, path, signed=True, data=None):
-            if method == 'get':
-                algo_id = data.get('algoId') if data else None
+            if method == "get":
+                algo_id = data.get("algoId") if data else None
                 if algo_id == 2002:
-                    return {'algoStatus': 'CANCELLED', 'orderType': 'TAKE_PROFIT'}
+                    return {"algoStatus": "CANCELLED", "orderType": "TAKE_PROFIT"}
                 if algo_id == 1001:
-                    return {'algoStatus': 'NEW', 'orderType': 'STOP'}
-                return {'algoStatus': 'NEW'}
+                    return {"algoStatus": "NEW", "orderType": "STOP"}
+                return {"algoStatus": "NEW"}
             # POST = new bracket order
-            return {'algoId': 'tp_repaired'}
+            return {"algoId": "tp_repaired"}
 
         scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
         scalper._sync_server_orders()
 
-        pos = scalper.strategy._positions['ETHUSDT']
-        assert pos['server_tp_order_id'] == 'tp_repaired'
+        pos = scalper.strategy._positions["ETHUSDT"]
+        assert pos["server_tp_order_id"] == "tp_repaired"
         scalper._save_state.assert_called()
 
     def test_cancelled_sl_triggers_bracket_repair(self):
@@ -126,27 +141,31 @@ class TestExternallyCancelledOrders:
         scalper._save_state = MagicMock()
 
         scalper.strategy.open_position(
-            symbol='ETHUSDT', signal=-1, entry_price=3000.0,
-            notional=300.0, leverage=3, move_size=0.03,
-            server_sl_order_id='3003',
-            server_tp_order_id='4004',
+            symbol="ETHUSDT",
+            signal=-1,
+            entry_price=3000.0,
+            notional=300.0,
+            leverage=3,
+            move_size=0.03,
+            server_sl_order_id="3003",
+            server_tp_order_id="4004",
         )
 
         def mock_algo_api(method, path, signed=True, data=None):
-            if method == 'get':
-                algo_id = data.get('algoId') if data else None
+            if method == "get":
+                algo_id = data.get("algoId") if data else None
                 if algo_id == 4004:
-                    return {'algoStatus': 'NEW', 'orderType': 'TAKE_PROFIT'}
+                    return {"algoStatus": "NEW", "orderType": "TAKE_PROFIT"}
                 if algo_id == 3003:
-                    return {'algoStatus': 'EXPIRED', 'orderType': 'STOP'}
-                return {'algoStatus': 'NEW'}
-            return {'algoId': 'sl_repaired'}
+                    return {"algoStatus": "EXPIRED", "orderType": "STOP"}
+                return {"algoStatus": "NEW"}
+            return {"algoId": "sl_repaired"}
 
         scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
         scalper._sync_server_orders()
 
-        pos = scalper.strategy._positions['ETHUSDT']
-        assert pos['server_sl_order_id'] == 'sl_repaired'
+        pos = scalper.strategy._positions["ETHUSDT"]
+        assert pos["server_sl_order_id"] == "sl_repaired"
         scalper._save_state.assert_called()
 
 
@@ -162,17 +181,21 @@ class TestRunnerBracketRepairBEStop:
     def test_runner_repair_uses_be_stop(self):
         scalper = _make_scalper(paper=False, breakeven_after_partial=True)
         scalper._save_state = MagicMock()
-        scalper._place_server_stop_loss = MagicMock(return_value='sl_be')
+        scalper._place_server_stop_loss = MagicMock(return_value="sl_be")
         # No TP for runners (breakeven_after_partial=True skips TP)
 
         scalper.strategy.open_position(
-            symbol='BTCUSDT', signal=1, entry_price=50000.0,
-            notional=500.0, leverage=3, move_size=0.04,
+            symbol="BTCUSDT",
+            signal=1,
+            entry_price=50000.0,
+            notional=500.0,
+            leverage=3,
+            move_size=0.04,
             server_sl_order_id=None,  # missing → triggers repair
             server_tp_order_id=None,
         )
         # Mark as runner
-        scalper.strategy._positions['BTCUSDT']['partial_closed'] = True
+        scalper.strategy._positions["BTCUSDT"]["partial_closed"] = True
 
         # Bypass _check_order_filled (no algo orders to check)
         scalper._check_order_filled = MagicMock(return_value=None)
@@ -181,9 +204,7 @@ class TestRunnerBracketRepairBEStop:
         # Verify BE stop_mult=0.0001 was used
         scalper._place_server_stop_loss.assert_called_once()
         _, kwargs = scalper._place_server_stop_loss.call_args
-        assert kwargs['stop_mult'] == 0.0001, (
-            f"Runner repair must use BE stop 0.0001, got {kwargs['stop_mult']}"
-        )
+        assert kwargs["stop_mult"] == 0.0001, f"Runner repair must use BE stop 0.0001, got {kwargs['stop_mult']}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -203,21 +224,26 @@ class TestPartialCloseNoPosition:
         scalper._record_server_fill = MagicMock()
 
         scalper.strategy.open_position(
-            symbol='DOGEUSDT', signal=1, entry_price=0.10,
-            notional=100.0, leverage=3, move_size=0.03,
-            server_sl_order_id='sl_1', server_tp_order_id='tp_1',
+            symbol="DOGEUSDT",
+            signal=1,
+            entry_price=0.10,
+            notional=100.0,
+            leverage=3,
+            move_size=0.03,
+            server_sl_order_id="sl_1",
+            server_tp_order_id="tp_1",
         )
 
         # _place_order returns NO_POSITION (race: server SL closed it)
         scalper._place_order = MagicMock(
-            return_value={'status': 'NO_POSITION'},
+            return_value={"status": "NO_POSITION"},
         )
 
-        result = scalper._partial_close_position('DOGEUSDT', 0.11)
+        result = scalper._partial_close_position("DOGEUSDT", 0.11)
 
         assert result is False
         # Position must be cleaned up (close_position called internally)
-        assert 'DOGEUSDT' not in scalper.strategy._positions
+        assert "DOGEUSDT" not in scalper.strategy._positions
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -234,12 +260,17 @@ class TestSaveStateOnServerFill:
         scalper.discord = MagicMock()
 
         scalper.strategy.open_position(
-            symbol='XRPUSDT', signal=1, entry_price=0.50,
-            notional=100.0, leverage=3, move_size=0.03,
-            server_sl_order_id=None, server_tp_order_id=None,
+            symbol="XRPUSDT",
+            signal=1,
+            entry_price=0.50,
+            notional=100.0,
+            leverage=3,
+            move_size=0.03,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
         )
 
-        scalper._record_server_fill('XRPUSDT', 0.52, 200.0, 'server_tp')
+        scalper._record_server_fill("XRPUSDT", 0.52, 200.0, "server_tp")
 
         scalper._save_state.assert_called_once()
 
@@ -284,26 +315,31 @@ class TestForceCloseRecursionGuard:
 
         # _place_order returns None (close fails) → triggers SL re-placement
         scalper._place_order = MagicMock(return_value=None)
-        scalper._place_server_stop_loss = MagicMock(return_value='WOULD_TRIGGER')
+        scalper._place_server_stop_loss = MagicMock(return_value="WOULD_TRIGGER")
         scalper._place_server_take_profit = MagicMock(return_value=None)
 
         scalper.strategy.open_position(
-            symbol='BNBUSDT', signal=1, entry_price=300.0,
-            notional=300.0, leverage=3, move_size=0.03,
-            server_sl_order_id=None, server_tp_order_id=None,
+            symbol="BNBUSDT",
+            signal=1,
+            entry_price=300.0,
+            notional=300.0,
+            leverage=3,
+            move_size=0.03,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
         )
 
         # Call with force_ prefix — must NOT recurse
-        result = scalper._close_position('BNBUSDT', 'force_sl_breach', 290.0)
+        result = scalper._close_position("BNBUSDT", "force_sl_breach", 290.0)
 
         assert result is False
         # _place_order called exactly once (the initial close attempt)
         scalper._place_order.assert_called_once()
         # Position still exists (was NOT recursively closed)
-        assert 'BNBUSDT' in scalper.strategy._positions
+        assert "BNBUSDT" in scalper.strategy._positions
         # WOULD_TRIGGER must NOT be stored
-        pos = scalper.strategy._positions['BNBUSDT']
-        assert pos['server_sl_order_id'] is None
+        pos = scalper.strategy._positions["BNBUSDT"]
+        assert pos["server_sl_order_id"] is None
 
     def test_non_force_reason_triggers_recursive_close(self):
         """Non-force reason with WOULD_TRIGGER DOES recurse (once)."""
@@ -321,19 +357,26 @@ class TestForceCloseRecursionGuard:
                 return None  # first attempt fails
             # Second attempt (recursive force close) succeeds
             return {
-                'avgPrice': '290.0', 'executedQty': '1.0', 'status': 'FILLED',
+                "avgPrice": "290.0",
+                "executedQty": "1.0",
+                "status": "FILLED",
             }
 
         scalper._place_order = MagicMock(side_effect=mock_place_order)
-        scalper._place_server_stop_loss = MagicMock(return_value='WOULD_TRIGGER')
+        scalper._place_server_stop_loss = MagicMock(return_value="WOULD_TRIGGER")
 
         scalper.strategy.open_position(
-            symbol='BNBUSDT', signal=1, entry_price=300.0,
-            notional=300.0, leverage=3, move_size=0.03,
-            server_sl_order_id=None, server_tp_order_id=None,
+            symbol="BNBUSDT",
+            signal=1,
+            entry_price=300.0,
+            notional=300.0,
+            leverage=3,
+            move_size=0.03,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
         )
 
-        result = scalper._close_position('BNBUSDT', 'stop_loss', 290.0)
+        result = scalper._close_position("BNBUSDT", "stop_loss", 290.0)
 
         # Should have recursed and eventually closed
         assert call_count[0] == 2
@@ -360,7 +403,8 @@ class TestLimitChaserPartialFillNoPosition:
     def mock_client(self) -> MagicMock:
         client = MagicMock()
         client.futures_orderbook_ticker.return_value = {
-            "bidPrice": "50000.0", "askPrice": "50001.0",
+            "bidPrice": "50000.0",
+            "askPrice": "50001.0",
         }
         return client
 
@@ -372,16 +416,19 @@ class TestLimitChaserPartialFillNoPosition:
             fallback_to_market=True,
         )
         chaser = LimitOrderChaser(
-            client=mock_client, config=config, paper_mode=False,
+            client=mock_client,
+            config=config,
+            paper_mode=False,
         )
 
         # First limit order partially fills 0.005 of 0.01
         mock_client.futures_create_order.side_effect = [
-            {"orderId": 100, "status": "NEW"},     # 1st limit
-            {"orderId": 200, "status": "NEW"},     # 2nd limit (chase)
+            {"orderId": 100, "status": "NEW"},  # 1st limit
+            {"orderId": 200, "status": "NEW"},  # 2nd limit (chase)
         ]
 
         check_idx = [0]
+
         def mock_get_order(symbol, orderId):
             check_idx[0] += 1
             if check_idx[0] == 1:
@@ -403,11 +450,14 @@ class TestLimitChaserPartialFillNoPosition:
 
         # Market fallback → NO_POSITION (position closed between orders)
         original_market_fallback = chaser._market_fallback
-        chaser._market_fallback = MagicMock(return_value='NO_POSITION')
+        chaser._market_fallback = MagicMock(return_value="NO_POSITION")
 
         result = chaser.chase_limit_order(
-            "BTCUSDT", "SELL", 0.01,
-            tick_size=0.1, price_precision=1,
+            "BTCUSDT",
+            "SELL",
+            0.01,
+            tick_size=0.1,
+            price_precision=1,
             reduce_only=True,
         )
 
