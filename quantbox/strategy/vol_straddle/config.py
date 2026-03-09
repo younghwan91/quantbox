@@ -113,6 +113,13 @@ class VolStraddleConfig(BaseSettings):
     # Dynamic formula (balance/n_active+1) causes -2019 margin errors on 10-slot config.
     dynamic_capital_enabled: bool = False
 
+    # ── Live-Backtest Divergence Monitor ──
+    # Sends Discord alert when live WR/PF diverges from v14.5.0 backtest baseline.
+    divergence_min_trades: int = 30  # Minimum live trades before checking
+    divergence_pf_threshold: float = 0.80  # Alert if live PF < threshold (baseline=1.563)
+    divergence_wr_gap_pp: float = 10.0  # Alert if live WR is X pp below baseline (43.4%)
+    divergence_cooldown_hours: float = 24.0  # Min hours between alerts
+
     # ── SoftTight DD Scaling (safety mechanism) ──
     soft_equity_scale: bool = True
     soft_eq_dd1: float = 0.02  # 2% DD → 80% sizing
