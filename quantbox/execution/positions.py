@@ -793,8 +793,15 @@ class PositionMixin:
                     "bars_held": closed_pos["bars_held"],
                     "reason": "server_fill_race",
                     "time": datetime.now(timezone.utc).isoformat(),
+                    "strategy_type": closed_pos.get("strategy_type", "vr_squeeze"),
+                    "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
+                    "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
+                    "entry_time": closed_pos.get("opened_at"),
+                    "balance_before": self.get_balance(),
+                    "balance_after": self.get_balance(),
                 }
                 self._trade_history.append(trade)
+                self._journal.record(trade)
                 self._save_state()
                 logger.info(f"[{symbol}] NO_POSITION race recorded: PnL={pnl_pct * 100:+.2f}% (${net_pnl:+.2f})")
             return False
@@ -882,8 +889,15 @@ class PositionMixin:
             "bars_held": pos["bars_held"],
             "reason": "partial_close",
             "time": datetime.now(timezone.utc).isoformat(),
+            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "mfe_pct": pos.get("best_pnl", 0) * 100,
+            "mae_pct": pos.get("worst_pnl", 0) * 100,
+            "entry_time": pos.get("opened_at"),
+            "balance_before": self.get_balance(),
+            "balance_after": self.get_balance(),
         }
         self._trade_history.append(trade)
+        self._journal.record(trade)
 
         # v12.4.5: Save state immediately after partial close.
         # Without this, a crash before end-of-cycle _save_state() leaves
@@ -1192,8 +1206,15 @@ class PositionMixin:
                     "bars_held": closed_pos["bars_held"],
                     "reason": f"{reason}_no_position",
                     "time": datetime.now(timezone.utc).isoformat(),
+                    "strategy_type": closed_pos.get("strategy_type", "vr_squeeze"),
+                    "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
+                    "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
+                    "entry_time": closed_pos.get("opened_at"),
+                    "balance_before": self.get_balance(),
+                    "balance_after": self.get_balance(),
                 }
                 self._trade_history.append(trade)
+                self._journal.record(trade)
 
                 # v12.0: Exit diagnostic to JSONL
                 _diag_logger.log_exit(
@@ -1377,6 +1398,7 @@ class PositionMixin:
             self._paper_balance -= close_cost
 
         # Trade record
+        balance_before = self.get_balance()
         trade = {
             "symbol": api_symbol,
             "signal": pos["signal"],
@@ -1388,8 +1410,15 @@ class PositionMixin:
             "bars_held": pos["bars_held"],
             "reason": reason,
             "time": datetime.now(timezone.utc).isoformat(),
+            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "mfe_pct": pos.get("best_pnl", 0) * 100,
+            "mae_pct": pos.get("worst_pnl", 0) * 100,
+            "entry_time": pos.get("opened_at"),
+            "balance_before": balance_before,
+            "balance_after": None,  # filled below after balance settles
         }
         self._trade_history.append(trade)
+        self._journal.record(trade)
 
         # v12.0: Exit diagnostic to JSONL
         _diag_logger.log_exit(self._cycle_count, datetime.now(timezone.utc).isoformat(), trade)
