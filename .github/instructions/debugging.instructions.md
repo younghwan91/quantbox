@@ -294,8 +294,60 @@ cp data/state/scalper_state_backup_YYYYMMDD_HHMMSS.json data/state/scalper_state
 # 수정된 모듈의 관련 테스트만 빠르게
 python -m pytest tests/test_hedge_mode.py tests/test_bracket_repair.py -x -q
 
-# 전체 (990+ 테스트, ~25초)
+# 전체 (1130+ 테스트, ~35초)
 python -m pytest tests/ -x -q
 ```
 
 **테스트 없는 버그 수정 = 미완성.** 수정 후 반드시 regression test 추가.
+
+---
+
+## 7. Scalper 함수 시그니처 & 테스트 패턴 (이 세션에서 반복 실수 방지용)
+
+### 7.1 자주 틀리는 함수 시그니처 (3회 이상 실수)
+
+| 함수 | 올바른 시그니처 | 흔한 실수 |
+|------|---------------|-----------|
+| `_close_position` | `(pos_key, reason, price)` — 3개 | 4번째 arg `balance` 추가 → TypeError |
+| `_scan_entries` | `(symbols, btc_close, balance, max_entries)` — 4개 필수 | 3개만 전달, max_entries 생략 |
+| `_build_rb_scalper()` | `rb_cfg=None` param 있음 | kwarg 없이 정의하면 unexpected kwarg 에러 |
+
+### 7.2 Compound Key vs API Symbol
+
+```
+pos_key  → "TESTUSDT:LONG"  (strategy._positions dict key, hedge mode)
+api_sym  → "TESTUSDT"       (Binance API에 전달하는 순수 심볼)
+pos['symbol'] → "TESTUSDT"  (pos dict 안 symbol 필드 — 절대 ':' 포함 금지)
+
+# 올바른 추출
+api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
+```
+
+### 7.3 Rubberband vs VolStraddle Code Path
+
+| 코드 경로 | RubberBand | VolStraddle |
+|----------|-----------|-------------|
+| `_cycle` L525-527 | ✅ (rubberband-specific) | ❌ skip |
+| `strategy.on_bar()` signal | -1/0/1 | -1/0/1/2 (straddle=2) |
+| position key format | `"TESTUSDT"` (no colon) | `"TESTUSDT:LONG"` / `"TESTUSDT:SHORT"` |
+| `_place_order` position_side | `None` (One-Way) | `"LONG"` / `"SHORT"` (Hedge) |
+| `_scan_entries` 4h download | only if `vs_config.ma_cluster_enabled` | always (vol_straddle) |
+
+### 7.4 conftest.py 공유 Fixture 사용법
+
+```python
+from tests.conftest import _build_vs_scalper, _build_rb_scalper
+
+# VolStraddle scalper (paper mode, mocked client)
+scalper = _build_vs_scalper(balance=1000.0)
+
+# RubberBand scalper
+rb_scalper = _build_rb_scalper()  # rb_cfg= optional
+
+# 포지션 주입 (hedge mode, LONG)
+_inject_position(scalper, "TESTUSDT:LONG")
+# pos['symbol'] = "TESTUSDT" (자동으로 colon 없이 설정됨)
+```
+
+> ⚠️ `_build_vs_scalper`는 `pytest.fixture`가 아님 — 함수로 직접 호출.
+> `vs_scalper` fixture는 conftest.py에서 자동 주입되며, params 못 받음.
