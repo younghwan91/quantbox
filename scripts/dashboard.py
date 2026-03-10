@@ -37,7 +37,7 @@ st.markdown("""
 /* Terminal base — zero decoration */
 html, body, [data-testid="stApp"] {
     background-color: #000000 !important;
-    color: #C8C8C8;
+    color: #E0E0E0;
     font-family: 'Courier New', Courier, monospace;
     font-size: 16px;
 }
@@ -51,14 +51,14 @@ html, body, [data-testid="stApp"] {
 [data-testid="stDecoration"]{ display: none; }
 
 /* Dividers */
-hr { border-color: #222 !important; margin: 6px 0 !important; }
+hr { border-color: #2a2a2a !important; margin: 6px 0 !important; }
 
 /* ── HEADER BAR ── */
 .ticker {
     border-top: 2px solid #FF8C00;
     border-bottom: 1px solid #222;
-    padding: 6px 12px;
-    font-size: 0.95rem;
+    padding: 7px 12px;
+    font-size: 0.97rem;
     letter-spacing: 0.03em;
     margin-bottom: 10px;
     display: flex;
@@ -76,15 +76,15 @@ hr { border-color: #222 !important; margin: 6px 0 !important; }
 /* ── SECTION LABELS ── */
 .bb-header {
     color: #FF8C00;
-    font-size: 0.80rem;
+    font-size: 0.88rem;
     font-weight: bold;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.16em;
     border-bottom: 1px solid #1e1e1e;
     padding-bottom: 3px;
     margin: 10px 0 5px 0;
 }
 
-/* ── STAT STRIP (replaces scorecard cards) ── */
+/* ── STAT STRIP ── */
 .statstrip {
     display: flex;
     gap: 0;
@@ -97,31 +97,31 @@ hr { border-color: #222 !important; margin: 6px 0 !important; }
     border-right: 1px solid #1e1e1e;
 }
 .stat:last-child { border-right: none; }
-.stat .lbl  { color: #555; font-size: 0.72rem; letter-spacing: 0.14em; margin-bottom: 3px; }
+.stat .lbl  { color: #888; font-size: 0.80rem; letter-spacing: 0.12em; margin-bottom: 3px; }
 .stat .val  { color: #E8E8E8; font-size: 1.30rem; font-weight: bold; }
-.stat .sub  { color: #444; font-size: 0.72rem; margin-top: 2px; }
+.stat .sub  { color: #777; font-size: 0.80rem; margin-top: 2px; }
 
 /* ── TABLES ── */
 .bb-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.92rem;
+    font-size: 0.95rem;
     font-family: 'Courier New', monospace;
 }
 .bb-table th {
-    color: #555;
+    color: #999;
     border-bottom: 1px solid #1e1e1e;
-    padding: 3px 10px;
+    padding: 4px 10px;
     text-align: right;
-    font-size: 0.72rem;
-    letter-spacing: 0.12em;
+    font-size: 0.80rem;
+    letter-spacing: 0.10em;
     font-weight: normal;
 }
 .bb-table th:first-child { text-align: left; }
 .bb-table td {
     padding: 5px 10px;
-    border-bottom: 1px solid #0f0f0f;
-    color: #C0C0C0;
+    border-bottom: 1px solid #111;
+    color: #D8D8D8;
     text-align: right;
 }
 .bb-table td:first-child { text-align: left; }
@@ -131,18 +131,18 @@ hr { border-color: #222 !important; margin: 6px 0 !important; }
 /* Color tokens */
 .pos  { color: #00C853 !important; font-weight: bold; }
 .neg  { color: #D50000 !important; font-weight: bold; }
-.neu  { color: #555 !important; }
+.neu  { color: #999 !important; }
 .sym  { color: #FFFFFF !important; font-weight: bold; letter-spacing: 0.04em; }
-.tag-vr { color: #4A90D9; font-size: 0.78rem; }
-.tag-ma { color: #B8860B; font-size: 0.78rem; }
-.long-tag  { color: #00C853; font-size: 0.82rem; letter-spacing: 0.06em; }
-.short-tag { color: #D50000; font-size: 0.82rem; letter-spacing: 0.06em; }
+.tag-vr { color: #4A90D9; font-size: 0.88rem; }
+.tag-ma { color: #C8960C; font-size: 0.88rem; }
+.long-tag  { color: #00C853; font-size: 0.88rem; letter-spacing: 0.06em; }
+.short-tag { color: #D50000; font-size: 0.88rem; letter-spacing: 0.06em; }
 
 /* ── BAR CHART ── */
-.bar-row   { display: flex; align-items: center; margin: 4px 0; font-size: 0.88rem; }
-.bar-label { color: #555; width: 200px; letter-spacing: 0.04em; }
+.bar-row   { display: flex; align-items: center; margin: 4px 0; font-size: 0.92rem; }
+.bar-label { color: #999; width: 200px; letter-spacing: 0.04em; }
 .bar-fill  { color: #FF8C00; letter-spacing: -2px; }
-.bar-stat  { color: #AAA; margin-left: 10px; font-size: 0.82rem; }
+.bar-stat  { color: #D0D0D0; margin-left: 10px; font-size: 0.88rem; }
 </style>
 """, unsafe_allow_html=True)
 
