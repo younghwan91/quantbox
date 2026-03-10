@@ -122,6 +122,36 @@ python -m quantbox.scalper --strategy vol_straddle
 > ⚠️ 실거래 전 `.env`에 `BINANCE_API_KEY/SECRET` 설정 및 Binance Hedge Mode 활성화 필요.  
 > 자세한 설정: `MANUAL.md` 참조.
 
+## 📊 라이브 대시보드
+
+브라우저에서 실시간으로 포지션/잔고/트레이드 현황을 볼 수 있습니다.
+
+```bash
+# 시작 (백그라운드)
+bash scripts/start_dashboard.sh start
+
+# 중지
+bash scripts/start_dashboard.sh stop
+
+# 상태 확인
+bash scripts/start_dashboard.sh status
+```
+
+접속: `http://localhost:8501` (같은 PC) 또는 `http://[PC_IP]:8501` (같은 네트워크)
+
+- 30초마다 자동 새로고침
+- 현재 포지션, 잔고, 전략별 성과, 최근 트레이드 확인
+- CPU 사용: < 0.5% (대기 중), RAM: ~60MB — 트레이딩 성능에 영향 없음
+
+### 트레이드 내역 CLI
+
+```bash
+python3 scripts/journal.py              # 오늘 트레이드 + 전체 요약
+python3 scripts/journal.py symbols      # 심볼별 손익 랭킹
+python3 scripts/journal.py last 10      # 최근 10건
+python3 scripts/journal.py strategy     # 전략별 성과
+```
+
 ## 📁 프로젝트 구조
 
 \`\`\`
