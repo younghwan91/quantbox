@@ -1,8 +1,8 @@
 """QuantBox Terminal — Bloomberg-style live dashboard.
 
-실행:
+Usage:
     uv run streamlit run scripts/dashboard.py --server.headless true
-접속:
+Access:
     http://localhost:8501
 """
 import os
@@ -21,6 +21,7 @@ DB = Path(__file__).parent.parent / "data" / "journal.sqlite"
 STATE = Path(__file__).parent.parent / "data" / "state" / "scalper_state.json"
 REAL = "ABS(pnl_pct) < 10 AND symbol NOT LIKE 'TEST%' AND symbol NOT LIKE '%:%'"
 REFRESH = 30
+POSITIONS_TTL = 10  # faster refresh for open positions
 
 # ─── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -38,6 +39,7 @@ html, body, [data-testid="stApp"] {
     background-color: #000000 !important;
     color: #FFFFFF;
     font-family: 'Courier New', Courier, monospace;
+    font-size: 14px;
 }
 [data-testid="stApp"] > div { background-color: #000000 !important; }
 [data-testid="stSidebar"] { display: none; }
@@ -56,21 +58,21 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
     background: #0a0a0a;
     border: 1px solid #FF8C00;
     border-radius: 2px;
-    padding: 6px 14px;
-    font-size: 0.82rem;
+    padding: 8px 16px;
+    font-size: 0.92rem;
     letter-spacing: 0.04em;
     margin-bottom: 8px;
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
-.ticker .logo { color: #FF8C00; font-weight: bold; font-size: 0.95rem; }
+.ticker .logo { color: #FF8C00; font-weight: bold; font-size: 1.05rem; }
 .ticker .sep { color: #444; margin: 0 10px; }
 
 /* Section headers */
 .bb-header {
     color: #FF8C00;
-    font-size: 0.72rem;
+    font-size: 0.82rem;
     font-weight: bold;
     letter-spacing: 0.12em;
     border-bottom: 1px solid #333;
@@ -92,9 +94,9 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
     padding: 8px 10px;
     border-radius: 2px;
 }
-.card .label { color: #888; font-size: 0.65rem; letter-spacing: 0.1em; }
-.card .value { color: #FFF; font-size: 1.15rem; font-weight: bold; margin-top: 2px; }
-.card .sub   { color: #555; font-size: 0.62rem; margin-top: 1px; }
+.card .label { color: #888; font-size: 0.74rem; letter-spacing: 0.1em; }
+.card .value { color: #FFF; font-size: 1.28rem; font-weight: bold; margin-top: 2px; }
+.card .sub   { color: #555; font-size: 0.70rem; margin-top: 1px; }
 .card.green  { border-left-color: #00D964; }
 .card.red    { border-left-color: #FF3B3B; }
 .card.orange { border-left-color: #FF8C00; }
@@ -103,19 +105,19 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
 .bb-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     font-family: 'Courier New', monospace;
 }
 .bb-table th {
     color: #FF8C00;
     border-bottom: 1px solid #333;
-    padding: 3px 8px;
+    padding: 4px 10px;
     text-align: left;
-    font-size: 0.65rem;
+    font-size: 0.74rem;
     letter-spacing: 0.08em;
 }
 .bb-table td {
-    padding: 4px 8px;
+    padding: 5px 10px;
     border-bottom: 1px solid #111;
     color: #DDD;
 }
@@ -124,14 +126,14 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
 .neg  { color: #FF3B3B !important; font-weight: bold; }
 .neu  { color: #888 !important; }
 .sym  { color: #FFF !important; font-weight: bold; }
-.tag-vr { color: #58a6ff; font-size: 0.6rem; }
-.tag-ma { color: #d29922; font-size: 0.6rem; }
-.long-tag  { color: #00D964; font-size: 0.65rem; }
-.short-tag { color: #FF3B3B; font-size: 0.65rem; }
+.tag-vr { color: #58a6ff; font-size: 0.7rem; }
+.tag-ma { color: #d29922; font-size: 0.7rem; }
+.long-tag  { color: #00D964; font-size: 0.75rem; }
+.short-tag { color: #FF3B3B; font-size: 0.75rem; }
 
 /* Bar chart */
-.bar-row { display: flex; align-items: center; margin: 2px 0; font-size: 0.72rem; }
-.bar-label { color: #888; width: 200px; }
+.bar-row { display: flex; align-items: center; margin: 3px 0; font-size: 0.82rem; }
+.bar-label { color: #888; width: 210px; }
 .bar-fill  { color: #FF8C00; letter-spacing: -1px; }
 .bar-stat  { color: #DDD; margin-left: 8px; }
 </style>
@@ -161,7 +163,7 @@ def fetch_account() -> dict:
         return {"error": str(e)}
 
 
-@st.cache_data(ttl=28, show_spinner=False)
+@st.cache_data(ttl=POSITIONS_TTL, show_spinner=False)
 def fetch_positions() -> list[dict]:
     try:
         rows = []
@@ -264,13 +266,13 @@ def render():
   <span class="sep">|</span>
   <span>💰 <b>${wallet:,.2f}</b></span>
   <span class="sep">|</span>
-  <span>미실현 <span class="{upnl_class}">{unrealized:+,.2f} ({upnl_pct:+.2f}%)</span></span>
+  <span>Unrealized <span class="{upnl_class}">{unrealized:+,.2f} ({upnl_pct:+.2f}%)</span></span>
   <span class="sep">|</span>
-  <span>마진 <span class="neu">${margin:,.0f} / {margin_pct:.1f}%</span></span>
+  <span>Margin <span class="neu">${margin:,.0f} / {margin_pct:.1f}%</span></span>
   <span class="sep">|</span>
-  <span>포지션 <b>{n_pos}</b>/10</span>
+  <span>Positions <b>{n_pos}</b>/10</span>
   <span class="sep">|</span>
-  <span>누적 <span class="{totpnl_class}"><b>${total_pnl:+,.2f}</b></span></span>
+  <span>Cumulative <span class="{totpnl_class}"><b>${total_pnl:+,.2f}</b></span></span>
   <span class="sep">|</span>
   <span class="neu">{now_str}</span>
 </div>
@@ -285,7 +287,7 @@ def render():
     avg_bars = df["bars_held"].mean() if n_trades > 0 else 0
 
     streak_class = "green" if streak_type == "W" else ("red" if streak_type == "L" else "orange")
-    streak_label = f"연속 {'승' if streak_type=='W' else '패'}" if streak_type != "–" else "스트릭"
+    streak_label = f"{'WIN' if streak_type=='W' else 'LOSS'} STREAK" if streak_type != "–" else "STREAK"
     wr_class = "green" if wr >= 50 else "red"
     totpnl_card_class = "green" if total_pnl >= 0 else "red"
 
@@ -311,13 +313,13 @@ def render():
   </div>
   <div class="card green">
     <div class="label">BEST TRADE</div>
-    <div class="value" style="font-size:0.9rem">{best_str}</div>
+    <div class="value" style="font-size:1.0rem">{best_str}</div>
     <div class="sub">{best['exit_reason'] if best is not None else ''}</div>
   </div>
   <div class="card {streak_class}">
     <div class="label">{streak_label.upper()}</div>
     <div class="value">{streak_n}</div>
-    <div class="sub">{'연속 중' if streak_n > 0 else ''}</div>
+    <div class="sub">{'in a row' if streak_n > 0 else ''}</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -328,7 +330,7 @@ def render():
     with col_l:
         st.markdown('<div class="bb-header">OPEN POSITIONS</div>', unsafe_allow_html=True)
         if not positions:
-            st.markdown('<span class="neu" style="font-size:0.8rem">— No open positions —</span>', unsafe_allow_html=True)
+            st.markdown('<span class="neu" style="font-size:0.85rem">— No open positions —</span>', unsafe_allow_html=True)
         else:
             rows_html = ""
             for p in positions:
@@ -439,7 +441,7 @@ def render():
 <div class="bar-row">
   <span class="bar-label">{reason[:22]}</span>
   <span class="bar-fill">{bar}</span>
-  <span class="bar-stat"> {int(row['n'])}건 <span class="{avg_cls}">avg ${row['avg_pnl']:+.0f}</span></span>
+  <span class="bar-stat"> {int(row['n'])}x <span class="{avg_cls}">avg ${row['avg_pnl']:+.0f}</span></span>
 </div>"""
             st.markdown(bars_html, unsafe_allow_html=True)
 
