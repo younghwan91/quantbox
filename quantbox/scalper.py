@@ -1024,6 +1024,13 @@ class RubberBandScalper(
                 server_sl_order_id=pos.get("server_sl_order_id"),
                 server_tp_order_id=pos.get("server_tp_order_id"),
                 position_side=restored_position_side,
+                # Pass stored metadata so log shows correct strategy/SL/TP at restore
+                sl=pos.get("sl"),
+                tp=pos.get("tp"),
+                tf=pos.get("tf"),
+                max_hold=pos.get("max_hold"),
+                strategy_type=pos.get("strategy_type", "vr_squeeze"),
+                is_straddle=pos.get("is_straddle", False),
             )
             # Restore bars_held and PBT runner state
             if sym in self.strategy._positions:
