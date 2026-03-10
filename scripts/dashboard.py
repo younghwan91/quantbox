@@ -39,7 +39,7 @@ html, body, [data-testid="stApp"] {
     background-color: #000000 !important;
     color: #FFFFFF;
     font-family: 'Courier New', Courier, monospace;
-    font-size: 14px;
+    font-size: 16px;
 }
 [data-testid="stApp"] > div { background-color: #000000 !important; }
 [data-testid="stSidebar"] { display: none; }
@@ -59,20 +59,20 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
     border: 1px solid #FF8C00;
     border-radius: 2px;
     padding: 8px 16px;
-    font-size: 0.92rem;
+    font-size: 1.05rem;
     letter-spacing: 0.04em;
     margin-bottom: 8px;
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
-.ticker .logo { color: #FF8C00; font-weight: bold; font-size: 1.05rem; }
+.ticker .logo { color: #FF8C00; font-weight: bold; font-size: 1.18rem; }
 .ticker .sep { color: #444; margin: 0 10px; }
 
 /* Section headers */
 .bb-header {
     color: #FF8C00;
-    font-size: 0.82rem;
+    font-size: 0.95rem;
     font-weight: bold;
     letter-spacing: 0.12em;
     border-bottom: 1px solid #333;
@@ -94,9 +94,9 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
     padding: 8px 10px;
     border-radius: 2px;
 }
-.card .label { color: #888; font-size: 0.74rem; letter-spacing: 0.1em; }
-.card .value { color: #FFF; font-size: 1.28rem; font-weight: bold; margin-top: 2px; }
-.card .sub   { color: #555; font-size: 0.70rem; margin-top: 1px; }
+.card .label { color: #888; font-size: 0.86rem; letter-spacing: 0.1em; }
+.card .value { color: #FFF; font-size: 1.42rem; font-weight: bold; margin-top: 2px; }
+.card .sub   { color: #555; font-size: 0.80rem; margin-top: 1px; }
 .card.green  { border-left-color: #00D964; }
 .card.red    { border-left-color: #FF3B3B; }
 .card.orange { border-left-color: #FF8C00; }
@@ -105,7 +105,7 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
 .bb-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     font-family: 'Courier New', monospace;
 }
 .bb-table th {
@@ -113,7 +113,7 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
     border-bottom: 1px solid #333;
     padding: 4px 10px;
     text-align: left;
-    font-size: 0.74rem;
+    font-size: 0.84rem;
     letter-spacing: 0.08em;
 }
 .bb-table td {
@@ -126,14 +126,14 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
 .neg  { color: #FF3B3B !important; font-weight: bold; }
 .neu  { color: #888 !important; }
 .sym  { color: #FFF !important; font-weight: bold; }
-.tag-vr { color: #58a6ff; font-size: 0.7rem; }
-.tag-ma { color: #d29922; font-size: 0.7rem; }
-.long-tag  { color: #00D964; font-size: 0.75rem; }
-.short-tag { color: #FF3B3B; font-size: 0.75rem; }
+.tag-vr { color: #58a6ff; font-size: 0.82rem; }
+.tag-ma { color: #d29922; font-size: 0.82rem; }
+.long-tag  { color: #00D964; font-size: 0.87rem; }
+.short-tag { color: #FF3B3B; font-size: 0.87rem; }
 
 /* Bar chart */
-.bar-row { display: flex; align-items: center; margin: 3px 0; font-size: 0.82rem; }
-.bar-label { color: #888; width: 210px; }
+.bar-row { display: flex; align-items: center; margin: 3px 0; font-size: 0.93rem; }
+.bar-label { color: #888; width: 220px; }
 .bar-fill  { color: #FF8C00; letter-spacing: -1px; }
 .bar-stat  { color: #DDD; margin-left: 8px; }
 </style>
