@@ -34,108 +34,115 @@ st.set_page_config(
 # ─── Bloomberg CSS ────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Bloomberg Terminal base */
+/* Terminal base — zero decoration */
 html, body, [data-testid="stApp"] {
     background-color: #000000 !important;
-    color: #FFFFFF;
+    color: #C8C8C8;
     font-family: 'Courier New', Courier, monospace;
     font-size: 16px;
 }
 [data-testid="stApp"] > div { background-color: #000000 !important; }
-[data-testid="stSidebar"] { display: none; }
-.block-container { padding: 0.5rem 1rem !important; max-width: 100% !important; }
+[data-testid="stSidebar"]   { display: none; }
+.block-container { padding: 4px 12px !important; max-width: 100% !important; }
 
-/* Hide streamlit chrome */
-#MainMenu, footer, header { visibility: hidden; }
-[data-testid="stToolbar"] { display: none; }
-[data-testid="stDecoration"] { display: none; }
+/* Hide Streamlit chrome */
+#MainMenu, footer, header   { visibility: hidden; }
+[data-testid="stToolbar"]   { display: none; }
+[data-testid="stDecoration"]{ display: none; }
 
-/* Divider */
-hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
+/* Dividers */
+hr { border-color: #222 !important; margin: 6px 0 !important; }
 
-/* Ticker bar */
+/* ── HEADER BAR ── */
 .ticker {
-    background: #0a0a0a;
-    border: 1px solid #FF8C00;
-    border-radius: 2px;
-    padding: 8px 16px;
-    font-size: 1.05rem;
-    letter-spacing: 0.04em;
-    margin-bottom: 8px;
+    border-top: 2px solid #FF8C00;
+    border-bottom: 1px solid #222;
+    padding: 6px 12px;
+    font-size: 0.95rem;
+    letter-spacing: 0.03em;
+    margin-bottom: 10px;
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
-.ticker .logo { color: #FF8C00; font-weight: bold; font-size: 1.18rem; letter-spacing: 0.18em; }
-.ticker .sep { color: #333; margin: 0 12px; }
+.ticker .logo {
+    color: #FF8C00;
+    font-weight: bold;
+    font-size: 1.05rem;
+    letter-spacing: 0.22em;
+}
+.ticker .sep { color: #2a2a2a; margin: 0 14px; }
 
-/* Section headers */
+/* ── SECTION LABELS ── */
 .bb-header {
     color: #FF8C00;
-    font-size: 0.95rem;
+    font-size: 0.80rem;
     font-weight: bold;
-    letter-spacing: 0.12em;
-    border-bottom: 1px solid #333;
-    padding-bottom: 2px;
-    margin: 8px 0 4px 0;
+    letter-spacing: 0.18em;
+    border-bottom: 1px solid #1e1e1e;
+    padding-bottom: 3px;
+    margin: 10px 0 5px 0;
 }
 
-/* Score cards */
-.scorecard {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 6px;
-    margin-bottom: 8px;
+/* ── STAT STRIP (replaces scorecard cards) ── */
+.statstrip {
+    display: flex;
+    gap: 0;
+    border: 1px solid #1e1e1e;
+    margin-bottom: 10px;
 }
-.card {
-    background: #0d0d0d;
-    border: 1px solid #222;
-    border-left: 3px solid #FF8C00;
-    padding: 8px 10px;
-    border-radius: 2px;
+.stat {
+    flex: 1;
+    padding: 8px 14px;
+    border-right: 1px solid #1e1e1e;
 }
-.card .label { color: #888; font-size: 0.86rem; letter-spacing: 0.1em; }
-.card .value { color: #FFF; font-size: 1.42rem; font-weight: bold; margin-top: 2px; }
-.card .sub   { color: #555; font-size: 0.80rem; margin-top: 1px; }
-.card.green  { border-left-color: #00D964; }
-.card.red    { border-left-color: #FF3B3B; }
-.card.orange { border-left-color: #FF8C00; }
+.stat:last-child { border-right: none; }
+.stat .lbl  { color: #555; font-size: 0.72rem; letter-spacing: 0.14em; margin-bottom: 3px; }
+.stat .val  { color: #E8E8E8; font-size: 1.30rem; font-weight: bold; }
+.stat .sub  { color: #444; font-size: 0.72rem; margin-top: 2px; }
 
-/* Tables */
+/* ── TABLES ── */
 .bb-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     font-family: 'Courier New', monospace;
 }
 .bb-table th {
-    color: #FF8C00;
-    border-bottom: 1px solid #333;
-    padding: 4px 10px;
-    text-align: left;
-    font-size: 0.84rem;
-    letter-spacing: 0.08em;
+    color: #555;
+    border-bottom: 1px solid #1e1e1e;
+    padding: 3px 10px;
+    text-align: right;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    font-weight: normal;
 }
+.bb-table th:first-child { text-align: left; }
 .bb-table td {
     padding: 5px 10px;
-    border-bottom: 1px solid #111;
-    color: #DDD;
+    border-bottom: 1px solid #0f0f0f;
+    color: #C0C0C0;
+    text-align: right;
 }
-.bb-table tr:hover td { background: #0d0d0d; }
-.pos  { color: #00D964 !important; font-weight: bold; }
-.neg  { color: #FF3B3B !important; font-weight: bold; }
-.neu  { color: #888 !important; }
-.sym  { color: #FFF !important; font-weight: bold; }
-.tag-vr { color: #58a6ff; font-size: 0.82rem; }
-.tag-ma { color: #d29922; font-size: 0.82rem; }
-.long-tag  { color: #00D964; font-size: 0.87rem; }
-.short-tag { color: #FF3B3B; font-size: 0.87rem; }
+.bb-table td:first-child { text-align: left; }
+.bb-table tr:last-child td { border-bottom: none; }
+.bb-table tr:hover td { background: #0a0a0a; }
 
-/* Bar chart */
-.bar-row { display: flex; align-items: center; margin: 3px 0; font-size: 0.93rem; }
-.bar-label { color: #888; width: 220px; }
-.bar-fill  { color: #FF8C00; letter-spacing: -1px; }
-.bar-stat  { color: #DDD; margin-left: 8px; }
+/* Color tokens */
+.pos  { color: #00C853 !important; font-weight: bold; }
+.neg  { color: #D50000 !important; font-weight: bold; }
+.neu  { color: #555 !important; }
+.sym  { color: #FFFFFF !important; font-weight: bold; letter-spacing: 0.04em; }
+.tag-vr { color: #4A90D9; font-size: 0.78rem; }
+.tag-ma { color: #B8860B; font-size: 0.78rem; }
+.long-tag  { color: #00C853; font-size: 0.82rem; letter-spacing: 0.06em; }
+.short-tag { color: #D50000; font-size: 0.82rem; letter-spacing: 0.06em; }
+
+/* ── BAR CHART ── */
+.bar-row   { display: flex; align-items: center; margin: 4px 0; font-size: 0.88rem; }
+.bar-label { color: #555; width: 200px; letter-spacing: 0.04em; }
+.bar-fill  { color: #FF8C00; letter-spacing: -2px; }
+.bar-stat  { color: #AAA; margin-left: 10px; font-size: 0.82rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -287,40 +294,46 @@ def render():
     streak_type, streak_n = win_streak(df)
     avg_bars = df["bars_held"].mean() if n_trades > 0 else 0
 
-    streak_class = "green" if streak_type == "W" else ("red" if streak_type == "L" else "orange")
-    streak_label = f"{'WIN' if streak_type=='W' else 'LOSS'} STREAK" if streak_type != "–" else "STREAK"
-    wr_class = "green" if wr >= 50 else "red"
-    totpnl_card_class = "green" if total_pnl >= 0 else "red"
-
-    best_str  = f"+${best['pnl_usd']:.0f} ({best['symbol']})"  if best is not None else "–"
-    worst_str = f"${worst['pnl_usd']:.0f} ({worst['symbol']})" if worst is not None else "–"
+    wr_color      = "#00C853" if wr >= 50 else "#D50000"
+    totpnl_color  = "#00C853" if total_pnl >= 0 else "#D50000"
+    streak_label  = f"{'WIN' if streak_type=='W' else 'LOSS'} STREAK" if streak_type != "–" else "STREAK"
+    streak_color  = "#00C853" if streak_type == "W" else ("#D50000" if streak_type == "L" else "#555")
+    best_str      = f"+${best['pnl_usd']:.2f}  {best['symbol']}" if best is not None else "—"
+    worst_str     = f"${worst['pnl_usd']:.2f}  {worst['symbol']}" if worst is not None else "—"
+    wins          = int(df["pnl_usd"].gt(0).sum()) if n_trades > 0 else 0
+    losses        = int(df["pnl_usd"].le(0).sum()) if n_trades > 0 else 0
 
     st.markdown(f"""
-<div class="scorecard">
-  <div class="card orange">
-    <div class="label">TOTAL TRADES</div>
-    <div class="value">{n_trades}</div>
-    <div class="sub">avg {avg_bars:.0f} bars held</div>
+<div class="statstrip">
+  <div class="stat">
+    <div class="lbl">TRADES</div>
+    <div class="val">{n_trades}</div>
+    <div class="sub">avg {avg_bars:.0f} bars</div>
   </div>
-  <div class="card {wr_class}">
-    <div class="label">WIN RATE</div>
-    <div class="value">{wr:.1f}%</div>
-    <div class="sub">{int(df['pnl_usd'].gt(0).sum())}W / {int(df['pnl_usd'].le(0).sum())}L</div>
+  <div class="stat">
+    <div class="lbl">WIN RATE</div>
+    <div class="val" style="color:{wr_color}">{wr:.1f}%</div>
+    <div class="sub">{wins}W  {losses}L</div>
   </div>
-  <div class="card {totpnl_card_class}">
-    <div class="label">TOTAL PnL</div>
-    <div class="value">${total_pnl:+,.2f}</div>
-    <div class="sub">closed trades only</div>
+  <div class="stat">
+    <div class="lbl">CLOSED PnL</div>
+    <div class="val" style="color:{totpnl_color}">${total_pnl:+,.2f}</div>
+    <div class="sub">realized only</div>
   </div>
-  <div class="card green">
-    <div class="label">BEST TRADE</div>
-    <div class="value" style="font-size:1.0rem">{best_str}</div>
+  <div class="stat">
+    <div class="lbl">BEST TRADE</div>
+    <div class="val" style="color:#00C853;font-size:1.05rem">{best_str}</div>
     <div class="sub">{best['exit_reason'] if best is not None else ''}</div>
   </div>
-  <div class="card {streak_class}">
-    <div class="label">{streak_label.upper()}</div>
-    <div class="value">{streak_n}</div>
-    <div class="sub">{'in a row' if streak_n > 0 else ''}</div>
+  <div class="stat">
+    <div class="lbl">WORST TRADE</div>
+    <div class="val" style="color:#D50000;font-size:1.05rem">{worst_str}</div>
+    <div class="sub">{worst['exit_reason'] if worst is not None else ''}</div>
+  </div>
+  <div class="stat">
+    <div class="lbl">{streak_label}</div>
+    <div class="val" style="color:{streak_color}">{streak_n}</div>
+    <div class="sub">{'consecutive' if streak_n > 1 else ''}</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -352,7 +365,7 @@ def render():
 </tr>"""
             st.markdown(f"""
 <table class="bb-table">
-<tr><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>MARK</th><th>PnL%</th><th>PnL$</th><th>BARS</th><th>NOTIONAL</th></tr>
+<tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>MARK</th><th>PnL%</th><th>PnL USD</th><th>BARS</th><th>NOTIONAL</th></tr>
 {rows_html}
 </table>""", unsafe_allow_html=True)
 
@@ -382,7 +395,7 @@ def render():
 </tr>"""
             st.markdown(f"""
 <table class="bb-table">
-<tr><th>STRAT</th><th>N</th><th>WR</th><th>PnL$</th><th>MFE</th><th>MAE</th><th>AVG</th></tr>
+<tr><th style="text-align:left">STRAT</th><th>N</th><th>WIN%</th><th>PnL USD</th><th>MFE AVG</th><th>MAE AVG</th><th>AVG BARS</th></tr>
 {strat_rows}
 </table>""", unsafe_allow_html=True)
 
@@ -408,18 +421,18 @@ def render():
                 mae = r.get("mae_pct", 0) or 0
                 trade_rows += f"""
 <tr>
-  <td class="neu">{t}</td>
-  <td class="sym">{r['symbol']}</td>
+  <td class="neu" style="text-align:left">{t}</td>
+  <td class="sym" style="text-align:left">{r['symbol']}</td>
   <td><span class="{side_cls}">{r['direction']}</span></td>
   <td><span class="{tag_cls}">{'VR' if 'vr' in str(r['strategy_type']) else 'MA'}</span></td>
   <td class="{pct_class}">${pnl:+.2f}</td>
-  <td class="neu">MFE {mfe*100:+.1f}%</td>
-  <td class="neu">{r['bars_held']}b</td>
-  <td class="neu">{r['exit_reason']}</td>
+  <td class="neu">{mfe*100:+.1f}%</td>
+  <td class="neu">{r['bars_held']}</td>
+  <td class="neu" style="text-align:left">{r['exit_reason']}</td>
 </tr>"""
             st.markdown(f"""
 <table class="bb-table">
-<tr><th>TIME</th><th>SYMBOL</th><th>DIR</th><th>STR</th><th>PnL$</th><th>MFE</th><th>BARS</th><th>REASON</th></tr>
+<tr><th style="text-align:left">EXIT TIME</th><th style="text-align:left">SYMBOL</th><th>DIR</th><th>STR</th><th>PnL USD</th><th>MFE</th><th>BARS</th><th style="text-align:left">REASON</th></tr>
 {trade_rows}
 </table>""", unsafe_allow_html=True)
 
