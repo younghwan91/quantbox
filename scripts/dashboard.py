@@ -173,7 +173,7 @@ def fetch_positions() -> list[dict]:
                 continue
             entry = float(p["entryPrice"])
             mark  = float(p["markPrice"])
-            upnl  = float(p["unrealizedProfit"])
+            upnl  = float(p["unRealizedProfit"])
             pct   = (mark - entry) / entry * 100 if amt > 0 else (entry - mark) / entry * 100
             rows.append({
                 "symbol": p["symbol"],
@@ -185,7 +185,8 @@ def fetch_positions() -> list[dict]:
                 "notional": abs(float(p["notional"])),
             })
         return sorted(rows, key=lambda x: x["pct"], reverse=True)
-    except Exception:
+    except Exception as e:
+        st.error(f"positions error: {e}")
         return []
 
 
