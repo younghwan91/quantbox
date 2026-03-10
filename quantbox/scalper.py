@@ -120,6 +120,7 @@ class RubberBandScalper(
         strategy_name: str = "rubberband",
         elliott_config: ElliottConfig | None = None,
         vs_config: VolStraddleConfig | None = None,
+        journal_db_path: str | None = None,
     ):
         self.paper_mode = paper_mode
         self.config = config or RubberBandConfig()
@@ -188,7 +189,10 @@ class RubberBandScalper(
 
         # Trade journal (persistent SQLite)
         _session_str = "paper" if paper_mode else "live"
-        _db_path = "data/journal_paper.sqlite" if paper_mode else "data/journal.sqlite"
+        if journal_db_path is not None:
+            _db_path = journal_db_path
+        else:
+            _db_path = "data/journal_paper.sqlite" if paper_mode else "data/journal.sqlite"
         self._journal = TradeJournal(db_path=_db_path, session=_session_str)
 
         # Live-Backtest divergence monitor
