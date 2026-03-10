@@ -36,6 +36,7 @@ def mock_vs_scalper(tmp_path):
             paper_mode=False,
             strategy_name="vol_straddle",
             vs_config=VolStraddleConfig(hedge_mode=True),
+            journal_db_path=":memory:",
         )
 
     scalper.client = MagicMock()
@@ -138,6 +139,7 @@ class TestEnsurePositionMode:
             scalper = RubberBandScalper(
                 paper_mode=False,
                 strategy_name="rubberband",
+                journal_db_path=":memory:",
             )
         scalper.client = MagicMock()
         scalper.discord = MagicMock()
@@ -171,6 +173,7 @@ class TestEnsurePositionMode:
             scalper = RubberBandScalper(
                 paper_mode=False,
                 strategy_name="rubberband",
+                journal_db_path=":memory:",
             )
         scalper.client = MagicMock()
         scalper.discord = MagicMock()

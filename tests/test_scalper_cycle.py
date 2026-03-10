@@ -512,6 +512,7 @@ def _build_live_vs_scalper():
             paper_mode=False,  # LIVE mode so _sync_server_orders runs
             strategy_name="vol_straddle",
             vs_config=VolStraddleConfig(),
+            journal_db_path=":memory:",
         )
 
     scalper._symbol_info_cache["TESTUSDT"] = {

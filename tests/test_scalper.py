@@ -154,7 +154,7 @@ class TestNoPositionTradeRecording:
                 discord_channel_id="",
                 paper_balance=2000.0,
             )
-            scalper = RubberBandScalper(paper_mode=False)
+            scalper = RubberBandScalper(paper_mode=False, journal_db_path=":memory:")
 
         scalper.client = MagicMock()
         scalper.discord = MagicMock()
