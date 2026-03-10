@@ -1,10 +1,9 @@
-"""QuantBox Live Dashboard — scripts/dashboard.py
+"""QuantBox Terminal — Bloomberg-style live dashboard.
 
 실행:
     uv run streamlit run scripts/dashboard.py --server.headless true
 접속:
-    http://localhost:8501   (같은 컴퓨터)
-    http://[PC_IP]:8501     (같은 네트워크)
+    http://localhost:8501
 """
 import os
 import sqlite3
@@ -18,43 +17,140 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_LIVE = Path(__file__).parent.parent / "data" / "journal.sqlite"
-REAL_FILTER = "ABS(pnl_pct) < 10 AND symbol NOT LIKE 'TEST%' AND symbol NOT LIKE '%:%'"
-REFRESH_SEC = 30
+DB = Path(__file__).parent.parent / "data" / "journal.sqlite"
+STATE = Path(__file__).parent.parent / "data" / "state" / "scalper_state.json"
+REAL = "ABS(pnl_pct) < 10 AND symbol NOT LIKE 'TEST%' AND symbol NOT LIKE '%:%'"
+REFRESH = 30
 
-# ─── 페이지 설정 ──────────────────────────────────────────────────────────────
+# ─── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="QuantBox Dashboard",
-    page_icon="📈",
+    page_title="QuantBox Terminal",
+    page_icon="▪",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-st.markdown(
-    """
-    <style>
-    .main { background-color: #0d1117; }
-    .stMetric { background: #161b22; border-radius: 8px; padding: 10px; }
-    .positive { color: #3fb950; }
-    .negative { color: #f85149; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# ─── Bloomberg CSS ────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Bloomberg Terminal base */
+html, body, [data-testid="stApp"] {
+    background-color: #000000 !important;
+    color: #FFFFFF;
+    font-family: 'Courier New', Courier, monospace;
+}
+[data-testid="stApp"] > div { background-color: #000000 !important; }
+[data-testid="stSidebar"] { display: none; }
+.block-container { padding: 0.5rem 1rem !important; max-width: 100% !important; }
+
+/* Hide streamlit chrome */
+#MainMenu, footer, header { visibility: hidden; }
+[data-testid="stToolbar"] { display: none; }
+[data-testid="stDecoration"] { display: none; }
+
+/* Divider */
+hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
+
+/* Ticker bar */
+.ticker {
+    background: #0a0a0a;
+    border: 1px solid #FF8C00;
+    border-radius: 2px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.ticker .logo { color: #FF8C00; font-weight: bold; font-size: 0.95rem; }
+.ticker .sep { color: #444; margin: 0 10px; }
+
+/* Section headers */
+.bb-header {
+    color: #FF8C00;
+    font-size: 0.72rem;
+    font-weight: bold;
+    letter-spacing: 0.12em;
+    border-bottom: 1px solid #333;
+    padding-bottom: 2px;
+    margin: 8px 0 4px 0;
+}
+
+/* Score cards */
+.scorecard {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.card {
+    background: #0d0d0d;
+    border: 1px solid #222;
+    border-left: 3px solid #FF8C00;
+    padding: 8px 10px;
+    border-radius: 2px;
+}
+.card .label { color: #888; font-size: 0.65rem; letter-spacing: 0.1em; }
+.card .value { color: #FFF; font-size: 1.15rem; font-weight: bold; margin-top: 2px; }
+.card .sub   { color: #555; font-size: 0.62rem; margin-top: 1px; }
+.card.green  { border-left-color: #00D964; }
+.card.red    { border-left-color: #FF3B3B; }
+.card.orange { border-left-color: #FF8C00; }
+
+/* Tables */
+.bb-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+    font-family: 'Courier New', monospace;
+}
+.bb-table th {
+    color: #FF8C00;
+    border-bottom: 1px solid #333;
+    padding: 3px 8px;
+    text-align: left;
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+}
+.bb-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid #111;
+    color: #DDD;
+}
+.bb-table tr:hover td { background: #0d0d0d; }
+.pos  { color: #00D964 !important; font-weight: bold; }
+.neg  { color: #FF3B3B !important; font-weight: bold; }
+.neu  { color: #888 !important; }
+.sym  { color: #FFF !important; font-weight: bold; }
+.tag-vr { color: #58a6ff; font-size: 0.6rem; }
+.tag-ma { color: #d29922; font-size: 0.6rem; }
+.long-tag  { color: #00D964; font-size: 0.65rem; }
+.short-tag { color: #FF3B3B; font-size: 0.65rem; }
+
+/* Bar chart */
+.bar-row { display: flex; align-items: center; margin: 2px 0; font-size: 0.72rem; }
+.bar-label { color: #888; width: 200px; }
+.bar-fill  { color: #FF8C00; letter-spacing: -1px; }
+.bar-stat  { color: #DDD; margin-left: 8px; }
+</style>
+""", unsafe_allow_html=True)
 
 
-# ─── 데이터 로더 ──────────────────────────────────────────────────────────────
+# ─── Data helpers ─────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
-def get_client() -> Client:
+def get_client():
     return Client(
         api_key=os.environ.get("BINANCE_API_KEY", ""),
         api_secret=os.environ.get("BINANCE_API_SECRET", ""),
     )
 
 
-def fetch_account(client: Client) -> dict:
+@st.cache_data(ttl=28, show_spinner=False)
+def fetch_account() -> dict:
     try:
-        acct = client.futures_account()
+        acct = get_client().futures_account()
         return {
             "wallet": float(acct["totalWalletBalance"]),
             "unrealized": float(acct["totalUnrealizedProfit"]),
@@ -65,190 +161,291 @@ def fetch_account(client: Client) -> dict:
         return {"error": str(e)}
 
 
-def fetch_positions(client: Client) -> list[dict]:
+@st.cache_data(ttl=28, show_spinner=False)
+def fetch_positions() -> list[dict]:
     try:
-        raw = client.futures_position_information()
-        result = []
-        for p in raw:
+        rows = []
+        for p in get_client().futures_position_information():
             amt = float(p["positionAmt"])
             if abs(amt) == 0:
                 continue
             entry = float(p["entryPrice"])
-            mark = float(p["markPrice"])
-            pnl_pct = (mark - entry) / entry * 100 if amt > 0 else (entry - mark) / entry * 100
-            result.append(
-                {
-                    "심볼": p["symbol"],
-                    "방향": p["positionSide"],
-                    "진입가": f"${entry:,.4f}",
-                    "현재가": f"${mark:,.4f}",
-                    "PnL%": f"{pnl_pct:+.2f}%",
-                    "_pnl": pnl_pct,
-                    "미실현$": f"${float(p['unrealizedProfit']):+.2f}",
-                    "Notional": f"${abs(float(p['notional'])):,.0f}",
-                }
-            )
-        return sorted(result, key=lambda x: x["_pnl"], reverse=True)
+            mark  = float(p["markPrice"])
+            upnl  = float(p["unrealizedProfit"])
+            pct   = (mark - entry) / entry * 100 if amt > 0 else (entry - mark) / entry * 100
+            rows.append({
+                "symbol": p["symbol"],
+                "side":   p["positionSide"],
+                "entry":  entry,
+                "mark":   mark,
+                "pct":    pct,
+                "upnl":   upnl,
+                "notional": abs(float(p["notional"])),
+            })
+        return sorted(rows, key=lambda x: x["pct"], reverse=True)
     except Exception:
         return []
 
 
-def fetch_state_bars() -> dict:
-    """state.json에서 bars_held 읽기."""
+def load_state_bars() -> dict:
     import json
-
-    state_path = Path(__file__).parent.parent / "data" / "state" / "scalper_state.json"
-    if not state_path.exists():
+    if not STATE.exists():
         return {}
     try:
-        state = json.load(open(state_path))
-        return {sym: pos.get("bars_held", 0) for sym, pos in state.get("positions", {}).items()}
+        s = json.load(open(STATE))
+        return {sym: pos.get("bars_held", 0) for sym, pos in s.get("positions", {}).items()}
     except Exception:
         return {}
 
 
-def fetch_recent_trades(n: int = 20) -> pd.DataFrame:
-    if not DB_LIVE.exists():
+@st.cache_data(ttl=28, show_spinner=False)
+def load_trades() -> pd.DataFrame:
+    if not DB.exists():
         return pd.DataFrame()
-    try:
-        conn = sqlite3.connect(DB_LIVE)
-        df = pd.read_sql_query(
-            f"""
-            SELECT symbol, strategy_type, direction, pnl_usd, exit_reason,
-                   bars_held, exit_time
-            FROM trades
-            WHERE {REAL_FILTER}
-            ORDER BY id DESC LIMIT {n}
-            """,
-            conn,
-        )
-        conn.close()
-        return df
-    except Exception:
-        return pd.DataFrame()
+    conn = sqlite3.connect(DB)
+    df = pd.read_sql_query(
+        f"SELECT * FROM trades WHERE {REAL} ORDER BY id", conn
+    )
+    conn.close()
+    return df
 
 
-def fetch_strategy_stats() -> pd.DataFrame:
-    if not DB_LIVE.exists():
-        return pd.DataFrame()
-    try:
-        conn = sqlite3.connect(DB_LIVE)
-        df = pd.read_sql_query(
-            f"""
-            SELECT
-                strategy_type as 전략,
-                COUNT(*) as 거래수,
-                ROUND(100.0 * SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as WR,
-                ROUND(SUM(pnl_usd), 2) as 합계PnL,
-                ROUND(AVG(pnl_usd), 2) as 평균PnL,
-                ROUND(AVG(bars_held), 1) as 평균보유바
-            FROM trades WHERE {REAL_FILTER}
-            GROUP BY strategy_type
-            ORDER BY 합계PnL DESC
-            """,
-            conn,
-        )
-        conn.close()
-        return df
-    except Exception:
-        return pd.DataFrame()
-
-
-# ─── 렌더링 ───────────────────────────────────────────────────────────────────
-def render():
-    now = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M:%S UTC")
-    st.title("📈 QuantBox Live Dashboard")
-    st.caption(f"마지막 갱신: {now}  •  {REFRESH_SEC}초마다 자동 새로고침")
-
-    client = get_client()
-
-    # ── 1. 계좌 요약 ──────────────────────────────────────────────────────────
-    acct = fetch_account(client)
-
-    if "error" not in acct:
-        total_equity = acct["wallet"] + acct["unrealized"]
-        margin_pct = acct["margin"] / acct["wallet"] * 100 if acct["wallet"] else 0
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("💰 잔고 (Wallet)", f"${acct['wallet']:,.2f}")
-        col2.metric(
-            "📊 미실현 PnL",
-            f"${acct['unrealized']:+,.2f}",
-            delta=f"{acct['unrealized'] / acct['wallet'] * 100:+.2f}%" if acct["wallet"] else None,
-        )
-        col3.metric("🔒 마진 사용", f"${acct['margin']:,.2f}", delta=f"{margin_pct:.1f}% 사용 중")
-        col4.metric("✅ 여유 잔고", f"${acct['available']:,.2f}")
-    else:
-        st.error(f"API 연결 실패: {acct['error']}")
-
-    st.divider()
-
-    # ── 2. 열린 포지션 ────────────────────────────────────────────────────────
-    bars_map = fetch_state_bars()
-    positions = fetch_positions(client)
-
-    left, right = st.columns([1, 1])
-
-    with left:
-        st.subheader(f"🟡 열린 포지션 ({len(positions)}개)")
-        if not positions:
-            st.info("현재 열린 포지션 없음")
-        else:
-            for pos in positions:
-                sym_key = f"{pos['심볼']}:{pos['방향']}"
-                bars = bars_map.get(sym_key, bars_map.get(pos["심볼"], "?"))
-                pnl_val = pos["_pnl"]
-                color = "🟢" if pnl_val >= 0 else "🔴"
-                st.markdown(
-                    f"{color} **{pos['심볼']}** `{pos['방향']}`  "
-                    f"진입 {pos['진입가']} → 현재 {pos['현재가']}  "
-                    f"**{pos['PnL%']}** ({pos['미실현$']})  "
-                    f"bars={bars}/192  notional={pos['Notional']}"
-                )
-
-    # ── 3. 전략 성과 ──────────────────────────────────────────────────────────
-    with right:
-        st.subheader("📊 전략별 성과")
-        stats = fetch_strategy_stats()
-        if stats.empty:
-            st.info("트레이드 기록 없음")
-        else:
-            for _, row in stats.iterrows():
-                pnl = row["합계PnL"]
-                color = "🟢" if pnl >= 0 else "🔴"
-                wr = row["WR"]
-                st.markdown(
-                    f"{color} **{row['전략']}**  "
-                    f"{int(row['거래수'])}건  WR={wr:.0f}%  "
-                    f"합계=**${pnl:+.2f}**  평균=${row['평균PnL']:+.2f}  "
-                    f"평균보유={row['평균보유바']}바"
-                )
-
-    st.divider()
-
-    # ── 4. 최근 트레이드 ──────────────────────────────────────────────────────
-    st.subheader("📋 최근 트레이드 (최근 20건)")
-    df = fetch_recent_trades(20)
+def win_streak(df: pd.DataFrame) -> tuple[str, int]:
+    """Returns ('W'/'L', count) for current streak."""
     if df.empty:
-        st.info("아직 청산된 트레이드 없음")
-    else:
-        df["결과"] = df["pnl_usd"].apply(lambda x: "✅ WIN" if x > 0 else "❌ LOSS")
-        df["PnL$"] = df["pnl_usd"].apply(lambda x: f"${x:+.2f}")
-        df["청산시각"] = df["exit_time"].str[:16]
-        display = df[["결과", "청산시각", "symbol", "direction", "strategy_type", "PnL$", "exit_reason", "bars_held"]].copy()
-        display.columns = ["결과", "시각", "심볼", "방향", "전략", "PnL$", "청산이유", "보유바"]
+        return ("–", 0)
+    seq = df["pnl_usd"].values[::-1]
+    if len(seq) == 0:
+        return ("–", 0)
+    current = "W" if seq[0] > 0 else "L"
+    count = 0
+    for v in seq:
+        if (v > 0) == (current == "W"):
+            count += 1
+        else:
+            break
+    return (current, count)
 
-        def color_pnl(val):
-            if "+" in str(val):
-                return "color: #3fb950; font-weight: bold"
-            elif "-" in str(val):
-                return "color: #f85149; font-weight: bold"
-            return ""
 
-        styled = display.style.map(color_pnl, subset=["PnL$"])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+def unicode_bar(value: float, max_val: float, width: int = 16) -> str:
+    if max_val == 0:
+        return ""
+    frac = min(abs(value) / max_val, 1.0)
+    filled = round(frac * width)
+    return "█" * filled + "░" * (width - filled)
 
-    # ── 자동 새로고침 ─────────────────────────────────────────────────────────
-    time.sleep(REFRESH_SEC)
+
+# ─── Render ───────────────────────────────────────────────────────────────────
+def render():
+    now_utc = pd.Timestamp.now(tz="UTC")
+    now_str = now_utc.strftime("%Y-%m-%d  %H:%M UTC")
+
+    acct = fetch_account()
+    positions = fetch_positions()
+    bars_map = load_state_bars()
+    df = load_trades()
+
+    wallet    = acct.get("wallet", 0)
+    unrealized= acct.get("unrealized", 0)
+    margin    = acct.get("margin", 0)
+    margin_pct= margin / wallet * 100 if wallet else 0
+    n_pos     = len(positions)
+
+    total_pnl = df["pnl_usd"].sum() if not df.empty else 0
+    upnl_pct  = unrealized / wallet * 100 if wallet else 0
+
+    # ── TICKER BAR ────────────────────────────────────────────────────────────
+    upnl_class = "pos" if unrealized >= 0 else "neg"
+    totpnl_class = "pos" if total_pnl >= 0 else "neg"
+
+    st.markdown(f"""
+<div class="ticker">
+  <span class="logo">▪ QUANTBOX TERMINAL</span>
+  <span class="sep">|</span>
+  <span>💰 <b>${wallet:,.2f}</b></span>
+  <span class="sep">|</span>
+  <span>미실현 <span class="{upnl_class}">{unrealized:+,.2f} ({upnl_pct:+.2f}%)</span></span>
+  <span class="sep">|</span>
+  <span>마진 <span class="neu">${margin:,.0f} / {margin_pct:.1f}%</span></span>
+  <span class="sep">|</span>
+  <span>포지션 <b>{n_pos}</b>/10</span>
+  <span class="sep">|</span>
+  <span>누적 <span class="{totpnl_class}"><b>${total_pnl:+,.2f}</b></span></span>
+  <span class="sep">|</span>
+  <span class="neu">{now_str}</span>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── SCORECARD ─────────────────────────────────────────────────────────────
+    n_trades = len(df)
+    wr = df["pnl_usd"].gt(0).mean() * 100 if n_trades > 0 else 0
+    best  = df.loc[df["pnl_usd"].idxmax()] if n_trades > 0 else None
+    worst = df.loc[df["pnl_usd"].idxmin()] if n_trades > 0 else None
+    streak_type, streak_n = win_streak(df)
+    avg_bars = df["bars_held"].mean() if n_trades > 0 else 0
+
+    streak_class = "green" if streak_type == "W" else ("red" if streak_type == "L" else "orange")
+    streak_label = f"연속 {'승' if streak_type=='W' else '패'}" if streak_type != "–" else "스트릭"
+    wr_class = "green" if wr >= 50 else "red"
+    totpnl_card_class = "green" if total_pnl >= 0 else "red"
+
+    best_str  = f"+${best['pnl_usd']:.0f} ({best['symbol']})"  if best is not None else "–"
+    worst_str = f"${worst['pnl_usd']:.0f} ({worst['symbol']})" if worst is not None else "–"
+
+    st.markdown(f"""
+<div class="scorecard">
+  <div class="card orange">
+    <div class="label">TOTAL TRADES</div>
+    <div class="value">{n_trades}</div>
+    <div class="sub">avg {avg_bars:.0f} bars held</div>
+  </div>
+  <div class="card {wr_class}">
+    <div class="label">WIN RATE</div>
+    <div class="value">{wr:.1f}%</div>
+    <div class="sub">{int(df['pnl_usd'].gt(0).sum())}W / {int(df['pnl_usd'].le(0).sum())}L</div>
+  </div>
+  <div class="card {totpnl_card_class}">
+    <div class="label">TOTAL PnL</div>
+    <div class="value">${total_pnl:+,.2f}</div>
+    <div class="sub">closed trades only</div>
+  </div>
+  <div class="card green">
+    <div class="label">BEST TRADE</div>
+    <div class="value" style="font-size:0.9rem">{best_str}</div>
+    <div class="sub">{best['exit_reason'] if best is not None else ''}</div>
+  </div>
+  <div class="card {streak_class}">
+    <div class="label">{streak_label.upper()}</div>
+    <div class="value">{streak_n}</div>
+    <div class="sub">{'연속 중' if streak_n > 0 else ''}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── ROW 2: POSITIONS | STRATEGY ──────────────────────────────────────────
+    col_l, col_r = st.columns([3, 2])
+
+    with col_l:
+        st.markdown('<div class="bb-header">OPEN POSITIONS</div>', unsafe_allow_html=True)
+        if not positions:
+            st.markdown('<span class="neu" style="font-size:0.8rem">— No open positions —</span>', unsafe_allow_html=True)
+        else:
+            rows_html = ""
+            for p in positions:
+                sym_key = f"{p['symbol']}:{p['side']}"
+                bars = bars_map.get(sym_key, bars_map.get(p["symbol"], "?"))
+                pct_class = "pos" if p["pct"] >= 0 else "neg"
+                side_class = "long-tag" if p["side"] == "LONG" else "short-tag"
+                rows_html += f"""
+<tr>
+  <td class="sym">{p['symbol']}</td>
+  <td><span class="{side_class}">{p['side']}</span></td>
+  <td>${p['entry']:,.4f}</td>
+  <td>${p['mark']:,.4f}</td>
+  <td class="{pct_class}">{p['pct']:+.2f}%</td>
+  <td class="{pct_class}">${p['upnl']:+.2f}</td>
+  <td class="neu">{bars}/192</td>
+  <td class="neu">${p['notional']:,.0f}</td>
+</tr>"""
+            st.markdown(f"""
+<table class="bb-table">
+<tr><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>MARK</th><th>PnL%</th><th>PnL$</th><th>BARS</th><th>NOTIONAL</th></tr>
+{rows_html}
+</table>""", unsafe_allow_html=True)
+
+    with col_r:
+        st.markdown('<div class="bb-header">STRATEGY BREAKDOWN</div>', unsafe_allow_html=True)
+        if not df.empty:
+            strat_rows = ""
+            for strat, grp in df.groupby("strategy_type"):
+                n_s = len(grp)
+                wr_s = grp["pnl_usd"].gt(0).mean() * 100
+                tot_s = grp["pnl_usd"].sum()
+                avg_mfe = grp["mfe_pct"].mean() * 100 if "mfe_pct" in grp else 0
+                avg_mae = grp["mae_pct"].mean() * 100 if "mae_pct" in grp else 0
+                avg_b = grp["bars_held"].mean()
+                tot_class = "pos" if tot_s >= 0 else "neg"
+                tag_cls = "tag-vr" if "vr" in strat else "tag-ma"
+                label = "VR SQZ" if "vr" in strat else "MA CLU"
+                strat_rows += f"""
+<tr>
+  <td><span class="{tag_cls}">{label}</span></td>
+  <td>{n_s}</td>
+  <td>{wr_s:.0f}%</td>
+  <td class="{tot_class}">${tot_s:+.0f}</td>
+  <td class="neu">{avg_mfe:+.2f}%</td>
+  <td class="neu">{avg_mae:.2f}%</td>
+  <td class="neu">{avg_b:.0f}b</td>
+</tr>"""
+            st.markdown(f"""
+<table class="bb-table">
+<tr><th>STRAT</th><th>N</th><th>WR</th><th>PnL$</th><th>MFE</th><th>MAE</th><th>AVG</th></tr>
+{strat_rows}
+</table>""", unsafe_allow_html=True)
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # ── ROW 3: RECENT TRADES | EXIT REASON DIST ───────────────────────────────
+    col_t, col_b = st.columns([3, 2])
+
+    with col_t:
+        st.markdown('<div class="bb-header">RECENT TRADES  <span class="neu">(15)</span></div>', unsafe_allow_html=True)
+        if df.empty:
+            st.markdown('<span class="neu">No closed trades.</span>', unsafe_allow_html=True)
+        else:
+            recent = df.sort_values("id", ascending=False).head(15)
+            trade_rows = ""
+            for _, r in recent.iterrows():
+                pnl = r["pnl_usd"]
+                pct_class = "pos" if pnl >= 0 else "neg"
+                win_icon = "▲" if pnl >= 0 else "▼"
+                side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
+                tag_cls = "tag-vr" if "vr" in str(r["strategy_type"]) else "tag-ma"
+                t = str(r["exit_time"])[:16]
+                mfe = r.get("mfe_pct", 0) or 0
+                mae = r.get("mae_pct", 0) or 0
+                trade_rows += f"""
+<tr>
+  <td class="neu">{t}</td>
+  <td class="sym">{r['symbol']}</td>
+  <td><span class="{side_cls}">{r['direction']}</span></td>
+  <td><span class="{tag_cls}">{'VR' if 'vr' in str(r['strategy_type']) else 'MA'}</span></td>
+  <td class="{pct_class}">{win_icon} ${pnl:+.2f}</td>
+  <td class="neu">MFE {mfe*100:+.1f}%</td>
+  <td class="neu">{r['bars_held']}b</td>
+  <td class="neu" style="font-size:0.65rem">{r['exit_reason']}</td>
+</tr>"""
+            st.markdown(f"""
+<table class="bb-table">
+<tr><th>TIME</th><th>SYMBOL</th><th>DIR</th><th>STR</th><th>PnL$</th><th>MFE</th><th>BARS</th><th>REASON</th></tr>
+{trade_rows}
+</table>""", unsafe_allow_html=True)
+
+    with col_b:
+        st.markdown('<div class="bb-header">EXIT REASON DISTRIBUTION</div>', unsafe_allow_html=True)
+        if not df.empty:
+            grp = df.groupby("exit_reason").agg(
+                n=("pnl_usd", "count"),
+                avg_pnl=("pnl_usd", "mean"),
+                total=("pnl_usd", "sum"),
+            ).sort_values("n", ascending=False)
+
+            max_n = grp["n"].max()
+            bars_html = ""
+            for reason, row in grp.iterrows():
+                bar = unicode_bar(row["n"], max_n, 12)
+                avg_cls = "pos" if row["avg_pnl"] >= 0 else "neg"
+                bars_html += f"""
+<div class="bar-row">
+  <span class="bar-label">{reason[:22]}</span>
+  <span class="bar-fill">{bar}</span>
+  <span class="bar-stat"> {int(row['n'])}건 <span class="{avg_cls}">avg ${row['avg_pnl']:+.0f}</span></span>
+</div>"""
+            st.markdown(bars_html, unsafe_allow_html=True)
+
+    # ── Auto refresh ─────────────────────────────────────────────────────────
+    time.sleep(REFRESH)
+    st.cache_data.clear()
     st.rerun()
 
 
