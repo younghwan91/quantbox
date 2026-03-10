@@ -26,7 +26,7 @@ POSITIONS_TTL = 10  # faster refresh for open positions
 # ─── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="QuantBox Terminal",
-    page_icon="▪",
+    page_icon="Q",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -66,8 +66,8 @@ hr { border-color: #FF8C00 !important; margin: 4px 0 !important; }
     justify-content: space-between;
     align-items: center;
 }
-.ticker .logo { color: #FF8C00; font-weight: bold; font-size: 1.18rem; }
-.ticker .sep { color: #444; margin: 0 10px; }
+.ticker .logo { color: #FF8C00; font-weight: bold; font-size: 1.18rem; letter-spacing: 0.18em; }
+.ticker .sep { color: #333; margin: 0 12px; }
 
 /* Section headers */
 .bb-header {
@@ -263,17 +263,17 @@ def render():
 
     st.markdown(f"""
 <div class="ticker">
-  <span class="logo">▪ QUANTBOX TERMINAL</span>
+  <span class="logo">QUANTBOX TERMINAL</span>
   <span class="sep">|</span>
-  <span>💰 <b>${wallet:,.2f}</b></span>
+  <span>WALLET <b>${wallet:,.2f}</b></span>
   <span class="sep">|</span>
-  <span>Unrealized <span class="{upnl_class}">{unrealized:+,.2f} ({upnl_pct:+.2f}%)</span></span>
+  <span>UNREALIZED <span class="{upnl_class}">{unrealized:+,.2f} ({upnl_pct:+.2f}%)</span></span>
   <span class="sep">|</span>
-  <span>Margin <span class="neu">${margin:,.0f} / {margin_pct:.1f}%</span></span>
+  <span>MARGIN <span class="neu">${margin:,.0f} / {margin_pct:.1f}%</span></span>
   <span class="sep">|</span>
-  <span>Positions <b>{n_pos}</b>/10</span>
+  <span>POSITIONS <b>{n_pos}</b>/10</span>
   <span class="sep">|</span>
-  <span>Cumulative <span class="{totpnl_class}"><b>${total_pnl:+,.2f}</b></span></span>
+  <span>CUMULATIVE PnL <span class="{totpnl_class}"><b>${total_pnl:+,.2f}</b></span></span>
   <span class="sep">|</span>
   <span class="neu">{now_str}</span>
 </div>
@@ -401,7 +401,6 @@ def render():
             for _, r in recent.iterrows():
                 pnl = r["pnl_usd"]
                 pct_class = "pos" if pnl >= 0 else "neg"
-                win_icon = "▲" if pnl >= 0 else "▼"
                 side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
                 tag_cls = "tag-vr" if "vr" in str(r["strategy_type"]) else "tag-ma"
                 t = str(r["exit_time"])[:16]
@@ -413,10 +412,10 @@ def render():
   <td class="sym">{r['symbol']}</td>
   <td><span class="{side_cls}">{r['direction']}</span></td>
   <td><span class="{tag_cls}">{'VR' if 'vr' in str(r['strategy_type']) else 'MA'}</span></td>
-  <td class="{pct_class}">{win_icon} ${pnl:+.2f}</td>
+  <td class="{pct_class}">${pnl:+.2f}</td>
   <td class="neu">MFE {mfe*100:+.1f}%</td>
   <td class="neu">{r['bars_held']}b</td>
-  <td class="neu" style="font-size:0.65rem">{r['exit_reason']}</td>
+  <td class="neu">{r['exit_reason']}</td>
 </tr>"""
             st.markdown(f"""
 <table class="bb-table">
