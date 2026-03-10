@@ -143,6 +143,31 @@ hr { border-color: #2a2a2a !important; margin: 6px 0 !important; }
 .bar-label { color: #999; width: 200px; letter-spacing: 0.04em; }
 .bar-fill  { color: #FF8C00; letter-spacing: -2px; }
 .bar-stat  { color: #D0D0D0; margin-left: 10px; font-size: 0.88rem; }
+
+/* ── TABLE SCROLL WRAPPER ── */
+.tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ── MOBILE  (≤ 600px) ── */
+@media (max-width: 600px) {
+    html, body, [data-testid="stApp"] { font-size: 14px; }
+    .block-container { padding: 2px 6px !important; }
+
+    /* Ticker: wrap to 2 lines */
+    .ticker { flex-wrap: wrap; gap: 4px 0; padding: 6px 8px; font-size: 0.88rem; }
+    .ticker .logo { width: 100%; margin-bottom: 2px; }
+    .ticker .sep  { display: none; }
+
+    /* Stat strip: 2 columns × 3 rows */
+    .statstrip { flex-wrap: wrap; }
+    .stat { flex: 0 0 50%; border-right: none;
+            border-bottom: 1px solid #1e1e1e; box-sizing: border-box; }
+    .stat:nth-child(odd)  { border-right: 1px solid #1e1e1e; }
+    .stat:nth-last-child(-n+2) { border-bottom: none; }
+    .stat .val { font-size: 1.10rem; }
+
+    /* Bar label: shrink fixed width */
+    .bar-label { width: 110px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -364,10 +389,10 @@ def render():
   <td class="neu">${p['notional']:,.0f}</td>
 </tr>"""
             st.markdown(f"""
-<table class="bb-table">
+<div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>MARK</th><th>PnL%</th><th>PnL USD</th><th>BARS</th><th>NOTIONAL</th></tr>
 {rows_html}
-</table>""", unsafe_allow_html=True)
+</table></div>""", unsafe_allow_html=True)
 
     with col_r:
         st.markdown('<div class="bb-header">STRATEGY BREAKDOWN</div>', unsafe_allow_html=True)
@@ -394,10 +419,10 @@ def render():
   <td class="neu">{avg_b:.0f}b</td>
 </tr>"""
             st.markdown(f"""
-<table class="bb-table">
+<div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">STRAT</th><th>N</th><th>WIN%</th><th>PnL USD</th><th>MFE AVG</th><th>MAE AVG</th><th>AVG BARS</th></tr>
 {strat_rows}
-</table>""", unsafe_allow_html=True)
+</table></div>""", unsafe_allow_html=True)
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -431,10 +456,10 @@ def render():
   <td class="neu" style="text-align:left">{r['exit_reason']}</td>
 </tr>"""
             st.markdown(f"""
-<table class="bb-table">
+<div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">EXIT TIME</th><th style="text-align:left">SYMBOL</th><th>DIR</th><th>STR</th><th>PnL USD</th><th>MFE</th><th>BARS</th><th style="text-align:left">REASON</th></tr>
 {trade_rows}
-</table>""", unsafe_allow_html=True)
+</table></div>""", unsafe_allow_html=True)
 
     with col_b:
         st.markdown('<div class="bb-header">EXIT REASON DISTRIBUTION</div>', unsafe_allow_html=True)
