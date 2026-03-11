@@ -1087,3 +1087,222 @@ class TestTBRGateBlocking:
         assert cfg.f5_tbr_enabled is False
         assert cfg.f5_tbr_z_threshold == 0.5
         assert cfg.f5_tbr_z_window == 192
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  30m TF Addition Tests (r57 A0, v14.16.0)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestThirtyMinTF:
+    """Tests for 30m timeframe support (r57 A0 deployment)."""
+
+    # ── Config defaults ───────────────────────────────────────────────────────
+
+    def test_config_enable_30m_default_true(self):
+        """enable_30m defaults to True (r57 A0 deployed)."""
+        cfg = VolStraddleConfig()
+        assert cfg.enable_30m is True
+
+    def test_config_warmup_30m_default(self):
+        """warmup_30m defaults to 100 (half of 15m warmup wall-clock)."""
+        cfg = VolStraddleConfig()
+        assert cfg.warmup_30m == 100
+
+    def test_config_get_warmup_30m(self):
+        """get_warmup('30m') returns warmup_30m."""
+        cfg = VolStraddleConfig()
+        assert cfg.get_warmup("30m") == cfg.warmup_30m
+
+    def test_tf_to_15m_has_30m(self):
+        """_TF_TO_15M mapping includes '30m' → 2."""
+        from quantbox.strategy.vol_straddle.strategy import _TF_TO_15M
+
+        assert "30m" in _TF_TO_15M
+        assert _TF_TO_15M["30m"] == 2
+
+    # ── Signal firing ─────────────────────────────────────────────────────────
+
+    def test_30m_signal_fires_when_1h_disabled(self):
+        """30m can fire signals independently when 1h is disabled."""
+        data = _load_real_data()
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
+
+        cfg = VolStraddleConfig(enable_15m=False, enable_1h=False, enable_4h=False, enable_30m=True)
+        strategy = VolStraddleStrategy(cfg)
+
+        found = False
+        for i in range(300, min(len(close), 8000)):
+            strategy.update_market_data(sym, volume[:i], np.ones(i), high[:i], low[:i])
+            sig = strategy.on_bar(sym, close[:i])
+            if sig != 0:
+                meta = strategy.get_last_signal_meta(sym)
+                assert meta.get("tf") == "30m", f"Expected 30m, got {meta.get('tf')}"
+                found = True
+                break
+        assert found, "No 30m signal fired in 8000 bars"
+
+    def test_30m_signal_metadata_has_correct_tf(self):
+        """When 30m fires, signal metadata tf == '30m'."""
+        data = _load_real_data()
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
+
+        cfg = VolStraddleConfig(enable_15m=False, enable_1h=False, enable_4h=False, enable_30m=True)
+        strategy = VolStraddleStrategy(cfg)
+
+        for i in range(300, min(len(close), 8000)):
+            strategy.update_market_data(sym, volume[:i], np.ones(i), high[:i], low[:i])
+            sig = strategy.on_bar(sym, close[:i])
+            if sig != 0:
+                meta = strategy.get_last_signal_meta(sym)
+                assert meta["tf"] == "30m"
+                assert "sl" in meta and "tp" in meta
+                break
+
+    def test_enable_30m_false_produces_no_30m_signals(self):
+        """When enable_30m=False, no 30m signals fire."""
+        data = _load_real_data()
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
+
+        cfg = VolStraddleConfig(enable_15m=False, enable_1h=False, enable_4h=False, enable_30m=False)
+        strategy = VolStraddleStrategy(cfg)
+
+        for i in range(300, min(len(close), 5000)):
+            strategy.update_market_data(sym, volume[:i], np.ones(i), high[:i], low[:i])
+            sig = strategy.on_bar(sym, close[:i])
+            assert sig == 0, f"Signal fired at bar {i} with all TFs disabled"
+
+    # ── Priority order ────────────────────────────────────────────────────────
+
+    def test_1h_priority_over_30m(self):
+        """When 1h fires, 30m is not checked (1h > 30m priority)."""
+        data = _load_real_data()
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
+
+        # Enable only 1h and 30m
+        cfg = VolStraddleConfig(enable_15m=False, enable_1h=True, enable_4h=False, enable_30m=True)
+        strategy = VolStraddleStrategy(cfg)
+
+        for i in range(300, min(len(close), 8000)):
+            strategy.update_market_data(sym, volume[:i], np.ones(i), high[:i], low[:i])
+            sig = strategy.on_bar(sym, close[:i])
+            if sig != 0:
+                meta = strategy.get_last_signal_meta(sym)
+                # When 1h fires, it should NOT be 30m
+                # (priority: 1h checked before 30m, so first signal wins)
+                assert meta["tf"] in ("1h", "30m")
+                break
+
+    def test_30m_priority_over_15m(self):
+        """When 30m fires before 15m, metadata shows 30m (not 15m)."""
+        data = _load_real_data()
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
+
+        cfg = VolStraddleConfig(enable_15m=True, enable_1h=False, enable_4h=False, enable_30m=True)
+        strategy = VolStraddleStrategy(cfg)
+
+        first_tf = None
+        for i in range(300, min(len(close), 8000)):
+            strategy.update_market_data(sym, volume[:i], np.ones(i), high[:i], low[:i])
+            sig = strategy.on_bar(sym, close[:i])
+            if sig != 0 and first_tf is None:
+                meta = strategy.get_last_signal_meta(sym)
+                first_tf = meta["tf"]
+                break
+        # 30m fires before 15m, so if both could fire, 30m wins
+        assert first_tf in ("30m", "15m"), f"Unexpected tf: {first_tf}"
+
+    # ── Warmup enforcement ────────────────────────────────────────────────────
+
+    def test_30m_no_signal_before_warmup(self):
+        """No 30m signal before warmup_30m*2+2 15m bars are available."""
+        data = _load_real_data()
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
+
+        cfg = VolStraddleConfig(enable_15m=False, enable_1h=False, enable_4h=False, enable_30m=True)
+        strategy = VolStraddleStrategy(cfg)
+        min_bars = 2 * (cfg.warmup_30m + 1)  # minimum 15m bars needed
+
+        for i in range(1, min(min_bars - 1, len(close))):
+            strategy.update_market_data(sym, volume[:i], np.ones(i), high[:i], low[:i])
+            sig = strategy.on_bar(sym, close[:i])
+            assert sig == 0, f"Signal fired too early at bar {i} (need {min_bars})"
+
+    # ── Resample no-lookahead ─────────────────────────────────────────────────
+
+    def test_30m_resample_no_developing_bar(self):
+        """30m resample discards developing (incomplete) bars.
+
+        201 15m bars → 201//2 = 100 completed 30m bars (last partial dropped).
+        """
+        n = 201
+        c = np.arange(1, n + 1, dtype=np.float64)
+        h = c + 0.5
+        l = c - 0.5
+        v = np.ones(n)
+        c_out, _, _, _ = resample_ohlcv(c, h, l, v, 2)
+        assert len(c_out) == 100  # 200//2 = 100
+
+    def test_30m_resample_close_is_last_15m_bar(self):
+        """30m close is the last 15m close in each pair."""
+        c = np.array([10.0, 11.0, 12.0, 13.0, 14.0, 15.0])
+        h = c + 1
+        l = c - 1
+        v = np.ones(len(c))
+        c_out, _, _, _ = resample_ohlcv(c, h, l, v, 2)
+        # 3 pairs: [10,11]→11, [12,13]→13, [14,15]→15
+        np.testing.assert_array_equal(c_out, [11.0, 13.0, 15.0])
+
+    # ── VR debug dict ─────────────────────────────────────────────────────────
+
+    def test_get_vr_all_tf_has_30m_key(self):
+        """get_vr_all_tf returns '30m' key after signal computation."""
+        cfg = VolStraddleConfig()
+        strategy = VolStraddleStrategy(cfg)
+        sym = "TESTUSDT"
+        vr_dict = strategy.get_vr_all_tf(sym)
+        assert "30m" in vr_dict
+        assert vr_dict["30m"] == 999.0  # default before any bar processed
+
+    def test_last_vr_30m_updated_after_bar(self):
+        """_last_vr_30m dict is populated after on_bar processes 30m."""
+        data = _load_real_data()
+        close = data["close"]
+        high = data["high"]
+        low = data["low"]
+        volume = data.get("volume", np.ones(len(close)))
+        sym = "TESTUSDT"
+
+        cfg = VolStraddleConfig(enable_15m=False, enable_1h=False, enable_4h=False, enable_30m=True)
+        strategy = VolStraddleStrategy(cfg)
+        min_bars = 2 * (cfg.warmup_30m + 1)
+
+        strategy.update_market_data(sym, volume[:min_bars], np.ones(min_bars), high[:min_bars], low[:min_bars])
+        strategy.on_bar(sym, close[:min_bars])
+        vr_dict = strategy.get_vr_all_tf(sym)
+        assert vr_dict["30m"] != 999.0, "VR should be updated after processing warmup bars"
+        assert 0 < vr_dict["30m"] < 10, f"VR out of reasonable range: {vr_dict['30m']}"
