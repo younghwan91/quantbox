@@ -132,11 +132,11 @@ def get_commit() -> str:
 
 def load_syms(min_years: float = 5.0) -> dict:
     """Load 15m symbols. Returns data_15m dict."""
-    exclude = set(cfg.exclude_symbols)
+    whitelist = set(cfg.symbol_whitelist)  # 60 live symbols only
     seen: dict[str, tuple[Path, int]] = {}
     for f in sorted(CACHE_DIR.glob("*_15m_2190d_*.npz")):
         sym = f.name.split("_")[0]
-        if sym in exclude:
+        if sym not in whitelist:
             continue
         nb = int(np.load(f, allow_pickle=False)["close"].shape[0])
         if sym not in seen or nb > seen[sym][1]:
