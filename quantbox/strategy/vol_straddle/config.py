@@ -83,11 +83,13 @@ class VolStraddleConfig(BaseSettings):
 
     # ── Multi-TF Control ──
     enable_15m: bool = True
+    enable_30m: bool = True  # 30m TF (resampled from 15m, ratio=2) — r57 A0: N+8.9%, Calmar+43.7%
     enable_1h: bool = True
     enable_4h: bool = True
 
     # ── VR warmup (bars before first signal per TF) ──
     warmup_15m: int = 200  # ~50h of 15m bars (~vr_long×4)
+    warmup_30m: int = 100  # ~50h of 30m bars (same wall-clock as warmup_15m)
     warmup_1h: int = 50  # ~50h of 1h bars
     warmup_4h: int = 13  # ~52h of 4h bars
 
@@ -331,6 +333,7 @@ class VolStraddleConfig(BaseSettings):
         """Get warmup bars for a timeframe."""
         return {
             "15m": self.warmup_15m,
+            "30m": self.warmup_30m,
             "1h": self.warmup_1h,
             "4h": self.warmup_4h,
         }.get(tf, self.warmup_15m)
