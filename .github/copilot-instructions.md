@@ -107,7 +107,7 @@ docs/backtest_results/YYYYMM/{YYYYMMDD}_{commit_short}_{description}.md
 | `main` | 프로덕션. 직접 커밋 금지 | `release` → `main` `--no-ff` + 버전 태그 |
 | `develop` | 통합. 직접 커밋 금지 | feature/fix/release에서만 머지 |
 | `feature/xxx` | 새 기능 (코드) | **`--squash`** — 커밋 정리 후 단일 커밋으로 |
-| `research/xxx` | 리서치/백테스트 | **`--squash`** — 탐색 커밋 정리 후 단일 커밋으로 |
+| `research/xxx` | 리서치/백테스트 | **`--squash`** — 탐색 커밋 정리 후 단일 커밋으로. **브랜치는 삭제 금지** (탐색 이력 보존) |
 | `release/xxx` | 릴리즈 준비 | `main` + `develop` 둘 다 **`--no-ff`** |
 | `fix/xxx` | 버그 수정 | **`--squash`** |
 | `hotfix/xxx` | 긴급 (`main`에서 분기) | `main` + `develop` 둘 다 **`--no-ff`** |
