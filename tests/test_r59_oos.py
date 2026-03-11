@@ -297,17 +297,19 @@ class TestCandidateConfig:
         assert baseline[1] == pytest.approx(self.S_VR)
         assert baseline[2] == self.S_DUR
 
-    def test_b2_mid_s_vr_above_baseline(self):
+    def test_b2_mid_s_vr_at_or_above_baseline(self):
+        # B2_mid was 0.57 at research time; baseline is now 0.57 after Combo2 adoption
         b2 = next(c for c in self.CANDIDATES if c[0] == "B2_mid")
-        assert b2[1] > self.S_VR
+        assert b2[1] >= self.S_VR
 
     def test_b3_s_dur_below_baseline(self):
         b3 = next(c for c in self.CANDIDATES if c[0] == "B3")
         assert b3[2] < self.S_DUR
 
     def test_combo1_both_modified(self):
+        # Combo1=(0.57, 2): s_vr at or above baseline, s_dur below baseline
         c1 = next(c for c in self.CANDIDATES if c[0] == "Combo1")
-        assert c1[1] > self.S_VR
+        assert c1[1] >= self.S_VR
         assert c1[2] < self.S_DUR
 
     def test_s_vr_candidates_in_valid_range(self):
