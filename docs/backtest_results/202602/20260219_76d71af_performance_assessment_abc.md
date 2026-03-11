@@ -4,6 +4,7 @@
 > **Config:** 20 symbols, 2 slots, $2,095 starting capital, flat sizing (no reinvestment)  
 > **Costs:** 0.04%/side + funding 0.01%/8h, adaptive threshold 2.5×_f1
 
+**구현:** 미구현 (옵션 A/B/C 비교 탐색)
 ---
 
 ## Background

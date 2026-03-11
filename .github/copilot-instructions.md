@@ -107,7 +107,7 @@ docs/backtest_results/YYYYMM/{YYYYMMDD}_{commit_short}_{description}.md
 | `main` | 프로덕션. 직접 커밋 금지 | `release` → `main` `--no-ff` + 버전 태그 |
 | `develop` | 통합. 직접 커밋 금지 | feature/fix/release에서만 머지 |
 | `feature/xxx` | 새 기능 (코드) | **`--squash`** — 커밋 정리 후 단일 커밋으로 |
-| `research/xxx` | 리서치/백테스트 | **`--no-ff`** — 백테스트 리포트·탐색 이력 보존 |
+| `research/xxx` | 리서치/백테스트 | **`--squash`** — 탐색 커밋 정리 후 단일 커밋으로. 머지 후 삭제 가능 (이력은 squash 커밋 + docs/backtest_results/ + `(ref: rNN)` 로 보존) |
 | `release/xxx` | 릴리즈 준비 | `main` + `develop` 둘 다 **`--no-ff`** |
 | `fix/xxx` | 버그 수정 | **`--squash`** |
 | `hotfix/xxx` | 긴급 (`main`에서 분기) | `main` + `develop` 둘 다 **`--no-ff`** |
@@ -115,6 +115,14 @@ docs/backtest_results/YYYYMM/{YYYYMMDD}_{commit_short}_{description}.md
 **반드시 develop에 머지 후 push.** 브랜치만 push하고 develop 안 건드리면 안 됨.
 
 **main에 머지할 때는 반드시 버전 태그 생성 및 push.** `git tag -a vX.Y.Z -m "..."`
+
+**리서치 → 전략 추적 관례:** 리서치 결과를 구현하는 feature/fix 커밋에 `(ref: rNN)` 명시.
+```
+# 예시
+feat(strategy): D_mom8 pullback entry (ref: r55, pb=0.5% win=5)
+fix(config): SL 파라미터 조정 (ref: r48 DD halt 분석)
+```
+반대 방향(어떤 버전에 반영됐는지)은 각 리서치 보고서 `.md`에 `**구현:** feature/xxx → vX.Y.Z` 한 줄 추가.
 
 ## 리서치·수익률 보고 규칙
 

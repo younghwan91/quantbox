@@ -157,6 +157,7 @@ At DD 6.4% and Calmar 1004:
 3. **A/B with D-VWSW+TW:** D has higher return but slightly higher DD — test which is more robust
 4. **Explore VWMA-POC agreement as entry gate:** Agree trades have PF 1.76 vs 1.41 — potentially significant filter
 
+**구현:** 미구현 (VWMA poc — volume-weighted MA 탐색)
 ---
 
 *No production parameters changed. Research only.*

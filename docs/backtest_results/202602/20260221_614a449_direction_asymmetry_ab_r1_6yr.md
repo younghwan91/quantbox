@@ -9,6 +9,7 @@
 | Variants   | 16 (1 baseline + 15 direction-aware)                |
 | Duration   | 71.0s                                               |
 
+**구현:** 미구현 (Long bias 확인, 전략 방향 변경 없음)
 ## Previous Bug
 
 Prior R1 test (`894139c`) ran on only **721 days** due to missing left-padding.

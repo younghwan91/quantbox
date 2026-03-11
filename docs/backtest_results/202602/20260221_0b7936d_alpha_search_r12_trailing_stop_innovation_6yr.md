@@ -9,6 +9,7 @@
 | Script | `scripts/alpha_search_r12.py` |
 | Runtime | 112.2s |
 
+**구현:** v13.1.0 (D_mom8 trailing stop의 원형)
 ## Goal
 
 U-RR+VWS (R11 winner) achieved Calmar 1004, DD 6.4%, PF 1.66, Sharpe 5.77, but 

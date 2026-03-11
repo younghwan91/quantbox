@@ -8,6 +8,7 @@
 **비용:** 0.08% round-trip (D), 0.16% (S straddle)  
 **수익률 모델:** 1x compound (compute_metrics 기본값)  
 
+**구현:** v14.5.0 (S_d8 trailing stop), v14.5.2 (universe 60심볼)
 ---
 
 ## 연구 목적
