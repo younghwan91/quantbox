@@ -9,6 +9,7 @@
 | **Capital** | $2,095, Fees 0.04%/side, Funding 0.01%/8h |
 | **Objective** | Validate R7 tier configs under 4 stress dimensions |
 
+**구현:** 미구현 (비용 민감도 분석)
 ## Motivation
 
 R7 found 4 champion tiers. Before going live, we need to answer:

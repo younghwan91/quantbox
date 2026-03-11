@@ -8,6 +8,7 @@
 - **Scoring:** Recency-weighted composite (Y5-6 = 2× weight)
 - **Runtime:** 164.8s (VPVR 105.0s + 18 variants × ~2.5s)
 
+**구현:** 미구현 (trail factor 민감도 탐색)
 ## Context
 
 R1-R2 used stripped config (rr_size=off, vwma_stop=off) → baseline 801%.

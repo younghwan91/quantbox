@@ -6,6 +6,7 @@
 > **Capital:** $2,095 | Fees: 0.04%/side | Funding: 0.01%/8h | Leverage: 3.75×  
 > **Crash Periods Covered:** COVID (Mar 2020), China Ban (May 2021), Luna (May 2022), FTX (Nov 2022)
 
+**구현:** 미구현 (신뢰도 검증 목적)
 ---
 
 ## 1. Executive Summary

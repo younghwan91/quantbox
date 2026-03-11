@@ -4,6 +4,7 @@
 > **Config:** 20 symbols, $2,095 starting capital, flat sizing, Adaptive 2.5×_f1, conf≥3  
 > **Costs:** 0.04%/side + funding 0.01%/8h
 
+**구현:** 미구현 (양방향 진입 탐색)
 ---
 
 ## Question

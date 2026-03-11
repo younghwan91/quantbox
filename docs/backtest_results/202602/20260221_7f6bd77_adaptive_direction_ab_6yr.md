@@ -6,6 +6,7 @@
 - **Data:** 6yr (2190d), 50 symbols, left-padded to 210,335 bars
 - **Baseline:** v12.4 I-HybTight (symmetric T150_S38_H25_PBT)
 
+**구현:** 미구현 (방향 필터 적응 탐색)
 ## Hypothesis
 
 The long/short performance asymmetry observed in the direction analysis is NOT static — it flips with the BTC macro regime. When BTC is above its SMA on the 4h timeframe (bull regime), longs outperform; below it (bear regime), shorts outperform. An **adaptive** mechanism that gives favorable exit params to the direction **aligned** with the current BTC regime should beat a static symmetric baseline.
