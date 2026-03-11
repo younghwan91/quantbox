@@ -10,6 +10,7 @@
 | Variants   | 18 (1 baseline + 2 R1 refs + 15 combos)             |
 | Duration   | 44.3s                                               |
 
+**구현:** 미구현 (r1 후속 탐색)
 ## Previous Bug
 
 Prior R2 test (`12e5c3b`) ran on only **721 days** due to missing left-padding.

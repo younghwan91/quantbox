@@ -7,6 +7,7 @@
 **이전 버전:** v13.1.0 (VR Squeeze 단독, 25x leverage, 10 slots)  
 **분석 스크립트:** `research/active/r41_r45/r44e_ma_cluster_deep.py`, production leverage 재계산  
 
+**구현:** 해당없음 (v14 전략 보고서)
 ---
 
 ## TL;DR — 핵심 요약

@@ -7,6 +7,7 @@
 - **Capital:** $2,095.00
 - **Costs:** 0.04%/side + funding fee
 
+**구현:** 미구현 (conf 임계값 완화 탐색)
 ## Goal
 
 The B-50 live deployment (v12.1.0) produced 0 candidates in cycle #1 despite 50 symbols.

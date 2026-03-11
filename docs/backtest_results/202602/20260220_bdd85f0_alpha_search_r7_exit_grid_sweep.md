@@ -10,6 +10,7 @@
 | **Base** | M-2SSTSX (R6 champion): 2slt + SoftTight + SteepX |
 | **Objective** | Find exit configs where R:R ≥ 1.0+ while DD ≤ 10% |
 
+**구현:** 미구현 (exit grid 탐색; r43/r47에서 발전)
 ## Motivation
 
 Live trading v12.1.0 ended -$150/session with R:R = 0.56 (backtest R:R = 0.60–0.78).
