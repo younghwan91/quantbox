@@ -263,6 +263,7 @@ for param_value in param_grid:
 - 베이스라인 N/PF (±1% 검증 통과 여부)
 - 수익률 모델 명시: **1x compound** 또는 **L/N=3.0**
 - Parity Notes: config.py 읽음 ✅, 룩어헤드 없음 ✅
+- **구현:** `미구현` 또는 `feature/xxx → vX.Y.Z` (결과가 전략에 반영되면 업데이트)
 
 ---
 
