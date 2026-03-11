@@ -1,6 +1,7 @@
 # R32: Exit / Risk Management A/B Test
 **Commit:** `daf75c9` | **Date:** 2026-02-28 | **Base:** G-ALL deduped (R31)
 
+**구현:** 미구현 (exit 최적화 탐색; r43/r47에서 발전)
 ## Objective
 Test exit/risk management techniques from rubber band era on the vol straddle strategy (G-ALL deduped). Can we improve the baseline's fixed SL/TP/timeout with adaptive exits, trailing stops, partial closes, or alternative parameter sweeps?
 

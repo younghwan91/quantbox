@@ -5,6 +5,7 @@
 **Universe:** 50 symbols, 6yr (2190d)
 **Baseline:** v12.5.3-Prod (fixed stop, no climax filter)
 
+**구현:** 미구현 (Climax ATR stop 탐색)
 ---
 
 ## Motivation

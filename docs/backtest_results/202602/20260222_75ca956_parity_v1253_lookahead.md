@@ -1,5 +1,6 @@
 # Parity Backtest Report: v12.5.3 Live Session (Feb 22-26, 2026)
 
+**구현:** 해당없음 (Lookahead 버그 수정 문서 — v12.5.3)
 ## Summary
 
 **Root Cause Found:** 4h MTF lookahead bias in `apply_mtf_confirmation()`.  
