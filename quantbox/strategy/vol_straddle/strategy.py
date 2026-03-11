@@ -42,7 +42,7 @@ logger = logging.getLogger("VolStraddle")
 
 # bars_held increments per 15m cycle, so max_hold must be in 15m bars.
 # Config stores max_hold in native TF bars — multiply to convert.
-_TF_TO_15M = {"15m": 1, "1h": 4, "4h": 16}
+_TF_TO_15M = {"15m": 1, "30m": 2, "1h": 4, "4h": 16}
 
 
 class VolStraddleStrategy:
@@ -81,6 +81,7 @@ class VolStraddleStrategy:
 
         # ── VR debug (per symbol per TF) ──
         self._last_vr_15m: dict[str, float] = {}
+        self._last_vr_30m: dict[str, float] = {}
         self._last_vr_1h: dict[str, float] = {}
         self._last_vr_4h: dict[str, float] = {}
         # Legacy single VR for backward compat
@@ -189,6 +190,15 @@ class VolStraddleStrategy:
                     if sig_1h != 0:
                         return sig_1h
 
+        # 30m: resampled from 15m (completed bars only) — r57 A0
+        if cfg.enable_30m:
+            if min_len >= 2 * (cfg.warmup_30m + 1):
+                c30, h30, l30, v30 = resample_ohlcv(c15, h15, l15, v15, 2)
+                if len(c30) >= cfg.warmup_30m + 1:
+                    sig_30m = self._check_tf_signal(c30, h30, l30, "30m")
+                    if sig_30m != 0:
+                        return sig_30m
+
         # 15m: direct from downloaded data
         if cfg.enable_15m:
             sig_15m = self._check_tf_signal(c15, h15, l15, "15m")
@@ -247,6 +257,8 @@ class VolStraddleStrategy:
         # Store per-TF VR
         if tf == "15m":
             self._last_vr_15m[self._current_symbol] = vr_val
+        elif tf == "30m":
+            self._last_vr_30m[self._current_symbol] = vr_val
         elif tf == "1h":
             self._last_vr_1h[self._current_symbol] = vr_val
         elif tf == "4h":
@@ -712,10 +724,11 @@ class VolStraddleStrategy:
     def get_vr_all_tf(self, symbol: str) -> dict[str, float]:
         """Get VR for all timeframes (debug only).
 
-        Returns dict with '15m', '1h', '4h' keys.
+        Returns dict with '15m', '30m', '1h', '4h' keys.
         """
         return {
             "15m": self._last_vr_15m.get(symbol, 999.0),
+            "30m": self._last_vr_30m.get(symbol, 999.0),
             "1h": self._last_vr_1h.get(symbol, 999.0),
             "4h": self._last_vr_4h.get(symbol, 999.0),
         }

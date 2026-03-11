@@ -972,7 +972,7 @@ class TestMaxHoldTfConversion:
         """MA cluster signal metadata has max_hold = 12 * 16 = 192."""
         from quantbox.strategy.vol_straddle.strategy import _TF_TO_15M
 
-        assert _TF_TO_15M == {"15m": 1, "1h": 4, "4h": 16}
+        assert _TF_TO_15M == {"15m": 1, "30m": 2, "1h": 4, "4h": 16}
 
         strategy = VolStraddleStrategy(
             VolStraddleConfig(
