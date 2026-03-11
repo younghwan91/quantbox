@@ -5,6 +5,7 @@
 **Verdict**: ❌ MARGINAL — Static params robust enough  
 **Baseline**: R38 canonical sim (collect_trades + portfolio_sim) — ✓ deployment parity verified  
 
+**구현:** 미구현 (레짐 적응형 VR 탐색)
 ## Objective
 
 BTC 변동성 레짐(low/mid/high)에 따라 VR squeeze entry/SL/TP를 조절하여

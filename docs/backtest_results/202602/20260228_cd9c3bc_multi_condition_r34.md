@@ -1,6 +1,7 @@
 # R34: Multi-Condition Portfolio Architecture
 **Commit:** `cd9c3bc` | **Date:** 2026-02-28 | **Runtime:** 35s (4 workers)
 
+**구현:** 미구현
 ## Concept
 
 R33에서 OOS 검증된 4개의 필터 조건을 **독립적인 conviction layer**로 취급.

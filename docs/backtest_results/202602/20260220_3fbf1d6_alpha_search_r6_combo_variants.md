@@ -5,6 +5,7 @@
 **Data:** 2190 days (6 years), 50 symbols, Binance USDT-M Futures
 **Capital:** $2,095 | Fees: 0.04%/side | Funding: 0.01%/8h
 
+**구현:** 미구현
 ## Objective
 
 Combine the 5 crash-era champion features from R5-6yr into 2-way, 3-way, 4-way, and "Fortress" combos to discover synergies.
