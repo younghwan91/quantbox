@@ -64,8 +64,8 @@ class VolStraddleConfig(BaseSettings):
     d_trail_distance: float = 0.002  # Trail 0.2% behind peak (r47: was 0.003)
 
     # ── S_d8: Straddle (requires Binance Hedge Mode) ──
-    s_vr_threshold: float = 0.55  # S VR entry threshold
-    s_squeeze_dur: int = 4  # Min consecutive bars below S VR threshold (R39: was 8)
+    s_vr_threshold: float = 0.57  # S VR entry threshold (r58/r59: 0.55→0.57 +28%N +11%PF)
+    s_squeeze_dur: int = 3  # Min consecutive bars below S VR threshold (r58/r59: 4→3 +25%N +12%PF)
     s_sl: float = 0.015  # 1.5% stop loss (per leg)
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
     s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg

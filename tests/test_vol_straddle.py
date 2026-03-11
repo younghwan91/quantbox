@@ -345,8 +345,10 @@ class TestStrategySignal:
                 assert "tp" in meta
                 assert "max_hold" in meta
                 assert "vr" in meta
-                assert meta["sl"] == 0.01
-                assert meta["tp"] == 0.12
+                cfg_check = VolStraddleConfig()
+                # sl/tp depend on signal type: VR squeeze uses d_sl, straddle uses s_sl
+                assert meta["sl"] in (cfg_check.d_sl, cfg_check.s_sl)
+                assert meta["tp"] in (cfg_check.d_tp, cfg_check.s_tp)
                 assert meta["vr"] > 0
                 break
         else:
