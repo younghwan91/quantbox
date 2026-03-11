@@ -9,6 +9,7 @@
 | **Conditions** | ZERO cost, 1x leverage, zero lookahead |
 | **Runtime** | 57 seconds |
 
+**구현:** 미구현
 ## Executive Summary
 
 **❌ 27개 변형 전부 PF < 1.0. 15m 크립토 선물에서 OHLCV 데이터만으로는 알파가 없다.**

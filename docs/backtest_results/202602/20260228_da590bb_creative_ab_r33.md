@@ -8,6 +8,7 @@
 | Data | 50 symbols × 6yr × 15m (8.3M bars) |
 | Execution | 4-core parallel, 285s |
 
+**구현:** 미구현
 ## Objective
 
 Test **structurally different** hypotheses beyond exit/SL/TP parameter sweeps (R32 already confirmed baseline SL/TP is near-optimal). R33 explores signal quality filters, cross-asset regime overlays, asymmetric straddle designs, entry timing, and anti-behavioral patterns.

@@ -6,6 +6,7 @@
 - **Strategies:** D_mom8 (VR<0.45 directional) + S_d8 (VR<0.55 straddle)
 - **Cost:** D=0.08% (2×0.04%), S=0.16% (4×0.04%)
 
+**구현:** v14.0.0 (MA Cluster Squeeze 전략의 원형)
 ## Goal
 
 R30 proved D_mom8 + S_d8 have real edge, but frequency is low (~0.5 trades/day).

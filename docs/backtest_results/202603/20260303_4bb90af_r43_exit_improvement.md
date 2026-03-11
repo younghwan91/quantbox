@@ -5,6 +5,7 @@
 **Author**: QuantBox R43 (exit-improvement series)  
 **Status**: ✅ VALIDATED — Ready for production consideration
 
+**구현:** v13.1.0 (D_mom8 trailing stop — activate=2%, distance=0.3%)
 ## Executive Summary
 
 Comprehensive exit optimization research across 6 vectors, 5 iterations (R43–R43e):

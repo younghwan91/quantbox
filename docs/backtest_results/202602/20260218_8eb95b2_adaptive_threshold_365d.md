@@ -6,6 +6,7 @@
 **Data:** 365 days ending 2026-02-18, 20 symbols, 15m + 4h bars  
 **Full Report:** [docs/adaptive_threshold_ab_test_report.md](../adaptive_threshold_ab_test_report.md)  
 
+**구현:** 미구현 (초기 임계값 탐색, 이후 전략에 반영되지 않음)
 ---
 
 ## Context

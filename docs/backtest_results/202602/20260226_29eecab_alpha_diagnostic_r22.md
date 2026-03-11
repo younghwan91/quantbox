@@ -9,6 +9,7 @@
 | **Lookahead** | ZERO (MTF uses last completed 4h bar, `j = j_raw - 1`) |
 | **Capital** | $2,095 |
 
+**구현:** 미구현 (알파 진단)
 ## Executive Summary
 
 **결론: 러버밴드 15m 평균회귀 시그널은 이론적 기대값(EV)이 음수이다.**

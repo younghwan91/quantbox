@@ -6,6 +6,7 @@
 - **Config:** Option B (conf≥3) + MTF block + Adaptive 2.5×_f1
 - **Capital:** $2,095 flat (no compounding)
 
+**구현:** v14.0.0 (유니버스 확장 — 30→40 심볼 방향성 확인)
 ## Purpose
 
 Assess whether expanding the trading universe from 20 → 30 symbols can

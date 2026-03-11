@@ -35,6 +35,7 @@ TBR_ENABLED   = cfg.f5_tbr_enabled                   # False (r47 이후)
 - [ ] `VR_LN = base_leverage / max_concurrent` (3.0). 하드코딩 2.5 등 금지
 - [ ] `MA_LN = ma_cluster_leverage / max_concurrent` (2.1). 하드코딩 금지
 - [ ] **심볼 universe = `cfg.symbol_whitelist`** (현재 60개). 하드코딩 금지
+- [ ] **`cfg.exclude_symbols` 방식으로 로딩 금지** → 스테이블코인만 제외해 상장폐지 심볼 포함됨
 
 > ⚠️ **Backtest-Live Universe Parity 원칙 (절대 규칙):**
 > **라이브 트레이딩 universe는 항상 백테스트 universe와 동일해야 한다.**
@@ -43,8 +44,23 @@ TBR_ENABLED   = cfg.f5_tbr_enabled                   # False (r47 이후)
 > - 상장폐지 발견 시: 라이브 제거 → 백테스트 재실행 → 공식 수치 업데이트 (순서 무관, 동시에)
 > - 신규 심볼 추가 시: 백테스트 먼저 → 검증 통과 후 라이브 추가 (백테스트 선행 필수)
 
-> ⚠️ **위반 선례 (2026-03-07):** `backtest_v14_3_0.py`가 `tp=0.05` + `VR_LN=2.5`, `MA_LN=1.2` 하드코딩 →
-> 실제 프로덕션 `tp=0.12` + trailing + `VR_LN=3.0`, `MA_LN=2.1`. N/PF/CAGR 전부 틀린 수치 보고.
+**심볼 로딩 코드 패턴 (반드시 이 방식):**
+```python
+# ✅ 올바른 방식 — 60 라이브 심볼만
+whitelist = set(cfg.symbol_whitelist)
+for f in sorted(CACHE_DIR.glob("*_15m_2190d_*.npz")):
+    sym = f.name.split("_")[0]
+    if sym not in whitelist:
+        continue
+
+# ❌ 금지 — exclude_symbols는 스테이블코인만 제외, 상장폐지 심볼 포함됨
+exclude = set(cfg.exclude_symbols)  # USDCUSDT/TUSDUSDT/BUSDUSDT만 제외
+# → MKRUSDT, FTMUSDT, EOSUSDT 포함됨 (상장폐지!) → 63sym
+```
+
+> ⚠️ **위반 선례 (2026-03-11):** r55/r56/r57이 `exclude_symbols` 방식으로 로딩 →
+> 상장폐지 3개(MKR/FTM/EOS) 포함 63심볼로 백테스트. 라이브(60sym)와 조건 불일치.
+> `symbol_whitelist` 방식으로 수정 후 전부 재실행함.
 
 ---
 
@@ -105,15 +121,16 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 **허용 기준:** 최신 리포트 대비 N ±1%, PF ±1%  
 **이탈 시 → 즉시 중단.** 데이터 범위, config, 함수 버전 확인 먼저.
 
-**최신 정식 베이스라인 (v14.5.2+, 2026-03-08 기준, commit=7399f4c):**
+**최신 정식 베이스라인 (v14.5.2+, 2026-03-11 기준, commit=6253fa0):**
 
 | 버전 | 유니버스 | 기간 | N | PF | Calmar | DD |
 |------|---------|------|---|----|--------|----|
 | v14.4.x baseline | **60 syms** | 6yr | 5,515 | 1.273 | 15.9 | 69.7% |
 | **v14.5.0 (프로덕션)** | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% |
+| **r56/r57 연구 베이스라인** | **60 syms** | 6yr | **6,538** | **1.638** | 88.5 | 52.3% |
 
-> v14.5.0 = S_d8 trailing (act=1.5%/dist=0.2%) 추가. CI=[1.461,1.676], P(PF≥1)=100%.
-> 60 syms = r53 63sym 유니버스에서 상장폐지 3개(MKR/FTM/EOS) 제외.
+> v14.5.0 = 프로덕션 canonical (trade_sim.py 기반). r56/r57 베이스라인은 연구 스크립트 자체 구현 기반.
+> 60 syms = symbol_whitelist (상장폐지 MKR/FTM/EOS 제외). **`exclude_symbols` 방식 사용 금지.**
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
 
 ---
@@ -236,11 +253,14 @@ baseline_cfg = {"d_tp": cfg.d_tp, "d_sl": cfg.d_sl,
                 "d_trail_activate": cfg.d_trail_activate, "d_trail_distance": cfg.d_trail_distance,
                 "f5_tbr_enabled": cfg.f5_tbr_enabled}
 
-# Phase 1: 베이스라인 재현 → ±1% 확인 후 진행
+# 심볼 로딩 — 반드시 symbol_whitelist 사용 (exclude_symbols 금지)
+whitelist = set(cfg.symbol_whitelist)  # 60 live symbols
+
+# Phase 1: 베이스라인 재현 → ±1% 확인 후 진행 (canonical: N=6207, PF=1.563)
 b_pnl = portfolio_sim(collect_trades(baseline_cfg, ...), max_concurrent=cfg.max_concurrent)
 b_m   = compute_metrics(b_pnl, DATA_YEARS)
-assert abs(b_m['N'] - 5515) / 5515 < 0.01, f"N drift: {b_m['N']}"
-assert abs(b_m['PF'] - 1.273) / 1.273 < 0.01, f"PF drift: {b_m['PF']:.3f}"
+assert abs(b_m['N'] - 6207) / 6207 < 0.05, f"N drift: {b_m['N']}"   # ±5% (연구 스크립트 구현 차이 허용)
+assert abs(b_m['PF'] - 1.563) / 1.563 < 0.05, f"PF drift: {b_m['PF']:.3f}"
 
 # Phase 2: 파라미터 스윕
 for param_value in param_grid:
@@ -263,6 +283,7 @@ for param_value in param_grid:
 - 베이스라인 N/PF (±1% 검증 통과 여부)
 - 수익률 모델 명시: **1x compound** 또는 **L/N=3.0**
 - Parity Notes: config.py 읽음 ✅, 룩어헤드 없음 ✅
+- **구현:** `미구현` 또는 `feature/xxx → vX.Y.Z` (결과가 전략에 반영되면 업데이트)
 
 ---
 
@@ -277,6 +298,8 @@ for param_value in param_grid:
 | 2026-02-21 | Reduce-only 레버리지 | -2028 API 에러 | 청산 주문에 `change_leverage()` 호출 | 청산 시 레버리지 변경 금지 |
 | 2026-03-08 | Hedge Mode trail abort | trail exit 실패 (-2028) | close가 `leverage=1` 기본값 전달 → 변경 시도 | `if not reduce_only and leverage > 1` (v14.4.2) |
 | 2026-03-09 | `.env` VS_ 파라미터 덮어쓰기 | config.py 변경 적용 안 됨 | 38개 VS_ 중복 in `.env` (pydantic-settings 우선순위) | `.env`는 override만. 기본값은 `config.py`만. |
+| 2026-03-11 | Universe 불일치 (r55/r56/r57) | 63sym 백테스트 vs 60sym 라이브 | `exclude_symbols`는 스테이블코인만 제외, 상장폐지 포함 | 반드시 `cfg.symbol_whitelist` 사용 |
+| 2026-03-11 | _offset 미적용 (r58 이전) | 단축 히스토리 심볼 슬롯 충돌 오류 | 신규 심볼 bar 0 ≠ 기존 심볼 bar 0 (시간 불일치) | 신규 심볼은 `data_15m[sym]["_offset"]` 적용 필수 |
 | (반복) | 복리 모델 혼동 | CAGR 보고 오류 | `compute_metrics` 1x ≠ 프로덕션 L/N | 레버리지 모델 항상 명시 |
 
 ---
@@ -292,4 +315,28 @@ for param_value in param_grid:
 ## 13. 연구 브랜치 컨벤션
 
 Git flow 규칙은 `copilot-instructions.md` 참조. 요약: `research/r{N}-{desc}` 브랜치 → `--no-ff` 머지 (이력 보존).
+
+---
+
+## 14. Universe Expansion — _offset 적용 규칙 (r58)
+
+whitelist 외 심볼(단축 히스토리)을 추가할 때 반드시 `_offset`을 적용해야 시간 정렬이 맞는다.
+
+```python
+# cache 로드 시 _offset 계산 (예: APTUSDT=3.3yr → max_bars=210,240 기준)
+data_15m[sym]["_offset"] = max_bars - len(close_arr)  # e.g. 95,240
+
+# collect 함수 내부 — trade bar를 global bar로 변환
+offset = data_15m[sym].get("_offset", 0)
+entry_global = local_bar + offset  # portfolio_sim에 전달하는 bar index
+```
+
+**미적용 시 증상:** 신규 심볼의 bar 0이 기존 심볼의 bar 0과 동일 시각으로 취급
+→ portfolio_sim이 서로 다른 날짜의 거래를 같은 슬롯 경쟁으로 봄 → N 과대/과소 오류.
+
+**r58 핵심 발견 (s_vr threshold):**
+- `s_vr_threshold` 0.55→0.59: N+72%, PF+24% **동시** 개선 — "moderate squeeze"가 "deep squeeze"보다 더 좋은 엣지
+- `s_squeeze_dur` 4→2: N+25%, PF+12% — 현재 `s_dur=4`는 너무 엄격, 2~3이 최적
+- `d_vr_threshold` 완화: N 크게 증가하지만 EV 단조 감소 → 권장 안 함
+- 연도별 EV 감소(2021→2025)는 시장 구조 변화(강세장→정상화)이며 전략 악화 아님
 

@@ -7,6 +7,7 @@
 - **Capital**: $2,095 USDT, fees 0.04%/side, funding 0.01%/8h, 3 slots
 - **Script**: `scripts/partial_exit_trailing_ab.py`
 
+**구현:** 미구현 (초기 partial exit 탐색)
 ## Background
 
 Current R:R ratio is 0.98 — dangerously close to 1.0. While win rate (64.2%) and Profit Factor (1.76) keep the strategy profitable, a slight regime change could flip R:R below break-even.

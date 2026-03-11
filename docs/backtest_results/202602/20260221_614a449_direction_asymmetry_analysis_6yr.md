@@ -9,6 +9,7 @@
 | Capital    | $2,095 → $134,100 (6,300.9%)                       |
 | Trades     | 17,165 (L: 8,452 / S: 8,713)                       |
 
+**구현:** 미구현 (방향 비대칭 분석)
 ## Previous Bug
 
 Prior analysis (`d3de815`) ran on only **721 days** (TONUSDT shortest symbol) due to missing left-padding.

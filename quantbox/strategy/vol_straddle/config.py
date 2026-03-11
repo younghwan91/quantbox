@@ -64,8 +64,8 @@ class VolStraddleConfig(BaseSettings):
     d_trail_distance: float = 0.002  # Trail 0.2% behind peak (r47: was 0.003)
 
     # ── S_d8: Straddle (requires Binance Hedge Mode) ──
-    s_vr_threshold: float = 0.55  # S VR entry threshold
-    s_squeeze_dur: int = 4  # Min consecutive bars below S VR threshold (R39: was 8)
+    s_vr_threshold: float = 0.57  # S VR entry threshold (r58/r59: 0.55→0.57 +28%N +11%PF)
+    s_squeeze_dur: int = 3  # Min consecutive bars below S VR threshold (r58/r59: 4→3 +25%N +12%PF)
     s_sl: float = 0.015  # 1.5% stop loss (per leg)
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
     s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg
@@ -83,11 +83,13 @@ class VolStraddleConfig(BaseSettings):
 
     # ── Multi-TF Control ──
     enable_15m: bool = True
+    enable_30m: bool = True  # 30m TF (resampled from 15m, ratio=2) — r57 A0: N+8.9%, Calmar+43.7%
     enable_1h: bool = True
     enable_4h: bool = True
 
     # ── VR warmup (bars before first signal per TF) ──
     warmup_15m: int = 200  # ~50h of 15m bars (~vr_long×4)
+    warmup_30m: int = 100  # ~50h of 30m bars (same wall-clock as warmup_15m)
     warmup_1h: int = 50  # ~50h of 1h bars
     warmup_4h: int = 13  # ~52h of 4h bars
 
@@ -331,6 +333,7 @@ class VolStraddleConfig(BaseSettings):
         """Get warmup bars for a timeframe."""
         return {
             "15m": self.warmup_15m,
+            "30m": self.warmup_30m,
             "1h": self.warmup_1h,
             "4h": self.warmup_4h,
         }.get(tf, self.warmup_15m)

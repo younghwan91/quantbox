@@ -8,6 +8,7 @@
 - **Capital**: $2,095 USDT, fees 0.04%/side, funding 0.01%/8h, 3 slots, base leverage 1.5×, MTF mult 2.5× (eff 3.75×)
 - **Script**: `scripts/alpha_search_r3.py`
 
+**구현:** 미구현 (아이디어 탐색; trailing은 r12/r43에서 발전)
 ## Background
 
 Previous rounds (R1: alternative signals, R2: parameter refinement) found that:

@@ -18,6 +18,7 @@ Two variants beat baseline on the composite risk-return metric:
 
 **Verdict: NO PRODUCTION CHANGE** — improvements are modest and need walk-forward validation. But VWMA(100) distance is now a PROVEN predictive factor worthy of deeper R11 exploration.
 
+**구현:** 미구현 (VWMA 탐색 초기)
 ---
 
 ## Hypothesis

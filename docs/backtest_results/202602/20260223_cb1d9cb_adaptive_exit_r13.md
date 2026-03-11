@@ -6,6 +6,7 @@
 - **Script:** `research/active/r12_r20/r13_adaptive_exit.py`
 - **Data:** 2190d (6yr), 50 symbols, 15m+4h
 
+**구현:** 미구현 (적응형 exit 탐색)
 ## Hypothesis
 
 Fixed exit params (target=1.5, hold=25, trail_factor=0.3) are suboptimal because
