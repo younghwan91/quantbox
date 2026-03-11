@@ -299,6 +299,7 @@ for param_value in param_grid:
 | 2026-03-08 | Hedge Mode trail abort | trail exit 실패 (-2028) | close가 `leverage=1` 기본값 전달 → 변경 시도 | `if not reduce_only and leverage > 1` (v14.4.2) |
 | 2026-03-09 | `.env` VS_ 파라미터 덮어쓰기 | config.py 변경 적용 안 됨 | 38개 VS_ 중복 in `.env` (pydantic-settings 우선순위) | `.env`는 override만. 기본값은 `config.py`만. |
 | 2026-03-11 | Universe 불일치 (r55/r56/r57) | 63sym 백테스트 vs 60sym 라이브 | `exclude_symbols`는 스테이블코인만 제외, 상장폐지 포함 | 반드시 `cfg.symbol_whitelist` 사용 |
+| 2026-03-11 | _offset 미적용 (r58 이전) | 단축 히스토리 심볼 슬롯 충돌 오류 | 신규 심볼 bar 0 ≠ 기존 심볼 bar 0 (시간 불일치) | 신규 심볼은 `data_15m[sym]["_offset"]` 적용 필수 |
 | (반복) | 복리 모델 혼동 | CAGR 보고 오류 | `compute_metrics` 1x ≠ 프로덕션 L/N | 레버리지 모델 항상 명시 |
 
 ---
@@ -314,4 +315,28 @@ for param_value in param_grid:
 ## 13. 연구 브랜치 컨벤션
 
 Git flow 규칙은 `copilot-instructions.md` 참조. 요약: `research/r{N}-{desc}` 브랜치 → `--no-ff` 머지 (이력 보존).
+
+---
+
+## 14. Universe Expansion — _offset 적용 규칙 (r58)
+
+whitelist 외 심볼(단축 히스토리)을 추가할 때 반드시 `_offset`을 적용해야 시간 정렬이 맞는다.
+
+```python
+# cache 로드 시 _offset 계산 (예: APTUSDT=3.3yr → max_bars=210,240 기준)
+data_15m[sym]["_offset"] = max_bars - len(close_arr)  # e.g. 95,240
+
+# collect 함수 내부 — trade bar를 global bar로 변환
+offset = data_15m[sym].get("_offset", 0)
+entry_global = local_bar + offset  # portfolio_sim에 전달하는 bar index
+```
+
+**미적용 시 증상:** 신규 심볼의 bar 0이 기존 심볼의 bar 0과 동일 시각으로 취급
+→ portfolio_sim이 서로 다른 날짜의 거래를 같은 슬롯 경쟁으로 봄 → N 과대/과소 오류.
+
+**r58 핵심 발견 (s_vr threshold):**
+- `s_vr_threshold` 0.55→0.59: N+72%, PF+24% **동시** 개선 — "moderate squeeze"가 "deep squeeze"보다 더 좋은 엣지
+- `s_squeeze_dur` 4→2: N+25%, PF+12% — 현재 `s_dur=4`는 너무 엄격, 2~3이 최적
+- `d_vr_threshold` 완화: N 크게 증가하지만 EV 단조 감소 → 권장 안 함
+- 연도별 EV 감소(2021→2025)는 시장 구조 변화(강세장→정상화)이며 전략 악화 아님
 
