@@ -75,6 +75,26 @@ def _isolate_state_file(tmp_path):
     _state_mod.STATE_DIR = orig_state_dir
 
 
+@pytest.fixture(autouse=True)
+def _isolate_journal_db(monkeypatch):
+    """Redirect all live journal writes to :memory: during tests.
+
+    Without this, any test using paper_mode=False writes fake trades to
+    data/journal.sqlite (the live trading DB), corrupting real trade history.
+
+    Must patch quantbox.scalper.TradeJournal (where it was already imported),
+    not the source module (that reference is stale after import).
+    """
+    import quantbox.scalper as _scalper_mod
+    from quantbox.core.trade_journal import TradeJournal as _OrigJournal
+
+    class _MemJournal(_OrigJournal):
+        def __init__(self, db_path: str = ":memory:", **kwargs):
+            super().__init__(db_path=":memory:", **kwargs)
+
+    monkeypatch.setattr(_scalper_mod, "TradeJournal", _MemJournal)
+
+
 def _get_real_data_loader():
     """Get the real data loader instance."""
     from quantbox.data.real_data_loader import RealDataLoader
