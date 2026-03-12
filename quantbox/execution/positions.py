@@ -257,6 +257,11 @@ class PositionMixin:
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
             return False
 
+        # T2-1 runtime guard: entry_price=0 → ZeroDivisionError in quantity calc
+        if entry_price <= 0:
+            logger.error(f"[{symbol}] INVARIANT VIOLATION: entry_price={entry_price!r} (must be > 0) — aborting open")
+            return False
+
         quantity = notional / entry_price
         quantity = self._round_qty(quantity, symbol)
         if quantity <= 0:

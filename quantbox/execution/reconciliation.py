@@ -297,6 +297,9 @@ class ReconciliationMixin:
         Detects ghost positions (closed on exchange but still in internal
         state) and quantity mismatches (ADL, manual intervention).
         """
+        if self.paper_mode:
+            return
+
         try:
             exchange_positions = self.client.futures_position_information()
         except Exception as e:
