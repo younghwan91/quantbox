@@ -97,7 +97,15 @@ SWEEPS: dict[str, list[float]] = {
     "base_leverage":     [20.0, 22.0, 25.0, 30.0, 33.0, 36.0, 40.0],
 }
 
-PROD_IDX: dict[str, int] = {k: 3 for k in SWEEPS}  # production value is at index 3
+PROD_IDX: dict[str, int] = {
+    "d_sl":             3,  # 0.010 @ idx 3
+    "d_tp":             3,  # 0.120 @ idx 3
+    "d_trail_activate": 2,  # 0.005 @ idx 2
+    "d_trail_distance": 2,  # 0.002 @ idx 2
+    "s_vr_threshold":   3,  # 0.570 @ idx 3
+    "s_squeeze_dur":    2,  # 3     @ idx 2 (dedup: [2,2,3,3,4,5,6])
+    "base_leverage":    3,  # 30.0  @ idx 3
+}
 
 
 def get_commit() -> str:
