@@ -161,3 +161,29 @@ class TestStepSizeValidation:
         qty = 0.1 + 0.1 + 0.1  # 0.30000000000000004
         result = _validate(quantity=qty, sym_info={"step_size": 0.1})
         assert result.ok is True
+
+
+# ── Paper mode integration ────────────────────────────────────────────────────
+
+
+class TestPaperModeCoverage:
+    """Verify preflight runs before paper_mode early return.
+
+    Previously preflight was live-only.  Bugs like compound keys were only
+    caught when the same path hit the live exchange for the first time.
+    """
+
+    def test_compound_key_caught_in_paper_mode(self):
+        from tests.conftest import _build_vs_scalper
+
+        scalper = _build_vs_scalper(balance=1000.0)
+        scalper.paper_mode = True
+
+        # _place_order with compound key must return None even in paper mode
+        result = scalper._place_order(
+            symbol="TESTUSDT:LONG",  # compound key — should be caught by preflight
+            side="BUY",
+            quantity=1.0,
+            leverage=30,
+        )
+        assert result is None, "Preflight should reject compound key before paper fill"

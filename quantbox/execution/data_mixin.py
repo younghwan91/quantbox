@@ -53,6 +53,41 @@ class DataMixin:
             logger.error(f"Symbol fetch failed: {e}")
             return []
 
+    def _preload_max_notional(self) -> None:
+        """Bulk-load max_notional for all symbols from Binance leverage brackets.
+
+        Called once after the exchange_info bulk fetch populates _symbol_info_cache.
+        Uses a single API call (no symbol arg) to retrieve all 800+ symbol brackets,
+        then sets 'max_notional' on every cached symbol in one pass.
+
+        The per-symbol lazy-load in get_symbol_info() remains as a fallback for
+        symbols added after this preload or if this call fails.
+        """
+        try:
+            resp = self.client.futures_leverage_bracket()
+            bracket_map = {item["symbol"]: item["brackets"] for item in resp}
+            loaded = 0
+            for sym, cached in self._symbol_info_cache.items():
+                if "max_notional" in cached:
+                    continue  # already set (lazy-load beat us)
+                sym_brackets = bracket_map.get(sym, [])
+                if sym_brackets:
+                    # Brackets sorted highest leverage first; bracket[0] gives
+                    # the cap for the highest available leverage tier.
+                    cached["max_notional"] = float(sym_brackets[0]["notionalCap"])
+                    loaded += 1
+                else:
+                    cached["max_notional"] = None  # not on futures or unknown
+            logger.info(
+                f"Preloaded max_notional for {loaded}/{len(self._symbol_info_cache)} symbols "
+                f"({len(bracket_map)} total in bracket response)"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Bulk leverage bracket preload failed: {e} — "
+                f"max_notional will be lazy-loaded per symbol on first order"
+            )
+
     def get_symbol_info(self, symbol: str) -> dict:
         """Get tick_size, step_size, min_notional, max_notional for a symbol (cached)."""
         if symbol in self._symbol_info_cache:
@@ -96,6 +131,9 @@ class DataMixin:
                             result["min_notional"] = float(f.get("notional", 5))
                     self._symbol_info_cache[sym_info["symbol"]] = result
                 self._exchange_info_fetched = True
+                # Bulk-load max_notional for all symbols now that the cache is
+                # populated.  1 API call covers all 800+ symbols at once.
+                self._preload_max_notional()
             return self._symbol_info_cache.get(symbol, {})
         except Exception as e:
             logger.error(f"Symbol info fetch failed for {symbol}: {e}")

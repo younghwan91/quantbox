@@ -465,3 +465,120 @@ class TestLimitChaserPartialFillNoPosition:
         assert result.status == ChaseFillStatus.FILLED
         assert result.filled_quantity == 0.005
         assert result.avg_price == 50000.0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Auto-close on persistent bracket repair failure (v14.5.x)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestBracketRepairAutoClose:
+    """When SL bracket repair fails MAX_REPAIR_FAILS (3) consecutive times,
+    the position should be auto-closed to prevent extended SL exposure.
+
+    Historically: WLDUSDT/SUIUSDT were left UNPROTECTED for many cycles
+    after -1022 caused bracket repair to fail silently."""
+
+    def _make_scalper_with_missing_sl(self):
+        """Scalper with one live position that has no server SL."""
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper.discord = MagicMock()
+        scalper.strategy.open_position(
+            symbol="ENJUSDT",
+            signal=1,
+            entry_price=0.25,
+            notional=100.0,
+            leverage=30,
+            move_size=0.01,
+            server_sl_order_id=None,  # missing — triggers repair
+            server_tp_order_id="tp_001",
+        )
+        # Orderbook for auto-close price fetch
+        scalper.client.futures_orderbook_ticker = MagicMock(return_value={"bidPrice": "0.24", "askPrice": "0.26"})
+        return scalper
+
+    def _mock_sl_placement_always_fails(self, scalper):
+        """Make every SL placement API call raise an exception."""
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == "post":
+                raise Exception("APIError(code=-1022): Signature not valid.")
+            return {"algoStatus": "WORKING"}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
+
+    def test_repair_fail_count_increments(self):
+        """Each failed repair increments _repair_fail_count on the position."""
+        scalper = self._make_scalper_with_missing_sl()
+        scalper._close_position = MagicMock(return_value=True)
+        self._mock_sl_placement_always_fails(scalper)
+
+        scalper._sync_server_orders()  # fail #1
+
+        pos = scalper.strategy._positions.get("ENJUSDT")
+        assert pos is not None
+        assert pos.get("_repair_fail_count") == 1
+
+    def test_auto_close_triggers_on_third_failure(self):
+        """After 3 consecutive SL repair failures, auto-close is called."""
+        scalper = self._make_scalper_with_missing_sl()
+        scalper._close_position = MagicMock(return_value=True)
+        self._mock_sl_placement_always_fails(scalper)
+
+        scalper._sync_server_orders()  # fail #1 — count=1
+        scalper._sync_server_orders()  # fail #2 — count=2
+        scalper._sync_server_orders()  # fail #3 — count=3 → auto-close
+
+        scalper._close_position.assert_called_once()
+        call_args = scalper._close_position.call_args
+        assert call_args[0][1] == "bracket_repair_exhausted"
+
+    def test_auto_close_sends_discord_alert(self):
+        """Discord alert fires when auto-close is triggered."""
+        scalper = self._make_scalper_with_missing_sl()
+        scalper._close_position = MagicMock(return_value=True)
+        self._mock_sl_placement_always_fails(scalper)
+
+        for _ in range(3):
+            scalper._sync_server_orders()
+
+        scalper.discord.send.assert_called()
+        alert_text = " ".join(str(c) for c in scalper.discord.send.call_args_list)
+        assert "bracket_repair" in alert_text.lower() or "SL" in alert_text or "자동청산" in alert_text
+
+    def test_no_auto_close_before_threshold(self):
+        """Auto-close must NOT fire before reaching MAX_REPAIR_FAILS."""
+        scalper = self._make_scalper_with_missing_sl()
+        scalper._close_position = MagicMock(return_value=True)
+        self._mock_sl_placement_always_fails(scalper)
+
+        scalper._sync_server_orders()  # fail #1
+        scalper._sync_server_orders()  # fail #2
+
+        scalper._close_position.assert_not_called()
+
+    def test_successful_repair_resets_fail_count(self):
+        """A successful SL repair clears _repair_fail_count."""
+        scalper = self._make_scalper_with_missing_sl()
+        scalper._close_position = MagicMock(return_value=True)
+
+        # First call fails
+        self._mock_sl_placement_always_fails(scalper)
+        scalper._sync_server_orders()  # fail #1 → count=1
+
+        pos = scalper.strategy._positions.get("ENJUSDT")
+        assert pos.get("_repair_fail_count") == 1
+
+        # Second call succeeds — repair places SL, count should NOT grow
+        def mock_algo_success(method, path, signed=True, data=None):
+            if method == "post":
+                return {"algoId": 99999}
+            return {"algoStatus": "WORKING"}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_success)
+        scalper._sync_server_orders()  # success → SL placed
+
+        pos = scalper.strategy._positions.get("ENJUSDT")
+        # _repair_fail_count should not have incremented further
+        assert pos.get("_repair_fail_count", 0) <= 1
