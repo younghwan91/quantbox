@@ -498,7 +498,7 @@ class ReconciliationMixin:
             exchange_qty = abs(exchange_map[lookup_key])
             internal_qty = pos["notional"] / pos["entry_price"]
             qty_diff_pct = abs(exchange_qty - internal_qty) / max(internal_qty, 1e-8) * 100
-            if qty_diff_pct > 5:  # More than 5% mismatch
+            if qty_diff_pct > self.config.reconciliation_qty_tolerance_pct:  # configurable mismatch threshold
                 logger.warning(
                     f"[{sym}] RECONCILIATION: Qty mismatch! "
                     f"Internal={internal_qty:.6f} Exchange={exchange_qty:.6f} "

@@ -69,7 +69,7 @@ class PositionMixin:
             if vs.dynamic_capital_enabled:
                 n_active = self.strategy.n_active
                 per_slot_capital = balance / max(1, n_active + 1)
-                per_slot_capital = min(per_slot_capital, balance * 0.5)
+                per_slot_capital = min(per_slot_capital, balance * vs.dynamic_capital_max_fraction)
                 # Hard cap: never exceed flat sizing regardless of n_active
                 if per_slot_capital > flat_per_slot:
                     logger.warning(
@@ -157,8 +157,8 @@ class PositionMixin:
             if cfg.dynamic_capital_enabled:
                 n_active = self.strategy.n_active
                 per_slot_capital = balance / max(1, n_active + 1)
-                # Safety: cap at 50% of balance to prevent over-concentration
-                per_slot_capital = min(per_slot_capital, balance * 0.5)
+                # Safety: cap at cfg.dynamic_capital_max_fraction of balance to prevent over-concentration
+                per_slot_capital = min(per_slot_capital, balance * cfg.dynamic_capital_max_fraction)
             else:
                 per_slot_capital = balance / cfg.max_concurrent
 
@@ -253,7 +253,7 @@ class PositionMixin:
                         f"[{symbol}] MTF leverage boost: {leverage / cfg.mtf_leverage_mult:.2f}x → {leverage:.2f}x"
                     )
 
-        if notional < 10.0:  # Min notional $10
+        if notional < 10.0:  # Internal strategy minimum ($10); Binance exchange min is $5 (see below)
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
             return False
 
@@ -267,7 +267,7 @@ class PositionMixin:
         if quantity <= 0:
             return False
 
-        # Check min notional
+        # Check exchange min notional (Binance API; default $5 when not in symbol info)
         info = self.get_symbol_info(symbol)
         min_notional = info.get("min_notional", 5.0)
         if quantity * entry_price < min_notional:

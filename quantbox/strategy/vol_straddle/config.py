@@ -115,6 +115,9 @@ class VolStraddleConfig(BaseSettings):
     # Disabled: vol_straddle uses fixed balance/max_concurrent (backtest parity).
     # Dynamic formula (balance/n_active+1) causes -2019 margin errors on 10-slot config.
     dynamic_capital_enabled: bool = False
+    # Safety cap: when dynamic capital enabled, never allocate more than this fraction
+    # of balance to a single slot (prevents first-slot over-concentration).
+    dynamic_capital_max_fraction: float = 0.5
 
     # ── Live-Backtest Divergence Monitor ──
     # Sends Discord alert when live WR/PF diverges from v14.5.0 backtest baseline.
