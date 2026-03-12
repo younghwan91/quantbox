@@ -308,6 +308,51 @@ class RubberBandScalper(
 
         return False
 
+    def _verify_invariants(self, balance: float) -> list[str]:
+        """T3-5: Check position invariants every cycle.
+
+        Returns list of violation descriptions. Empty = all OK.
+        Logs violations and sends a single Discord alert if any found.
+        Does NOT close positions automatically — alert and log only.
+        """
+        import re
+
+        violations: list[str] = []
+
+        # 1. Position count
+        n_active = self.strategy.n_active
+        max_c = self._cfg.max_concurrent
+        if n_active > max_c:
+            violations.append(f"position_count={n_active} > max_concurrent={max_c}")
+
+        # 2-5. Per-position checks
+        safe_balance = max(balance, 1.0)
+        for pos_key, pos in self.strategy._positions.items():
+            entry_price = pos.get("entry_price", 0)
+            notional = pos.get("notional", 0)
+            signal = pos.get("signal")
+            api_sym = pos.get("symbol", pos_key.split(":")[0] if ":" in pos_key else pos_key)
+
+            if not (0 < entry_price < 1e7):
+                violations.append(f"[{pos_key}] entry_price={entry_price!r} out of range")
+            if not (0 < notional < safe_balance * max_c * 125 + 1):
+                violations.append(f"[{pos_key}] notional={notional!r} out of range")
+            if signal not in (-1, 0, 1, 2):
+                violations.append(f"[{pos_key}] invalid signal={signal!r}")
+            if not re.match(r"^[A-Z]{2,12}USDT$", api_sym):
+                violations.append(f"[{pos_key}] malformed symbol={api_sym!r}")
+
+        if violations:
+            self.discord.send(
+                content=(
+                    f"\u26a0\ufe0f **불변량 위반** ({len(violations)}개) — "
+                    + "; ".join(violations[:3])
+                    + ("..." if len(violations) > 3 else "")
+                )
+            )
+
+        return violations
+
     # ==================== Order Execution ====================
 
     def _place_order(
@@ -518,6 +563,11 @@ class RubberBandScalper(
 
         # 1. Risk check
         risk_blocked = self._check_risk_limits(balance)
+
+        # T3-5: Invariant check every cycle
+        violations = self._verify_invariants(balance)
+        if violations:
+            logger.error(f"INVARIANT VIOLATIONS ({len(violations)}): " + "; ".join(violations))
 
         # 2. Close positions on drawdown halt
         if self._drawdown_halt:
