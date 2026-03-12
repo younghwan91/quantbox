@@ -651,6 +651,14 @@ class RubberBandScalper(
                     # v12.3.3: Ratchet server SL for runners to protect profits
                     if pos.get("partial_closed") and self.config.breakeven_after_partial and not self.paper_mode:
                         self._ratchet_runner_sl(pos_key, pos)
+                    # r65: Ratchet server SL to trail_stop_gain (bar-close gap fix)
+                    if (
+                        pos.get("trail_active")
+                        and not self.paper_mode
+                        and self.strategy_name == "vol_straddle"
+                        and getattr(self.vs_config, "trail_server_ratchet_enabled", True)
+                    ):
+                        self._ratchet_trail_sl(pos_key, pos)
 
         # 5. Look for new entries (skip if risk blocked or paused)
         if self._paused:

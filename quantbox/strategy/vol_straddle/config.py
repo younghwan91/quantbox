@@ -277,6 +277,11 @@ class VolStraddleConfig(BaseSettings):
     ma_cluster_tp: float = 0.08  # 8% hard TP ceiling (safety; r47: trailing fires first)
     ma_cluster_trail_activate: float = 0.04  # r47: activate trailing at +4% gain
     ma_cluster_trail_distance: float = 0.005  # r47: trail 0.5% behind peak
+
+    # r65: Server-side trail SL ratchet — closes bar-close execution gap (ΔPF=-0.950)
+    # When True, places/updates Binance STOP order at trail_stop_gain price after
+    # trail activation, ensuring intrabar execution matching backtest assumption.
+    trail_server_ratchet_enabled: bool = True
     ma_cluster_max_hold_4h: int = 12  # 12 × 4h = 48h
     ma_cluster_leverage: float = 21.0  # Half-Kelly: f*/2=4.33%, L=0.0433×10/0.02≈21
     ma_cluster_sma_periods: list[int] = Field(
