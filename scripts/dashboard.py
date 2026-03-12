@@ -402,8 +402,8 @@ def render():
                 n_s = len(grp)
                 wr_s = grp["pnl_usd"].gt(0).mean() * 100
                 tot_s = grp["pnl_usd"].sum()
-                avg_mfe = grp["mfe_pct"].mean() * 100 if "mfe_pct" in grp else 0
-                avg_mae = grp["mae_pct"].mean() * 100 if "mae_pct" in grp else 0
+                avg_mfe = grp["mfe_pct"].mean() if "mfe_pct" in grp else 0
+                avg_mae = grp["mae_pct"].mean() if "mae_pct" in grp else 0
                 avg_b = grp["bars_held"].mean()
                 tot_class = "pos" if tot_s >= 0 else "neg"
                 tag_cls = "tag-vr" if "vr" in strat else "tag-ma"
@@ -451,7 +451,7 @@ def render():
   <td><span class="{side_cls}">{r['direction']}</span></td>
   <td><span class="{tag_cls}">{'VR' if 'vr' in str(r['strategy_type']) else 'MA'}</span></td>
   <td class="{pct_class}">${pnl:+.2f}</td>
-  <td class="neu">{mfe*100:+.1f}%</td>
+  <td class="neu">{mfe:+.1f}%</td>
   <td class="neu">{r['bars_held']}</td>
   <td class="neu" style="text-align:left">{r['exit_reason']}</td>
 </tr>"""

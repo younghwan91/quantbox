@@ -78,6 +78,7 @@ class VolStraddleConfig(BaseSettings):
 
     # ── Max Hold (bars at each TF, all ≈ 48h real-time) ──
     max_hold_15m: int = 192  # 192 × 15m = 48h
+    max_hold_30m: int = 96  # 96  × 30m = 48h
     max_hold_1h: int = 48  # 48 × 1h = 48h
     max_hold_4h: int = 12  # 12 × 4h = 48h
 
@@ -330,6 +331,7 @@ class VolStraddleConfig(BaseSettings):
         """Get max hold bars for a timeframe."""
         return {
             "15m": self.max_hold_15m,
+            "30m": self.max_hold_30m,
             "1h": self.max_hold_1h,
             "4h": self.max_hold_4h,
         }.get(tf, self.max_hold_15m)

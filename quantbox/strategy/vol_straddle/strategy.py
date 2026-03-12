@@ -992,6 +992,7 @@ class VolStraddleStrategy:
             "move_size": move_size,
             "bars_held": 0,
             "best_pnl": 0.0,
+            "worst_pnl": 0.0,
             # VolStraddle-specific
             "sl": sl,
             "tp": tp,
