@@ -158,6 +158,14 @@ class BracketMixin:
         stop_price = round(round(stop_price / tick_size) * tick_size, price_precision)
         limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
 
+        # T2-1 runtime guard: sanity check stop price placement
+        if entry_price <= 0:
+            logger.error(f"[{symbol}] SL INVARIANT: entry_price={entry_price!r} — aborting SL placement")
+            return None
+        if stop_price <= 0:
+            logger.error(f"[{symbol}] SL INVARIANT: stop_price={stop_price!r} — aborting SL placement")
+            return None
+
         dist_pct = stop_distance * 100
         logger.info(
             f"[{symbol}] SL calc: entry=${entry_price:.4f} "
@@ -253,6 +261,14 @@ class BracketMixin:
         # Round prices to tick size
         trigger_price = round(round(trigger_price / tick_size) * tick_size, price_precision)
         limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
+
+        # T2-1 runtime guard: sanity check TP price placement
+        if entry_price <= 0:
+            logger.error(f"[{symbol}] TP INVARIANT: entry_price={entry_price!r} — aborting TP placement")
+            return None
+        if trigger_price <= 0:
+            logger.error(f"[{symbol}] TP INVARIANT: trigger_price={trigger_price!r} — aborting TP placement")
+            return None
 
         dist_pct = target_distance * 100
         logger.info(
