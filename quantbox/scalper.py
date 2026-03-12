@@ -252,21 +252,31 @@ class RubberBandScalper(
         return self.config
 
     def get_balance(self) -> float:
-        """Get current USDT balance."""
+        """Get current USDT balance.
+
+        Sets self._balance_fetch_ok = True on success, False on API failure.
+        Callers must check this flag before opening new positions (T1-4).
+        """
         if self.paper_mode:
+            self._balance_fetch_ok = True
             return self._paper_balance
         try:
             balances = self.client.futures_account_balance()
             for b in balances:
                 if b["asset"] == "USDT":
-                    return float(b["balance"])
+                    val = float(b["balance"])
+                    self._balance_fetch_ok = True
+                    return val
         except Exception as e:
             logger.error(f"Balance fetch failed: {e}")
+        # T1-4: Mark stale — callers will block new entries on this flag
+        self._balance_fetch_ok = False
         # v12.5.1: Return last known balance instead of 0.0 to prevent
         # false drawdown halt on transient API failures.
         if hasattr(self, "_last_known_balance") and self._last_known_balance > 0:
             logger.warning(f"Using last known balance ${self._last_known_balance:.2f} due to API failure")
             return self._last_known_balance
+        logger.critical("Balance fetch failed and no fallback available — new entries will be blocked")
         return 0.0
 
     def _check_risk_limits(self, balance: float) -> bool:
@@ -419,6 +429,12 @@ class RubberBandScalper(
                 quantity_precision=qty_precision,
                 reduce_only=reduce_only,
                 position_side=position_side,
+                # T1-1: Generate stable clientOrderId for audit trail.
+                # Format: QB_{symbol}_{side}_{unix_ms} — unique per order attempt.
+                # Entry orders pass leverage>1, close orders default to leverage=1.
+                client_order_id_prefix=(
+                    f"QB_{symbol}_{side}_{int(time.time() * 1000)}" if not self.paper_mode else None
+                ),
             )
 
             if result.status == ChaseFillStatus.NO_POSITION:
@@ -723,9 +739,27 @@ class RubberBandScalper(
                         f"G7 DailyBreaker active: today PnL=${self._daily_realized_pnl:.2f}. Skipping new entries."
                     )
             if not self._daily_loss_blocked:
-                available_slots = self._cfg.max_concurrent - self.strategy.n_active
-                if available_slots > 0:
-                    self._scan_entries(symbols, btc_close, balance, available_slots, btc_close_4h=btc_close_4h)
+                # T1-4: Block new entries when balance is stale (API failure).
+                # Stale balance → per_slot_capital may be incorrect → wrong sizing.
+                if not getattr(self, "_balance_fetch_ok", True):
+                    logger.warning(
+                        f"T1-4 Balance fetch FAILED — skipping new entries this cycle "
+                        f"(using {'stale $' + str(round(balance, 2)) if balance > 0 else 'NO DATA'})"
+                    )
+                    if not getattr(self, "_balance_alert_sent", False):
+                        self.discord.send(
+                            content=(
+                                f"⚠️ **잔고 조회 실패** — 이번 사이클 신규 진입 차단. "
+                                f"{'최종 잔고 $' + str(round(balance, 2)) + ' 사용 중' if balance > 0 else '잔고 불명 (0)'}. "
+                                f"거래소 API 확인 요망."
+                            )
+                        )
+                        self._balance_alert_sent = True
+                else:
+                    self._balance_alert_sent = False  # Reset alert flag on recovery
+                    available_slots = self._cfg.max_concurrent - self.strategy.n_active
+                    if available_slots > 0:
+                        self._scan_entries(symbols, btc_close, balance, available_slots, btc_close_4h=btc_close_4h)
 
         # 6. Save state
         self._save_state()
@@ -1004,6 +1038,32 @@ class RubberBandScalper(
         except Exception as e:
             logger.error(f"State save failed: {e}")
 
+    @staticmethod
+    def _validate_restored_position(sym: str, pos: dict) -> tuple[bool, str]:
+        """T1-2: Validate a position dict loaded from state file before restoring.
+
+        Returns (is_valid, error_reason). If False, the position is skipped
+        and a Discord alert is sent. Prevents ZeroDivisionError and silent
+        corruption from propagating into live trading logic.
+        """
+        entry_price = pos.get("entry_price", 0)
+        if not isinstance(entry_price, (int, float)) or entry_price != entry_price or entry_price <= 0:
+            return False, f"entry_price={entry_price!r} must be > 0"
+
+        notional = pos.get("notional", 0)
+        if not isinstance(notional, (int, float)) or notional != notional or notional <= 0:
+            return False, f"notional={notional!r} must be > 0"
+
+        leverage = pos.get("leverage", 1)
+        if not isinstance(leverage, (int, float)) or not (1 <= float(leverage) <= 125):
+            return False, f"leverage={leverage!r} must be in [1, 125]"
+
+        signal = pos.get("signal")
+        if signal not in (-1, 0, 1, 2):
+            return False, f"signal={signal!r} must be in {{-1, 0, 1, 2}}"
+
+        return True, ""
+
     def _load_state(self) -> None:
         """Restore state from disk."""
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
@@ -1037,6 +1097,16 @@ class RubberBandScalper(
             logger.info(f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history cleared")
 
         for sym, pos in positions.items():
+            # T1-2: Validate critical fields before restoring to prevent
+            # ZeroDivisionError, -1111 API errors, or silent bad state.
+            valid, reason = self._validate_restored_position(sym, pos)
+            if not valid:
+                logger.error(f"[{sym}] SKIPPING corrupted position from state file: {reason}")
+                self.discord.send(
+                    content=(f"⚠️ **상태파일 오류** [{sym}] — {reason}. 해당 포지션 복원 건너뜀. 수동 확인 필요.")
+                )
+                continue
+
             # Parse compound key (e.g. 'SUIUSDT:LONG') to extract the clean
             # Binance API symbol and position_side separately.
             # Without this, open_position stores the compound key as 'symbol',
