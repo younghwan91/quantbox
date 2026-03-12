@@ -317,6 +317,23 @@ class RubberBandScalper(
 
         Returns dict with avgPrice, executedQty on success, None on failure.
         """
+        # ── Pre-flight validation (paper AND live) ──────────────────────────
+        # Run before paper-mode early return so that bugs like compound keys
+        # (':' in symbol → -1022) are caught during paper testing, not only
+        # when the same code path hits the live exchange for the first time.
+        info = self.get_symbol_info(symbol)
+        preflight = OrderPreflight.validate(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            leverage=leverage,
+            reduce_only=reduce_only,
+            sym_info=info,
+        )
+        if not preflight.ok:
+            logger.error(f"[{symbol}] Order preflight FAILED: {preflight.reason}")
+            return None
+
         if self.paper_mode:
             # Simulate fill at current market price
             try:
@@ -332,24 +349,6 @@ class RubberBandScalper(
             }
 
         try:
-            # ── Pre-flight validation ───────────────────────────────────────
-            # Centralised gate: catches symbol format errors, invalid sides,
-            # non-positive quantities, bad leverage, and step-size misalignment
-            # before any API call is made.  Guards are applied uniformly across
-            # all code paths (VR, MA-cluster, CW-Tier, hedge-mode close, etc.).
-            info = self.get_symbol_info(symbol)
-            preflight = OrderPreflight.validate(
-                symbol=symbol,
-                side=side,
-                quantity=quantity,
-                leverage=leverage,
-                reduce_only=reduce_only,
-                sym_info=info,
-            )
-            if not preflight.ok:
-                logger.error(f"[{symbol}] Order preflight FAILED: {preflight.reason}")
-                return None
-
             tick_size = info.get("tick_size", 0.01)
             price_precision = info.get("price_precision", 2)
             step_size = info.get("step_size", 0.001)
