@@ -74,6 +74,7 @@ from quantbox.core.scalper_state import (
 from quantbox.execution.brackets import BracketMixin
 from quantbox.execution.data_mixin import DataMixin
 from quantbox.execution.positions import PositionMixin
+from quantbox.execution.preflight import OrderPreflight
 from quantbox.execution.reconciliation import ReconciliationMixin
 from quantbox.core.trade_journal import TradeJournal
 from quantbox.core.divergence_monitor import DivergenceMonitor
@@ -331,6 +332,29 @@ class RubberBandScalper(
             }
 
         try:
+            # ── Pre-flight validation ───────────────────────────────────────
+            # Centralised gate: catches symbol format errors, invalid sides,
+            # non-positive quantities, bad leverage, and step-size misalignment
+            # before any API call is made.  Guards are applied uniformly across
+            # all code paths (VR, MA-cluster, CW-Tier, hedge-mode close, etc.).
+            info = self.get_symbol_info(symbol)
+            preflight = OrderPreflight.validate(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                leverage=leverage,
+                reduce_only=reduce_only,
+                sym_info=info,
+            )
+            if not preflight.ok:
+                logger.error(f"[{symbol}] Order preflight FAILED: {preflight.reason}")
+                return None
+
+            tick_size = info.get("tick_size", 0.01)
+            price_precision = info.get("price_precision", 2)
+            step_size = info.get("step_size", 0.001)
+            qty_precision = info.get("quantity_precision", 3)
+
             # v12.4.7: Skip leverage change for reduce-only orders.
             # Changing leverage on an open position can fail with
             # -2028 "insufficient margin balance" if the new leverage
@@ -378,12 +402,6 @@ class RubberBandScalper(
                     else:
                         logger.error(f"[{symbol}] Leverage set failed: {e} — ABORTING order")
                         return None
-
-            info = self.get_symbol_info(symbol)
-            tick_size = info.get("tick_size", 0.01)
-            price_precision = info.get("price_precision", 2)
-            step_size = info.get("step_size", 0.001)
-            qty_precision = info.get("quantity_precision", 3)
 
             result: ChaseResult = self._chaser.chase_limit_order(
                 symbol=symbol,
