@@ -15,6 +15,10 @@ or execution branch generated it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.types import ApiSymbol, Side
 
 
 @dataclass
@@ -30,8 +34,8 @@ class OrderPreflight:
 
     @staticmethod
     def validate(
-        symbol: str,
-        side: str,
+        symbol: "ApiSymbol",
+        side: "Side",
         quantity: float,
         leverage: int,
         reduce_only: bool,

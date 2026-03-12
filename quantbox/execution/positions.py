@@ -7,6 +7,12 @@ pyramid logic.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.protocol import ScalperProtocol
+    from quantbox.core.types import ApiSymbol, PositionKey, SignalValue
+
 import logging
 import math
 from datetime import datetime, timezone
@@ -28,9 +34,9 @@ class PositionMixin:
     """Mixin: Position lifecycle (open, partial close, close, pyramid)."""
 
     def _open_position(
-        self,
-        symbol: str,
-        signal: int,
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
         close_prices: np.ndarray,
         balance: float,
     ) -> bool:
@@ -644,8 +650,8 @@ class PositionMixin:
         return True
 
     def _partial_close_position(
-        self,
-        symbol: str,
+        self: "ScalperProtocol",
+        symbol: "PositionKey",
         current_price: float,
     ) -> bool:
         """Partially close 50% of a position (v4.3 capital preservation).
@@ -949,7 +955,7 @@ class PositionMixin:
         return True
 
     def _add_to_position(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         current_price: float,
         balance: float,
@@ -1026,7 +1032,7 @@ class PositionMixin:
         return True
 
     def _pyramid_position(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         current_price: float,
         balance: float,
@@ -1110,8 +1116,8 @@ class PositionMixin:
         return True
 
     def _close_position(
-        self,
-        symbol: str,
+        self: "ScalperProtocol",
+        symbol: "PositionKey",
         reason: str,
         current_price: float,
     ) -> bool:

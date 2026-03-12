@@ -7,6 +7,11 @@ mismatch correction.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.protocol import ScalperProtocol
+
 import logging
 from datetime import datetime, timezone
 
@@ -16,7 +21,7 @@ logger = logging.getLogger("Scalper")
 class ReconciliationMixin:
     """Mixin: Exchange reconciliation (sync server orders, detect ghosts)."""
 
-    def _sync_server_orders(self) -> None:
+    def _sync_server_orders(self: "ScalperProtocol") -> None:
         """Check if any server-side TP/SL orders filled between cycles.
 
         v11.2: Reconciles internal state with exchange reality.
@@ -285,7 +290,7 @@ class ReconciliationMixin:
                         f"(algoId={tp_id})"
                     )
 
-    def _reconcile_positions(self) -> None:
+    def _reconcile_positions(self: "ScalperProtocol") -> None:
         """Reconcile internal position state with exchange reality.
 
         v12.5.1: Called each cycle AFTER _sync_server_orders.
@@ -500,7 +505,7 @@ class ReconciliationMixin:
                 pos["notional"] = exchange_qty * pos["entry_price"]
 
     def _handle_server_partial_tp_fill(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         pos: dict,
         fill_price: float,
@@ -626,7 +631,7 @@ class ReconciliationMixin:
         )
 
     def _record_server_fill(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         fill_price: float,
         fill_qty: float,

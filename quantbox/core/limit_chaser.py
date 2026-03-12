@@ -451,7 +451,7 @@ class LimitOrderChaser:
                     elapsed_seconds=time.monotonic() - start_time,
                     maker_fill=False,
                 )
-            if market_result is not None:
+            if market_result is not None and not isinstance(market_result, str):
                 mkt_qty, mkt_price, mkt_oid = market_result
                 weighted_price_sum += mkt_qty * mkt_price
                 total_filled += mkt_qty
@@ -486,7 +486,7 @@ class LimitOrderChaser:
         quantity_precision: int = 8,
         reduce_only: bool = False,
         position_side: str | None = None,
-    ) -> tuple[float, float, str] | None:
+    ) -> tuple[float, float, str] | str | None:
         """시장가 fallback 주문.
 
         바이낸스 MARKET 응답에서 executedQty/avgPrice가 "0"으로 올 수 있으므로

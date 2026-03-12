@@ -70,15 +70,48 @@ python_version = "3.13"
 ignore_missing_imports = true
 warn_unused_ignores = false
 follow_imports = "skip"
-# Scope: SSoT config files + pure utility modules.
-# Mixin files (brackets, positions, reconciliation, loop_mixin, data_mixin, commands)
-# use self.attr from other mixins → Protocol pattern needed before adding here.
 files = [
+    # Core types & protocol (strict)
+    "quantbox/core/types.py",
+    "quantbox/core/protocol.py",
+    # SSoT config files
     "quantbox/strategy/vol_straddle/config.py",
     "quantbox/strategy/rubberband/config.py",
+    # Utility modules
     "quantbox/core/bot_utils.py",
     "quantbox/core/scalper_state.py",
+    "quantbox/core/events.py",
+    "quantbox/core/limit_chaser.py",
+    # Execution layer (Protocol pattern applied)
+    "quantbox/execution/preflight.py",
+    "quantbox/execution/positions.py",
+    "quantbox/execution/reconciliation.py",
+    "quantbox/execution/brackets.py",
+    "quantbox/execution/data_mixin.py",
+    # Mixin modules (Protocol pattern applied)
+    "quantbox/core/loop_mixin.py",
+    "quantbox/core/commands.py",
+    # Main entry point
+    "quantbox/scalper.py",
+    # Data layer
+    "quantbox/data/cache.py",
+    "quantbox/data/downloader.py",
+    "quantbox/data/real_data_loader.py",
 ]
+
+[[tool.mypy.overrides]]
+module = ["quantbox.core.types", "quantbox.core.protocol", "quantbox.execution.preflight"]
+disallow_untyped_defs = true
+warn_return_any = true
+
+[[tool.mypy.overrides]]
+# RubberBandScalper inherits Mixin methods annotated with self: ScalperProtocol.
+# mypy cannot verify structural conformance with follow_imports="skip", so it
+# raises [misc] "Invalid self argument" on every Mixin method call from the
+# concrete class. This is a known mypy limitation with the Protocol+Mixin pattern.
+# The Protocol enforcement still applies within each Mixin file.
+module = "quantbox.scalper"
+disable_error_code = ["misc", "arg-type"]
 
 [dependency-groups]
 dev = [
