@@ -68,6 +68,37 @@ def test_entry_price_zero_rejected(signal: int) -> None:
     assert result is False, f"Expected False for entry_price=0, signal={signal}, got {result!r}"
 
 
+def test_entry_price_guard_prevents_zero_division() -> None:
+    """T2-1 guard must catch entry_price=0 *before* quantity division.
+
+    Without the guard, `notional / 0.0` raises ZeroDivisionError (Python float)
+    or returns inf (numpy float64) — both silent/crash failures in production.
+    This test verifies the guard fires and logs an error.
+    """
+    import logging
+    from unittest.mock import patch
+
+    sc = _build_vs_scalper()
+    sc.strategy.get_last_signal_meta = MagicMock(return_value={})
+    # Prevent lazy-load via MagicMock client (MagicMock().__float__() == 1.0
+    # would set max_notional=1.0 and route the early-return through notional cap
+    # instead of the entry_price guard). Set sentinel to bypass lazy-load.
+    sc._symbol_info_cache["TESTUSDT"]["max_notional"] = None
+
+    # Python float 0.0 → ZeroDivisionError without guard
+    close_prices = np.array([100.0] * 19 + [0.0])
+
+    with patch("quantbox.execution.positions.logger") as mock_log:
+        result = sc._open_position("TESTUSDT", 1, close_prices, 1000.0)
+
+    assert result is False, "entry_price=0 must return False"
+    # Guard must have logged an error (INVARIANT VIOLATION)
+    error_calls = [str(c) for c in mock_log.error.call_args_list]
+    assert any("INVARIANT" in c or "entry_price" in c for c in error_calls), (
+        f"Expected INVARIANT error log, got: {error_calls}"
+    )
+
+
 # ─────────────────────────── Quantity formula ─────────────────────
 
 

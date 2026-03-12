@@ -64,6 +64,19 @@ class TestSLGuard:
         )
         assert result is None
 
+    def test_sl_stop_price_guard_fires_when_move_size_exceeds_one(self):
+        """stop_price guard (not entry_price guard) must fire when move_size=2.0.
+
+        With entry_price=50.0, signal=1, stop_distance = 2.0*1.0 = 2.0:
+            stop_price = 50.0 * (1.0 - 2.0) = -50.0 → must return None.
+        This tests the stop_price <= 0 guard independently (entry_price is valid).
+        """
+        sc = _live_scalper()
+        result = sc._place_server_stop_loss(
+            **{**_SL_KWARGS, "entry_price": 50.0, "move_size": 2.0, "stop_mult": 1.0},
+        )
+        assert result is None
+
     def test_sl_returns_str_on_valid_entry_price(self):
         """Live mode: valid entry returns an algoId string."""
         sc = _live_scalper()
@@ -80,6 +93,21 @@ class TestTPGuard:
         sc = _live_scalper()
         result = sc._place_server_take_profit(
             **{**_TP_KWARGS, "entry_price": 0.0},
+        )
+        assert result is None
+
+    def test_tp_trigger_price_guard_fires_on_extreme_retrace(self):
+        """trigger_price guard must fire when target_retrace causes price <= 0.
+
+        With entry_price=1.0, signal=1, retrace=200 (200%):
+            trigger = 1.0 * (1.0 + 2.0) = 3.0 — valid; but with move_size=0 and
+            negative logic it should clamp. Use negative entry scenario via signal=-1:
+            trigger = 1.0 * (1.0 - 200) = -199.0 → must return None.
+        Tests the trigger_price <= 0 guard independently (entry_price is valid).
+        """
+        sc = _live_scalper()
+        result = sc._place_server_take_profit(
+            **{**_TP_KWARGS, "entry_price": 1.0, "signal": -1, "target_retrace": 200.0},
         )
         assert result is None
 
