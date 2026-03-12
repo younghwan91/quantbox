@@ -4,7 +4,8 @@
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-v14.4.2-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-1596%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-1685%20passed-brightgreen.svg)]()
+[![Coverage](https://img.shields.io/badge/coverage-77%25-green.svg)]()
 [![Branch](https://img.shields.io/badge/branch-main-blue.svg)]()
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(30x)와 MA Cluster Squeeze(21x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
