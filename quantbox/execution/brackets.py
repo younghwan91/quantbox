@@ -549,4 +549,102 @@ class BracketMixin:
             # Placement failed — keep old SL active (don't cancel!)
             logger.warning(f"[{symbol}] Runner SL ratchet FAILED — keeping old SL at {last_server_floor * 100:.2f}%")
 
+    def _ratchet_trail_sl(self, symbol: str, pos: dict) -> None:
+        """Ratchet server SL to trail_stop_gain price after trail activation.
+
+        r65: bar-close execution gap fix. Backtest assumes intrabar trail stop at
+        exact trail_stop_gain price; live code exits at bar-close (MARKET order).
+        This places/updates a Binance STOP order at the exact trail_stop_gain price
+        so Binance executes intrabar — matching backtest behavior.
+
+        Only ratchets UPWARD (never moves SL against position direction).
+        Guards against API spam with a minimum 0.1% improvement threshold.
+
+        Args:
+            symbol: Compound position key (e.g. "BTCUSDT:LONG").
+            pos: Position dict (mutated to update server_sl_order_id).
+        """
+        peak_gain = pos.get("peak_gain", 0.0)
+        if not pos.get("trail_active") or self.paper_mode:
+            return
+
+        strategy_type = pos.get("strategy_type", "vr_squeeze")
+        is_straddle = pos.get("is_straddle", False)
+
+        vs = self.vs_config
+        if is_straddle:
+            trail_distance = vs.s_trail_distance
+        elif strategy_type == "ma_cluster":
+            trail_distance = vs.ma_cluster_trail_distance
+        else:
+            trail_distance = vs.d_trail_distance  # 0.002
+
+        trail_stop_gain = max(peak_gain - trail_distance, 0.0)
+
+        # Only ratchet when meaningfully better than last ratcheted level
+        last_ratcheted = pos.get("_trail_sl_ratcheted", -999.0)
+        if trail_stop_gain - last_ratcheted < 0.001:  # 0.1% minimum step
+            return
+
+        raw_sym = pos.get("symbol", symbol)
+        api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+
+        entry_price = pos["entry_price"]
+        signal = pos["signal"]
+
+        if signal == 1:  # LONG: SL is below current price
+            trigger_price = entry_price * (1.0 + trail_stop_gain)
+            close_side = "SELL"
+            buffer = -0.003  # 0.3% below trigger for limit
+        else:  # SHORT: SL is above current price
+            trigger_price = entry_price * (1.0 - trail_stop_gain)
+            close_side = "BUY"
+            buffer = 0.003  # 0.3% above trigger for limit
+
+        limit_price = trigger_price * (1.0 + buffer)
+
+        info = self.get_symbol_info(api_sym)
+        tick_size = info.get("tick_size", 0.01)
+        price_precision = info.get("price_precision", 2)
+
+        trigger_price = round(round(trigger_price / tick_size) * tick_size, price_precision)
+        limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
+
+        # Place-first-cancel-after: position never left unprotected
+        quantity = pos["notional"] / pos["entry_price"]
+        quantity = self._round_qty(quantity, api_sym)
+        if quantity <= 0:
+            return
+
+        new_sl = self._place_algo_order(
+            symbol=api_sym,
+            side=close_side,
+            order_type="STOP",
+            quantity=quantity,
+            trigger_price=trigger_price,
+            limit_price=limit_price,
+            label="trail-ratchet-sl",
+            position_side=pos.get("position_side"),
+        )
+
+        if new_sl and new_sl != "WOULD_TRIGGER":
+            old_sl = pos.get("server_sl_order_id")
+            if old_sl:
+                self._cancel_server_stop_loss(api_sym, old_sl)
+            pos["server_sl_order_id"] = new_sl
+            pos["_trail_sl_ratcheted"] = trail_stop_gain
+            logger.info(
+                f"[{symbol}] Trail SL RATCHETED: "
+                f"trail_stop={trail_stop_gain * 100:.3f}% peak={peak_gain * 100:.3f}% "
+                f"trigger=${trigger_price:.4f}"
+            )
+            self._save_state()
+        elif new_sl == "WOULD_TRIGGER":
+            logger.warning(
+                f"[{symbol}] Trail SL ratchet WOULD_TRIGGER — "
+                f"bar-close exit will handle (trail_stop={trail_stop_gain * 100:.3f}%)"
+            )
+        else:
+            logger.warning(f"[{symbol}] Trail SL ratchet FAILED — old SL preserved")
+
     # ── Elliott: Add-to-position methods ──
