@@ -41,6 +41,8 @@ omit = [
     # signals.py uses Numba @jit(nopython=True) — JIT-compiled code is not
     # trackable by coverage.py. Logic is verified by tests/test_signals_unit.py.
     "quantbox/strategy/vol_straddle/signals.py",
+    # types.py contains only NewType/TypedDict definitions — no executable logic.
+    "quantbox/core/types.py",
 ]
 
 [tool.coverage.report]
