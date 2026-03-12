@@ -46,7 +46,12 @@ html, body, [data-testid="stApp"] {
 }
 [data-testid="stApp"] > div { background-color: #000000 !important; }
 [data-testid="stSidebar"]   { display: none; }
-.block-container { padding: 4px 12px !important; max-width: 100% !important; }
+.block-container {
+    padding: 4px 16px !important;
+    max-width: 1280px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
 
 /* Hide Streamlit chrome */
 #MainMenu, footer, header   { visibility: hidden; }
@@ -143,7 +148,7 @@ hr { border-color: #2a2a2a !important; margin: 6px 0 !important; }
 /* ── MOBILE ── */
 @media (max-width: 600px) {
     html, body, [data-testid="stApp"] { font-size: 14px; }
-    .block-container { padding: 2px 6px !important; }
+    .block-container { padding: 2px 8px !important; max-width: 100% !important; margin: 0 !important; }
     .ticker { flex-wrap: wrap; gap: 4px 0; padding: 6px 8px; font-size: 0.88rem; }
     .ticker .logo { width: 100%; margin-bottom: 2px; }
     .ticker .sep  { display: none; }
