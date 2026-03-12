@@ -10,7 +10,7 @@ Provides efficient data download with:
 
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import pandas as pd
 from tqdm import tqdm
@@ -84,7 +84,7 @@ class DataDownloader:
 
     def _ms_to_datetime(self, ms: int) -> datetime:
         """Convert milliseconds timestamp to datetime."""
-        return datetime.utcfromtimestamp(ms / 1000)
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).replace(tzinfo=None)
 
     def get_trading_coins(
         self, quote_currency: str = "USDT", n_coins: int = 50, sort_by_volume: bool = True

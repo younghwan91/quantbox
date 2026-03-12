@@ -1415,7 +1415,7 @@ class PositionMixin:
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
             "balance_before": balance_before,
-            "balance_after": None,  # filled below after balance settles
+            "balance_after": self.get_balance(),
         }
         self._trade_history.append(trade)
         self._journal.record(trade)

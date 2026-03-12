@@ -1060,6 +1060,8 @@ class RubberBandScalper(
                 # ratchet API call and has a brief inconsistency window.
                 self.strategy._positions[sym]["_computed_trail_stop"] = pos.get("_computed_trail_stop")
                 self.strategy._positions[sym]["_server_sl_pct"] = pos.get("_server_sl_pct", 0.0)
+                # r65: Restore trail ratchet level to avoid redundant API call on restart
+                self.strategy._positions[sym]["_trail_sl_ratcheted"] = pos.get("_trail_sl_ratcheted", -999.0)
                 # R43: Trailing stop state for directional trades
                 self.strategy._positions[sym]["trail_active"] = pos.get("trail_active", False)
                 self.strategy._positions[sym]["peak_gain"] = pos.get("peak_gain", 0.0)
