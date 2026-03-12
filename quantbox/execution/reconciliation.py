@@ -195,7 +195,49 @@ class ReconciliationMixin:
                             pos["_server_sl_pct"] = 0.0
                         logger.info(f"[{sym}] BRACKET REPAIR: SL placed algoId={new_sl}")
                     else:
-                        logger.error(f"[{sym}] BRACKET REPAIR FAILED: Could not place SL — position UNPROTECTED")
+                        # Track consecutive SL repair failures.
+                        # After MAX_REPAIR_FAILS attempts the position is likely
+                        # in a bad state (API issues, corrupt symbol, etc.) —
+                        # auto-close to cap the unprotected exposure window.
+                        MAX_REPAIR_FAILS = 3
+                        fail_count = pos.get("_repair_fail_count", 0) + 1
+                        pos["_repair_fail_count"] = fail_count
+                        logger.error(
+                            f"[{sym}] BRACKET REPAIR FAILED ({fail_count}/{MAX_REPAIR_FAILS}): "
+                            f"Could not place SL — position UNPROTECTED"
+                        )
+                        if fail_count >= MAX_REPAIR_FAILS:
+                            logger.critical(
+                                f"[{sym}] BRACKET REPAIR EXHAUSTED ({MAX_REPAIR_FAILS} failures) — "
+                                f"AUTO CLOSING to prevent extended SL exposure"
+                            )
+                            self.discord.send(
+                                content=(
+                                    f"\U0001f6a8 **수익보전 자동청산** [{sym}] — "
+                                    f"SL 배치 {MAX_REPAIR_FAILS}회 연속 실패. 포지션 자동 종료."
+                                )
+                            )
+                            _fc_price = entry_price
+                            try:
+                                _book = self.client.futures_orderbook_ticker(symbol=api_sym)
+                                _fc_price = float(_book["bidPrice"] if signal == 1 else _book["askPrice"])
+                            except Exception:
+                                pass
+                            closed = self._close_position(sym, "bracket_repair_exhausted", _fc_price)
+                            if closed:
+                                logger.info(f"[{sym}] AUTO CLOSE SUCCESS — unprotected position liquidated.")
+                            else:
+                                logger.critical(
+                                    f"[{sym}] AUTO CLOSE FAILED — MANUAL INTERVENTION REQUIRED! "
+                                    f"Position has no SL and could not be closed automatically."
+                                )
+                                self.discord.send(
+                                    content=(
+                                        f"\U0001f6a8\U0001f6a8 **자동청산 실패** [{sym}] — "
+                                        f"수동 청산 필요! 즉시 거래소 확인!"
+                                    )
+                                )
+                            continue  # Skip TP repair — position gone or in critical state
 
                 if missing_tp:
                     # v12.5: PBT mode uses 50% qty server TP (pre-partial only).
