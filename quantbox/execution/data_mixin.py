@@ -54,9 +54,29 @@ class DataMixin:
             return []
 
     def get_symbol_info(self, symbol: str) -> dict:
-        """Get tick_size, step_size, min_notional for a symbol (cached)."""
+        """Get tick_size, step_size, min_notional, max_notional for a symbol (cached)."""
         if symbol in self._symbol_info_cache:
-            return self._symbol_info_cache[symbol]
+            cached = self._symbol_info_cache[symbol]
+            # Lazy-load max_notional from leverage brackets on first access.
+            # Use None as sentinel to avoid repeated failed API calls.
+            if "max_notional" not in cached:
+                try:
+                    brackets = self.client.futures_leverage_bracket(symbol=symbol)
+                    if brackets:
+                        sym_brackets = brackets[0].get("brackets", [])
+                        if sym_brackets:
+                            # Brackets are sorted highest leverage first.
+                            # The first bracket's notionalCap is the max allowed
+                            # at the highest leverage tier.
+                            cached["max_notional"] = float(sym_brackets[0]["notionalCap"])
+                        else:
+                            cached["max_notional"] = None  # sentinel: tried, unavailable
+                    else:
+                        cached["max_notional"] = None
+                except Exception as be:
+                    logger.debug(f"[{symbol}] Leverage bracket fetch failed: {be}")
+                    cached["max_notional"] = None  # sentinel: tried, failed
+            return cached
 
         try:
             if not self._exchange_info_fetched:

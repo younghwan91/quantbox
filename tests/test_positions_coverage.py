@@ -53,13 +53,15 @@ def _make_vs_scalper(
             vs_config=vs_config,
         )
 
-    # Pre-populate symbol info cache so _round_qty() never hits the API
+    # Pre-populate symbol info cache so _round_qty() never hits the API.
+    # max_notional=None sentinel: leverage bracket already "tried" → no API call.
     scalper._symbol_info_cache["TESTUSDT"] = {
         "step_size": 0.001,
         "tick_size": 0.01,
         "quantity_precision": 3,
         "price_precision": 2,
         "min_notional": 5.0,
+        "max_notional": None,  # sentinel: no cap by default
     }
     scalper._symbol_info_cache["SHORTUSDT"] = scalper._symbol_info_cache["TESTUSDT"]
 
@@ -1427,3 +1429,77 @@ class TestCloseEdgeCases:
         scalper.strategy.close_position = MagicMock(return_value=None)
         result = scalper._close_position("TESTUSDT:LONG", "max_hold", 100.0)
         assert result is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# max_notional cap tests (prevents -2027)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestMaxNotionalCap:
+    """positions.py: notional is capped at symbol's Binance max_notional limit."""
+
+    def test_cw_notional_capped_when_exceeds_max(self):
+        """CW-Tier 1.5x notional이 max_notional 초과 시 캡핑되어 _place_order에 전달."""
+        cfg = VolStraddleConfig(
+            dynamic_capital_enabled=False,
+            soft_equity_scale=False,
+            cw_enabled=True,
+            cw_multipliers=[0.5, 1.0, 1.5, 2.0, 2.5],
+            base_leverage=30,
+            max_concurrent=10,
+        )
+        scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
+        # CW score=2 → 1.5x → notional = $3000 * 1.5 = $4500
+        # max_notional = $4000 → should cap to $4000
+        scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 4000.0
+        _mock_open(scalper)
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _open(scalper, 1000.0)
+
+        qty = float(scalper._place_order.call_args[0][2])
+        # capped notional=$4000 @ price=100.0 → qty=40
+        assert abs(qty - 40.0) < 0.1, f"Expected ~40 (capped), got {qty}"
+
+    def test_notional_not_capped_when_within_limit(self):
+        """max_notional 한도 내이면 캡핑 없이 그대로 사용."""
+        cfg = VolStraddleConfig(
+            dynamic_capital_enabled=False,
+            soft_equity_scale=False,
+            cw_enabled=True,
+            cw_multipliers=[0.5, 1.0, 1.5, 2.0, 2.5],
+            base_leverage=30,
+            max_concurrent=10,
+        )
+        scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
+        # CW score=2 → 1.5x → notional = $4500, max_notional = $10000 → no cap
+        scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 10000.0
+        _mock_open(scalper)
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _open(scalper, 1000.0)
+
+        qty = float(scalper._place_order.call_args[0][2])
+        # notional=$4500 @ price=100.0 → qty=45
+        assert abs(qty - 45.0) < 0.1, f"Expected ~45 (uncapped), got {qty}"
+
+    def test_no_cap_when_max_notional_absent(self):
+        """max_notional=None (sentinel: fetch failed or unavailable) → 캡핑 없이 원래 notional 사용."""
+        cfg = VolStraddleConfig(
+            dynamic_capital_enabled=False,
+            soft_equity_scale=False,
+            cw_enabled=True,
+            cw_multipliers=[0.5, 1.0, 1.5, 2.0, 2.5],
+            base_leverage=30,
+            max_concurrent=10,
+        )
+        scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
+        # max_notional=None sentinel means "bracket fetch failed" → no cap applied.
+        # _make_vs_scalper already sets None; this is explicit for documentation.
+        scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = None
+        _mock_open(scalper)
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _open(scalper, 1000.0)
+
+        qty = float(scalper._place_order.call_args[0][2])
+        # original notional=$4500 @ price=100.0 → qty=45
+        assert abs(qty - 45.0) < 0.1, f"Expected ~45 (no cap), got {qty}"

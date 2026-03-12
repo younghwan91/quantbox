@@ -282,6 +282,22 @@ class LimitOrderChaser:
                         elapsed_seconds=time.monotonic() - start_time,
                         maker_fill=False,
                     )
+                # -2027: Exceeded the maximum allowable position at current leverage.
+                # MARKET fallback will fail for the same reason — skip it immediately.
+                if "-2027" in err_str:
+                    logger.error(
+                        f"[{symbol}] Position size exceeds Binance notional limit at "
+                        f"current leverage (-2027). Skipping MARKET fallback."
+                    )
+                    return ChaseResult(
+                        status=ChaseFillStatus.FAILED,
+                        filled_quantity=0.0,
+                        avg_price=0.0,
+                        order_id="",
+                        chase_count=chase_count,
+                        elapsed_seconds=time.monotonic() - start_time,
+                        maker_fill=False,
+                    )
                 break
 
             # 4. Wait and check fill
