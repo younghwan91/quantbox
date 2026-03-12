@@ -8,7 +8,7 @@ to work identically in both backtesting and live trading modes.
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Dict, Any, List
+from typing import Callable, Optional, Dict, Any, List
 from queue import Queue
 import uuid
 
@@ -206,13 +206,13 @@ class EventQueue:
 
     def __init__(self, maxsize: int = 0):
         self._queue: Queue = Queue(maxsize=maxsize)
-        self._handlers: Dict[EventType, List[callable]] = {event_type: [] for event_type in EventType}
+        self._handlers: Dict[EventType, List[Callable[..., Any]]] = {event_type: [] for event_type in EventType}
 
     def put(self, event: Event):
         """Add event to queue."""
         self._queue.put(event)
 
-    def get(self, block: bool = True, timeout: float = None) -> Event:
+    def get(self, block: bool = True, timeout: float | None = None) -> Event:
         """Get event from queue."""
         return self._queue.get(block=block, timeout=timeout)
 
@@ -220,7 +220,7 @@ class EventQueue:
         """Check if queue is empty."""
         return self._queue.empty()
 
-    def register_handler(self, event_type: EventType, handler: callable):
+    def register_handler(self, event_type: EventType, handler: Callable[..., Any]) -> None:
         """Register an event handler for a specific event type."""
         self._handlers[event_type].append(handler)
 

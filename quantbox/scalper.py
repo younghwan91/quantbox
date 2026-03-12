@@ -27,6 +27,13 @@ Safety features:
     - Atomic state persistence for crash recovery
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.types import ApiSymbol, Side, PositionSide
+
 import argparse
 import logging
 import logging.handlers
@@ -295,12 +302,12 @@ class RubberBandScalper(
 
     def _place_order(
         self,
-        symbol: str,
-        side: str,
+        symbol: "ApiSymbol",
+        side: "Side",
         quantity: float,
         leverage: int = 1,
         reduce_only: bool = False,
-        position_side: str | None = None,
+        position_side: "PositionSide | None" = None,
     ) -> dict | None:
         """Place order via LimitOrderChaser.
 
@@ -502,7 +509,7 @@ class RubberBandScalper(
             for pos_key in list(self.strategy.active_positions):
                 api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
                 close = self.download_klines(api_sym, 2)
-                price = close[-1] if close is not None else 0
+                price = float(close[-1]) if close is not None else 0.0
                 self._close_position(pos_key, "drawdown_halt", price)
 
             # v14.0.1: Auto-recover when DD drops below threshold
@@ -931,7 +938,7 @@ class RubberBandScalper(
                 break
 
             # ── G6: BTC Trend Gate — block LONG when BTC below MA ──
-            if signal == 1 and btc_ma is not None:
+            if signal == 1 and btc_ma is not None and btc_close is not None:
                 btc_cur = float(btc_close[-1])
                 if btc_cur < btc_ma:
                     logger.info(
@@ -1100,7 +1107,7 @@ class RubberBandScalper(
         if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_ma_cluster_cooldown"):
             cooldown_data = state.get("ma_cluster_cooldown", {})
             for sym, val in cooldown_data.items():
-                arr = np.zeros(1, dtype=np.int64)
+                arr: np.ndarray = np.zeros(1, dtype=np.int64)
                 arr[0] = val
                 self.strategy._ma_cluster_cooldown[sym] = arr
             if cooldown_data:
