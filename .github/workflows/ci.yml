@@ -28,7 +28,7 @@ jobs:
         env:
           BINANCE_API_KEY: ci_placeholder
           BINANCE_API_SECRET: ci_placeholder
-        run: uv run pytest tests/ -m "not slow" -q --tb=short --cov=quantbox --cov-report=term-missing --cov-fail-under=60
+        run: uv run pytest tests/ -m "not slow" -q --tb=short --cov=quantbox --cov-report=term-missing --cov-fail-under=75
 
       - name: Ruff format check
         run: uv run ruff format --check quantbox/ tests/
