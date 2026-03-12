@@ -87,7 +87,7 @@ class TestConfig:
 
     def test_sl_tp(self, cfg):
         assert cfg.d_sl == 0.01  # 1% SL
-        assert cfg.d_tp == 0.12  # 12% hard TP ceiling (R43: was 5%)
+        assert cfg.d_tp == 0.20  # r68: raised to 0.20 — dead parameter, trail always exits first
         assert cfg.d_trail_activate == 0.005  # r47: trail after +0.5%
         assert cfg.d_trail_distance == 0.002  # r47: 0.2% behind peak
 

@@ -54,11 +54,11 @@ class VolStraddleConfig(BaseSettings):
     # ── D_mom8: Directional Momentum ──
     d_vr_threshold: float = 0.50  # A1-D50: D VR entry threshold (was 0.45)
     d_sl: float = 0.01  # 1% stop loss
-    d_tp: float = 0.12  # 12% hard TP ceiling (R43: was 5%)
+    d_tp: float = 0.20  # 20% safety cap — dead parameter (r67: trail exits first; was 0.12)
 
     # ── D_mom8: Trailing Stop (R43 validated) ──
     # Once unrealized gain reaches trail_activate, a trailing stop
-    # follows at trail_distance below peak. Hard TP at d_tp (12%).
+    # follows at trail_distance below peak. Hard TP at d_tp (20% safety cap, rarely hit).
     # Mechanism: lets VR squeeze explosive releases run beyond fixed TP.
     d_trail_activate: float = 0.005  # Activate trailing after +0.5% gain (r47: was 0.02)
     d_trail_distance: float = 0.002  # Trail 0.2% behind peak (r47: was 0.003)
