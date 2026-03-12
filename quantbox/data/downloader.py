@@ -11,7 +11,7 @@ Provides efficient data download with:
 import time
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import pandas as pd
 from tqdm import tqdm
 
@@ -265,7 +265,7 @@ class DataDownloader:
         Returns:
             Dict of symbol -> interval -> DataFrame
         """
-        results = {}
+        results: Dict[str, Any] = {}
 
         total = len(symbols) * len(intervals)
         with tqdm(total=total, desc="Downloading multi-TF") as pbar:

@@ -8,7 +8,15 @@ Methods in this mixin rely on instance attributes set by RubberBandScalper.__ini
     self._exchange_info_fetched — bool
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.protocol import ScalperProtocol
+
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -18,7 +26,7 @@ logger = logging.getLogger("Scalper")
 class DataMixin:
     """Market data fetching: symbol universe, symbol info, klines."""
 
-    def get_trading_symbols(self) -> list[str]:
+    def get_trading_symbols(self: "ScalperProtocol") -> list[str]:
         """Get top-N USDT-M futures symbols by volume."""
         try:
             exchange_info = self.client.futures_exchange_info()
@@ -30,7 +38,7 @@ class DataMixin:
 
             tickers = self.client.futures_ticker()
             volumes = {t["symbol"]: float(t["quoteVolume"]) for t in tickers if t["symbol"] in usdt_symbols}
-            sorted_syms = sorted(volumes, key=volumes.get, reverse=True)
+            sorted_syms = sorted(volumes, key=lambda s: volumes.get(s, 0.0), reverse=True)
 
             # v11.1 fix: When whitelist is set, use whitelist directly
             # (only filter to actively trading symbols). Volume rank
@@ -53,7 +61,7 @@ class DataMixin:
             logger.error(f"Symbol fetch failed: {e}")
             return []
 
-    def _preload_max_notional(self) -> None:
+    def _preload_max_notional(self: "ScalperProtocol") -> None:
         """Bulk-load max_notional for all symbols from Binance leverage brackets.
 
         Called once after the exchange_info bulk fetch populates _symbol_info_cache.
@@ -88,7 +96,7 @@ class DataMixin:
                 f"max_notional will be lazy-loaded per symbol on first order"
             )
 
-    def get_symbol_info(self, symbol: str) -> dict:
+    def get_symbol_info(self: "ScalperProtocol", symbol: str) -> dict[str, Any]:
         """Get tick_size, step_size, min_notional, max_notional for a symbol (cached)."""
         if symbol in self._symbol_info_cache:
             cached = self._symbol_info_cache[symbol]
@@ -117,7 +125,7 @@ class DataMixin:
             if not self._exchange_info_fetched:
                 info = self.client.futures_exchange_info()
                 for sym_info in info["symbols"]:
-                    result = {
+                    result: dict[str, Any] = {
                         "quantity_precision": sym_info["quantityPrecision"],
                         "price_precision": sym_info["pricePrecision"],
                     }
@@ -140,12 +148,12 @@ class DataMixin:
             return {}
 
     def download_klines(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         n_bars: int = 200,
         interval: str = "15m",
         full: bool = False,
-    ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
         """Download recent COMPLETED klines (incomplete bar dropped).
 
         Binance futures_klines always includes the currently-open (incomplete)
