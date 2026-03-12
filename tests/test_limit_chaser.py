@@ -871,3 +871,49 @@ class TestMarketOrderRespType:
         # 두 번째 futures_create_order 호출 (market fallback)
         market_call = mock_client.futures_create_order.call_args_list[1]
         assert market_call.kwargs.get("newOrderRespType") == "RESULT"
+
+
+# ──────── -2027 Position Limit Error Tests ────────────────────────
+
+
+class TestExceedMaxPosition:
+    """-2027: Exceeded maximum allowable position at current leverage."""
+
+    @pytest.fixture
+    def chaser_with_fallback(self, mock_client: MagicMock) -> LimitOrderChaser:
+        config = ChaseConfig(
+            max_chase_ticks=3,
+            chase_interval_seconds=0.01,
+            timeout_seconds=5.0,
+            fallback_to_market=True,
+        )
+        return LimitOrderChaser(client=mock_client, config=config)
+
+    def test_2027_returns_failed_immediately(self, chaser_with_fallback: LimitOrderChaser, mock_client: MagicMock):
+        """-2027 에러 발생 시 MARKET fallback 없이 즉시 FAILED 반환."""
+        from binance.exceptions import BinanceAPIException
+
+        mock_client.futures_create_order.side_effect = Exception(
+            "APIError(code=-2027): Exceeded the maximum allowable position at current leverage."
+        )
+
+        result = chaser_with_fallback.chase_limit_order(
+            "ENJUSDT", "SELL", 348628.0, tick_size=0.0001, price_precision=4
+        )
+
+        assert result.status == ChaseFillStatus.FAILED
+        assert result.filled_quantity == 0.0
+        # MARKET fallback should NOT have been attempted
+        # (only 1 call: the failed limit order, no market order)
+        assert mock_client.futures_create_order.call_count == 1
+
+    def test_2027_skips_market_fallback(self, chaser_with_fallback: LimitOrderChaser, mock_client: MagicMock):
+        """-2027 발생 시 futures_create_order 2번 호출 안 됨 (fallback 차단 확인)."""
+        mock_client.futures_create_order.side_effect = Exception(
+            "APIError(code=-2027): Exceeded the maximum allowable position at current leverage."
+        )
+
+        chaser_with_fallback.chase_limit_order("ENJUSDT", "SELL", 100000.0, tick_size=0.0001, price_precision=4)
+
+        # Confirm market fallback was skipped: only 1 API call total
+        assert mock_client.futures_create_order.call_count == 1
