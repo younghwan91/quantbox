@@ -269,6 +269,12 @@ class RubberBandConfig:
 
     # ── Dynamic capital allocation (v10.0) ──
     dynamic_capital_enabled: bool = True  # balance / max(1, n_active+1) instead of fixed slots
+    # Safety cap: when dynamic capital enabled, never allocate more than this fraction
+    # of balance to a single slot (prevents first-slot over-concentration).
+    dynamic_capital_max_fraction: float = 0.5
+    # Qty mismatch tolerance for reconciliation; if exchange qty differs by more than
+    # this percentage, internal notional is corrected to match exchange reality.
+    reconciliation_qty_tolerance_pct: float = 5.0
 
     @property
     def cost_per_side(self) -> float:
