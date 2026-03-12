@@ -126,6 +126,17 @@ class PositionMixin:
                     f"({sig_meta.get('conviction_cond', {})})"
                 )
 
+            # ── Cap notional at Binance's max allowable for this symbol/leverage ──
+            # Prevents -2027 "Exceeded the maximum allowable position" errors.
+            sym_info = self.get_symbol_info(symbol)
+            max_notional = sym_info.get("max_notional")
+            if max_notional and notional > max_notional:
+                logger.warning(
+                    f"[{symbol}] Notional capped: ${notional:.2f} → ${max_notional:.2f} "
+                    f"(Binance max_notional limit at current leverage)"
+                )
+                notional = max_notional
+
         # ── Elliott: 2% exploratory sizing (winning_strategy §4.2) ──
         elif self.strategy_name == "elliott":
             ecfg = getattr(self, "elliott_config", ElliottConfig())
