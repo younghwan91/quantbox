@@ -302,6 +302,25 @@ for param_value in param_grid:
 | 2026-03-11 | _offset 미적용 (r58 이전) | 단축 히스토리 심볼 슬롯 충돌 오류 | 신규 심볼 bar 0 ≠ 기존 심볼 bar 0 (시간 불일치) | 신규 심볼은 `data_15m[sym]["_offset"]` 적용 필수 |
 | (반복) | 복리 모델 혼동 | CAGR 보고 오류 | `compute_metrics` 1x ≠ 프로덕션 L/N | 레버리지 모델 항상 명시 |
 
+## 11b. 민감도 분석 핵심 발견 (r67, 2026-03-12)
+
+> `research/active/r66_r70/r67_sensitivity.py` — 7개 파라미터 × 7단계 sweep
+
+| 파라미터 | 상태 | 발견 내용 |
+|----------|------|-----------|
+| `d_trail_distance=0.002` | ⚠️ **CLIFF EDGE** | +1 스텝(→0.003): PF -40.9%, OOS PF 1.160. +2 스텝(→0.004): OOS PF=0.883 (음수 기대값). **현재값 0.002가 임계점. 절대 증가 금지.** |
+| `d_tp=0.12` | ℹ️ **효과 없음** | d_tp 전 범위에서 PF/N 변화 없음. 실제 청산은 trail stop이 전담, TP는 dead parameter. |
+| `d_sl=0.01` | ✅ ROBUST | ±1 스텝 → PF ±12%. 타이트한 SL이 N 늘고 PF 높음 (빠른 손실 차단 효과). |
+| `d_trail_activate=0.005` | ✅ ROBUST | 높을수록 PF 상승 (0.01 → PF 4.6), 하지만 N 감소. 현재값 균형점. |
+| `s_vr_threshold=0.57` | ✅ ROBUST | ±1 스텝 → PF ±2%. 매우 안정적. 높을수록 N 급감하며 EV 소폭 상승. |
+| `s_squeeze_dur=3` | ✅ ROBUST | ±1 스텝 → PF ±2%. 안정적. |
+| `base_leverage=30` | ✅ ROBUST | PF 변화 없음 (당연 — PF는 레버리지 무관). L/N만 바뀜. |
+
+**운영 규칙:**
+- `d_trail_distance` 변경 제안 시 반드시 r67 결과 참조. 0.003+ 사용 금지.
+- `d_tp`는 현재 dead parameter — 수정해도 백테스트 수치 변화 없음 (trail이 먼저 작동).
+- 새 파라미터 추가 시 반드시 sensitivity sweep 먼저 (cliff edge 사전 검출).
+
 ---
 
 ## 12. `.env` 운영 원칙 — 중복 추가 금지
