@@ -76,6 +76,8 @@ from quantbox.backtest.trade_sim import (
     compute_metrics,        # PF, EV, Sharpe, MaxDD, bootstrap CI
     bootstrap_pf,           # 부트스트랩 신뢰구간
     precompute_all_vr,      # VR 신호 사전계산
+    sim_directional_trailing,   # trail-aware D_mom8 시뮬레이션 (v14.24.0, r43에서 이전)
+    sim_straddle_trailing,      # trail-aware S_d8 시뮬레이션 (v14.24.0, r43에서 이전)
 )
 ```
 
@@ -142,6 +144,9 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 > S_d8 standalone: N=7748, PF=9.349, MaxDD=4.3% (with s_trail_distance=0.001)
 > 3전략 combined trail: S_d8 dominant, MA 독립, D_mom8 cherry-pick
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
+
+> **v14.24.0 추가:** `sim_directional_trailing()` 및 `sim_straddle_trailing()`이 `research/active/r41_r45/r43_exit_improvement.py`에서 `quantbox/backtest/trade_sim.py`로 이전됨 (v14.24.0).  
+> 모든 연구 스크립트 import 자동 업데이트 완료. 기존 import 경로(r43)는 deprecation 경고 출력.
 
 ---
 

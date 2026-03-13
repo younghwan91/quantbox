@@ -532,3 +532,69 @@ if quantity <= 0:
     self.discord.send(...)
     continue  # skip repair
 ```
+
+---
+
+## 10. 신뢰성 모듈 진단 (v14.22.0~v14.24.0)
+
+### Rate Limiter & Circuit Breaker
+
+```bash
+grep "circuit\|RateLimiter\|throttle\|rate_limit" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
+# 정상: 출력 없거나 간헐적 "throttled" — 자동 복구
+# 이상: 반복적 "circuit open" → API 키 확인 또는 바이낸스 서버 상태 확인
+```
+
+### ExposureGuard 진단
+
+```python
+from quantbox.execution.exposure import ExposureGuard
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+cfg = VolStraddleConfig()
+print(f'max_exposure_multiplier={cfg.max_exposure_multiplier}')  # 35.0
+# 로그에서 "Exposure blocked" 검색
+```
+
+```bash
+grep "Exposure blocked\|exposure cap\|ExposureGuard" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
+# 출력이 있으면 잔고 대비 노출도가 35배를 초과한 상태
+# 정상 상황: 10슬롯 × 30x = 300% 노출 → 35배 cap 넉넉히 여유
+# 비정상: 반복 출력 → positions.py 마진 계산 점검
+```
+
+### ReconJournal 감사 로그
+
+```bash
+# 감사 DB 파일 확인
+ls -lh data/recon/recon.db 2>/dev/null || echo "ReconJournal DB not yet created (no recon events)"
+
+# 이벤트 통계
+python3 -c "
+import sqlite3, os
+db_path = 'data/recon/recon.db'
+if os.path.exists(db_path):
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute('SELECT event_type, COUNT(*) as cnt FROM recon_events GROUP BY event_type ORDER BY cnt DESC').fetchall()
+    for r in rows:
+        print(f'  {r[0]}: {r[1]}')
+    conn.close()
+else:
+    print('No recon DB yet')
+"
+```
+
+**10종 이벤트 타입:**
+- `GHOST_DETECTED` / `GHOST_CLOSED` — 내부 상태에 없는 포지션 감지/청산
+- `REVERSE_GHOST` / `REVERSE_GHOST_CLOSED` — 거래소에만 있는 포지션 감지/청산
+- `SERVER_SL_FILL` / `SERVER_TP_FILL` — 서버 SL/TP 체결
+- `BRACKET_REPAIR` / `BRACKET_REPAIR_FAIL` — SL/TP 재설정 성공/실패
+- `POSITION_ADOPTED` — 미추적 포지션 채택
+- `EXPOSURE_BLOCKED` — 노출도 상한 초과로 진입 차단
+
+### InFlightTracker 진단
+
+```bash
+grep "inflight\|InFlight\|pending order" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
+# "Loaded N pending orders from disk" — 시작 시 크래시 전 미체결 주문 복원
+# "Stale order detected" — 오래된 미체결 주문 → 자동 상태 재동기화
+```

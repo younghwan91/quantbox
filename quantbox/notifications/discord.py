@@ -14,9 +14,12 @@ Provides rich embed notifications for live trading events:
 
 from __future__ import annotations
 
+import json
 import os
 import logging
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import requests
@@ -33,6 +36,9 @@ COLOR_YELLOW = 0xFFD600  # 경고
 COLOR_BLUE = 0x2979FF  # 정보
 COLOR_GRAY = 0x9E9E9E  # 중립
 
+# Colors that map to "critical" level in fallback alerts
+_CRITICAL_COLORS = frozenset({COLOR_RED, 0xFF0000})
+
 
 class DiscordNotifier:
     """Discord 웹훅 알림 전송.
@@ -44,6 +50,11 @@ class DiscordNotifier:
     Args:
         webhook_url: Discord 웹훅 URL. None이면 환경변수에서 읽는다.
     """
+
+    # Fallback file for alerts that couldn't reach Discord
+    _fallback_path: Path = Path("logs/alerts/missed_alerts.jsonl")
+    _fallback_enabled: bool = True
+    MAX_FALLBACK_ALERT_SIZE_MB: int = 5
 
     def __init__(self, webhook_url: str | None = None):
         self.webhook_url = webhook_url or os.getenv("DISCORD_WEBHOOK_URL")
@@ -76,10 +87,91 @@ class DiscordNotifier:
                 data["embeds"] = [embed]
 
             r = requests.post(self.webhook_url, json=data, timeout=5)
+
+            # Retry once on rate limit
+            if r.status_code == 429:
+                try:
+                    retry_after = float(r.json().get("retry_after", 1))
+                except Exception:
+                    retry_after = 1.0
+                time.sleep(retry_after)
+                r = requests.post(self.webhook_url, json=data, timeout=5)
+
             return r.status_code == 204
         except Exception as e:
             logger.warning(f"Discord notification failed: {e}")
+            if embed is not None and self._fallback_enabled:
+                self._write_fallback(embed)
             return False
+
+    def _write_fallback(self, embed: dict) -> None:
+        """Write a failed Discord embed to the fallback JSONL file.
+
+        Never raises — failure is silently swallowed to protect trading logic.
+
+        Args:
+            embed: Discord embed dict that failed to send.
+        """
+        try:
+            self._fallback_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Guard against unlimited growth
+            if self._fallback_path.exists():
+                size_mb = self._fallback_path.stat().st_size / (1024 * 1024)
+                if size_mb >= self.MAX_FALLBACK_ALERT_SIZE_MB:
+                    logger.warning(f"Fallback alert file exceeds {self.MAX_FALLBACK_ALERT_SIZE_MB}MB, skipping write")
+                    return
+
+            color = embed.get("color", 0)
+            if color in _CRITICAL_COLORS:
+                level = "critical"
+            elif color == COLOR_YELLOW:
+                level = "warning"
+            else:
+                level = "info"
+
+            record = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "title": embed.get("title", ""),
+                "description": embed.get("description", ""),
+                "fields": embed.get("fields", []),
+            }
+
+            with open(self._fallback_path, "a") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning(f"Fallback alert write failed: {e}")
+
+    @classmethod
+    def get_missed_alerts(cls, clear: bool = False) -> list[dict]:
+        """Read alerts written to the fallback file when Discord was unreachable.
+
+        Args:
+            clear: If True, delete the fallback file after reading.
+
+        Returns:
+            List of alert dicts, each with keys: ts, level, title, description, fields.
+        """
+        if not cls._fallback_path.exists():
+            return []
+
+        alerts: list[dict] = []
+        try:
+            with open(cls._fallback_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            alerts.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+            if clear:
+                cls._fallback_path.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"Failed to read fallback alerts: {e}")
+
+        return alerts
 
     # ==================== Bot Lifecycle ====================
 
@@ -464,8 +556,6 @@ class DiscordNotifier:
             alert_key: Unique key for this alert type (e.g., 'balance_fetch_fail')
             cooldown_s: Minimum seconds between alerts of same type
         """
-        import time
-
         now = time.time()
         last = self._alert_cooldowns.get(alert_key, 0)
         if now - last < cooldown_s:

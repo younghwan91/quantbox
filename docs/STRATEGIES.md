@@ -191,3 +191,49 @@ MA Cluster:                  leverage = 21x → Notional = 잔고/10 × 21  (L/N
 ---
 
 *Source of truth: `quantbox/strategy/vol_straddle/config.py` · 이 문서는 config 변경 시 동기화*
+
+---
+
+## TradingStrategy Protocol (v14.24.0)
+
+**개념:** 모든 거래 전략이 준수하는 타입 안전 인터페이스. `@runtime_checkable` Protocol.  
+**위치:** `quantbox/strategy/protocol.py`  
+**테스트:** `tests/test_strategy_protocol.py` (32개)
+
+### 14개 멤버
+
+| 멤버 | 종류 | 목적 |
+|------|------|------|
+| `n_active` | property | 활성 포지션 수 |
+| `config` | property | 전략 설정 객체 |
+| `on_bar()` | method | 바 클로즈 시 신호 처리 |
+| `update_position()` | method | 포지션 상태 업데이트 |
+| `update_market_data()` | method | 15m 시장 데이터 갱신 |
+| `update_htf_data()` | method | 고타임프레임(1h/4h) 데이터 갱신 |
+| `open_position()` | method | 포지션 오픈 |
+| `close_position()` | method | 포지션 청산 |
+| `get_positions()` | method | 전체 포지션 조회 |
+| `get_position()` | method | 단일 포지션 조회 |
+| `has_position()` | method | 포지션 보유 여부 |
+| `get_pnl()` | method | 미실현 PnL 조회 |
+| `to_state_dict()` | method | 상태 직렬화 (JSON) |
+| `from_state_dict()` | method | 상태 복원 (크래시 복구) |
+
+### 사용 예시
+
+```python
+from quantbox.strategy.protocol import TradingStrategy
+
+def process_strategy(strategy: TradingStrategy) -> None:
+    print(f"Active positions: {strategy.n_active}")
+    # isinstance() 지원 (runtime_checkable)
+    assert isinstance(strategy, TradingStrategy)
+```
+
+### 현재 구현체
+
+| 전략 | 클래스 | Protocol 준수 |
+|------|--------|--------------|
+| VR Squeeze (D_mom8 + S_d8) | `VolStraddleStrategy` | ✅ v14.24.0 |
+| MA Cluster | `VolStraddleStrategy` | ✅ v14.24.0 |
+| RubberBand (레거시) | `RubberBandStrategy` | ✅ v14.24.0 |
