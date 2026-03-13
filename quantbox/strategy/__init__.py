@@ -4,7 +4,7 @@ Strategy module — Production strategy: vol_straddle (VR Squeeze).
 Infrastructure:
   - RubberBandScalper: Base execution class (all strategies run on this)
   - RubberBand: Mean-reversion strategy (inactive, infrastructure only)
-  - Alpha/VolSelector: Backtest utilities
+  - VolSelector: Backtest utility (compute_realized_vol)
 """
 
 from quantbox.strategy.rubberband import (
@@ -21,12 +21,6 @@ from quantbox.strategy.rubberband import (
     calculate_position_size,
     compute_confidence_leverage,
     apply_confidence_leverage,
-)
-from quantbox.strategy.alpha_engine import (
-    AlphaConfig,
-    AlphaStrategy,
-    compute_alpha_signals,
-    compute_hybrid_signals,
 )
 from quantbox.strategy.vol_selector import (
     VolSelectorConfig,
@@ -46,11 +40,6 @@ __all__ = [
     "calculate_position_size",
     "compute_confidence_leverage",
     "apply_confidence_leverage",
-    # Alpha engine (backtest utilities)
-    "AlphaConfig",
-    "AlphaStrategy",
-    "compute_alpha_signals",
-    "compute_hybrid_signals",
     # Volatility-based symbol selection (backtest utilities)
     "VolSelectorConfig",
     "VolatilitySelector",
