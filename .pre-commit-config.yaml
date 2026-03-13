@@ -32,3 +32,11 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+
+      - id: research-param-guard
+        name: research param guard
+        entry: uv run python scripts/check_research_params.py
+        language: system
+        files: ^research/.*\.py$
+        pass_filenames: true
+        stages: [pre-commit]
