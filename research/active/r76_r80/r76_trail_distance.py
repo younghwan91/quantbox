@@ -47,11 +47,8 @@ from quantbox.strategy.vol_straddle.signals import (
     gen_vr_signal,
     make_direction_momentum,
 )
-from research.active.r41_r45.r43_exit_improvement import (
-    get_year_boundaries,
-    sim_directional_trailing,
-    sim_straddle_trailing,
-)
+from research.active.r41_r45.r43_exit_improvement import get_year_boundaries
+from quantbox.backtest.trade_sim import sim_directional_trailing, sim_straddle_trailing
 from research.active.r41_r45.r44c_ma_confluence import precompute_mas
 from research.active.r41_r45.r45_param_sweep import collect_enhanced_trades
 

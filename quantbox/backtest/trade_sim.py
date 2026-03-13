@@ -258,6 +258,244 @@ def sim_directional_trades(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Trailing Stop — Directional
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def sim_directional_trailing(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    sig: np.ndarray,
+    dire: np.ndarray,
+    sl: float,
+    tp: float,
+    max_hold: int,
+    cost: float,
+    trail_activate: float,  # activate trailing after this % gain
+    trail_distance: float,  # trailing stop distance from peak
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Directional sim with trailing stop.
+
+    Once unrealized gain reaches `trail_activate`, stop-loss becomes
+    a trailing stop at `trail_distance` below the peak gain.
+    TP is kept as a hard ceiling.
+
+    Args:
+        trail_activate: e.g. 0.02 means trailing activates after +2% gain
+        trail_distance: e.g. 0.01 means trail 1% below peak
+    """
+    n = len(close)
+    cap = n // 2 + 1
+    pnl = np.empty(cap, dtype=np.float64)
+    ent = np.empty(cap, dtype=np.int64)
+    ext = np.empty(cap, dtype=np.int64)
+    cnt = 0
+    i = 0
+    while i < n - 1:
+        if sig[i] == 0 or dire[i] == 0:
+            i += 1
+            continue
+        entry = close[i]
+        if entry <= 0:
+            i += 1
+            continue
+        d = dire[i]
+        end = min(i + 1 + max_hold, n)
+        eb = end - 1
+        trade_pnl = 0.0
+        trailing_active = False
+        peak_gain = 0.0
+
+        for j in range(i + 1, end):
+            if d == 1:
+                cur_gain = (high[j] - entry) / entry
+                # Update peak
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
+                # Check trailing stop first (if active)
+                if trailing_active:
+                    trail_level = entry * (1.0 + peak_gain - trail_distance)
+                    if low[j] <= trail_level:
+                        # Trailing stop hit
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+
+                # Check hard TP
+                if high[j] >= entry * (1.0 + tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+
+                # Check initial SL (only before trailing activates)
+                if not trailing_active and low[j] <= entry * (1.0 - sl):
+                    trade_pnl = -sl
+                    eb = j
+                    break
+
+                # Activate trailing
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+            else:
+                cur_gain = (entry - low[j]) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
+                if trailing_active:
+                    trail_level = entry * (1.0 - peak_gain + trail_distance)
+                    if high[j] >= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+
+                if high[j] >= entry * (1.0 + tp) and d == -1:
+                    # Nonsense for short — check SL
+                    pass
+                if low[j] <= entry * (1.0 - tp) and d == -1:
+                    trade_pnl = tp
+                    eb = j
+                    break
+
+                if not trailing_active and high[j] >= entry * (1.0 + sl):
+                    trade_pnl = -sl
+                    eb = j
+                    break
+
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+        else:
+            if d == 1:
+                trade_pnl = (close[eb] - entry) / entry
+            else:
+                trade_pnl = (entry - close[eb]) / entry
+
+        if cnt < cap:
+            pnl[cnt] = trade_pnl - cost
+            ent[cnt] = i
+            ext[cnt] = eb
+            cnt += 1
+        i = eb + 1
+    return pnl[:cnt], ent[:cnt], ext[:cnt]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Trailing Stop — Straddle
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def sim_straddle_trailing(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    sig: np.ndarray,
+    sl: float,
+    tp: float,
+    max_hold: int,
+    cost: float,
+    trail_activate: float,  # activate trailing on winning leg after this gain
+    trail_distance: float,  # trail distance from peak of winning leg
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Straddle sim with trailing on winning legs.
+
+    Each leg gets its own trailing stop once it gains `trail_activate`.
+    """
+    n = len(close)
+    cap = n // 2 + 1
+    pnl = np.empty(cap, dtype=np.float64)
+    ent = np.empty(cap, dtype=np.int64)
+    ext = np.empty(cap, dtype=np.int64)
+    cnt = 0
+    i = 0
+    while i < n - 1:
+        if sig[i] == 0:
+            i += 1
+            continue
+        entry = close[i]
+        if entry <= 0:
+            i += 1
+            continue
+
+        la = True
+        sa = True
+        le = 0.0
+        se = 0.0
+        l_peak = 0.0
+        s_peak = 0.0
+        l_trailing = False
+        s_trailing = False
+        eb = i
+        end = min(i + 1 + max_hold, n)
+        for j in range(i + 1, end):
+            # Long leg
+            if la:
+                l_gain = (high[j] - entry) / entry
+                if l_gain > l_peak:
+                    l_peak = l_gain
+
+                if not l_trailing and l_peak >= trail_activate:
+                    l_trailing = True
+
+                if l_trailing:
+                    trail_lvl = entry * (1.0 + l_peak - trail_distance)
+                    if low[j] <= trail_lvl:
+                        le = max(l_peak - trail_distance, -sl)
+                        la = False
+                else:
+                    if low[j] <= entry * (1.0 - sl):
+                        le = -sl
+                        la = False
+
+                if la and high[j] >= entry * (1.0 + tp):
+                    le = tp
+                    la = False
+
+            # Short leg
+            if sa:
+                s_gain = (entry - low[j]) / entry
+                if s_gain > s_peak:
+                    s_peak = s_gain
+
+                if not s_trailing and s_peak >= trail_activate:
+                    s_trailing = True
+
+                if s_trailing:
+                    trail_lvl = entry * (1.0 - s_peak + trail_distance)
+                    if high[j] >= trail_lvl:
+                        se = max(s_peak - trail_distance, -sl)
+                        sa = False
+                else:
+                    if high[j] >= entry * (1.0 + sl):
+                        se = -sl
+                        sa = False
+
+                if sa and low[j] <= entry * (1.0 - tp):
+                    se = tp
+                    sa = False
+
+            if not la and not sa:
+                eb = j
+                break
+        else:
+            eb = end - 1
+        if la:
+            le = (close[eb] - entry) / entry
+        if sa:
+            se = (entry - close[eb]) / entry
+        net = le + se - cost
+        if cnt < cap:
+            pnl[cnt] = net
+            ent[cnt] = i
+            ext[cnt] = eb
+            cnt += 1
+        i = eb + 1
+    return pnl[:cnt], ent[:cnt], ext[:cnt]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Trade Collection — Multi-TF, Multi-Symbol
 # ══════════════════════════════════════════════════════════════════════════════
 

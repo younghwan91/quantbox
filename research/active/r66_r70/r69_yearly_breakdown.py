@@ -51,7 +51,7 @@ from quantbox.backtest.trade_sim import (
 )
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import gen_vr_dur_signal
-from research.active.r41_r45.r43_exit_improvement import sim_straddle_trailing
+from quantbox.backtest.trade_sim import sim_straddle_trailing
 
 # ── Style ─────────────────────────────────────────────────────────────────────
 BG_DARK   = "#0d1117"
