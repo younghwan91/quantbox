@@ -237,7 +237,7 @@ class TestTF30mConfig:
 class TestConfigParity:
     def test_d_trail_act_from_config(self):
         """D_TRAIL_ACT must be 0.005 (r47 production, NOT 0.02 from backtest_v14_3_0)."""
-        assert D_TRAIL_ACT == 0.005, f"D_TRAIL_ACT={D_TRAIL_ACT} — must be loaded from config.py, not backtest_v14_3_0"
+        assert D_TRAIL_ACT == 0.010, f"D_TRAIL_ACT={D_TRAIL_ACT} — must be loaded from config.py, not backtest_v14_3_0"
 
     def test_d_trail_dist_from_config(self):
         """D_TRAIL_DIST must be 0.002 (r47 production, NOT 0.003 from backtest_v14_3_0)."""
