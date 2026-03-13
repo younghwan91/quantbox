@@ -130,6 +130,21 @@ class ReconciliationMixin:
             if missing_sl or missing_tp:
                 quantity = pos["notional"] / pos["entry_price"]
                 quantity = self._round_qty(quantity, api_sym)
+                # F3: Guard — qty=0 after rounding (very small position) → skip repair
+                if quantity <= 0:
+                    logger.error(
+                        f"[{sym}] Bracket repair SKIPPED: quantity={quantity:.6f} ≤ 0 "
+                        f"(notional=${pos['notional']:.4f} / entry=${pos['entry_price']:.6f}). "
+                        f"Manual close required."
+                    )
+                    self.discord.send(
+                        content=(
+                            f"⚠️ **[{sym}] Bracket repair skipped** — "
+                            f"qty=0 after rounding (notional=${pos['notional']:.4f}). "
+                            f"Manual close required."
+                        )
+                    )
+                    continue
                 signal = pos["signal"]
                 entry_price = pos["entry_price"]
                 move_size = pos.get("move_size", 0.03)
@@ -170,7 +185,7 @@ class ReconciliationMixin:
                             _book = self.client.futures_orderbook_ticker(
                                 symbol=api_sym,
                             )
-                            _fc_price = float(_book["bidPrice"])
+                            _fc_price = float(_book["bidPrice"] if signal == 1 else _book["askPrice"])
                         except Exception:
                             pass
                         closed = self._close_position(
