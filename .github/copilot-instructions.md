@@ -146,3 +146,4 @@ fix(config): SL 파라미터 조정 (ref: r48 DD halt 분석)
 | #3 | 2026-03-05 | slot sizing 테스트는 반드시 **`n_active > 0` 상태** 포함. 전체 10슬롯 마진 합계 검증 |
 | #4 | 2026-03-06 | `_check_order_filled()` — `TRIGGERED` **+ `FINISHED`** 둘 다 체결 처리. ghost 발견 시 반대편 주문도 취소 |
 | #5 | 2026-03-08 | Hedge Mode close는 `reduce_only=False` → leverage guard는 **`if not reduce_only and leverage > 1:`** |
+| #6 | 2026-03-13 | **config 파라미터는 반드시 `VolStraddleConfig()`에서 직접 읽어야 함.** `d_trail_activate`는 r69에서 0.005→0.010으로 변경됨. skills 문서/research 스크립트에 하드코딩 또는 이전 값 사용 시 결과 전부 무효 |

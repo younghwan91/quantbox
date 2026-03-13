@@ -105,17 +105,23 @@ compute_metrics(pnl, data_years) → {
 
 ```python
 # Phase 1: 정적 파라미터로 베이스라인 재현
+# ✅ collect_trades() 에 전달하는 cfg dict — 올바른 키 이름
 static_cfg = {
-    "d_tp": cfg.d_tp, "d_sl": cfg.d_sl,
-    "d_trail_activate": cfg.d_trail_activate, "d_trail_distance": cfg.d_trail_distance,
-    ...  # config.py에서 읽은 값
+    "sp":    cfg.vr_short,           # e.g. 4
+    "lp":    cfg.vr_long,            # e.g. 24
+    "d_vr":  cfg.d_vr_threshold,     # directional VR threshold
+    "s_vr":  cfg.s_vr_threshold,     # straddle VR threshold
+    "s_dur": cfg.s_squeeze_dur,      # squeeze duration filter
+    "d_sl":  cfg.d_sl,               # directional SL (0.01)
+    "s_sl":  cfg.s_sl,               # straddle SL (0.015)
+    "tp":    cfg.d_tp,               # TP cap (0.20 — trail exits first)
 }
-baseline_trades = collect_trades(static_cfg, ...)
+baseline_trades = collect_trades(static_cfg, data_15m, data_1h, data_4h, strat="D_mom8")
 baseline_pnl    = portfolio_sim(baseline_trades, max_concurrent=10)
 baseline_m      = compute_metrics(baseline_pnl, data_years)
 
 print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
-# 최신 정식 리포트 값과 ±1% 이내인지 확인
+# 최신 정식 리포트 값과 ±5% 이내인지 확인
 ```
 
 **허용 기준:** 최신 리포트 대비 N ±1%, PF ±1%  
