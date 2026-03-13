@@ -197,6 +197,18 @@ class PositionDict(TypedDict, total=False):
     confidence: int
     """Signal confidence score (0–4, used for CW-Tier sizing)."""
 
+    # ── Balance tracking (Incident #4 / balance_before fix) ──────────────
+    balance_before: float | None
+    """Account balance at the time this position was opened.
+
+    Captured immediately before ``_place_order()`` and stored in the
+    position dict so that the closed ``TradeRecord`` can correctly report
+    ``balance_before`` (open-time) vs ``balance_after`` (close-time).
+
+    ``None`` for positions restored from a state file written before
+    this field was introduced (fallback: close-time balance used).
+    """
+
 
 # ── TypedDict: closed trade record ───────────────────────────────────────────
 
@@ -216,3 +228,10 @@ class TradeRecord(TypedDict, total=False):
     entry_time: str
     exit_time: str
     tf: str
+
+    # ── Balance P&L attribution ────────────────────────────────────────────
+    balance_before: float
+    """Account balance at position open time (captured by positions.py)."""
+
+    balance_after: float
+    """Account balance at position close time."""

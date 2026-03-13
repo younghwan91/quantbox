@@ -1116,6 +1116,16 @@ class RubberBandScalper(
         if signal not in (-1, 0, 1, 2):
             return False, f"signal={signal!r} must be in {{-1, 0, 1, 2}}"
 
+        # T1-5: Warn on corrupt compound-key symbol fields (Incident #4 guard).
+        # Sanitization already happens via api_sym extraction in _load_state;
+        # we emit a warning here so the corruption is visible in logs early.
+        symbol_field = pos.get("symbol", "")
+        if symbol_field and ":" in symbol_field:
+            logger.warning(
+                f"[{sym}] pos['symbol']={symbol_field!r} contains ':' — corrupt compound key "
+                f"(will be sanitized by _load_state, see Incident #4)"
+            )
+
         return True, ""
 
     def _load_state(self) -> None:

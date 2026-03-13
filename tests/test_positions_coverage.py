@@ -423,6 +423,48 @@ class TestPositionSizing:
         # per_slot=$100, notional=$100×21=$2100, qty=21
         assert abs(qty - 21.0) < 0.1, f"Expected ~21, got {qty}"
 
+    def test_leverage_override_zero_clamped_to_1(self, caplog):
+        """leverage_override=0 → clamped to 1.0 with WARNING (not ZeroDivision)."""
+        import logging
+
+        cfg = VolStraddleConfig(
+            dynamic_capital_enabled=False,
+            soft_equity_scale=False,
+            cw_enabled=False,
+            base_leverage=30.0,
+        )
+        scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
+        _mock_open(scalper)
+        _set_signal_meta(scalper, strategy_type="ma_cluster", leverage_override=0, sl=0.02)
+        with caplog.at_level(logging.WARNING, logger="quantbox.execution.positions"):
+            _open(scalper, 1000.0)
+
+        qty = float(scalper._place_order.call_args[0][2])
+        # clamped to 1 → notional=$100×1=$100 → qty=1 (price=100)
+        assert qty >= 1.0, f"qty must be >= 1, got {qty}"
+        assert any("clamped" in r.message for r in caplog.records)
+
+    def test_leverage_override_exceeds_max_clamped_to_125(self, caplog):
+        """leverage_override=200 → clamped to 125.0 with WARNING."""
+        import logging
+
+        cfg = VolStraddleConfig(
+            dynamic_capital_enabled=False,
+            soft_equity_scale=False,
+            cw_enabled=False,
+            base_leverage=30.0,
+        )
+        scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
+        _mock_open(scalper)
+        _set_signal_meta(scalper, strategy_type="ma_cluster", leverage_override=200, sl=0.02)
+        with caplog.at_level(logging.WARNING, logger="quantbox.execution.positions"):
+            _open(scalper, 1000.0)
+
+        qty = float(scalper._place_order.call_args[0][2])
+        # clamped to 125 → notional=$100×125=$12500 → qty=125 (price=100)
+        assert abs(qty - 125.0) < 0.5, f"Expected ~125, got {qty}"
+        assert any("clamped" in r.message for r in caplog.records)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestBracketPlacement — L319-454
