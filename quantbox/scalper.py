@@ -1116,6 +1116,16 @@ class RubberBandScalper(
         if signal not in (-1, 0, 1, 2):
             return False, f"signal={signal!r} must be in {{-1, 0, 1, 2}}"
 
+        # T1-5: Warn on corrupt compound-key symbol fields (Incident #4 guard).
+        # Sanitization already happens via api_sym extraction in _load_state;
+        # we emit a warning here so the corruption is visible in logs early.
+        symbol_field = pos.get("symbol", "")
+        if symbol_field and ":" in symbol_field:
+            logger.warning(
+                f"[{sym}] pos['symbol']={symbol_field!r} contains ':' — corrupt compound key "
+                f"(will be sanitized by _load_state, see Incident #4)"
+            )
+
         return True, ""
 
     def _load_state(self) -> None:
@@ -1131,7 +1141,25 @@ class RubberBandScalper(
         self._initial_balance = state.get("initial_balance", 0)
         self._high_water_mark = state.get("high_water_mark", 0)
 
-        self._trade_history = state.get("trade_history", [])
+        raw_history = state.get("trade_history", [])
+        # A1: Validate trade_history records — drop corrupt entries (missing/non-numeric pnl fields)
+        valid_history = []
+        for rec in raw_history:
+            if not isinstance(rec, dict):
+                logger.warning(f"Trade history: dropping non-dict record {rec!r}")
+                continue
+            pnl_usd = rec.get("pnl_usd")
+            pnl_pct = rec.get("pnl_pct")
+            if not (isinstance(pnl_usd, (int, float)) and isinstance(pnl_pct, (int, float))):
+                logger.warning(f"Trade history: dropping corrupt record (non-numeric pnl) — {rec!r}")
+                continue
+            valid_history.append(rec)
+        if len(valid_history) < len(raw_history):
+            logger.warning(
+                f"Trade history: dropped {len(raw_history) - len(valid_history)} corrupt records "
+                f"({len(valid_history)}/{len(raw_history)} kept)"
+            )
+        self._trade_history = valid_history
         self._cycle_count = 0  # Always reset per session (new log file each run)
 
         # Restore positions
@@ -1149,6 +1177,21 @@ class RubberBandScalper(
             self._initial_balance = balance
             self._trade_history = []
             logger.info(f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history cleared")
+
+        # A2: Guard — HWM/initial_balance corrupt (0 or negative) → reset to current balance
+        # Prevents ZeroDivisionError in (hwm - balance) / hwm and DD halt triggering immediately
+        if self._high_water_mark <= 0 or self._initial_balance <= 0:
+            balance = self.get_balance()
+            if self._high_water_mark <= 0:
+                logger.warning(
+                    f"Restored HWM={self._high_water_mark:.2f} invalid — resetting to balance ${balance:.2f}"
+                )
+                self._high_water_mark = balance
+            if self._initial_balance <= 0:
+                logger.warning(
+                    f"Restored initial_balance={self._initial_balance:.2f} invalid — resetting to balance ${balance:.2f}"
+                )
+                self._initial_balance = balance
 
         for sym, pos in positions.items():
             # T1-2: Validate critical fields before restoring to prevent
@@ -1236,6 +1279,48 @@ class RubberBandScalper(
                 self.strategy._ma_cluster_cooldown[sym] = arr
             if cooldown_data:
                 logger.info(f"Restored MA cluster cooldown for {len(cooldown_data)} symbols")
+
+        # Startup exchange cross-check: warn immediately if exchange has
+        # positions not present in restored state (reverse ghost candidates).
+        if not self.paper_mode:
+            self._startup_exchange_crosscheck()
+
+    def _startup_exchange_crosscheck(self) -> None:
+        """Cross-check exchange positions against restored internal state at startup.
+
+        Detects positions that exist on the exchange but were not in the state
+        file — these are 'reverse ghosts' with no SL/TP protection.
+        Logs a WARNING and sends a Discord alert immediately so the operator
+        is aware before the first reconciliation cycle fires.
+        """
+        try:
+            exchange_positions = self.client.futures_position_information()
+        except Exception as exc:
+            logger.warning(f"Startup exchange cross-check failed: {exc}")
+            return
+
+        for p in exchange_positions:
+            amt = float(p.get("positionAmt", "0"))
+            if amt == 0:
+                continue
+            sym = p["symbol"]
+            pos_side = p.get("positionSide", "BOTH")
+            check_key = f"{sym}:{pos_side}" if pos_side in ("LONG", "SHORT") else sym
+            if check_key not in self.strategy.active_positions:
+                notional = abs(float(p.get("notional", "0")))
+                upnl = float(p.get("unRealizedProfit", "0"))
+                logger.warning(
+                    f"[{check_key}] STARTUP CROSSCHECK: Untracked position on exchange! "
+                    f"notional=${notional:.2f} uPnL={upnl:+.2f} — "
+                    f"No SL/TP. Will be auto-closed in first reconciliation cycle."
+                )
+                self.discord.send(
+                    content=(
+                        f"⚠️ **Startup: Untracked position [{check_key}]** — "
+                        f"notional=${notional:.2f} uPnL={upnl:+.2f}. "
+                        f"No SL/TP protection. Auto-close pending (next reconciliation cycle)."
+                    )
+                )
 
     # ==================== Entry Points ====================
 
