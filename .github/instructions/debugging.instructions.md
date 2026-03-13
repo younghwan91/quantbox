@@ -267,7 +267,7 @@ cp data/state/scalper_state_backup_YYYYMMDD_HHMMSS.json data/state/scalper_state
 4. **타임프레임 혼용:** 4h 바를 15m 루프에서 참조 시 `j = (i // ratio) - 1` 확인
 5. **포지션 크기:** L/N 값 확인 (VR=3.0, MA=2.1)
 6. **데이터 기간:** 강세장만 백테스트 → 실제와 다른 시장 환경
-7. **D_trail 파라미터 소스 오염 (r53 인시던트, 2026-03-08):** `backtest_v14_3_0.py`의 `D_TRAIL_ACTIVATE=0.02/D_TRAIL_DISTANCE=0.003` import 절대 금지. 항상 `cfg = VolStraddleConfig()`에서 직접 읽어야 함. r47 이후 프로덕션 값은 `0.005/0.002`. 구버전 파일에서 import 시 D_mom8 결과가 조용히 틀림.
+7. **D_trail 파라미터 소스 오염 (r53 인시던트, 2026-03-08):** `backtest_v14_3_0.py`의 `D_TRAIL_ACTIVATE=0.02/D_TRAIL_DISTANCE=0.003` import 절대 금지. 항상 `cfg = VolStraddleConfig()`에서 직접 읽어야 함. **r69 이후 프로덕션 값은 `0.010/0.002`** (r47~r68: 0.005/0.002). 구버전 파일에서 import 시 D_mom8 결과가 조용히 틀림.
 8. **Trail bar-close 실행 갭 (r65 발견, 2026-03-11, ✅ ratchet 구현 완료):**
    - 기존 문제: 라이브는 bar CLOSE에서 MARKET 주문 → 급락 바에서 최대 $158/slot 손실 갭. D_mom8 ΔPF=-0.950 (48% 저하).
    - **해결:** Trail Server Ratchet 구현 완료 (commit `e473e4d`, `trail_server_ratchet_enabled=True`)
