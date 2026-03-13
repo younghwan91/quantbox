@@ -44,10 +44,7 @@ from quantbox.backtest.trade_sim import (
     sim_directional_trades,
     sim_straddle_trades,
 )
-from research.active.r41_r45.r43_exit_improvement import (
-    sim_directional_trailing,
-    sim_straddle_trailing,
-)
+from quantbox.backtest.trade_sim import sim_directional_trailing, sim_straddle_trailing
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 # ── Config (no hardcoding) ──
