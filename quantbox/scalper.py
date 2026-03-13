@@ -835,7 +835,7 @@ class RubberBandScalper(
         and 4h data for MTF confirmation filter.
         Prioritizes symbols with the largest moves (strongest alpha signal).
         """
-        candidates: list[tuple[str, int, float, np.ndarray]] = []
+        candidates: list[tuple[str, int, float, np.ndarray, bool]] = []
         moves_seen: list[tuple[str, float]] = []  # diagnostic: (symbol, abs_move)
         scan_diags: list[dict] = []  # v12.0: per-symbol diagnostics
 
@@ -895,11 +895,13 @@ class RubberBandScalper(
                 # Measure move strength for prioritization
                 move = abs(close[-1] / close[-_lb - 1] - 1.0)
                 if signal == 2:
-                    # Straddle: expand into LONG + SHORT candidates
-                    candidates.append((sym, 1, move, close))
-                    candidates.append((sym, -1, move, close))
+                    # Straddle: expand into LONG + SHORT candidates.
+                    # is_straddle=True so G6 and DirDiversity filters are skipped
+                    # (straddle is direction-neutral — BTC trend gate does not apply).
+                    candidates.append((sym, 1, move, close, True))
+                    candidates.append((sym, -1, move, close, True))
                 else:
-                    candidates.append((sym, signal, move, close))
+                    candidates.append((sym, signal, move, close, False))
 
         # Prioritize strongest moves
         candidates.sort(key=lambda x: x[2], reverse=True)
@@ -910,7 +912,7 @@ class RubberBandScalper(
             # VR strategy: show VR threshold + actual VR values
             print(format_scan_summary(len(candidates), top_movers, 0.0))
             if candidates:
-                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
@@ -984,7 +986,7 @@ class RubberBandScalper(
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
             if candidates:
-                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
@@ -1017,12 +1019,13 @@ class RubberBandScalper(
             )
 
         entries_made = 0
-        for sym, signal, move, close in candidates:
+        for sym, signal, move, close, is_straddle in candidates:
             if entries_made >= max_entries:
                 break
 
-            # ── G6: BTC Trend Gate — block LONG when BTC below MA ──
-            if signal == 1 and btc_ma is not None and btc_close is not None:
+            # ── G6: BTC Trend Gate — block directional LONG when BTC below MA ──
+            # Straddle is direction-neutral (LONG+SHORT) → G6 does not apply.
+            if signal == 1 and not is_straddle and btc_ma is not None and btc_close is not None:
                 btc_cur = float(btc_close[-1])
                 if btc_cur < btc_ma:
                     logger.info(
@@ -1032,7 +1035,8 @@ class RubberBandScalper(
                     continue
 
             # ═══ v12.3 PARITY: Direction Diversity Filter ═══
-            if self._cfg.dir_diversity_enabled:
+            # Straddle is direction-neutral → diversity filter does not apply.
+            if self._cfg.dir_diversity_enabled and not is_straddle:
                 same_dir = sum(1 for p in self.strategy.active_positions.values() if p.get("signal") == signal)
                 if same_dir >= self._cfg.max_same_direction:
                     logger.info(
