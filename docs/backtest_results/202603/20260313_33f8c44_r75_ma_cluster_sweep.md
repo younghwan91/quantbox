@@ -109,4 +109,4 @@ Fixed: pct=0.02, dur=6, min_mom=0.01, max_dur=24, sl=0.02, tp=0.08, max_hold=12
 **Calmar 개선:** 4.4 → 33.5 (+29.1)
 
 **config 변경 권장:** Yes ✅
-**구현:** 미구현
+**구현:** `feat(config): MA Cluster r75 최적화` → `43c5154` (develop)
