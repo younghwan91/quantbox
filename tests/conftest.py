@@ -25,7 +25,6 @@ Avoid reimplementing scalper setup in every test file — use these fixtures ins
 ## Code path map (what strategy reaches which lines in positions.py)
 
   L56-129  : vol_straddle sizing + bracket  ← vs_scalper reaches this
-  L130-137 : elliott sizing                 ← NOT reachable with vs_scalper/rb_scalper
   L138-253 : rubberband sizing              ← rb_scalper reaches this
   L394-454 : vol_straddle bracket           ← vs_scalper reaches this
   L455-633 : rubberband bracket             ← rb_scalper reaches this

@@ -1,10 +1,10 @@
 """
-Strategy module — Rubber Band + Elliott Wave + Alpha Engine.
+Strategy module — Production strategy: vol_straddle (VR Squeeze).
 
-Strategies:
-  - RubberBand: Mean-reversion scalper (15m/4h)
-  - Elliott: ABC wave pattern + Fibonacci validation (4h/15m)
-  - Alpha: Multi-factor alpha engine (hybrid)
+Infrastructure:
+  - RubberBandScalper: Base execution class (all strategies run on this)
+  - RubberBand: Mean-reversion strategy (inactive, infrastructure only)
+  - Alpha/VolSelector: Backtest utilities
 """
 
 from quantbox.strategy.rubberband import (
@@ -34,15 +34,9 @@ from quantbox.strategy.vol_selector import (
     compute_realized_vol,
     rank_symbols_by_vol,
 )
-from quantbox.strategy.elliott import (
-    ElliottConfig,
-    ElliottStrategy,
-    compute_elliott_signals,
-    scan_multi_scale_patterns,
-)
 
 __all__ = [
-    # Original rubber band
+    # Rubber band (infrastructure base)
     "RubberBandConfig",
     "RubberBandStrategy",
     "compute_signals",
@@ -52,17 +46,12 @@ __all__ = [
     "calculate_position_size",
     "compute_confidence_leverage",
     "apply_confidence_leverage",
-    # Elliott Wave (ABC pattern + Fibonacci)
-    "ElliottConfig",
-    "ElliottStrategy",
-    "compute_elliott_signals",
-    "scan_multi_scale_patterns",
-    # Alpha engine (enhanced + hybrid)
+    # Alpha engine (backtest utilities)
     "AlphaConfig",
     "AlphaStrategy",
     "compute_alpha_signals",
     "compute_hybrid_signals",
-    # Volatility-based symbol selection
+    # Volatility-based symbol selection (backtest utilities)
     "VolSelectorConfig",
     "VolatilitySelector",
     "compute_realized_vol",
