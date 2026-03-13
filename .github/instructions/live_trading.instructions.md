@@ -6,6 +6,19 @@ applyTo: "quantbox/scalper.py,quantbox/execution/**/*.py"
 > **목적:** AI 에이전트가 라이브 세션을 안전하게 시작, 재시작, 종료할 수 있도록.
 > 모든 절차는 실제 자금 손실 및 버그 사례에서 도출됨. 순서 임의 변경 금지.
 
+## ⚡ 포지션 상태 조회 — 반드시 스크립트 사용
+
+> **규칙:** 포지션 PnL·SL·TP·trail 상태를 물어보면 수작업 계산 절대 금지.
+> 반드시 아래 스크립트를 실행하고 출력을 그대로 보고한다.
+
+```bash
+python3 scripts/check_positions.py
+```
+
+출력 항목: strategy_type별 올바른 SL%, 서버 triggerPrice(직접 조회), 달러 PnL, SL까지 거리%, 고아 주문.
+
+> 이 스크립트 없이 수작업으로 SL 가격을 계산하면 strategy_type을 무시하는 실수가 발생한다 (Incident 2026-03-13).
+
 ---
 
 ## 1. 세션 시작 전 체크리스트 (Pre-Flight)
