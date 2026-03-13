@@ -83,6 +83,34 @@ for key, pos in state['positions'].items():
 json.dump(state, open(path, 'w'), indent=2)
 ```
 
+### 1.4 신뢰성 모듈 상태 확인 (v14.22.0+)
+
+```bash
+# 시작 로그에서 모듈 초기화 확인
+head -30 logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1)
+```
+
+**정상 초기화 로그:**
+```
+[INFO] InFlight - Loaded N pending orders from disk
+[INFO] Scalper - RubberBandScalper initialized (LIVE) strategy=vol_straddle
+[INFO] Scalper - Position mode: Hedge (OK)
+[INFO] Scalper - Restoring state from ...
+[INFO] Scalper - Restored N positions, M trade records
+```
+
+**이상 징후 (즉시 확인):**
+- `InFlight - Failed to load` → `data/inflight/` 디렉토리 권한 확인
+- `RateLimiter - circuit open` 반복 → API 키 또는 바이낸스 서버 상태 확인
+- `ExposureGuard - BLOCKED` 시작 직후 → 잔고 대비 노출도 점검
+- `ReconJournal - Failed to init` → `data/recon/` 디렉토리 권한 확인
+
+**모듈 별 파일 위치:**
+```
+data/inflight/inflight_state.json   # InFlight 미체결 주문
+data/recon/recon.db                 # ReconJournal SQLite
+```
+
 ---
 
 ## 2. 기존 세션 종료

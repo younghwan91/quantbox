@@ -137,6 +137,33 @@ for i in range(cfg_max):
         break
 ```
 
+### 3.3 ExposureGuard 영향 (v14.23.0+)
+
+ExposureGuard는 포지션 사이징 공식 자체를 바꾸지 않음. 대신 총 노출도가 상한을 초과하면 **신규 진입을 차단**:
+
+```python
+# ExposureGuard 작동 원리 (execution/exposure.py)
+cap_notional = balance * max_exposure_multiplier  # 기본: balance × 35.0
+current_notional = sum(pos.notional for pos in open_positions)
+
+if current_notional + new_notional > cap_notional:
+    return False  # 진입 차단
+```
+
+**현재 설정 확인:**
+```python
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+cfg = VolStraddleConfig()
+print(f'max_exposure_multiplier={cfg.max_exposure_multiplier}')  # 35.0
+# 이론적 최대 노출도: 10슬롯 × 30x = balance의 30배
+# ExposureGuard 상한: 35배 (17% 헤드룸)
+```
+
+**실거래 영향:**
+- 정상 운용 (10슬롯 × 30x = 30배): 35배 cap을 초과하지 않아 영향 없음
+- MA Cluster 혼합 시 (21x): 노출도 감소 → 더 안전
+- cap 초과 발생 시: 신규 진입만 차단, 기존 포지션은 그대로 유지
+
 ---
 
 ## 4. Conviction-Weighted Sizing (CW-Tier)
