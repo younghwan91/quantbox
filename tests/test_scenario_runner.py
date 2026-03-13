@@ -641,9 +641,9 @@ class TestExitPriority:
         pos_key = _open_ma_cluster(strategy, signal=1, entry_price=100.0)
         sl_pct = cfg.ma_cluster_sl  # 2%
 
-        # Bar that hits SL but NOT trail_activate (price dips -3%, never rises above +4%)
+        # Bar that hits SL but NOT trail_activate (price rises 1.5%, below ma_cluster_trail_activate=2%)
         sl_low = 100.0 * (1.0 - sl_pct) - 1.0  # 97 — breaches SL
-        below_trail_high = 100.0 * 1.03  # 103 — 3% gain, below ma_cluster_trail_activate (4%)
+        below_trail_high = 100.0 * 1.015  # 101.5 — 1.5% gain, below ma_cluster_trail_activate (2%, r75)
         reason = _tick(strategy, pos_key, sl_low, high=below_trail_high, low=sl_low)
         assert reason == "stop_loss", f"Expected stop_loss when trail not active, got {reason}"
 
