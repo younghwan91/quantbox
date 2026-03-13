@@ -241,6 +241,10 @@ gs = fig.add_gridspec(..., hspace=0.52, wspace=0.35,
 | 008 | More Leverage or More Positions? | r52 RCB analysis | 2026-03-08 |
 | 009 | Monte Carlo Said I'd Have $390K. It Also Said 21% Chance of Ruin. | r46 MC | 2026-03-08 |
 | 010 | The Exit You Never Optimize (But Should) | r7 exit grid | 2026-03-08 |
+| 011 | Your IS PF Was 2.16. Your Live PF Will Be 1.38. | r59 OOS validation | 2026-03-13 |
+| 012 | Every Config Lost Money in One Year. Except This One. | r39 yearly consistency | 2026-03-13 |
+| 013 | Kelly Said 154x. We Run 30x. Here's Why That's Right. | r63 Kelly audit | 2026-03-13 |
+| 014 | The Backtest Said +$125. Live Delivered -$33. Same Signal. | r65 MFE exit gap | 2026-03-13 |
 
 ---
 
@@ -248,8 +252,8 @@ gs = fig.add_gridspec(..., hspace=0.52, wspace=0.35,
 
 | 우선순위 | # | 타이틀 아이디어 | 핵심 숫자 | 리서치 출처 |
 |---------|---|----------------|-----------|------------|
-| 🔥 | 011 | Confidence Filtering: When Fewer Trades Is Better | conf≥3 vs conf≥2: fewer trades, higher EV, lower DD | r5/r6 (20260220) |
-| 🔥 | 012 | How 3 Years of Bear Market Changed Everything | 2022-2023 regime shift, long EV halved, short WR plateau | r39 yearly breakdown (20260302) |
-| ⭐ | 013 | The Calmar Ratio Is the Only Metric That Matters for Sizing | AnnRet/MaxDD vs Sharpe — why Calmar aligns with position sizing reality | r39 ranking (20260302) |
-| ⭐ | 014 | Trail Factor AB Test: When "Better" Looks Identical | 18 trail variants, max diff = 2% return | r12/trail_factor (20260223) |
+| 🔥 | 015 | Confidence Filtering: When Fewer Trades Is Better | conf≥3 vs conf≥2: fewer trades, higher EV, lower DD | r5/r6 (20260220) |
+| 🔥 | 016 | One Parameter Changed. Every Year Got Better. | d_trail_activate 0.005→0.010, 2023+2024+2025 모두 PF 개선 | r69 yearly OOS (20260313) |
+| ⭐ | 017 | The Calmar Ratio Is the Only Metric That Matters for Sizing | AnnRet/MaxDD vs Sharpe — why Calmar aligns with position sizing reality | r39 ranking (20260302) |
+| ⭐ | 018 | Trail Factor AB Test: When "Better" Looks Identical | 18 trail variants, max diff = 2% return | r12/trail_factor (20260223) |
 
