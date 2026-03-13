@@ -319,7 +319,7 @@ for param_value in param_grid:
 
 | 파라미터 | 상태 | 발견 내용 |
 |----------|------|-----------|
-| `d_trail_distance=0.002` | ✅ **ROBUST** (but 단조 감소) | ±1 스텝 기준 통과. 하지만 **평탄 구간(plateau) 없음** — 작을수록 백테스트 성과 계속 상승 (0.001→PF 3.77, 0.002→PF 2.77). 0.001을 안 쓰는 이유: bar-close MARKET 실행 갭(r65) — 0.1% trail은 15분 바 노이즈에 의한 오청산 위험. `trail-server-ratchet` 구현 후 재최적화 대상. |
+| `d_trail_distance=0.002` | ✅ **ROBUST** (but 단조 감소) | ±1 스텝 기준 통과. 하지만 **평탄 구간(plateau) 없음** — 작을수록 백테스트 성과 계속 상승 (0.001→PF 3.77, 0.002→PF 2.77). **trail-server-ratchet 구현 완료(e473e4d) 후** 0.001~0.0015 재최적화 가능. |
 | `d_tp=0.20` | ℹ️ **Dead parameter** | 전 범위에서 PF/N 변화 없음. 실제 청산은 trail stop이 전담, TP는 never hit. 20%는 안전 상한선. |
 | `d_sl=0.01` | ✅ ROBUST | ±1 스텝 → PF ±12%. 타이트한 SL이 N 늘고 PF 높음. |
 | `d_trail_activate=0.01` | ✅ ROBUST | 높을수록 PF 상승 (0.01 → PF 4.6), 하지만 N 감소. 현재값이 균형점. |
@@ -329,7 +329,7 @@ for param_value in param_grid:
 
 **운영 규칙:**
 - `d_trail_distance` 증가 금지 (0.003: OOS=1.160 barely pass, 0.004: OOS=0.883 fail)
-- `d_trail_distance` 감소(0.001~0.0015)는 **backtest에서는 더 좋음** — 단, trail-server-ratchet 구현 전까지 live에서는 bar-close 실행 갭으로 역효과 가능
+- `d_trail_distance` 감소(0.001~0.0015)는 **backtest에서는 더 좋음** — trail-server-ratchet 구현 완료(e473e4d)로 live 갭 문제 해소. 재최적화 시 r65+ 데이터로 검증 필요
 - `d_tp`는 dead parameter — 수정해도 백테스트 수치 변화 없음
 - 새 파라미터 추가 시 반드시 sensitivity sweep 먼저 (cliff edge 사전 검출)
 - **PROD_IDX 주의:** sweep 배열에서 프로덕션값의 실제 인덱스를 수동 확인 필수 (`{k: 3}`으로 일괄 설정 금지)
