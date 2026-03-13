@@ -268,9 +268,15 @@ cp data/state/scalper_state_backup_YYYYMMDD_HHMMSS.json data/state/scalper_state
 5. **포지션 크기:** L/N 값 확인 (VR=3.0, MA=2.1)
 6. **데이터 기간:** 강세장만 백테스트 → 실제와 다른 시장 환경
 7. **D_trail 파라미터 소스 오염 (r53 인시던트, 2026-03-08):** `backtest_v14_3_0.py`의 `D_TRAIL_ACTIVATE=0.02/D_TRAIL_DISTANCE=0.003` import 절대 금지. 항상 `cfg = VolStraddleConfig()`에서 직접 읽어야 함. r47 이후 프로덕션 값은 `0.005/0.002`. 구버전 파일에서 import 시 D_mom8 결과가 조용히 틀림.
-8. **Trail bar-close 실행 갭 (r65 발견, 2026-03-11):** 백테스트는 trail_stop_gain 정확 가격에 청산. 라이브는 bar CLOSE에서 MARKET 주문 → 급락 바에서 최대 $158/slot 손실 갭. D_mom8 단독 ΔPF=-0.950 (48% 저하). → `feature/trail-server-ratchet` 구현 전까지 라이브 PF는 백테스트보다 낮음이 정상.
+8. **Trail bar-close 실행 갭 (r65 발견, 2026-03-11, ✅ ratchet 구현 완료):**
+   - 기존 문제: 라이브는 bar CLOSE에서 MARKET 주문 → 급락 바에서 최대 $158/slot 손실 갭. D_mom8 ΔPF=-0.950 (48% 저하).
+   - **해결:** Trail Server Ratchet 구현 완료 (commit `e473e4d`, `trail_server_ratchet_enabled=True`)
+     - trail_active 활성화 후 매 bar마다 서버에 STOP 주문을 `peak_gain - trail_distance` 가격에 배치/업데이트
+     - 최소 0.1% 개선 시에만 API 호출 (스팸 방지)
+     - `quantbox/execution/brackets.py:574-670` `_ratchet_trail_sl()`
+     - 현재 라이브 PF 갭은 ratchet 이전 포지션 or paper mode에서만 발생 가능
 
-   **진단:** 대시보드에서 MFE >> |PnL|이고 trailing_stop 청산이면 이 갭이 원인.
+   **진단:** 대시보드에서 MFE >> |PnL|이고 trailing_stop 청산이면 이 갭이 원인 (ratchet 이전 포지션).
    ```
    SUIUSDT LONG VR: MFE=+131%, PnL=-$33 → 한 15m 바에 +4.37% → -1.1%
    백테스트: trail_stop_gain=4.17% → +$125 / 라이브: close=-1.1% → -$33
