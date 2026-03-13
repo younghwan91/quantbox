@@ -109,6 +109,7 @@ class VolStraddleConfig(BaseSettings):
     # ── Costs (conservative) ──
     fee_rate: float = 0.0002  # 0.02% maker fee per side
     slippage_rate: float = 0.0002  # 0.02% slippage with limit chaser
+    slippage_mode: str = "flat"  # flat | tiered | conservative
 
     # ── Direction Diversity ──
     dir_diversity_enabled: bool = True
@@ -368,6 +369,8 @@ class VolStraddleConfig(BaseSettings):
             errors.append(f"ma_cluster_sl must be positive, got {self.ma_cluster_sl}")
         if self.fee_rate < 0:
             errors.append(f"fee_rate must be non-negative, got {self.fee_rate}")
+        if self.slippage_mode not in ("flat", "tiered", "conservative"):
+            errors.append(f"slippage_mode must be 'flat', 'tiered', or 'conservative', got {self.slippage_mode!r}")
         if self.max_exposure_multiplier < self.base_leverage:
             errors.append(
                 f"max_exposure_multiplier must be >= base_leverage, "

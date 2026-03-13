@@ -42,6 +42,25 @@ def _compute_checksum(state: dict) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _try_remote_backup(source: Path) -> None:
+    """Best-effort copy to secondary backup location. Never raises.
+
+    Reads ``STATE_REMOTE_BACKUP_DIR`` directly from the environment to avoid
+    circular imports with ``quantbox.core.settings``.
+    """
+    remote_dir_str = os.getenv("STATE_REMOTE_BACKUP_DIR")
+    if not remote_dir_str:
+        return
+    try:
+        remote_dir = Path(remote_dir_str)
+        remote_dir.mkdir(parents=True, exist_ok=True)
+        dest = remote_dir / source.name
+        shutil.copy2(str(source), str(dest))
+        logger.debug(f"Remote backup written: {dest}")
+    except Exception as e:
+        logger.warning(f"Remote backup failed (non-critical): {e}")
+
+
 def save_scalper_state(state: dict, filepath: Path | None = None) -> None:
     """Atomic JSON write with rotating backup (keeps 5 most recent).
 
@@ -80,6 +99,8 @@ def save_scalper_state(state: dict, filepath: Path | None = None) -> None:
         except OSError:
             pass
         raise
+
+    _try_remote_backup(filepath)
 
 
 def _load_state_from_file(filepath: Path) -> dict | None:
