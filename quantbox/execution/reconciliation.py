@@ -507,6 +507,61 @@ class ReconciliationMixin:
                 # Update internal notional to match exchange reality
                 pos["notional"] = exchange_qty * pos["entry_price"]
 
+        # ── Phase 2: Reverse ghost — exchange has position not in state ──
+        # Build set of all keys already tracked internally.
+        tracked_keys: set[str] = set()
+        for sym in self.strategy.active_positions:
+            pos = self.strategy._positions.get(sym)
+            if not pos:
+                continue
+            raw_sym = pos.get("symbol", sym)
+            api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+            pos_side = pos.get("position_side")
+            if pos_side in ("LONG", "SHORT"):
+                tracked_keys.add(f"{api_sym}:{pos_side}")
+            else:
+                tracked_keys.add(api_sym)
+
+        for ex_key, ex_amt in exchange_map.items():
+            if ex_key in tracked_keys:
+                continue
+            # Reverse ghost: exchange has a position with no internal state.
+            # This means no SL/TP protection. Auto-close immediately.
+            parts = ex_key.split(":")
+            api_sym = parts[0]
+            pos_side_str = parts[1] if len(parts) == 2 else None
+            close_side = "SELL" if pos_side_str == "LONG" else "BUY"
+            logger.error(
+                f"[{ex_key}] REVERSE GHOST: Position on exchange has no internal "
+                f"state (no SL/TP protection). Auto-closing qty={abs(ex_amt):.6f}."
+            )
+            self.discord.send(
+                content=(
+                    f"⚠️ **[{ex_key}] Reverse ghost detected** — "
+                    f"Unmanaged exchange position with no SL/TP. "
+                    f"Auto-closing qty={abs(ex_amt):.4f} via MARKET order."
+                )
+            )
+            try:
+                order_kwargs: dict = dict(
+                    symbol=api_sym,
+                    side=close_side,
+                    type="MARKET",
+                    quantity=abs(ex_amt),
+                )
+                if pos_side_str in ("LONG", "SHORT"):
+                    order_kwargs["positionSide"] = pos_side_str
+                self.client.futures_create_order(**order_kwargs)
+                logger.info(f"[{ex_key}] Reverse ghost auto-closed: {close_side} {abs(ex_amt):.6f} MARKET.")
+            except Exception as exc:
+                logger.error(f"[{ex_key}] Reverse ghost auto-close FAILED: {exc}. Manual intervention required!")
+                self.discord.send(
+                    content=(
+                        f"🚨 **[{ex_key}] Reverse ghost AUTO-CLOSE FAILED** — "
+                        f"`{exc}`. Manual close required immediately!"
+                    )
+                )
+
     def _handle_server_partial_tp_fill(
         self: "ScalperProtocol",
         symbol: str,

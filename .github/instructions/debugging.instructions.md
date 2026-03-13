@@ -121,6 +121,43 @@ grep -n "futures_change_leverage\|leverage > 1" quantbox/scalper.py | head -5
 
 ---
 
+### Incident #6: Reverse Ghost Position (2026-03-13)
+
+**증상:** 이전 세션에서 열린 포지션이 state에 없어 SL/TP 없이 방치됨
+```
+[BANDUSDT] State out of sync — position exists on exchange but not in internal state.
+No SL/TP protection. Reverse ghost check in _reconcile_positions() will auto-close.
+(21:00~21:15 2회 WARNING 후 3시간 방치)
+```
+
+**원인 체인:**
+1. 이전 세션에서 BANDUSDT LONG 진입 (balance ~$130일 때, notional=$403)
+2. 세션 종료 시 state 파일에 BANDUSDT 미저장 (crash 또는 비정상 종료)
+3. 새 세션 시작: state 복원 시 BANDUSDT 없음
+4. BANDUSDT squeeze 신호 발생 → exchange dedup 감지 → 진입만 차단
+5. `_reconcile_positions()`는 state→exchange 방향만 체크 (ghost 감지)
+   exchange→state 방향 체크 없음 (reverse ghost 미탐지) ← **버그**
+6. BANDUSDT는 SL/TP 없이 ~3시간 방치
+
+**식별 방법:**
+```
+grep "State out of sync\|Untracked position\|REVERSE GHOST" logs/...
+```
+
+**수정 (v14.5.x):**
+- `_reconcile_positions()` Phase 2 추가: exchange→state reverse ghost 탐지 + 즉시 시장가 청산
+- `_startup_exchange_crosscheck()` 추가: 세션 시작 시 미추적 포지션 즉시 Discord 경고
+- 테스트: `tests/test_reconciliation_reverse_ghost.py` (11개)
+
+**재발 방지 확인:**
+```bash
+grep -n "REVERSE GHOST\|reverse ghost\|_startup_exchange_crosscheck" quantbox/execution/reconciliation.py quantbox/scalper.py
+# reconciliation.py에 Phase 2 있어야 함
+# scalper.py에 _startup_exchange_crosscheck 있어야 함
+```
+
+---
+
 ### -4028: Leverage not supported for this symbol
 
 **증상:** 레버리지가 심볼 최대치 초과
