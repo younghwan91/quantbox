@@ -2,11 +2,13 @@
 Strategy module — Production strategy: vol_straddle (VR Squeeze).
 
 Infrastructure:
+  - TradingStrategy: Protocol formalising the shared strategy interface.
   - RubberBandScalper: Base execution class (all strategies run on this)
   - RubberBand: Mean-reversion strategy (inactive, infrastructure only)
   - VolSelector: Backtest utility (compute_realized_vol)
 """
 
+from quantbox.strategy.protocol import TradingStrategy
 from quantbox.strategy.rubberband import (
     RubberBandConfig,
     RubberBandStrategy,
@@ -30,6 +32,8 @@ from quantbox.strategy.vol_selector import (
 )
 
 __all__ = [
+    # Strategy protocol (type-checking interface)
+    "TradingStrategy",
     # Rubber band (infrastructure base)
     "RubberBandConfig",
     "RubberBandStrategy",

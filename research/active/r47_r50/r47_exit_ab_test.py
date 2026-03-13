@@ -79,7 +79,7 @@ from research.active.r41_r45.backtest_v14_3_0 import (
     load_15m,
     year_metrics,
 )
-from research.active.r41_r45.r43_exit_improvement import sim_directional_trailing
+from quantbox.backtest.trade_sim import sim_directional_trailing
 from research.active.r41_r45.r44c_ma_confluence import precompute_mas
 from research.active.r41_r45.r45_param_sweep import (
     collect_enhanced_trades,

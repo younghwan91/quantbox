@@ -18,11 +18,9 @@ from quantbox.backtest.trade_sim import (
     portfolio_sim, compute_metrics, bootstrap_pf,
     build_resampled, precompute, precompute_all_vr,
     collect_trades, COST_STRADDLE, COST_DIRECTIONAL, G_3TF,
+    sim_directional_trailing, sim_straddle_trailing,
 )
 from quantbox.strategy.vol_straddle.signals import gen_vr_dur_signal
-from research.active.r41_r45.r43_exit_improvement import (
-    sim_straddle_trailing, sim_directional_trailing,
-)
 from research.active.r41_r45.r44c_ma_confluence import precompute_mas
 from research.active.r41_r45.r45_param_sweep import collect_enhanced_trades
 from research.active.r41_r45.backtest_v14_3_0 import (
