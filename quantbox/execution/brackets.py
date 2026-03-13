@@ -7,6 +7,11 @@ Also includes runner SL ratcheting for PBT Phase 2.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.protocol import ScalperProtocol
+
 import logging
 import time
 
@@ -19,7 +24,7 @@ class BracketMixin:
     """Mixin: Server-side bracket orders (SL/TP) via Algo Order API."""
 
     def _place_algo_order(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         side: str,
         order_type: str,
@@ -100,7 +105,7 @@ class BracketMixin:
             return None
 
     def _place_server_stop_loss(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         signal: int,
         quantity: float,
@@ -153,6 +158,14 @@ class BracketMixin:
         stop_price = round(round(stop_price / tick_size) * tick_size, price_precision)
         limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
 
+        # T2-1 runtime guard: sanity check stop price placement
+        if entry_price <= 0:
+            logger.error(f"[{symbol}] SL INVARIANT: entry_price={entry_price!r} — aborting SL placement")
+            return None
+        if stop_price <= 0:
+            logger.error(f"[{symbol}] SL INVARIANT: stop_price={stop_price!r} — aborting SL placement")
+            return None
+
         dist_pct = stop_distance * 100
         logger.info(
             f"[{symbol}] SL calc: entry=${entry_price:.4f} "
@@ -197,7 +210,7 @@ class BracketMixin:
         return algo_id
 
     def _place_server_take_profit(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         signal: int,
         quantity: float,
@@ -249,6 +262,14 @@ class BracketMixin:
         trigger_price = round(round(trigger_price / tick_size) * tick_size, price_precision)
         limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
 
+        # T2-1 runtime guard: sanity check TP price placement
+        if entry_price <= 0:
+            logger.error(f"[{symbol}] TP INVARIANT: entry_price={entry_price!r} — aborting TP placement")
+            return None
+        if trigger_price <= 0:
+            logger.error(f"[{symbol}] TP INVARIANT: trigger_price={trigger_price!r} — aborting TP placement")
+            return None
+
         dist_pct = target_distance * 100
         logger.info(
             f"[{symbol}] TP calc: entry=${entry_price:.4f} "
@@ -271,7 +292,7 @@ class BracketMixin:
             logger.warning(f"[{symbol}] Server TP failed — will rely on client-side TP check.")
         return algo_id
 
-    def _cancel_server_order(self, symbol: str, order_id: str, label: str = "order") -> None:
+    def _cancel_server_order(self: "ScalperProtocol", symbol: str, order_id: str, label: str = "order") -> None:
         """Cancel a server-side algo order (stop-loss or take-profit).
 
         Uses Binance Algo Order API (DELETE /fapi/v1/algoOrder).
@@ -304,16 +325,16 @@ class BracketMixin:
         except Exception as e:
             logger.warning(f"[{symbol}] Unexpected error cancelling server {label}: algoId={order_id} error={e}")
 
-    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
+    def _cancel_server_stop_loss(self: "ScalperProtocol", symbol: str, order_id: str) -> None:
         """Cancel the server-side stop-loss."""
         self._cancel_server_order(symbol, order_id, "stop-loss")
 
-    def _cancel_server_take_profit(self, symbol: str, order_id: str) -> None:
+    def _cancel_server_take_profit(self: "ScalperProtocol", symbol: str, order_id: str) -> None:
         """Cancel the server-side take-profit."""
         self._cancel_server_order(symbol, order_id, "take-profit")
 
     def _lookup_actual_fill(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         expected_qty: str,
         order_type: str,
@@ -363,7 +384,7 @@ class BracketMixin:
             logger.warning(f"[{symbol}] Failed to lookup actual fill: {e}")
         return None
 
-    def _check_order_filled(self, symbol: str, order_id: str) -> dict | None:
+    def _check_order_filled(self: "ScalperProtocol", symbol: str, order_id: str) -> dict | None:
         """Check if a server-side algo order has been filled.
 
         Uses Binance Algo Order API (GET /fapi/v1/algoOrder).
@@ -453,7 +474,7 @@ class BracketMixin:
             logger.warning(f"[{symbol}] Algo order status check failed: algoId={order_id} error={e}")
         return None
 
-    def _ratchet_runner_sl(self, symbol: str, pos: dict) -> None:
+    def _ratchet_runner_sl(self: "ScalperProtocol", symbol: str, pos: dict) -> None:
         """Ratchet server-side SL for a Phase 2 runner to protect profits.
 
         v12.3.3: The runner's server SL starts at breakeven (stop_mult=0.0001).
@@ -549,7 +570,7 @@ class BracketMixin:
             # Placement failed — keep old SL active (don't cancel!)
             logger.warning(f"[{symbol}] Runner SL ratchet FAILED — keeping old SL at {last_server_floor * 100:.2f}%")
 
-    def _ratchet_trail_sl(self, symbol: str, pos: dict) -> None:
+    def _ratchet_trail_sl(self: "ScalperProtocol", symbol: str, pos: dict) -> None:
         """Ratchet server SL to trail_stop_gain price after trail activation.
 
         r65: bar-close execution gap fix. Backtest assumes intrabar trail stop at

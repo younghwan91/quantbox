@@ -214,6 +214,96 @@ class TestGetTradingSymbols:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+#  DataMixin._preload_max_notional
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _make_bracket_response(symbol_caps: dict[str, float]) -> list[dict]:
+    """Build a mock futures_leverage_bracket() response."""
+    return [
+        {
+            "symbol": sym,
+            "brackets": [
+                {"bracket": 1, "initialLeverage": 50, "notionalCap": cap, "notionalFloor": 0},
+            ],
+        }
+        for sym, cap in symbol_caps.items()
+    ]
+
+
+def _exchange_info_for(*symbols: str) -> dict:
+    """Minimal exchange_info response for given symbols."""
+    return {
+        "symbols": [
+            {
+                "symbol": sym,
+                "quantityPrecision": 3,
+                "pricePrecision": 2,
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "5"},
+                ],
+            }
+            for sym in symbols
+        ]
+    }
+
+
+class TestPreloadMaxNotional:
+    def test_bulk_preload_sets_max_notional(self):
+        """Bulk preload populates max_notional for all cached symbols."""
+        host = _make_host()
+        host.client.futures_exchange_info.return_value = _exchange_info_for("ENJUSDT", "BTCUSDT")
+        host.client.futures_leverage_bracket.return_value = _make_bracket_response(
+            {"ENJUSDT": 5000.0, "BTCUSDT": 1_000_000.0}
+        )
+
+        host.get_symbol_info("ENJUSDT")  # triggers exchange_info + preload
+
+        assert host._symbol_info_cache["ENJUSDT"]["max_notional"] == pytest.approx(5000.0)
+        assert host._symbol_info_cache["BTCUSDT"]["max_notional"] == pytest.approx(1_000_000.0)
+        # Only one bulk call, not per-symbol
+        host.client.futures_leverage_bracket.assert_called_once_with()
+
+    def test_preload_called_once_after_exchange_info(self):
+        """Bracket bulk load is called exactly once, when exchange_info is first fetched."""
+        host = _make_host()
+        host.client.futures_exchange_info.return_value = _exchange_info_for("BTCUSDT")
+        host.client.futures_leverage_bracket.return_value = _make_bracket_response({"BTCUSDT": 1_000_000.0})
+
+        host.get_symbol_info("BTCUSDT")
+        host.get_symbol_info("BTCUSDT")  # second call — cache hit, no reload
+
+        host.client.futures_leverage_bracket.assert_called_once()
+
+    def test_preload_failure_falls_back_to_lazy(self):
+        """If bulk preload fails, per-symbol lazy-load is used as fallback."""
+        host = _make_host()
+        host.client.futures_exchange_info.return_value = _exchange_info_for("ENJUSDT")
+        host.client.futures_leverage_bracket.side_effect = Exception("rate limit")
+
+        # First call: exchange_info OK, bulk preload fails, max_notional not set yet
+        host.get_symbol_info("ENJUSDT")
+        assert "max_notional" not in host._symbol_info_cache["ENJUSDT"]
+
+        # Second call (cache hit): lazy-load per-symbol
+        host.client.futures_leverage_bracket.side_effect = None
+        host.client.futures_leverage_bracket.return_value = _make_bracket_response({"ENJUSDT": 5000.0})
+        info = host.get_symbol_info("ENJUSDT")
+        assert info["max_notional"] == pytest.approx(5000.0)
+
+    def test_symbol_absent_from_bracket_response_gets_none(self):
+        """Symbol not in bracket response gets max_notional=None sentinel."""
+        host = _make_host()
+        host.client.futures_exchange_info.return_value = _exchange_info_for("NEWUSDT")
+        host.client.futures_leverage_bracket.return_value = []  # empty response
+
+        host.get_symbol_info("NEWUSDT")
+        assert host._symbol_info_cache["NEWUSDT"]["max_notional"] is None
+
+
 class TestGetGitCommit:
     def test_returns_dict_with_expected_keys(self):
         from quantbox.core.bot_utils import get_git_commit

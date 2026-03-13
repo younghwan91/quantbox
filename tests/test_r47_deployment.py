@@ -102,10 +102,10 @@ def cfg():
 
 
 class TestSameBarTrailActivateAndFire:
-    """trail_activate=0.5%이면 일반 변동성 바에서 활성화+발동이 동시에 발생 가능.
+    """trail_activate=1.0%이면 일반 변동성 바에서 활성화+발동이 동시에 발생 가능.
 
-    bar range 0.4% (trail_distance=0.2%) 이상이면 같은 바에서 trail fire 가능.
-    이전 trail_activate=2%에서는 사실상 불가능했던 시나리오.
+    bar range 0.2% (trail_distance=0.2%) 이상이면 같은 바에서 trail fire 가능.
+    이전 trail_activate=0.5%에서도 동일한 메커니즘.
     """
 
     def test_long_same_bar_activate_fire(self, strategy, cfg):
@@ -161,11 +161,14 @@ class TestSameBarTrailActivateAndFire:
     def test_same_bar_does_not_fire_if_range_too_tight(self, strategy, cfg):
         """trail 활성화는 됐지만 bar range < trail_distance → 발동 없음."""
         pos_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
-        trail_activate = cfg.d_trail_activate  # 0.005
+        trail_activate = cfg.d_trail_activate  # 0.010
         trail_distance = cfg.d_trail_distance  # 0.002
 
-        # best_gain=0.6% → 활성화, worst_gain=0.5% > trail_stop(0.4%) → 발동 안 됨
-        result = _tick(strategy, pos_key, 100.6, high=100.6, low=100.5)
+        # high=+1.1% → trail 활성화, low=+1.0% > trail_stop(1.1-0.2=0.9%) → 발동 안 됨
+        # bar range = 0.1% < trail_distance(0.2%) → too tight
+        result = _tick(
+            strategy, pos_key, 101.05, high=100.0 * (1 + trail_activate + 0.001), low=100.0 * (1 + trail_activate)
+        )
         assert result is None, f"bar range < trail_distance일 때 trail 발동 없어야 함. got={result}"
         pos = strategy._positions[pos_key]
         assert pos["trail_active"] is True, "Trail은 활성화됐어야 함"
@@ -336,12 +339,12 @@ class TestTrailReplacesStopLoss:
         """LONG: trail 활성화 후 SL(-1%) 수준 하락 → trailing_stop (not stop_loss)."""
         pos_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
 
-        # Trail 활성화 (tight bar)
-        _tick(strategy, pos_key, 100.7, high=100.7, low=100.69)
+        # Trail 활성화 (tight bar, 1.1% gain — above trail_activate=1.0%)
+        _tick(strategy, pos_key, 101.1, high=101.1, low=101.09)
         pos = strategy._positions[pos_key]
         assert pos["trail_active"] is True
 
-        # SL 수준(-1%)으로 직접 하락 — trail_stop_gain(0.5%)보다 훨씬 낮음
+        # SL 수준(-1%)으로 직접 하락 — trail_stop_gain(0.9%)보다 훨씬 낮음
         sl_price = 100.0 * (1 - cfg.d_sl - 0.001)  # 98.9
         result = _tick(strategy, pos_key, sl_price, high=100.0, low=sl_price)
         assert result == "trailing_stop", (
@@ -358,7 +361,7 @@ class TestTrailReplacesStopLoss:
             strategy,
             pos_key,
             sl_price,
-            high=100.2,  # 0.2% 수익 — trail_activate(0.5%) 미달
+            high=100.2,  # 0.2% 수익 — trail_activate(1.0%) 미달
             low=sl_price,
         )
         assert result == "stop_loss", f"trail 미활성화 시 stop_loss 필요. got={result}"
@@ -446,9 +449,9 @@ class TestFreshStateAfterTrailExit:
         """trail 종료 → 포지션 제거 → 신규 오픈 → 초기 상태 확인."""
         pos_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
 
-        # Trail 활성화 후 발동
-        _tick(strategy, pos_key, 100.7, high=100.7, low=100.69)
-        result = _tick(strategy, pos_key, 100.4, high=100.7, low=100.4)
+        # Trail 활성화 후 발동 (trail_activate=1.0%)
+        _tick(strategy, pos_key, 101.15, high=101.2, low=101.1)  # +1.2% peak, trail activates
+        result = _tick(strategy, pos_key, 100.9, high=101.2, low=100.9)  # drop below trail_stop(1.0%)
         assert result == "trailing_stop"
 
         # 포지션 제거
@@ -492,18 +495,18 @@ class TestStrategyTypeInPositionDict:
         btc_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
         eth_key = _open_ma_cluster(strategy, "ETHUSDT", signal=1, entry=100.0)
 
-        # D_mom8 포지션: 0.6% 수익 → trail 활성화됨
-        _tick(strategy, btc_key, 100.6, high=100.6, low=100.59)
+        # D_mom8 포지션: 1.1% 수익 → trail 활성화됨 (trail_activate=1.0%)
+        _tick(strategy, btc_key, 101.1, high=101.1, low=101.09)
         btc_pos = strategy._positions[btc_key]
         assert btc_pos["trail_active"] is True, (
-            f"D_mom8 0.6% 수익에서 trail_active=True 필요 (activate={cfg.d_trail_activate})"
+            f"D_mom8 1.1% 수익에서 trail_active=True 필요 (activate={cfg.d_trail_activate})"
         )
 
-        # MA cluster 포지션: 동일 0.6% 수익 → trail 미활성화
-        _tick(strategy, eth_key, 100.6, high=100.6, low=100.59)
+        # MA cluster 포지션: 동일 1.1% 수익 → trail 미활성화 (MA는 4% 필요)
+        _tick(strategy, eth_key, 101.1, high=101.1, low=101.09)
         eth_pos = strategy._positions[eth_key]
         assert eth_pos.get("trail_active", False) is False, (
-            f"MA cluster 0.6% 수익에서 trail_active=False 필요 (activate={cfg.ma_cluster_trail_activate})"
+            f"MA cluster 1.1% 수익에서 trail_active=False 필요 (activate={cfg.ma_cluster_trail_activate})"
         )
 
 
@@ -554,12 +557,12 @@ class TestPastIncidentPrevention:
         ), "TRIGGERED와 FINISHED가 동일하게 처리되지 않음"
 
     def test_d_trail_activate_faster_than_previous(self, cfg):
-        """r47: trail_activate가 2%→0.5%로 단축 — bad trade를 더 빨리 종료.
+        """r69: trail_activate가 2%→0.5%→1.0%로 조정 — OOS 2023/2024/2025 일관 개선.
 
-        이전 시스템에서 max_hold/SL로만 종료되던 문제 해결의 핵심 메커니즘.
+        r47에서 0.5%로 단축된 후, r69 연도별 검증으로 1.0%가 최적으로 확인됨.
         """
         assert cfg.d_trail_activate < 0.02, f"r47: trail_activate는 0.02 미만이어야 함. got={cfg.d_trail_activate}"
-        assert cfg.d_trail_activate == 0.005, f"r47: trail_activate=0.005 (0.5%). got={cfg.d_trail_activate}"
+        assert cfg.d_trail_activate == 0.010, f"r69: trail_activate=0.010 (1.0%). got={cfg.d_trail_activate}"
         assert cfg.d_trail_distance == 0.002, f"r47: trail_distance=0.002 (0.2%). got={cfg.d_trail_distance}"
 
     def test_ma_cluster_trail_activate_not_zero(self, cfg):

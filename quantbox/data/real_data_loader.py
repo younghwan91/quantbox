@@ -16,7 +16,7 @@ import gzip
 import pickle
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -39,36 +39,39 @@ class RealDataLoader:
     # Standard symbols for testing when specific symbols are not required
     DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"]
 
-    def __init__(self, cache_dir: str = None):
+    def __init__(self, cache_dir: str | Path | None = None):
         """
         Initialize the data loader.
 
         Args:
             cache_dir: Path to cache directory. Defaults to 'data/cache' in project root.
         """
+        resolved: Path | None = None
         if cache_dir is None:
             # Try to find project root by looking for cache_index.json
             current = Path(__file__).resolve().parent
             for parent in [current] + list(current.parents):
                 test_path = parent / "data" / "cache" / "cache_index.json"
                 if test_path.exists():
-                    cache_dir = parent / "data" / "cache"
+                    resolved = parent / "data" / "cache"
                     break
 
             # Fallback: look for pyproject.toml and use data/cache
-            if cache_dir is None:
+            if resolved is None:
                 current = Path(__file__).resolve().parent
                 for parent in list(current.parents):
                     if (parent / "pyproject.toml").exists():
-                        cache_dir = parent / "data" / "cache"
+                        resolved = parent / "data" / "cache"
                         break
 
-            if cache_dir is None:
-                cache_dir = Path("data/cache")
+            if resolved is None:
+                resolved = Path("data/cache")
+        else:
+            resolved = Path(cache_dir)
 
-        self.cache_dir = Path(cache_dir)
-        self._index = None
-        self._data_cache = {}
+        self.cache_dir = resolved
+        self._index: Dict | None = None
+        self._data_cache: Dict[str, Any] = {}
 
     @property
     def index(self) -> Dict:
@@ -142,7 +145,7 @@ class RealDataLoader:
         return None
 
     def load_data(
-        self, symbols: List[str] = None, min_bars: int = 100, align_data: bool = True
+        self, symbols: List[str] | None = None, min_bars: int = 100, align_data: bool = True
     ) -> Dict[str, pd.DataFrame]:
         """
         Load data for multiple symbols.
@@ -218,18 +221,20 @@ class RealDataLoader:
         logger.info(f"Aligned data: {len(aligned)} symbols, {len(next(iter(aligned.values())))} bars")
         return aligned
 
-    def get_data_info(self) -> Dict:
+    def get_data_info(self) -> Dict[str, Any]:
         """Get information about available cached data."""
-        info = {
+        info: Dict[str, Any] = {
             "cache_dir": str(self.cache_dir),
             "cache_exists": self.cache_dir.exists(),
             "symbols": self.get_available_symbols(),
             "n_symbols": len(self.get_available_symbols()),
         }
 
-        if info["n_symbols"] > 0:
+        n_symbols: int = len(self.get_available_symbols())
+        all_symbols: List[str] = self.get_available_symbols()
+        if n_symbols > 0:
             # Get sample info
-            sample_symbol = info["symbols"][0]
+            sample_symbol = all_symbols[0]
             sample_df = self.load_symbol(sample_symbol)
             if sample_df is not None:
                 info["sample_bars"] = len(sample_df)
@@ -243,7 +248,7 @@ _default_loader = None
 
 
 def get_real_data(
-    symbols: List[str] = None, min_bars: int = 100, align_data: bool = True, cache_dir: str = None
+    symbols: List[str] | None = None, min_bars: int = 100, align_data: bool = True, cache_dir: str | None = None
 ) -> Dict[str, pd.DataFrame]:
     """
     Convenient function to load real market data.

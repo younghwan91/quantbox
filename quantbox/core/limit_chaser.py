@@ -170,6 +170,7 @@ class LimitOrderChaser:
         quantity_precision: int = 8,
         reduce_only: bool = False,
         position_side: str | None = None,
+        client_order_id_prefix: str | None = None,
     ) -> ChaseResult:
         """Limit 지정가 추격 주문 실행.
 
@@ -194,6 +195,9 @@ class LimitOrderChaser:
             position_side: Hedge Mode용. 'LONG' 또는 'SHORT'.
                 설정 시 reduceOnly 대신 positionSide를 사용한다.
                 None이면 One-Way Mode (기존 동작).
+            client_order_id_prefix: T1-1 주문 추적용. 각 chase 틱마다
+                '{prefix}_{tick_n}' 형식의 newClientOrderId를 설정한다.
+                None이면 clientOrderId 없이 주문 (기존 동작).
 
         Returns:
             ChaseResult with 체결 정보.
@@ -261,6 +265,10 @@ class LimitOrderChaser:
                     order_params["positionSide"] = position_side
                 elif reduce_only:
                     order_params["reduceOnly"] = "true"
+                # T1-1: Attach clientOrderId for audit trail and duplicate detection.
+                # Format: '{prefix}_{tick_n}' — unique per chase attempt.
+                if client_order_id_prefix:
+                    order_params["newClientOrderId"] = f"{client_order_id_prefix}_{chase_count}"
                 order = self.client.futures_create_order(**order_params)
                 last_order_id = str(order["orderId"])
                 logger.debug(
@@ -275,6 +283,22 @@ class LimitOrderChaser:
                 if "-4118" in err_str or "-2022" in err_str:
                     return ChaseResult(
                         status=ChaseFillStatus.NO_POSITION,
+                        filled_quantity=0.0,
+                        avg_price=0.0,
+                        order_id="",
+                        chase_count=chase_count,
+                        elapsed_seconds=time.monotonic() - start_time,
+                        maker_fill=False,
+                    )
+                # -2027: Exceeded the maximum allowable position at current leverage.
+                # MARKET fallback will fail for the same reason — skip it immediately.
+                if "-2027" in err_str:
+                    logger.error(
+                        f"[{symbol}] Position size exceeds Binance notional limit at "
+                        f"current leverage (-2027). Skipping MARKET fallback."
+                    )
+                    return ChaseResult(
+                        status=ChaseFillStatus.FAILED,
                         filled_quantity=0.0,
                         avg_price=0.0,
                         order_id="",
@@ -435,7 +459,7 @@ class LimitOrderChaser:
                     elapsed_seconds=time.monotonic() - start_time,
                     maker_fill=False,
                 )
-            if market_result is not None:
+            if market_result is not None and not isinstance(market_result, str):
                 mkt_qty, mkt_price, mkt_oid = market_result
                 weighted_price_sum += mkt_qty * mkt_price
                 total_filled += mkt_qty
@@ -470,7 +494,7 @@ class LimitOrderChaser:
         quantity_precision: int = 8,
         reduce_only: bool = False,
         position_side: str | None = None,
-    ) -> tuple[float, float, str] | None:
+    ) -> tuple[float, float, str] | str | None:
         """시장가 fallback 주문.
 
         바이낸스 MARKET 응답에서 executedQty/avgPrice가 "0"으로 올 수 있으므로

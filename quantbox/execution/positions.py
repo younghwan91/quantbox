@@ -7,6 +7,12 @@ pyramid logic.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.protocol import ScalperProtocol
+    from quantbox.core.types import ApiSymbol, PositionKey, SignalValue
+
 import logging
 import math
 from datetime import datetime, timezone
@@ -28,9 +34,9 @@ class PositionMixin:
     """Mixin: Position lifecycle (open, partial close, close, pyramid)."""
 
     def _open_position(
-        self,
-        symbol: str,
-        signal: int,
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
         close_prices: np.ndarray,
         balance: float,
     ) -> bool:
@@ -63,7 +69,7 @@ class PositionMixin:
             if vs.dynamic_capital_enabled:
                 n_active = self.strategy.n_active
                 per_slot_capital = balance / max(1, n_active + 1)
-                per_slot_capital = min(per_slot_capital, balance * 0.5)
+                per_slot_capital = min(per_slot_capital, balance * vs.dynamic_capital_max_fraction)
                 # Hard cap: never exceed flat sizing regardless of n_active
                 if per_slot_capital > flat_per_slot:
                     logger.warning(
@@ -126,6 +132,17 @@ class PositionMixin:
                     f"({sig_meta.get('conviction_cond', {})})"
                 )
 
+            # ── Cap notional at Binance's max allowable for this symbol/leverage ──
+            # Prevents -2027 "Exceeded the maximum allowable position" errors.
+            sym_info = self.get_symbol_info(symbol)
+            max_notional = sym_info.get("max_notional")
+            if max_notional and notional > max_notional:
+                logger.warning(
+                    f"[{symbol}] Notional capped: ${notional:.2f} → ${max_notional:.2f} "
+                    f"(Binance max_notional limit at current leverage)"
+                )
+                notional = max_notional
+
         # ── Elliott: 2% exploratory sizing (winning_strategy §4.2) ──
         elif self.strategy_name == "elliott":
             ecfg = getattr(self, "elliott_config", ElliottConfig())
@@ -140,8 +157,8 @@ class PositionMixin:
             if cfg.dynamic_capital_enabled:
                 n_active = self.strategy.n_active
                 per_slot_capital = balance / max(1, n_active + 1)
-                # Safety: cap at 50% of balance to prevent over-concentration
-                per_slot_capital = min(per_slot_capital, balance * 0.5)
+                # Safety: cap at cfg.dynamic_capital_max_fraction of balance to prevent over-concentration
+                per_slot_capital = min(per_slot_capital, balance * cfg.dynamic_capital_max_fraction)
             else:
                 per_slot_capital = balance / cfg.max_concurrent
 
@@ -236,8 +253,13 @@ class PositionMixin:
                         f"[{symbol}] MTF leverage boost: {leverage / cfg.mtf_leverage_mult:.2f}x → {leverage:.2f}x"
                     )
 
-        if notional < 10.0:  # Min notional $10
+        if notional < 10.0:  # Internal strategy minimum ($10); Binance exchange min is $5 (see below)
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
+            return False
+
+        # T2-1 runtime guard: entry_price=0 → ZeroDivisionError in quantity calc
+        if entry_price <= 0:
+            logger.error(f"[{symbol}] INVARIANT VIOLATION: entry_price={entry_price!r} (must be > 0) — aborting open")
             return False
 
         quantity = notional / entry_price
@@ -245,7 +267,7 @@ class PositionMixin:
         if quantity <= 0:
             return False
 
-        # Check min notional
+        # Check exchange min notional (Binance API; default $5 when not in symbol info)
         info = self.get_symbol_info(symbol)
         min_notional = info.get("min_notional", 5.0)
         if quantity * entry_price < min_notional:
@@ -633,8 +655,8 @@ class PositionMixin:
         return True
 
     def _partial_close_position(
-        self,
-        symbol: str,
+        self: "ScalperProtocol",
+        symbol: "PositionKey",
         current_price: float,
     ) -> bool:
         """Partially close 50% of a position (v4.3 capital preservation).
@@ -938,7 +960,7 @@ class PositionMixin:
         return True
 
     def _add_to_position(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         current_price: float,
         balance: float,
@@ -1015,7 +1037,7 @@ class PositionMixin:
         return True
 
     def _pyramid_position(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         current_price: float,
         balance: float,
@@ -1099,8 +1121,8 @@ class PositionMixin:
         return True
 
     def _close_position(
-        self,
-        symbol: str,
+        self: "ScalperProtocol",
+        symbol: "PositionKey",
         reason: str,
         current_price: float,
     ) -> bool:
@@ -1415,7 +1437,7 @@ class PositionMixin:
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
             "balance_before": balance_before,
-            "balance_after": None,  # filled below after balance settles
+            "balance_after": self.get_balance(),
         }
         self._trade_history.append(trade)
         self._journal.record(trade)

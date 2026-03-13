@@ -871,3 +871,126 @@ class TestMarketOrderRespType:
         # 두 번째 futures_create_order 호출 (market fallback)
         market_call = mock_client.futures_create_order.call_args_list[1]
         assert market_call.kwargs.get("newOrderRespType") == "RESULT"
+
+
+# ──────── -2027 Position Limit Error Tests ────────────────────────
+
+
+class TestExceedMaxPosition:
+    """-2027: Exceeded maximum allowable position at current leverage."""
+
+    @pytest.fixture
+    def chaser_with_fallback(self, mock_client: MagicMock) -> LimitOrderChaser:
+        config = ChaseConfig(
+            max_chase_ticks=3,
+            chase_interval_seconds=0.01,
+            timeout_seconds=5.0,
+            fallback_to_market=True,
+        )
+        return LimitOrderChaser(client=mock_client, config=config)
+
+    def test_2027_returns_failed_immediately(self, chaser_with_fallback: LimitOrderChaser, mock_client: MagicMock):
+        """-2027 에러 발생 시 MARKET fallback 없이 즉시 FAILED 반환."""
+        from binance.exceptions import BinanceAPIException
+
+        mock_client.futures_create_order.side_effect = Exception(
+            "APIError(code=-2027): Exceeded the maximum allowable position at current leverage."
+        )
+
+        result = chaser_with_fallback.chase_limit_order(
+            "ENJUSDT", "SELL", 348628.0, tick_size=0.0001, price_precision=4
+        )
+
+        assert result.status == ChaseFillStatus.FAILED
+        assert result.filled_quantity == 0.0
+        # MARKET fallback should NOT have been attempted
+        # (only 1 call: the failed limit order, no market order)
+        assert mock_client.futures_create_order.call_count == 1
+
+    def test_2027_skips_market_fallback(self, chaser_with_fallback: LimitOrderChaser, mock_client: MagicMock):
+        """-2027 발생 시 futures_create_order 2번 호출 안 됨 (fallback 차단 확인)."""
+        mock_client.futures_create_order.side_effect = Exception(
+            "APIError(code=-2027): Exceeded the maximum allowable position at current leverage."
+        )
+
+        chaser_with_fallback.chase_limit_order("ENJUSDT", "SELL", 100000.0, tick_size=0.0001, price_precision=4)
+
+        # Confirm market fallback was skipped: only 1 API call total
+        assert mock_client.futures_create_order.call_count == 1
+
+
+# ══════════════════════════════════════════════════════════════════════
+# T1-1: clientOrderId (newClientOrderId) — audit trail & dedup
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestClientOrderId:
+    """T1-1: newClientOrderId must be attached to every limit order placed."""
+
+    def test_client_order_id_prefix_included_in_order(self, mock_client: MagicMock):
+        """When client_order_id_prefix is set, orders must include newClientOrderId."""
+        mock_client.futures_create_order.return_value = {
+            "orderId": 99,
+            "status": "FILLED",
+            "avgPrice": "50001.0",
+            "executedQty": "1.0",
+        }
+        config = ChaseConfig(max_chase_ticks=1, fallback_to_market=False)
+        chaser = LimitOrderChaser(client=mock_client, config=config)
+
+        chaser.chase_limit_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            quantity=1.0,
+            client_order_id_prefix="QB_BTCUSDT_BUY_1234567890",
+        )
+
+        call_kwargs = mock_client.futures_create_order.call_args[1]
+        assert "newClientOrderId" in call_kwargs
+        assert call_kwargs["newClientOrderId"].startswith("QB_BTCUSDT_BUY_1234567890_")
+
+    def test_client_order_id_includes_tick_counter(self, mock_client: MagicMock):
+        """Each chase tick must generate unique ID with tick counter suffix."""
+        # First call: fill pending, second call: filled
+        mock_client.futures_create_order.side_effect = [
+            {"orderId": 1, "status": "NEW", "avgPrice": "0", "executedQty": "0"},
+            {"orderId": 2, "status": "FILLED", "avgPrice": "50001.0", "executedQty": "1.0"},
+        ]
+        mock_client.futures_get_order.return_value = {
+            "status": "PARTIALLY_FILLED",
+            "executedQty": "0",
+            "price": "50001.0",
+        }
+        mock_client.futures_cancel_order.return_value = {}
+
+        config = ChaseConfig(max_chase_ticks=5, chase_interval_seconds=0.0, fallback_to_market=False)
+        chaser = LimitOrderChaser(client=mock_client, config=config)
+
+        chaser.chase_limit_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            quantity=1.0,
+            client_order_id_prefix="QB_BTCUSDT_BUY_9999",
+        )
+
+        # Both orders must have different newClientOrderId (different tick suffix)
+        calls = mock_client.futures_create_order.call_args_list
+        ids = [c[1].get("newClientOrderId", "") for c in calls]
+        if len(ids) >= 2:
+            assert ids[0] != ids[1], "Each chase tick must have unique clientOrderId"
+
+    def test_no_prefix_does_not_set_client_order_id(self, mock_client: MagicMock):
+        """Without prefix, newClientOrderId must NOT be added (backward compat)."""
+        mock_client.futures_create_order.return_value = {
+            "orderId": 99,
+            "status": "FILLED",
+            "avgPrice": "50001.0",
+            "executedQty": "1.0",
+        }
+        config = ChaseConfig(max_chase_ticks=1, fallback_to_market=False)
+        chaser = LimitOrderChaser(client=mock_client, config=config)
+
+        chaser.chase_limit_order("BTCUSDT", "BUY", 1.0)  # no prefix
+
+        call_kwargs = mock_client.futures_create_order.call_args[1]
+        assert "newClientOrderId" not in call_kwargs

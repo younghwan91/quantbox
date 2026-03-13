@@ -45,7 +45,7 @@ WORST_H          = {2,7,9,11,13,14,15,23}
 print(f"[PARITY CHECK]")
 print(f"  D_TRAIL: activate={D_TRAIL_ACTIVATE} ({D_TRAIL_ACTIVATE*100:.1f}%) / distance={D_TRAIL_DISTANCE} ({D_TRAIL_DISTANCE*100:.1f}%)")
 print(f"  S_TRAIL: activate={S_TRAIL_ACTIVATE} ({S_TRAIL_ACTIVATE*100:.1f}%) / distance={S_TRAIL_DISTANCE} ({S_TRAIL_DISTANCE*100:.1f}%)")
-assert D_TRAIL_ACTIVATE == 0.005, f"D trail activate mismatch! {D_TRAIL_ACTIVATE}"
+assert D_TRAIL_ACTIVATE == 0.010, f"D trail activate mismatch! {D_TRAIL_ACTIVATE}"
 assert D_TRAIL_DISTANCE == 0.002, f"D trail distance mismatch! {D_TRAIL_DISTANCE}"
 print("  ✅ All params match production config.py")
 
