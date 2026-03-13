@@ -7,7 +7,7 @@
 ```
 docs/backtest_results/
 ├── 202602/   # 2026-02 (R2~R23, 방향비대칭, 클라이맥스 실험 등 — 31개)
-└── 202603/   # 2026-03 (R31~R45, v13/v14 배포 — 19개)
+└── 202603/   # 2026-03 (R31~R75+, v13/v14 배포 — 64개)
 ```
 
 ## 네이밍 규칙
@@ -20,17 +20,17 @@ docs/backtest_results/
 
 파일 이름의 날짜 순으로 `ls | sort`만 해도 시간 순 정렬 완성.
 
-## 현재 정식 배포 수치 (v14.3.0 — 2026-03-07)
+## 현재 정식 배포 수치 (v14.17.0 — r73 trail, 2026-03-13)
 
-> **canonical 리포트:** `20260307_2542664_v14_3_0_corrected_parity.md` (202603/)  
-> 이전 `05631f4` 리포트는 flat-TP + 잘못된 L/N 사용 → 폐기. 아래 수치가 공식 기준.
+> **canonical 리포트:** `docs/backtest_results/202603/` r73 trail-aware sim  
+> 3전략 combined trail: S_d8 dominant (82.4% 슬롯), MA 독립 (94.5%), D_mom8 cherry-pick (11.3%)
 
 | 파트 | 핵심 수치 |
 |---|---|
-| **VR (D+S, F5 TBR)** | N=2,229, PF=1.308, WR=49.5%, EV=+36.7bp, Sharpe=2.72, Prod CAGR=+2,805% |
-| **MA Cluster R45** | N=1,631, PF=1.365, WR=38.1%, EV=+42.6bp, Sharpe=2.27, Prod CAGR=+813% |
-| **Combined v14.3.0** | N=3,713, PF=1.324, WR=44.6%, EV=+38.5bp, Sharpe=3.39, Sortino=12.43, Calmar=237.2 |
-| Phase 1 Baseline (trailing, no TBR) | N=2,336, PF=1.351 ← config.py 도큐스트링과 정확히 일치 |
+| **S_d8 Straddle** | 8,683 raw → 7,152 accepted, PF=4.948, Calmar=1813 |
+| **MA Cluster** | 2,464 raw → 2,329 accepted, 4h TF 독립 |
+| **D_mom8** | 2,594 raw → 292 accepted (11.3%), cherry-pick |
+| **3전략 combined (r73)** | N=9,773, PF=2.002, Calmar=1695.6, MaxDD=40.5%, 5.67yr |
 
 ## 불변 베이스라인 (변경 금지 — 시뮬레이션 엔진 일관성 기준)
 
