@@ -69,7 +69,7 @@ S_TRAIL_ACT   = cfg.s_trail_activate
 S_TRAIL_DIST  = cfg.s_trail_distance
 VR_LN         = cfg.base_leverage / cfg.max_concurrent  # 3.0
 
-assert D_TRAIL_ACT == 0.005, f"d_trail_activate mismatch: {D_TRAIL_ACT}"
+assert D_TRAIL_ACT == 0.010, f"d_trail_activate mismatch: {D_TRAIL_ACT}"
 assert D_TRAIL_DIST == 0.002, f"d_trail_distance mismatch: {D_TRAIL_DIST}"
 
 CACHE_DIR  = "data/cache_extended"
