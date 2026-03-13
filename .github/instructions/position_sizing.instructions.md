@@ -43,11 +43,7 @@ notional = per_slot_capital * leverage   # $100 × 21 = $2,100
 | `leverage_override` | 21x | MA cluster: SL=2%, 12/0.01 × 0.02 ≈ 21 |
 | `L/N` (MA) | **2.1** | 21 / 10 |
 
-**위험 동등성 (Risk Parity):** 12× SL_VR(1%) ≈ 21× SL_MA(0.571%)... 실제 설계:
-```
-VR:  30x × 1% SL = 30% max loss per slot
-MA:  21x × 2% SL = 42% max loss per slot  ← 다름! 설계 의도 확인 필요
-```
+VR: 30x × 1% SL = 30% max loss per slot. MA: 21x × 2% SL = 42% max loss per slot. MA는 VR보다 높은 max loss를 허용하는 설계 (낮은 빈도, 높은 R:R).
 
 ---
 
@@ -108,61 +104,9 @@ total_margin_10_slots = margin_per_slot * max_slots
 print(f'10 slots 전부 열면: total_margin={total_margin_10_slots:.2f}')
 print(f'balance={balance:.2f}')
 print(f'충분: {total_margin_10_slots <= balance}')
-
-# dynamic_capital_enabled=True일 때 (현재 비활성, 주의)
-if cfg.dynamic_capital_enabled:
-    print("WARNING: dynamic_capital_enabled=True → 50% cap 주의")
-    # n_active=0일 때: per_slot = balance / max(1, 0+1) = balance
-    # → 첫 슬롯이 전체 잔고를 독점!
-    # → min(per_slot, balance*0.5) cap 있음
-    # → 2번째 슬롯: per_slot = balance / max(1, 1+1) = balance/2 = $500
-    # → 3번째: balance/3... 슬롯 10개면 $100씩이어야 하는데 처음에 $500 할당됨
 ```
 
-### 3.2 슬롯 순차 오픈 시뮬레이션
-
-```python
-balance = 1000.0
-cfg_leverage = 30.0
-cfg_max = 10
-remaining_balance = balance
-
-for i in range(cfg_max):
-    per_slot = remaining_balance / cfg_max  # 항상 balance/10으로 나눠야 함
-    margin = per_slot  # leverage cancel
-    remaining_balance -= margin
-    print(f'Slot {i+1}: margin=${margin:.2f}, remaining=${remaining_balance:.2f}')
-    if remaining_balance < 0:
-        print(f"ERROR: Margin insufficient at slot {i+1}!")
-        break
-```
-
-### 3.3 ExposureGuard 영향 (v14.23.0+)
-
-ExposureGuard는 포지션 사이징 공식 자체를 바꾸지 않음. 대신 총 노출도가 상한을 초과하면 **신규 진입을 차단**:
-
-```python
-# ExposureGuard 작동 원리 (execution/exposure.py)
-cap_notional = balance * max_exposure_multiplier  # 기본: balance × 35.0
-current_notional = sum(pos.notional for pos in open_positions)
-
-if current_notional + new_notional > cap_notional:
-    return False  # 진입 차단
-```
-
-**현재 설정 확인:**
-```python
-from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-cfg = VolStraddleConfig()
-print(f'max_exposure_multiplier={cfg.max_exposure_multiplier}')  # 35.0
-# 이론적 최대 노출도: 10슬롯 × 30x = balance의 30배
-# ExposureGuard 상한: 35배 (17% 헤드룸)
-```
-
-**실거래 영향:**
-- 정상 운용 (10슬롯 × 30x = 30배): 35배 cap을 초과하지 않아 영향 없음
-- MA Cluster 혼합 시 (21x): 노출도 감소 → 더 안전
-- cap 초과 발생 시: 신규 진입만 차단, 기존 포지션은 그대로 유지
+> ⚠️ `dynamic_capital_enabled=False` (프로덕션 기본값). 활성화 금지 — 첫 슬롯이 전체 잔고의 50%를 독점해 2번째 슬롯에서 -2019 에러 발생 (Incident #3).
 
 ---
 
