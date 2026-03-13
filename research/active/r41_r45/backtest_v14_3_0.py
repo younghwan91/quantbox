@@ -58,10 +58,10 @@ from research.active.r41_r45.r45_param_sweep import (
 )
 from research.active.r41_r45.r44c_ma_confluence import precompute_mas
 from research.active.r41_r45.r43_exit_improvement import (
-    sim_directional_trailing,
     year_metrics,
     get_year_boundaries,
 )
+from quantbox.backtest.trade_sim import sim_directional_trailing
 from research.active.r31_r40.scaling_r38 import CFG_V13
 
 
@@ -349,10 +349,13 @@ MA_SL = 0.02
 MA_TP = 0.08
 MA_TF_RESTRICTION = 16  # 4h ratio (integer, not string)
 
-# Production L/N leverage (MUST match config.py: base_leverage / max_concurrent)
-# VR: 30 / 10 = 3.0  |  MA: 21 / 10 = 2.1
-VR_LN = 3.0
-MA_LN = 2.1
+# Production L/N leverage — read from config
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _Cfg
+
+_cfg = _Cfg()
+VR_LN = _cfg.base_leverage / _cfg.max_concurrent  # 3.0
+MA_LN = _cfg.ma_cluster_leverage / _cfg.max_concurrent  # 2.1
+del _cfg
 
 
 def main() -> None:

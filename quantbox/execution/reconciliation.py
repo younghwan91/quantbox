@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 import logging
 from datetime import datetime, timezone
 
+from quantbox.execution.recon_journal import ReconEventType
+
 logger = logging.getLogger("Scalper")
 
 
@@ -77,6 +79,19 @@ class ReconciliationMixin:
                     # Cancel the counterpart SL
                     if sl_oid:
                         self._cancel_server_stop_loss(api_sym, sl_oid)
+                    # ── ReconJournal: record server TP fill ──
+                    try:
+                        _rj = getattr(self, "_recon_journal", None)
+                        if _rj is not None:
+                            _rj.record(
+                                event_type=ReconEventType.SERVER_TP_FILL,
+                                symbol=api_sym,
+                                action=f"TP filled @ ${fill_price:.4f}",
+                                result="success",
+                                details={"fill_price": fill_price, "fill_qty": fill_qty},
+                            )
+                    except Exception:
+                        pass
                     self._record_server_fill(
                         sym,
                         fill_price,
@@ -100,6 +115,19 @@ class ReconciliationMixin:
                     # Cancel the counterpart TP
                     if tp_oid:
                         self._cancel_server_take_profit(api_sym, tp_oid)
+                    # ── ReconJournal: record server SL fill ──
+                    try:
+                        _rj = getattr(self, "_recon_journal", None)
+                        if _rj is not None:
+                            _rj.record(
+                                event_type=ReconEventType.SERVER_SL_FILL,
+                                symbol=api_sym,
+                                action=f"SL filled @ ${fill_price:.4f}",
+                                result="success",
+                                details={"fill_price": fill_price, "fill_qty": fill_qty},
+                            )
+                    except Exception:
+                        pass
                     self._record_server_fill(
                         sym,
                         fill_price,
@@ -214,6 +242,18 @@ class ReconciliationMixin:
                         if repair_stop_mult < 0.001:  # BE stop for runner
                             pos["_server_sl_pct"] = 0.0
                         logger.info(f"[{sym}] BRACKET REPAIR: SL placed algoId={new_sl}")
+                        # ── ReconJournal: record bracket repair success ──
+                        try:
+                            _rj = getattr(self, "_recon_journal", None)
+                            if _rj is not None:
+                                _rj.record(
+                                    event_type=ReconEventType.BRACKET_REPAIR,
+                                    symbol=api_sym,
+                                    action=f"SL placed algoId={new_sl}",
+                                    result="success",
+                                )
+                        except Exception:
+                            pass
                     else:
                         # Track consecutive SL repair failures.
                         # After MAX_REPAIR_FAILS attempts the position is likely
@@ -226,6 +266,18 @@ class ReconciliationMixin:
                             f"[{sym}] BRACKET REPAIR FAILED ({fail_count}/{MAX_REPAIR_FAILS}): "
                             f"Could not place SL — position UNPROTECTED"
                         )
+                        # ── ReconJournal: record bracket repair failure ──
+                        try:
+                            _rj = getattr(self, "_recon_journal", None)
+                            if _rj is not None:
+                                _rj.record(
+                                    event_type=ReconEventType.BRACKET_REPAIR_FAIL,
+                                    symbol=api_sym,
+                                    action=f"SL placement failed ({fail_count}/{MAX_REPAIR_FAILS})",
+                                    result="failure",
+                                )
+                        except Exception:
+                            pass
                         if fail_count >= MAX_REPAIR_FAILS:
                             logger.critical(
                                 f"[{sym}] BRACKET REPAIR EXHAUSTED ({MAX_REPAIR_FAILS} failures) — "
@@ -365,6 +417,23 @@ class ReconciliationMixin:
                         f"Position missing on exchange. Cleaning up internal state."
                     )
                 )
+                # ── ReconJournal: record ghost detection ──
+                try:
+                    _rj = getattr(self, "_recon_journal", None)
+                    if _rj is not None:
+                        _rj.record(
+                            event_type=ReconEventType.GHOST_DETECTED,
+                            symbol=api_sym,
+                            action="removed from state",
+                            result="success",
+                            details={
+                                "entry_price": pos.get("entry_price"),
+                                "bars_held": pos.get("bars_held"),
+                                "position_side": pos.get("position_side"),
+                            },
+                        )
+                except Exception:
+                    pass
                 # ── Ghost Fill Audit (P1) ──────────────────────────
                 # Retrieve and log ALL closing fills so we can diagnose
                 # *why* _sync_server_orders missed the fill.
@@ -568,6 +637,19 @@ class ReconciliationMixin:
                     order_kwargs["positionSide"] = pos_side_str
                 self.client.futures_create_order(**order_kwargs)
                 logger.info(f"[{ex_key}] Reverse ghost auto-closed: {close_side} {abs(ex_amt):.6f} MARKET.")
+                # ── ReconJournal: record reverse ghost close ──
+                try:
+                    _rj = getattr(self, "_recon_journal", None)
+                    if _rj is not None:
+                        _rj.record(
+                            event_type=ReconEventType.REVERSE_GHOST_CLOSED,
+                            symbol=api_sym,
+                            action=f"auto-closed {close_side} qty={abs(ex_amt):.6f}",
+                            result="success",
+                            details={"position_side": pos_side_str},
+                        )
+                except Exception:
+                    pass
             except Exception as exc:
                 logger.error(f"[{ex_key}] Reverse ghost auto-close FAILED: {exc}. Manual intervention required!")
                 self.discord.send(
@@ -576,6 +658,19 @@ class ReconciliationMixin:
                         f"`{exc}`. Manual close required immediately!"
                     )
                 )
+                # ── ReconJournal: record failed reverse ghost close ──
+                try:
+                    _rj = getattr(self, "_recon_journal", None)
+                    if _rj is not None:
+                        _rj.record(
+                            event_type=ReconEventType.REVERSE_GHOST,
+                            symbol=api_sym,
+                            action=f"auto-close FAILED: {exc}",
+                            result="failure",
+                            details={"position_side": pos_side_str},
+                        )
+                except Exception:
+                    pass
 
     def _handle_server_partial_tp_fill(
         self: "ScalperProtocol",

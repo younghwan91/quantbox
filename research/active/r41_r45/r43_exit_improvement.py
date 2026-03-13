@@ -65,6 +65,8 @@ def get_commit_short() -> str:
 #  V1: Trailing Stop — Directional
 # ══════════════════════════════════════════════════════════════════════════════
 
+# DEPRECATED: Use quantbox.backtest.trade_sim.sim_directional_trailing instead
+# Kept for backward compatibility with old research scripts
 
 @numba.jit(nopython=True, cache=True)
 def sim_directional_trailing(
@@ -440,6 +442,8 @@ def sim_straddle_atr_exit(
 #  V6: Straddle Trailing — trail winning leg after activation
 # ══════════════════════════════════════════════════════════════════════════════
 
+# DEPRECATED: Use quantbox.backtest.trade_sim.sim_straddle_trailing instead
+# Kept for backward compatibility with old research scripts
 
 @numba.jit(nopython=True, cache=True)
 def sim_straddle_trailing(
