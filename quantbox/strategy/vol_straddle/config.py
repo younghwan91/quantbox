@@ -308,6 +308,69 @@ class VolStraddleConfig(BaseSettings):
     daily_loss_limit_pct: float = 0.05  # 5% of account balance
 
     @model_validator(mode="after")
+    def _validate_safety_constraints(self) -> "VolStraddleConfig":
+        """Validate logical constraints between config parameters.
+
+        Catches misconfigurations that would cause silent misbehavior
+        or real money loss in live trading.
+        """
+        errors: list[str] = []
+
+        if self.d_sl <= 0:
+            errors.append(f"d_sl must be positive, got {self.d_sl}")
+        if self.s_sl <= 0:
+            errors.append(f"s_sl must be positive, got {self.s_sl}")
+        if self.d_tp <= self.d_sl:
+            errors.append(
+                f"d_tp must be greater than d_sl (can't TP before SL), got d_tp={self.d_tp}, d_sl={self.d_sl}"
+            )
+        if self.base_leverage < 1:
+            errors.append(f"base_leverage must be >= 1, got {self.base_leverage}")
+        if self.max_leverage < self.base_leverage:
+            errors.append(
+                f"max_leverage must be >= base_leverage, "
+                f"got max_leverage={self.max_leverage}, base_leverage={self.base_leverage}"
+            )
+        if self.max_concurrent < 1:
+            errors.append(f"max_concurrent must be >= 1, got {self.max_concurrent}")
+        if self.d_trail_distance <= 0:
+            errors.append(f"d_trail_distance must be positive, got {self.d_trail_distance}")
+        if self.d_trail_distance >= self.d_trail_activate:
+            errors.append(
+                f"d_trail_distance must be less than d_trail_activate, "
+                f"got d_trail_distance={self.d_trail_distance}, d_trail_activate={self.d_trail_activate}"
+            )
+        if self.s_trail_distance <= 0:
+            errors.append(f"s_trail_distance must be positive, got {self.s_trail_distance}")
+        if self.s_trail_distance >= self.s_trail_activate:
+            errors.append(
+                f"s_trail_distance must be less than s_trail_activate, "
+                f"got s_trail_distance={self.s_trail_distance}, s_trail_activate={self.s_trail_activate}"
+            )
+        if self.ma_cluster_trail_distance >= self.ma_cluster_trail_activate:
+            errors.append(
+                f"ma_cluster_trail_distance must be less than ma_cluster_trail_activate, "
+                f"got ma_cluster_trail_distance={self.ma_cluster_trail_distance}, "
+                f"ma_cluster_trail_activate={self.ma_cluster_trail_activate}"
+            )
+        if self.max_drawdown_pct <= self.soft_eq_dd3:
+            errors.append(
+                f"max_drawdown_pct must be greater than soft_eq_dd3 "
+                f"(DD halt must be above max scaling threshold), "
+                f"got max_drawdown_pct={self.max_drawdown_pct}, soft_eq_dd3={self.soft_eq_dd3}"
+            )
+        if self.daily_loss_limit_pct <= 0:
+            errors.append(f"daily_loss_limit_pct must be positive, got {self.daily_loss_limit_pct}")
+        if self.ma_cluster_sl <= 0:
+            errors.append(f"ma_cluster_sl must be positive, got {self.ma_cluster_sl}")
+        if self.fee_rate < 0:
+            errors.append(f"fee_rate must be non-negative, got {self.fee_rate}")
+
+        if errors:
+            raise ValueError("VolStraddleConfig safety constraint violations:\n  - " + "\n  - ".join(errors))
+        return self
+
+    @model_validator(mode="after")
     def _populate_symbol_whitelist(self) -> "VolStraddleConfig":
         if not self.symbol_whitelist:
             rb_whitelist = os.environ.get("RB_SYMBOL_WHITELIST", "")
