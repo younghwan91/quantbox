@@ -16,7 +16,7 @@
      - L/N: `base_leverage / max_concurrent` (VR=30/10=3.0, MA=21/10=2.1) — 하드코딩 금지
      - SL 값, 슬리피지/수수료 (round-trip = 0.0008)
    - **위반 선례 (2026-03-07):** `backtest_v14_3_0.py`가 `tp=0.05`(flat) + `VR_LN=2.5`, `MA_LN=1.2` 사용 →
-     실제 프로덕션은 `tp=0.12` + trailing stop + `VR_LN=3.0`, `MA_LN=2.1`. N/PF/CAGR 전부 틀린 수치 보고.
+     실제 프로덕션은 `tp=0.20` (dead cap) + trailing stop + `VR_LN=3.0`, `MA_LN=2.1`. N/PF/CAGR 전부 틀린 수치 보고.
 
 3. **Test-Code Parity** — 모든 기능에 `pytest` 테스트 필수. 짧고 효과적인 테스트 우선. 테스트 없는 코드 = 미완성.
 
