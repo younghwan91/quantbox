@@ -42,11 +42,12 @@ from quantbox.strategy.rubberband import (
     apply_mtf_leverage,
     compute_atr_pct,
 )
-from quantbox.strategy.alpha_engine import (
-    compute_alpha_signals,
-    compute_momentum_signals,
-    compute_hybrid_signals,
-)
+# [ARCHIVED] alpha_engine deleted — this file is archive-only, not importable
+# from quantbox.strategy.alpha_engine import (
+#     compute_alpha_signals,
+#     compute_momentum_signals,
+#     compute_hybrid_signals,
+# )
 
 CACHE_DIR = Path(__file__).parent.parent / 'data' / 'cache_extended'
 
