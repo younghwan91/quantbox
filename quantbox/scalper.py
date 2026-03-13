@@ -27,6 +27,13 @@ Safety features:
     - Atomic state persistence for crash recovery
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.types import ApiSymbol, Side, PositionSide
+
 import argparse
 import logging
 import logging.handlers
@@ -74,6 +81,7 @@ from quantbox.core.scalper_state import (
 from quantbox.execution.brackets import BracketMixin
 from quantbox.execution.data_mixin import DataMixin
 from quantbox.execution.positions import PositionMixin
+from quantbox.execution.preflight import OrderPreflight
 from quantbox.execution.reconciliation import ReconciliationMixin
 from quantbox.core.trade_journal import TradeJournal
 from quantbox.core.divergence_monitor import DivergenceMonitor
@@ -244,21 +252,31 @@ class RubberBandScalper(
         return self.config
 
     def get_balance(self) -> float:
-        """Get current USDT balance."""
+        """Get current USDT balance.
+
+        Sets self._balance_fetch_ok = True on success, False on API failure.
+        Callers must check this flag before opening new positions (T1-4).
+        """
         if self.paper_mode:
+            self._balance_fetch_ok = True
             return self._paper_balance
         try:
             balances = self.client.futures_account_balance()
             for b in balances:
                 if b["asset"] == "USDT":
-                    return float(b["balance"])
+                    val = float(b["balance"])
+                    self._balance_fetch_ok = True
+                    return val
         except Exception as e:
             logger.error(f"Balance fetch failed: {e}")
+        # T1-4: Mark stale — callers will block new entries on this flag
+        self._balance_fetch_ok = False
         # v12.5.1: Return last known balance instead of 0.0 to prevent
         # false drawdown halt on transient API failures.
         if hasattr(self, "_last_known_balance") and self._last_known_balance > 0:
             logger.warning(f"Using last known balance ${self._last_known_balance:.2f} due to API failure")
             return self._last_known_balance
+        logger.critical("Balance fetch failed and no fallback available — new entries will be blocked")
         return 0.0
 
     def _check_risk_limits(self, balance: float) -> bool:
@@ -290,16 +308,61 @@ class RubberBandScalper(
 
         return False
 
+    def _verify_invariants(self, balance: float) -> list[str]:
+        """T3-5: Check position invariants every cycle.
+
+        Returns list of violation descriptions. Empty = all OK.
+        Logs violations and sends a single Discord alert if any found.
+        Does NOT close positions automatically — alert and log only.
+        """
+        import re
+
+        violations: list[str] = []
+
+        # 1. Position count
+        n_active = self.strategy.n_active
+        max_c = self._cfg.max_concurrent
+        if n_active > max_c:
+            violations.append(f"position_count={n_active} > max_concurrent={max_c}")
+
+        # 2-5. Per-position checks
+        safe_balance = max(balance, 1.0)
+        for pos_key, pos in self.strategy._positions.items():
+            entry_price = pos.get("entry_price", 0)
+            notional = pos.get("notional", 0)
+            signal = pos.get("signal")
+            api_sym = pos.get("symbol", pos_key.split(":")[0] if ":" in pos_key else pos_key)
+
+            if not (0 < entry_price < 1e7):
+                violations.append(f"[{pos_key}] entry_price={entry_price!r} out of range")
+            if not (0 < notional < safe_balance * max_c * 125 + 1):
+                violations.append(f"[{pos_key}] notional={notional!r} out of range")
+            if signal not in (-1, 0, 1, 2):
+                violations.append(f"[{pos_key}] invalid signal={signal!r}")
+            if not re.match(r"^[A-Z]{2,12}USDT$", api_sym):
+                violations.append(f"[{pos_key}] malformed symbol={api_sym!r}")
+
+        if violations:
+            self.discord.send(
+                content=(
+                    f"\u26a0\ufe0f **불변량 위반** ({len(violations)}개) — "
+                    + "; ".join(violations[:3])
+                    + ("..." if len(violations) > 3 else "")
+                )
+            )
+
+        return violations
+
     # ==================== Order Execution ====================
 
     def _place_order(
         self,
-        symbol: str,
-        side: str,
+        symbol: "ApiSymbol",
+        side: "Side",
         quantity: float,
         leverage: int = 1,
         reduce_only: bool = False,
-        position_side: str | None = None,
+        position_side: "PositionSide | None" = None,
     ) -> dict | None:
         """Place order via LimitOrderChaser.
 
@@ -316,6 +379,23 @@ class RubberBandScalper(
 
         Returns dict with avgPrice, executedQty on success, None on failure.
         """
+        # ── Pre-flight validation (paper AND live) ──────────────────────────
+        # Run before paper-mode early return so that bugs like compound keys
+        # (':' in symbol → -1022) are caught during paper testing, not only
+        # when the same code path hits the live exchange for the first time.
+        info = self.get_symbol_info(symbol)
+        preflight = OrderPreflight.validate(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            leverage=leverage,
+            reduce_only=reduce_only,
+            sym_info=info,
+        )
+        if not preflight.ok:
+            logger.error(f"[{symbol}] Order preflight FAILED: {preflight.reason}")
+            return None
+
         if self.paper_mode:
             # Simulate fill at current market price
             try:
@@ -331,6 +411,11 @@ class RubberBandScalper(
             }
 
         try:
+            tick_size = info.get("tick_size", 0.01)
+            price_precision = info.get("price_precision", 2)
+            step_size = info.get("step_size", 0.001)
+            qty_precision = info.get("quantity_precision", 3)
+
             # v12.4.7: Skip leverage change for reduce-only orders.
             # Changing leverage on an open position can fail with
             # -2028 "insufficient margin balance" if the new leverage
@@ -379,12 +464,6 @@ class RubberBandScalper(
                         logger.error(f"[{symbol}] Leverage set failed: {e} — ABORTING order")
                         return None
 
-            info = self.get_symbol_info(symbol)
-            tick_size = info.get("tick_size", 0.01)
-            price_precision = info.get("price_precision", 2)
-            step_size = info.get("step_size", 0.001)
-            qty_precision = info.get("quantity_precision", 3)
-
             result: ChaseResult = self._chaser.chase_limit_order(
                 symbol=symbol,
                 side=side,
@@ -395,6 +474,12 @@ class RubberBandScalper(
                 quantity_precision=qty_precision,
                 reduce_only=reduce_only,
                 position_side=position_side,
+                # T1-1: Generate stable clientOrderId for audit trail.
+                # Format: QB_{symbol}_{side}_{unix_ms} — unique per order attempt.
+                # Entry orders pass leverage>1, close orders default to leverage=1.
+                client_order_id_prefix=(
+                    f"QB_{symbol}_{side}_{int(time.time() * 1000)}" if not self.paper_mode else None
+                ),
             )
 
             if result.status == ChaseFillStatus.NO_POSITION:
@@ -479,13 +564,18 @@ class RubberBandScalper(
         # 1. Risk check
         risk_blocked = self._check_risk_limits(balance)
 
+        # T3-5: Invariant check every cycle
+        violations = self._verify_invariants(balance)
+        if violations:
+            logger.error(f"INVARIANT VIOLATIONS ({len(violations)}): " + "; ".join(violations))
+
         # 2. Close positions on drawdown halt
         if self._drawdown_halt:
             # Close any remaining positions
             for pos_key in list(self.strategy.active_positions):
                 api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
                 close = self.download_klines(api_sym, 2)
-                price = close[-1] if close is not None else 0
+                price = float(close[-1]) if close is not None else 0.0
                 self._close_position(pos_key, "drawdown_halt", price)
 
             # v14.0.1: Auto-recover when DD drops below threshold
@@ -699,9 +789,27 @@ class RubberBandScalper(
                         f"G7 DailyBreaker active: today PnL=${self._daily_realized_pnl:.2f}. Skipping new entries."
                     )
             if not self._daily_loss_blocked:
-                available_slots = self._cfg.max_concurrent - self.strategy.n_active
-                if available_slots > 0:
-                    self._scan_entries(symbols, btc_close, balance, available_slots, btc_close_4h=btc_close_4h)
+                # T1-4: Block new entries when balance is stale (API failure).
+                # Stale balance → per_slot_capital may be incorrect → wrong sizing.
+                if not getattr(self, "_balance_fetch_ok", True):
+                    logger.warning(
+                        f"T1-4 Balance fetch FAILED — skipping new entries this cycle "
+                        f"(using {'stale $' + str(round(balance, 2)) if balance > 0 else 'NO DATA'})"
+                    )
+                    if not getattr(self, "_balance_alert_sent", False):
+                        self.discord.send(
+                            content=(
+                                f"⚠️ **잔고 조회 실패** — 이번 사이클 신규 진입 차단. "
+                                f"{'최종 잔고 $' + str(round(balance, 2)) + ' 사용 중' if balance > 0 else '잔고 불명 (0)'}. "
+                                f"거래소 API 확인 요망."
+                            )
+                        )
+                        self._balance_alert_sent = True
+                else:
+                    self._balance_alert_sent = False  # Reset alert flag on recovery
+                    available_slots = self._cfg.max_concurrent - self.strategy.n_active
+                    if available_slots > 0:
+                        self._scan_entries(symbols, btc_close, balance, available_slots, btc_close_4h=btc_close_4h)
 
         # 6. Save state
         self._save_state()
@@ -727,7 +835,7 @@ class RubberBandScalper(
         and 4h data for MTF confirmation filter.
         Prioritizes symbols with the largest moves (strongest alpha signal).
         """
-        candidates: list[tuple[str, int, float, np.ndarray]] = []
+        candidates: list[tuple[str, int, float, np.ndarray, bool]] = []
         moves_seen: list[tuple[str, float]] = []  # diagnostic: (symbol, abs_move)
         scan_diags: list[dict] = []  # v12.0: per-symbol diagnostics
 
@@ -787,11 +895,13 @@ class RubberBandScalper(
                 # Measure move strength for prioritization
                 move = abs(close[-1] / close[-_lb - 1] - 1.0)
                 if signal == 2:
-                    # Straddle: expand into LONG + SHORT candidates
-                    candidates.append((sym, 1, move, close))
-                    candidates.append((sym, -1, move, close))
+                    # Straddle: expand into LONG + SHORT candidates.
+                    # is_straddle=True so G6 and DirDiversity filters are skipped
+                    # (straddle is direction-neutral — BTC trend gate does not apply).
+                    candidates.append((sym, 1, move, close, True))
+                    candidates.append((sym, -1, move, close, True))
                 else:
-                    candidates.append((sym, signal, move, close))
+                    candidates.append((sym, signal, move, close, False))
 
         # Prioritize strongest moves
         candidates.sort(key=lambda x: x[2], reverse=True)
@@ -802,7 +912,7 @@ class RubberBandScalper(
             # VR strategy: show VR threshold + actual VR values
             print(format_scan_summary(len(candidates), top_movers, 0.0))
             if candidates:
-                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
@@ -876,7 +986,7 @@ class RubberBandScalper(
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
             if candidates:
-                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _ in candidates[:3]]
+                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
@@ -909,12 +1019,13 @@ class RubberBandScalper(
             )
 
         entries_made = 0
-        for sym, signal, move, close in candidates:
+        for sym, signal, move, close, is_straddle in candidates:
             if entries_made >= max_entries:
                 break
 
-            # ── G6: BTC Trend Gate — block LONG when BTC below MA ──
-            if signal == 1 and btc_ma is not None:
+            # ── G6: BTC Trend Gate — block directional LONG when BTC below MA ──
+            # Straddle is direction-neutral (LONG+SHORT) → G6 does not apply.
+            if signal == 1 and not is_straddle and btc_ma is not None and btc_close is not None:
                 btc_cur = float(btc_close[-1])
                 if btc_cur < btc_ma:
                     logger.info(
@@ -924,7 +1035,8 @@ class RubberBandScalper(
                     continue
 
             # ═══ v12.3 PARITY: Direction Diversity Filter ═══
-            if self._cfg.dir_diversity_enabled:
+            # Straddle is direction-neutral → diversity filter does not apply.
+            if self._cfg.dir_diversity_enabled and not is_straddle:
                 same_dir = sum(1 for p in self.strategy.active_positions.values() if p.get("signal") == signal)
                 if same_dir >= self._cfg.max_same_direction:
                     logger.info(
@@ -980,6 +1092,32 @@ class RubberBandScalper(
         except Exception as e:
             logger.error(f"State save failed: {e}")
 
+    @staticmethod
+    def _validate_restored_position(sym: str, pos: dict) -> tuple[bool, str]:
+        """T1-2: Validate a position dict loaded from state file before restoring.
+
+        Returns (is_valid, error_reason). If False, the position is skipped
+        and a Discord alert is sent. Prevents ZeroDivisionError and silent
+        corruption from propagating into live trading logic.
+        """
+        entry_price = pos.get("entry_price", 0)
+        if not isinstance(entry_price, (int, float)) or entry_price != entry_price or entry_price <= 0:
+            return False, f"entry_price={entry_price!r} must be > 0"
+
+        notional = pos.get("notional", 0)
+        if not isinstance(notional, (int, float)) or notional != notional or notional <= 0:
+            return False, f"notional={notional!r} must be > 0"
+
+        leverage = pos.get("leverage", 1)
+        if not isinstance(leverage, (int, float)) or not (1 <= float(leverage) <= 125):
+            return False, f"leverage={leverage!r} must be in [1, 125]"
+
+        signal = pos.get("signal")
+        if signal not in (-1, 0, 1, 2):
+            return False, f"signal={signal!r} must be in {{-1, 0, 1, 2}}"
+
+        return True, ""
+
     def _load_state(self) -> None:
         """Restore state from disk."""
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
@@ -1013,6 +1151,16 @@ class RubberBandScalper(
             logger.info(f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history cleared")
 
         for sym, pos in positions.items():
+            # T1-2: Validate critical fields before restoring to prevent
+            # ZeroDivisionError, -1111 API errors, or silent bad state.
+            valid, reason = self._validate_restored_position(sym, pos)
+            if not valid:
+                logger.error(f"[{sym}] SKIPPING corrupted position from state file: {reason}")
+                self.discord.send(
+                    content=(f"⚠️ **상태파일 오류** [{sym}] — {reason}. 해당 포지션 복원 건너뜀. 수동 확인 필요.")
+                )
+                continue
+
             # Parse compound key (e.g. 'SUIUSDT:LONG') to extract the clean
             # Binance API symbol and position_side separately.
             # Without this, open_position stores the compound key as 'symbol',
@@ -1060,6 +1208,8 @@ class RubberBandScalper(
                 # ratchet API call and has a brief inconsistency window.
                 self.strategy._positions[sym]["_computed_trail_stop"] = pos.get("_computed_trail_stop")
                 self.strategy._positions[sym]["_server_sl_pct"] = pos.get("_server_sl_pct", 0.0)
+                # r65: Restore trail ratchet level to avoid redundant API call on restart
+                self.strategy._positions[sym]["_trail_sl_ratcheted"] = pos.get("_trail_sl_ratcheted", -999.0)
                 # R43: Trailing stop state for directional trades
                 self.strategy._positions[sym]["trail_active"] = pos.get("trail_active", False)
                 self.strategy._positions[sym]["peak_gain"] = pos.get("peak_gain", 0.0)
@@ -1081,7 +1231,7 @@ class RubberBandScalper(
         if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_ma_cluster_cooldown"):
             cooldown_data = state.get("ma_cluster_cooldown", {})
             for sym, val in cooldown_data.items():
-                arr = np.zeros(1, dtype=np.int64)
+                arr: np.ndarray = np.zeros(1, dtype=np.int64)
                 arr[0] = val
                 self.strategy._ma_cluster_cooldown[sym] = arr
             if cooldown_data:

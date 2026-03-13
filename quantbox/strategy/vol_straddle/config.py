@@ -54,13 +54,13 @@ class VolStraddleConfig(BaseSettings):
     # ── D_mom8: Directional Momentum ──
     d_vr_threshold: float = 0.50  # A1-D50: D VR entry threshold (was 0.45)
     d_sl: float = 0.01  # 1% stop loss
-    d_tp: float = 0.12  # 12% hard TP ceiling (R43: was 5%)
+    d_tp: float = 0.20  # 20% safety cap — dead parameter (r67: trail exits first; was 0.12)
 
     # ── D_mom8: Trailing Stop (R43 validated) ──
     # Once unrealized gain reaches trail_activate, a trailing stop
-    # follows at trail_distance below peak. Hard TP at d_tp (12%).
+    # follows at trail_distance below peak. Hard TP at d_tp (20% safety cap, rarely hit).
     # Mechanism: lets VR squeeze explosive releases run beyond fixed TP.
-    d_trail_activate: float = 0.005  # Activate trailing after +0.5% gain (r47: was 0.02)
+    d_trail_activate: float = 0.010  # Activate trailing after +1.0% gain (r69: 0.005→0.010, OOS +38%/+23%/+40%)
     d_trail_distance: float = 0.002  # Trail 0.2% behind peak (r47: was 0.003)
 
     # ── S_d8: Straddle (requires Binance Hedge Mode) ──
@@ -78,6 +78,7 @@ class VolStraddleConfig(BaseSettings):
 
     # ── Max Hold (bars at each TF, all ≈ 48h real-time) ──
     max_hold_15m: int = 192  # 192 × 15m = 48h
+    max_hold_30m: int = 96  # 96  × 30m = 48h
     max_hold_1h: int = 48  # 48 × 1h = 48h
     max_hold_4h: int = 12  # 12 × 4h = 48h
 
@@ -114,6 +115,9 @@ class VolStraddleConfig(BaseSettings):
     # Disabled: vol_straddle uses fixed balance/max_concurrent (backtest parity).
     # Dynamic formula (balance/n_active+1) causes -2019 margin errors on 10-slot config.
     dynamic_capital_enabled: bool = False
+    # Safety cap: when dynamic capital enabled, never allocate more than this fraction
+    # of balance to a single slot (prevents first-slot over-concentration).
+    dynamic_capital_max_fraction: float = 0.5
 
     # ── Live-Backtest Divergence Monitor ──
     # Sends Discord alert when live WR/PF diverges from v14.5.0 backtest baseline.
@@ -176,7 +180,9 @@ class VolStraddleConfig(BaseSettings):
     # Backtest result (6yr, 46 symbols): PF 1.306→1.348 (+0.042),
     # WR 42.6%→46.4% (+3.8%), N -14.8%, p=0.029.
     # IMPORTANT: Applied to D_mom8 only. S_d8 straddle is direction-neutral.
-    f5_tbr_enabled: bool = False  # r47: disabled — trail_activate=0.5% handles bad trades directly
+    f5_tbr_enabled: bool = (
+        False  # r47: disabled; r71: re-validated with trail_activate=1.0% → KEEP disabled (2024/2025 OOS degrade)
+    )
     f5_tbr_z_threshold: float = 0.5  # R46b optimal (lb=192, p=0.029)
     f5_tbr_z_window: int = 192  # Lookback bars (~2 days of 15m)
 
@@ -330,6 +336,7 @@ class VolStraddleConfig(BaseSettings):
         """Get max hold bars for a timeframe."""
         return {
             "15m": self.max_hold_15m,
+            "30m": self.max_hold_30m,
             "1h": self.max_hold_1h,
             "4h": self.max_hold_4h,
         }.get(tf, self.max_hold_15m)

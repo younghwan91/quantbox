@@ -106,7 +106,7 @@ BL_N_EXPECTED = 6207
 BL_PF_EXPECTED = 1.563
 
 # Config guards
-assert D_TRAIL_ACT == 0.005, f"d_trail_activate mismatch: {D_TRAIL_ACT}"
+assert D_TRAIL_ACT == 0.010, f"d_trail_activate mismatch: {D_TRAIL_ACT}"
 assert D_TRAIL_DIST == 0.002, f"d_trail_distance mismatch: {D_TRAIL_DIST}"
 
 print("\n[Config] 검증")

@@ -274,8 +274,8 @@ class TestConfigDefaults:
 
     def test_default_config(self):
         cfg = VolStraddleConfig()
-        assert cfg.d_tp == 0.12
-        assert cfg.d_trail_activate == 0.005  # r47: was 0.02
+        assert cfg.d_tp == 0.20  # r68: raised from 0.12 — dead parameter, now explicit safety cap
+        assert cfg.d_trail_activate == 0.010  # r69: 0.005→0.010 (OOS +38%/+23%/+40% in 2023/2024/2025)
         assert cfg.d_trail_distance == 0.002  # r47: was 0.003
         assert cfg.d_sl == 0.01
         # Straddle unchanged
