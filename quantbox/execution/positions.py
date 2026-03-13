@@ -314,7 +314,8 @@ class PositionMixin:
                         logger.warning(
                             f"[{symbol}] State out of sync — "
                             f"position exists on exchange but not in internal state. "
-                            f"Reconciliation will fix this."
+                            f"No SL/TP protection. "
+                            f"Reverse ghost check in _reconcile_positions() will auto-close."
                         )
                     return False
             except Exception as exc:
