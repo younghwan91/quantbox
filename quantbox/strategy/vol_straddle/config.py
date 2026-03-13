@@ -60,7 +60,7 @@ class VolStraddleConfig(BaseSettings):
     # Once unrealized gain reaches trail_activate, a trailing stop
     # follows at trail_distance below peak. Hard TP at d_tp (20% safety cap, rarely hit).
     # Mechanism: lets VR squeeze explosive releases run beyond fixed TP.
-    d_trail_activate: float = 0.005  # Activate trailing after +0.5% gain (r47: was 0.02)
+    d_trail_activate: float = 0.010  # Activate trailing after +1.0% gain (r69: 0.005→0.010, OOS +38%/+23%/+40%)
     d_trail_distance: float = 0.002  # Trail 0.2% behind peak (r47: was 0.003)
 
     # ── S_d8: Straddle (requires Binance Hedge Mode) ──

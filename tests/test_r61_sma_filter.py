@@ -287,7 +287,7 @@ class TestConfigParity:
         assert cfg.d_vr_threshold == pytest.approx(0.5)
         assert cfg.s_squeeze_dur == 3
         assert cfg.s_trail_activate == pytest.approx(0.015)
-        assert cfg.d_trail_activate == pytest.approx(0.005)
+        assert cfg.d_trail_activate == pytest.approx(0.010)
         assert cfg.s_trail_distance == pytest.approx(0.002)
         assert cfg.d_trail_distance == pytest.approx(0.002)
         assert cfg.max_concurrent == 10
