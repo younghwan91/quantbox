@@ -17,9 +17,15 @@ Methods in this mixin rely on instance attributes set by RubberBandScalper.__ini
     self._save_state()            — from RubberBandScalper
 """
 
+from __future__ import annotations
+
 import logging
 import time
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.protocol import ScalperProtocol
 
 from quantbox.core.bot_utils import GIT_COMMIT
 from quantbox.core.settings import get_settings
@@ -35,7 +41,7 @@ logger = logging.getLogger("Scalper")
 class LoopMixin:
     """Timing, display and periodic summary logging."""
 
-    def _log_summary(self, balance: float) -> None:
+    def _log_summary(self: "ScalperProtocol", balance: float) -> None:
         """Log periodic summary — always, even with 0 trades."""
         positions = self.strategy.active_positions
         n_trades = len(self._trade_history)
@@ -50,7 +56,7 @@ class LoopMixin:
         last_trade_ago = ""
         if self._trade_history:
             last_t = self._trade_history[-1].get("time", "")
-            if last_t:
+            if last_t and isinstance(last_t, str):
                 try:
                     from datetime import datetime as _dt
 
@@ -84,7 +90,7 @@ class LoopMixin:
         if self.strategy_name == "vol_straddle" and len(positions) == 0 and self._cycle_count % 16 == 0:
             self._log_vr_distribution()
 
-    def _log_vr_distribution(self) -> None:
+    def _log_vr_distribution(self: "ScalperProtocol") -> None:
         """Log top-10 closest-to-squeeze symbols with per-TF VR.
 
         Provides visibility into market state during extended no-signal
@@ -110,7 +116,7 @@ class LoopMixin:
             )
         logger.info("\n".join(lines))
 
-    def _print_startup_banner(self, balance: float, n_symbols: int) -> None:
+    def _print_startup_banner(self: "ScalperProtocol", balance: float, n_symbols: int) -> None:
         """Print the startup banner with system info."""
         settings = get_settings()
         mode_str = "PAPER" if self.paper_mode else "LIVE"
@@ -164,7 +170,7 @@ class LoopMixin:
             )
         print_startup_complete(mode_str)
 
-    def _next_bar_time(self) -> datetime:
+    def _next_bar_time(self: "ScalperProtocol") -> datetime:
         """Calculate the next 15-minute bar close time (+5s buffer)."""
         now = datetime.now(timezone.utc)
         next_boundary = ((now.minute // 15) + 1) * 15
@@ -174,7 +180,7 @@ class LoopMixin:
             target = now.replace(minute=next_boundary, second=5, microsecond=0)
         return target
 
-    def _wait_for_bar(self) -> None:
+    def _wait_for_bar(self: "ScalperProtocol") -> None:
         """Wait for the next 15m bar close, polling every 5s for commands.
 
         While waiting:

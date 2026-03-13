@@ -7,6 +7,10 @@ Mixin class for processing interactive commands received via Discord
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.protocol import ScalperProtocol
 
 from quantbox.notifications.bot import BotCommand, CommandType
 
@@ -16,7 +20,7 @@ logger = logging.getLogger("Scalper")
 class CommandsMixin:
     """Mixin: Discord bot command processing and handlers."""
 
-    def _process_bot_commands(self) -> None:
+    def _process_bot_commands(self: "ScalperProtocol") -> None:
         """Poll the bot command queue and handle all pending commands.
 
         Called at the start of each cycle. Non-blocking.
@@ -32,7 +36,7 @@ class CommandsMixin:
                 logger.error(f"Bot command error: {e}")
                 cmd.set_response(f"❌ Internal error: {e}")
 
-    def _handle_command(self, cmd: BotCommand) -> str:
+    def _handle_command(self: "ScalperProtocol", cmd: BotCommand) -> str:
         """Dispatch a BotCommand to the appropriate handler.
 
         Args:
@@ -58,7 +62,7 @@ class CommandsMixin:
             return "❓ Unknown command"
         return handler()
 
-    def _cmd_status(self) -> str:
+    def _cmd_status(self: "ScalperProtocol") -> str:
         """!status — Show balance, positions, and active state.
 
         v12.5.2: Reconcile with exchange BEFORE displaying, so ghost
@@ -120,7 +124,7 @@ class CommandsMixin:
         lines.append("```")
         return "\n".join(lines)
 
-    def _cmd_close_all(self) -> str:
+    def _cmd_close_all(self: "ScalperProtocol") -> str:
         """!close all — Close all open positions."""
         positions = list(self.strategy.active_positions.keys())
         if not positions:
@@ -132,14 +136,14 @@ class CommandsMixin:
             pos = self.strategy._positions.get(sym, {})
             api_sym = pos.get("symbol", sym.split(":")[0])
             price_arr = self.download_klines(api_sym, 2)
-            price = price_arr[-1] if price_arr is not None else 0
+            price = float(price_arr[-1]) if price_arr is not None else 0.0
             if self._close_position(sym, "bot_close_all", price):
                 closed += 1
 
         self._save_state()
         return f"✅ Closed {closed}/{len(positions)} positions"
 
-    def _cmd_close_slot(self, slot_id: int) -> str:
+    def _cmd_close_slot(self: "ScalperProtocol", slot_id: int) -> str:
         """!close <N> — Close the Nth active position (0-indexed).
 
         Since the scalper uses symbol names instead of fixed slots,
@@ -160,13 +164,13 @@ class CommandsMixin:
         # Extract Binance symbol from compound key for kline download
         api_sym = pos.get("symbol", sym.split(":")[0])
         price_arr = self.download_klines(api_sym, 2)
-        price = price_arr[-1] if price_arr is not None else 0
+        price = float(price_arr[-1]) if price_arr is not None else 0.0
         if self._close_position(sym, "bot_close", price):
             self._save_state()
             return f"✅ Closed position {slot_id}: {sym}"
         return f"❌ Failed to close {sym}"
 
-    def _cmd_pause(self) -> str:
+    def _cmd_pause(self: "ScalperProtocol") -> str:
         """!pause — Stop new entries, keep monitoring existing."""
         if self._paused:
             return "⏸️ Already paused"
@@ -174,7 +178,7 @@ class CommandsMixin:
         logger.info("Bot command: PAUSED (no new entries)")
         return "⏸️ New entries paused. Existing positions still monitored."
 
-    def _cmd_resume(self) -> str:
+    def _cmd_resume(self: "ScalperProtocol") -> str:
         """!resume — Resume normal operation."""
         if not self._paused:
             return "▶️ Already active"
@@ -182,7 +186,7 @@ class CommandsMixin:
         logger.info("Bot command: RESUMED")
         return "▶️ Trading resumed"
 
-    def _cmd_stop(self) -> str:
+    def _cmd_stop(self: "ScalperProtocol") -> str:
         """!stop — Close all positions and shut down."""
         self._stop_requested = True
         # Close all positions first
@@ -193,14 +197,14 @@ class CommandsMixin:
             pos = self.strategy._positions.get(sym, {})
             api_sym = pos.get("symbol", sym.split(":")[0])
             price_arr = self.download_klines(api_sym, 2)
-            price = price_arr[-1] if price_arr is not None else 0
+            price = float(price_arr[-1]) if price_arr is not None else 0.0
             if self._close_position(sym, "bot_stop", price):
                 closed += 1
         self._save_state()
         logger.info(f"Bot command: STOP (closed {closed} positions)")
         return f"🛑 Stopping... Closed {closed} positions. Scalper will exit after this cycle."
 
-    def _cmd_pnl(self) -> str:
+    def _cmd_pnl(self: "ScalperProtocol") -> str:
         """!pnl — Session PnL summary."""
         trades = self._trade_history
         if not trades:
@@ -237,7 +241,7 @@ class CommandsMixin:
             f"```"
         )
 
-    def _cmd_blacklist(self, args: dict | None = None) -> str:
+    def _cmd_blacklist(self: "ScalperProtocol", args: dict | None = None) -> str:
         """!blacklist — View or clear the exclude list.
 
         Args:

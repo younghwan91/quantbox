@@ -116,7 +116,7 @@ class TestConfigParity:
     """All r58 params must come from VolStraddleConfig."""
 
     def test_d_trail_activate(self, _cfg):
-        assert D_TRAIL_ACT == 0.005
+        assert D_TRAIL_ACT == 0.010
         assert D_TRAIL_ACT == _cfg.d_trail_activate
 
     def test_d_trail_distance(self, _cfg):

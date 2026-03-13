@@ -406,7 +406,7 @@ class TestConfigParity:
         assert S_TRAIL_ACT == 0.015, f"S_TRAIL_ACT={S_TRAIL_ACT}"
 
     def test_d_trail_activate(self):
-        assert D_TRAIL_ACT == 0.005, f"D_TRAIL_ACT={D_TRAIL_ACT}"
+        assert D_TRAIL_ACT == 0.010, f"D_TRAIL_ACT={D_TRAIL_ACT}"
 
     def test_bsm_window_positive(self):
         assert BSM_WINDOW > 0

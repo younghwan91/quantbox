@@ -15,7 +15,7 @@ import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Callable, Dict, List, Optional, Any
 from pathlib import Path
 import pandas as pd
 from threading import Lock
@@ -359,7 +359,7 @@ class DataCache:
         interval: str,
         start: datetime,
         end: datetime,
-        fetch_func: callable,
+        fetch_func: Callable[..., Any],
         expiry_hours: Optional[int] = None,
     ) -> pd.DataFrame:
         """
@@ -454,7 +454,9 @@ class DataCache:
             "memory_cache_size": self.memory_cache.size,
         }
 
-    def preload(self, symbols: List[str], intervals: List[str], days: int = 30, fetch_func: callable = None):
+    def preload(
+        self, symbols: List[str], intervals: List[str], days: int = 30, fetch_func: Callable[..., Any] | None = None
+    ):
         """
         Preload cache with historical data.
 
@@ -527,7 +529,7 @@ class TimeframedCache:
         cache.put(symbol, interval, start, end, data)
 
     def get_or_fetch(
-        self, symbol: str, interval: str, start: datetime, end: datetime, fetch_func: callable
+        self, symbol: str, interval: str, start: datetime, end: datetime, fetch_func: Callable[..., Any]
     ) -> pd.DataFrame:
         """Get or fetch data from appropriate timeframe cache."""
         cache = self._get_cache(interval)

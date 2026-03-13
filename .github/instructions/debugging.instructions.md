@@ -358,3 +358,64 @@ _inject_position(scalper, "TESTUSDT:LONG")
 
 > ⚠️ `_build_vs_scalper`는 `pytest.fixture`가 아님 — 함수로 직접 호출.
 > `vs_scalper` fixture는 conftest.py에서 자동 주입되며, params 못 받음.
+
+---
+
+## 8. 새 코드 경로 추가 시 Guard 상속 체크리스트
+
+> **목적:** 새 기능(진입 전략, 사이징 로직, 청산 경로)을 추가할 때 기존 Guard들이
+> 새 경로에서도 동작하는지 확인. 이 체크를 건너뛰면 "기존 경로는 됐는데 새 경로에서 처음 에러" 패턴 반복.
+
+**새 entry/exit/sizing 로직 추가 시 반드시 확인:**
+
+- [ ] **Symbol 형식**: API에 `pos['symbol']` 전달 (`:` 포함 안 된 순수 심볼). `pos_key` 직접 전달 금지
+  → 위반 시 -1022. `_place_order()` 진입 시 `OrderPreflight`가 자동 차단.
+
+- [ ] **레버리지 변경 guard**: `if not reduce_only and leverage > 1:` 조건 있는가?
+  → 위반 시 -2028 (Incident #1, #5). close/partial-close 경로에서 절대 leverage 변경 금지.
+
+- [ ] **Notional 상한**: `max_notional` 캡 적용 경로를 지나는가? (`positions.py` 내부)
+  → 위반 시 -2027 (ENJ/ICX Incident). CW-Tier, leverage_override 모두 cap 이후 적용됨.
+
+- [ ] **주문 경로**: `_place_order()` 경유하는가?
+  → 모든 진입/청산은 `_place_order()`를 통해야 `OrderPreflight`가 자동 적용됨.
+
+- [ ] **경계 상태 테스트 포함**: n_active>0, trail_active=True, hedge mode, reduce_only=False
+  → n_active=0만 테스트하면 실거래에서 슬롯 2+에서 에러 (Incident #3).
+
+- [ ] **Binance 상태 전이 처리**: TRIGGERED + FINISHED 둘 다 체결로 처리
+  → TRIGGERED만 처리하면 FINISHED 상태에서 ghost 발생 (Incident #4).
+
+**새 코드 경로 추가 후 반드시 실행:**
+```bash
+python -m pytest tests/ -x -q  # 전체 (1586+ tests)
+```
+
+---
+
+## 9. OrderPreflight — 중앙화된 주문 검증 게이트 (v14.5.x~)
+
+`_place_order()` 진입 시 항상 `OrderPreflight.validate()`가 호출됨.
+추가 검증이 필요할 때 `quantbox/execution/preflight.py`에 추가:
+
+```python
+from quantbox.execution.preflight import OrderPreflight, PreflightResult
+
+# 현재 검증 항목:
+# 1. symbol — ':' 포함 금지, 빈 문자열 금지
+# 2. side — 'BUY' or 'SELL' 만
+# 3. quantity > 0
+# 4. leverage ≥ 1
+# 5. step_size 정렬 (entry 전용; reduce_only=True는 skip)
+
+# 새 체크 추가 예시:
+@staticmethod
+def validate(...) -> PreflightResult:
+    ...
+    # 6. 새 조건 추가
+    if some_new_condition:
+        return PreflightResult(False, "reason string")
+    return PreflightResult(True)
+```
+
+`tests/test_preflight.py`에 각 조건마다 테스트 추가 필수.

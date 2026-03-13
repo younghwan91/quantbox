@@ -7,6 +7,11 @@ mismatch correction.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantbox.core.protocol import ScalperProtocol
+
 import logging
 from datetime import datetime, timezone
 
@@ -16,7 +21,7 @@ logger = logging.getLogger("Scalper")
 class ReconciliationMixin:
     """Mixin: Exchange reconciliation (sync server orders, detect ghosts)."""
 
-    def _sync_server_orders(self) -> None:
+    def _sync_server_orders(self: "ScalperProtocol") -> None:
         """Check if any server-side TP/SL orders filled between cycles.
 
         v11.2: Reconciles internal state with exchange reality.
@@ -195,7 +200,49 @@ class ReconciliationMixin:
                             pos["_server_sl_pct"] = 0.0
                         logger.info(f"[{sym}] BRACKET REPAIR: SL placed algoId={new_sl}")
                     else:
-                        logger.error(f"[{sym}] BRACKET REPAIR FAILED: Could not place SL — position UNPROTECTED")
+                        # Track consecutive SL repair failures.
+                        # After MAX_REPAIR_FAILS attempts the position is likely
+                        # in a bad state (API issues, corrupt symbol, etc.) —
+                        # auto-close to cap the unprotected exposure window.
+                        MAX_REPAIR_FAILS = 3
+                        fail_count = pos.get("_repair_fail_count", 0) + 1
+                        pos["_repair_fail_count"] = fail_count
+                        logger.error(
+                            f"[{sym}] BRACKET REPAIR FAILED ({fail_count}/{MAX_REPAIR_FAILS}): "
+                            f"Could not place SL — position UNPROTECTED"
+                        )
+                        if fail_count >= MAX_REPAIR_FAILS:
+                            logger.critical(
+                                f"[{sym}] BRACKET REPAIR EXHAUSTED ({MAX_REPAIR_FAILS} failures) — "
+                                f"AUTO CLOSING to prevent extended SL exposure"
+                            )
+                            self.discord.send(
+                                content=(
+                                    f"\U0001f6a8 **수익보전 자동청산** [{sym}] — "
+                                    f"SL 배치 {MAX_REPAIR_FAILS}회 연속 실패. 포지션 자동 종료."
+                                )
+                            )
+                            _fc_price = entry_price
+                            try:
+                                _book = self.client.futures_orderbook_ticker(symbol=api_sym)
+                                _fc_price = float(_book["bidPrice"] if signal == 1 else _book["askPrice"])
+                            except Exception:
+                                pass
+                            closed = self._close_position(sym, "bracket_repair_exhausted", _fc_price)
+                            if closed:
+                                logger.info(f"[{sym}] AUTO CLOSE SUCCESS — unprotected position liquidated.")
+                            else:
+                                logger.critical(
+                                    f"[{sym}] AUTO CLOSE FAILED — MANUAL INTERVENTION REQUIRED! "
+                                    f"Position has no SL and could not be closed automatically."
+                                )
+                                self.discord.send(
+                                    content=(
+                                        f"\U0001f6a8\U0001f6a8 **자동청산 실패** [{sym}] — "
+                                        f"수동 청산 필요! 즉시 거래소 확인!"
+                                    )
+                                )
+                            continue  # Skip TP repair — position gone or in critical state
 
                 if missing_tp:
                     # v12.5: PBT mode uses 50% qty server TP (pre-partial only).
@@ -243,13 +290,16 @@ class ReconciliationMixin:
                         f"(algoId={tp_id})"
                     )
 
-    def _reconcile_positions(self) -> None:
+    def _reconcile_positions(self: "ScalperProtocol") -> None:
         """Reconcile internal position state with exchange reality.
 
         v12.5.1: Called each cycle AFTER _sync_server_orders.
         Detects ghost positions (closed on exchange but still in internal
         state) and quantity mismatches (ADL, manual intervention).
         """
+        if self.paper_mode:
+            return
+
         try:
             exchange_positions = self.client.futures_position_information()
         except Exception as e:
@@ -448,7 +498,7 @@ class ReconciliationMixin:
             exchange_qty = abs(exchange_map[lookup_key])
             internal_qty = pos["notional"] / pos["entry_price"]
             qty_diff_pct = abs(exchange_qty - internal_qty) / max(internal_qty, 1e-8) * 100
-            if qty_diff_pct > 5:  # More than 5% mismatch
+            if qty_diff_pct > self.config.reconciliation_qty_tolerance_pct:  # configurable mismatch threshold
                 logger.warning(
                     f"[{sym}] RECONCILIATION: Qty mismatch! "
                     f"Internal={internal_qty:.6f} Exchange={exchange_qty:.6f} "
@@ -458,7 +508,7 @@ class ReconciliationMixin:
                 pos["notional"] = exchange_qty * pos["entry_price"]
 
     def _handle_server_partial_tp_fill(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         pos: dict,
         fill_price: float,
@@ -584,7 +634,7 @@ class ReconciliationMixin:
         )
 
     def _record_server_fill(
-        self,
+        self: "ScalperProtocol",
         symbol: str,
         fill_price: float,
         fill_qty: float,
