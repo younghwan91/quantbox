@@ -29,6 +29,7 @@ import asyncio
 import logging
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any
@@ -231,18 +232,23 @@ class DiscordBotRunner:
         self._bot: TradingBot | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._max_reconnect_attempts: int = 5
+        self._reconnect_backoff_base: float = 2.0
+        self._reconnect_count: int = 0
+        self._stop_requested: bool = False
 
     def start(self):
         """봇 스레드를 시작한다."""
+        self._stop_requested = False
         self._thread = threading.Thread(
-            target=self._run_bot,
+            target=self._run_with_reconnect,
             daemon=True,
             name="discord-bot",
         )
         self._thread.start()
         logger.info("Discord Bot thread started")
 
-    def _run_bot(self):
+    def _run_event_loop(self):
         """별도 스레드에서 asyncio 이벤트 루프를 실행."""
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -254,8 +260,6 @@ class DiscordBotRunner:
 
         try:
             self._loop.run_until_complete(self._bot.start(self.token))
-        except Exception as e:
-            logger.error(f"Discord Bot error: {e}")
         finally:
             # 잔여 태스크 정리 — "Task was destroyed but it is pending" 방지
             pending = asyncio.all_tasks(self._loop)
@@ -263,6 +267,32 @@ class DiscordBotRunner:
                 self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             self._loop.run_until_complete(self._loop.shutdown_asyncgens())
             self._loop.close()
+
+    def _run_with_reconnect(self):
+        """Run bot with automatic reconnection on failure."""
+        while self._reconnect_count < self._max_reconnect_attempts:
+            if self._stop_requested:
+                break
+            try:
+                self._run_event_loop()
+                break  # Clean shutdown
+            except Exception as e:
+                self._reconnect_count += 1
+                if self._reconnect_count >= self._max_reconnect_attempts:
+                    logger.critical(f"Discord bot failed {self._reconnect_count} times — giving up. Last error: {e}")
+                    break
+                backoff = min(
+                    self._reconnect_backoff_base * (2 ** (self._reconnect_count - 1)),
+                    60.0,
+                )
+                logger.warning(
+                    f"Discord bot crashed (attempt {self._reconnect_count}/"
+                    f"{self._max_reconnect_attempts}): {e}. "
+                    f"Reconnecting in {backoff:.0f}s..."
+                )
+                time.sleep(backoff)
+
+        logger.info(f"Discord bot thread exiting (reconnect_count={self._reconnect_count})")
 
     def get_command(self) -> BotCommand | None:
         """큐에서 명령을 가져온다 (non-blocking).
@@ -298,6 +328,8 @@ class DiscordBotRunner:
         Args:
             timeout: 종료 대기 최대 시간(초). 초과 시 강제 진행.
         """
+        self._stop_requested = True
+
         if self._bot and self._loop and not self._loop.is_closed():
             try:
                 future = asyncio.run_coroutine_threadsafe(self._bot.close(), self._loop)
@@ -311,6 +343,15 @@ class DiscordBotRunner:
                 logger.warning(f"Discord Bot thread did not terminate within {timeout}s — proceeding anyway")
 
         logger.info("Discord Bot stopped")
+
+    @property
+    def reconnect_count(self) -> int:
+        """현재 재연결 시도 횟수."""
+        return self._reconnect_count
+
+    def reset_reconnect_count(self) -> None:
+        """재연결 카운터를 초기화한다."""
+        self._reconnect_count = 0
 
     @property
     def is_running(self) -> bool:

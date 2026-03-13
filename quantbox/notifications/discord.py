@@ -50,6 +50,8 @@ class DiscordNotifier:
         self.enabled = bool(self.webhook_url)
         # 일일 리포트 추적용
         self._last_daily_report: datetime | None = None
+        # Cooldown tracking — prevent alert spam for the same event type
+        self._alert_cooldowns: dict[str, float] = {}
         if self.enabled:
             logger.info("Discord notifications enabled")
 
@@ -452,6 +454,153 @@ class DiscordNotifier:
                 "footer": {"text": _now_str()},
             }
         )
+
+    # ==================== Cooldown ====================
+
+    def _should_alert(self, alert_key: str, cooldown_s: float = 300) -> bool:
+        """Check if alert should be sent (respects cooldown).
+
+        Args:
+            alert_key: Unique key for this alert type (e.g., 'balance_fetch_fail')
+            cooldown_s: Minimum seconds between alerts of same type
+        """
+        import time
+
+        now = time.time()
+        last = self._alert_cooldowns.get(alert_key, 0)
+        if now - last < cooldown_s:
+            return False
+        self._alert_cooldowns[alert_key] = now
+        return True
+
+    # ==================== Critical Alerts ====================
+
+    def notify_critical(self, title: str, message: str, alert_key: str = "") -> bool:
+        """🔴 CRITICAL alert — immediate, repeated every 5 min until resolved.
+
+        For: state corruption, circuit breaker open, positions at risk.
+        """
+        key = alert_key or title
+        if not self._should_alert(key, cooldown_s=300):
+            return False
+        return self.send(
+            embed={
+                "title": f"🔴 CRITICAL: {title}",
+                "color": 0xFF0000,
+                "description": message[:1000],
+                "footer": {"text": _now_str()},
+            }
+        )
+
+    def notify_api_failure(self, operation: str, error: str, consecutive_failures: int = 1) -> bool:
+        """API failure alert — sent after 3+ consecutive failures.
+
+        Args:
+            operation: What was being attempted (e.g., 'Balance fetch', 'Order placement')
+            error: Error message
+            consecutive_failures: How many times in a row this failed
+        """
+        if consecutive_failures < 3:
+            return False
+        if not self._should_alert(f"api_fail_{operation}", cooldown_s=300):
+            return False
+        color = 0xFF0000 if consecutive_failures >= 5 else COLOR_YELLOW
+        return self.send(
+            embed={
+                "title": f"🚨 API 장애: {operation}",
+                "color": color,
+                "fields": [
+                    {"name": "에러", "value": error[:200], "inline": False},
+                    {"name": "연속 실패", "value": f"{consecutive_failures}회", "inline": True},
+                    {"name": "시각", "value": _now_str(), "inline": True},
+                ],
+            }
+        )
+
+    def notify_circuit_breaker(self, is_open: bool, failures: int, backoff_s: float) -> bool:
+        """Circuit breaker state change alert.
+
+        Args:
+            is_open: True if circuit just opened, False if just closed
+            failures: Number of consecutive failures
+            backoff_s: Backoff duration in seconds
+        """
+        if is_open:
+            return self.send(
+                embed={
+                    "title": "🔴 Circuit Breaker OPEN",
+                    "color": 0xFF0000,
+                    "description": (
+                        f"API 연속 {failures}회 실패 → 새 진입 차단.\n"
+                        f"기존 포지션은 서버 SL/TP로 보호됨.\n"
+                        f"{backoff_s:.0f}초 후 자동 리셋."
+                    ),
+                    "footer": {"text": _now_str()},
+                }
+            )
+        else:
+            return self.send(
+                embed={
+                    "title": "🟢 Circuit Breaker RESET",
+                    "color": COLOR_GREEN,
+                    "description": "API 정상 복구 — 트레이딩 재개.",
+                    "footer": {"text": _now_str()},
+                }
+            )
+
+    def notify_state_restored(self, source: str) -> bool:
+        """State restored from backup alert.
+
+        Args:
+            source: Backup filename used for restore
+        """
+        return self.send(
+            embed={
+                "title": "⚠️ State 백업 복원",
+                "color": COLOR_YELLOW,
+                "description": (
+                    f"Primary state 파일 손상 감지.\n백업에서 복원: `{source}`\n포지션 SL/TP 상태 확인 권장."
+                ),
+                "footer": {"text": _now_str()},
+            }
+        )
+
+    def notify_reconciliation_failure(self, symbol: str, error: str, consecutive: int) -> bool:
+        """Reconciliation repeated failure alert.
+
+        Only alerts after 5+ consecutive failures for same symbol.
+        """
+        if consecutive < 5:
+            return False
+        if not self._should_alert(f"recon_fail_{symbol}", cooldown_s=600):
+            return False
+        return self.send(
+            embed={
+                "title": f"🔴 Reconciliation 반복 실패: {symbol}",
+                "color": 0xFF0000,
+                "description": (f"연속 {consecutive}회 SL/TP 동기화 실패.\n에러: {error[:200]}\n수동 확인 필요."),
+                "footer": {"text": _now_str()},
+            }
+        )
+
+    def notify_heartbeat(self, stall_seconds: float) -> bool:
+        """Main loop stall detected.
+
+        Args:
+            stall_seconds: Seconds since last successful cycle
+        """
+        if not self._should_alert("heartbeat_stall", cooldown_s=300):
+            return False
+        return self.send(
+            embed={
+                "title": "🔴 메인 루프 정지 감지",
+                "color": 0xFF0000,
+                "description": (f"마지막 사이클로부터 {stall_seconds:.0f}초 경과.\n프로세스 점검 필요."),
+                "footer": {"text": _now_str()},
+            }
+        )
+
+    # ==================== Divergence ====================
 
     def notify_divergence_alert(self, alert: "DivergenceAlert") -> None:
         """라이브-백테스트 성과 괴리 경보.
