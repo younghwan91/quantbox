@@ -857,7 +857,8 @@ class VolStraddleStrategy:
                 return "trailing_stop"
 
         # SL check (only when trailing is NOT active — same as backtest)
-        if not trail_active and worst_gain <= -sl_pct:
+        # B3 guard: sl_pct=0 would exit at ANY loss — skip if not configured
+        if not trail_active and sl_pct > 0 and worst_gain <= -sl_pct:
             logger.info(
                 f"[{symbol}] SL hit: worst_gain={worst_gain * 100:+.3f}% "
                 f"vs SL={sl_pct * 100:.1f}% bars={pos['bars_held']} "
