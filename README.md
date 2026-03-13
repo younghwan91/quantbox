@@ -3,18 +3,18 @@
 **바이낸스 USDT-M 선물 VR 스퀴즈 시스템 — Dual-Axis Squeeze (VR + MA Cluster)**
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-v14.17.0-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-1727%20passed-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-v14.24.0-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-1929%20passed-brightgreen.svg)]()
 [![Coverage](https://img.shields.io/badge/coverage-77%25-green.svg)]()
 [![Branch](https://img.shields.io/badge/branch-main-blue.svg)]()
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(30x)와 MA Cluster Squeeze(21x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
 
-> **현재 상태**: Live Trading | Tag `v14.17.0` | 1727 tests passed
+> **현재 상태**: Live Trading | Tag `v14.24.0` | 1929 tests passed
 
 ## 🌟 주요 기능
 
-### 🎯 VolStraddle — VR Compression Detector (v14.17.0, 배포 중)
+### 🎯 VolStraddle — VR Compression Detector (v14.24.0, 배포 중)
 - **Volatility Ratio (VR) 압축 감지**: `VR = ATR(8)/ATR(56) < 0.50` — 변동성 압축 후 폭발 포착
 - **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
 - **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정 (D_mom8)
@@ -84,11 +84,18 @@
 - **알림 스로틀링**: 슬롯 포화/잔고 부족 알림 중복 전송 방지
 - **Discord Bot**: 원격 모니터링 및 명령 (포지션 조회, 강제 청산 등)
 - **Log Rotation**: 50MB/5파일 로테이션 (디스크 무한 성장 방지)
+- **Config Validators (v14.22.0)**: 15개 교차 검증 — SL<TP, leverage≥1, trail_distance<trail_activate 등
+- **Rate Limiter + Circuit Breaker (v14.22.0)**: API 호출 스로틀링. 연속 에러 시 자동 차단
+- **In-Flight Order Tracker (v14.22.0)**: 미체결 주문 실시간 추적. 크래시 복구 시 자동 재동기화
+- **ExposureGuard (v14.23.0)**: 세션 노출도 상한선 (`max_exposure_multiplier=35.0`). 초과 시 신규 진입 차단
+- **ReconJournal (v14.23.0)**: SQLite 기반 10종 이벤트 감사 로그 (ghost, bracket repair, exposure 등)
+- **TradingStrategy Protocol (v14.24.0)**: 14개 멤버 타입 안전 인터페이스. 전략 확장 표준화
 
 ### 백테스팅 (Dual-Engine)
 - **Signal-Array Engine** (`vectorized_backtest.py`): RubberBand/Elliott 등 ±1 포지션 어레이 기반. Close-to-close PnL. 단일자산 신속 스캔용.
 - **Trade-Event Engine** (`trade_sim.py`): VolStraddle/MA Cluster 등 이산 트레이드 시뮬레이션. High/Low 기반 인트라바 SL/TP. N-slot 포트폴리오 경합. Numba 가속.
   - `sim_directional_trades()` / `sim_straddle_trades()` → `collect_trades()` → `portfolio_sim()` → `compute_metrics()` 파이프라인
+  - `sim_directional_trailing()` / `sim_straddle_trailing()` — trail-aware 시뮬레이션 (v14.24.0, r43에서 이전)
   - 리서치 스크립트의 canonical source (`scaling_r38.py`가 re-export)
 - **롤링 윈도우**: Formation/Trading 기간 시뮬레이션
 - **종합 지표**: Sharpe, Sortino, Calmar, Profit Factor, Bootstrap CI 등
@@ -163,11 +170,16 @@ quantbox/
 │   ├── limit_chaser.py     # 지정가 추격 주문
 │   ├── settings.py         # 환경변수 검증 (pydantic-settings)
 │   ├── state_persistence.py # 상태 영속화 (JSON, 크래시 복구)
-│   └── terminal_ui.py      # 터미널 UI (실시간 상태 표시)
+│   ├── terminal_ui.py      # 터미널 UI (실시간 상태 표시)
+│   ├── rate_limiter.py     # API 호출 스로틀링 + Circuit Breaker (v14.22.0)
+│   └── heartbeat.py        # 메인 루프 정지 감지 + Discord 재연결 (v14.22.0)
 ├── execution/               # 주문 실행 및 포지션 관리
 │   ├── brackets.py         # 서버사이드 브라켓 주문 (BracketMixin)
 │   ├── positions.py        # 포지션 라이프사이클 (PositionMixin)
-│   └── reconciliation.py   # 거래소 상태 동기화 (ReconciliationMixin)
+│   ├── reconciliation.py   # 거래소 상태 동기화 (ReconciliationMixin)
+│   ├── inflight.py         # 미체결 주문 추적 + 크래시 복구 (v14.22.0)
+│   ├── exposure.py         # 세션 노출도 상한선 ExposureGuard (v14.23.0)
+│   └── recon_journal.py    # SQLite 감사 로그 10종 이벤트 (v14.23.0)
 ├── data/                    # 데이터 처리
 │   ├── cache.py            # 2단계 캐싱 (LRU + gzip)
 │   ├── downloader.py       # 바이낸스 데이터 다운로드
@@ -183,7 +195,8 @@ quantbox/
 │   │   └── strategy.py     # VolStraddleStrategy 클래스 (VR + MA cluster)
 │   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
-│   └── vol_selector.py     # 변동성 기반 심볼 선택기
+│   ├── vol_selector.py     # 변동성 기반 심볼 선택기
+│   └── protocol.py         # TradingStrategy Protocol 14멤버 (v14.24.0)
 ├── backtest/               # 듀얼 엔진 백테스팅 프레임워크
 │   ├── vectorized_backtest.py  # Signal-Array 엔진 (RubberBand, close-to-close)
 │   └── trade_sim.py            # Trade-Event 엔진 (VolStraddle, intra-bar SL/TP, slot 경합)
@@ -217,10 +230,10 @@ docs/
 └── backtest_results/
     ├── 202602/             # 2026-02 백테스트 리포트 (31개)
     └── 202603/             # 2026-03 백테스트 리포트 (64개, 현재)
-tests/                      # 유닛 테스트 (1727개, 47 파일)
+tests/                      # 유닛 테스트 (1929개, 56 파일)
 \`\`\`
 
-## 📈 성과 지표 (v14.17.x — Dual-Axis Squeeze, r73 trail)
+## 📈 성과 지표 (v14.24.x — Dual-Axis Squeeze, r73 trail)
 
 ### 불변 엣지 지표 (leverage·기간 무관)
 
