@@ -1,8 +1,7 @@
 """Position lifecycle management (open, partial close, close, pyramid).
 
 Mixin class providing all position entry/exit methods including PBT
-(Partial-then-BreakEven-Trail) flow, Elliott add-to-position, and
-pyramid logic.
+(Partial-then-BreakEven-Trail) flow and pyramid logic.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from datetime import datetime, timezone
 import numpy as np
 
 from quantbox.core.terminal_ui import format_entry, format_exit
-from quantbox.strategy.elliott import ElliottConfig
 from quantbox.strategy.rubberband import (
     calculate_position_size,
     compute_confidence_leverage,
@@ -151,15 +149,6 @@ class PositionMixin:
                 )
                 notional = max_notional
 
-        # ── Elliott: 2% exploratory sizing (winning_strategy §4.2) ──
-        elif self.strategy_name == "elliott":
-            ecfg = getattr(self, "elliott_config", ElliottConfig())
-            margin = balance * ecfg.exploratory_pct
-            leverage = ecfg.nominal_leverage
-            notional = margin * leverage
-            if notional < 10.0:
-                logger.debug(f"[{symbol}] Elliott notional too small: ${notional:.2f}")
-                return False
         else:
             # Position sizing — v10.0: dynamic capital allocation
             if cfg.dynamic_capital_enabled:
@@ -489,7 +478,7 @@ class PositionMixin:
             return True
 
         else:
-            # ── Rubber Band / Elliott brackets ──
+            # ── Rubber Band brackets ──
             logger.info(
                 f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
                 f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
@@ -967,167 +956,6 @@ class PositionMixin:
                     {"name": "남은포지션", "value": f"${pos['notional']:,.2f}", "inline": True},
                     {"name": "TP 방식", "value": _r_tp, "inline": True},
                     {"name": "SL 방식", "value": _r_sl, "inline": True},
-                ],
-                "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
-            }
-        )
-        return True
-
-    def _add_to_position(
-        self: "ScalperProtocol",
-        symbol: str,
-        current_price: float,
-        balance: float,
-    ) -> bool:
-        """Add primary capital (8%) to an exploratory Elliott position.
-
-        Called when update_position returns 'confirm_entry' — the
-        divergence + MACD/Stochastic confluence has been validated.
-
-        Args:
-            symbol: Trading symbol.
-            current_price: Current market price.
-            balance: Current account balance.
-
-        Returns:
-            True if additional capital was deployed.
-        """
-        pos = self.strategy._positions.get(symbol)
-        if pos is None:
-            return False
-
-        # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT)
-        api_sym = pos.get("symbol", symbol.split(":")[0])
-
-        ecfg = getattr(self, "elliott_config", ElliottConfig())
-        add_margin = balance * ecfg.primary_pct
-        add_notional = add_margin * ecfg.nominal_leverage
-        if add_notional < 10.0:
-            return False
-
-        add_qty = add_notional / current_price
-        add_qty = self._round_qty(add_qty, api_sym)
-        if add_qty <= 0:
-            return False
-
-        side = "BUY" if pos["signal"] == 1 else "SELL"
-        result = self._place_order(
-            api_sym,
-            side,
-            add_qty,
-            position_side=pos.get("position_side"),
-        )
-        if result is None:
-            return False
-
-        fill_price = float(result["avgPrice"])
-        fill_qty = float(result["executedQty"])
-
-        # Update position with blended entry
-        old_notional = pos["notional"]
-        new_notional = fill_qty * fill_price
-        total_notional = old_notional + new_notional
-        blended_entry = (pos["entry_price"] * old_notional + fill_price * new_notional) / total_notional
-        pos["entry_price"] = blended_entry
-        pos["notional"] = total_notional
-
-        logger.info(
-            f"[{symbol}] CONFIRMED: Added 8% (${new_notional:.2f}) → "
-            f"total ${total_notional:.2f} @ blended ${blended_entry:.4f}"
-        )
-        self.discord.send(
-            embed={
-                "title": f"✅ {symbol} 확정진입 | 다이버전스 검증",
-                "color": 0x2196F3,
-                "description": "다이버전스 확인. 10% 마진으로 업그레이드.",
-                "fields": [
-                    {"name": "추가금액", "value": f"${new_notional:.2f}", "inline": True},
-                    {"name": "총포지션", "value": f"${total_notional:.2f}", "inline": True},
-                    {"name": "평균진입가", "value": f"${blended_entry:.4f}", "inline": True},
-                ],
-                "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
-            }
-        )
-        return True
-
-    def _pyramid_position(
-        self: "ScalperProtocol",
-        symbol: str,
-        current_price: float,
-        balance: float,
-    ) -> bool:
-        """Pyramid into a winning Elliott position using unrealized profits.
-
-        Called when update_position returns 'pyramid' — Wave 3/C momentum
-        confirmed with EMA alignment. Uses unrealized profit as margin.
-
-        Args:
-            symbol: Trading symbol.
-            current_price: Current market price.
-            balance: Current account balance.
-
-        Returns:
-            True if pyramid order was filled.
-        """
-        pos = self.strategy._positions.get(symbol)
-        if pos is None:
-            return False
-
-        # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT)
-        api_sym = pos.get("symbol", symbol.split(":")[0])
-
-        # Unrealized PnL
-        if pos["signal"] == 1:
-            gain_pct = (current_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            gain_pct = (pos["entry_price"] - current_price) / pos["entry_price"]
-
-        unrealized = gain_pct * pos["notional"]
-        if unrealized < 20.0:  # Min $20 profit for pyramid
-            return False
-
-        ecfg = getattr(self, "elliott_config", ElliottConfig())
-        # Use unrealized profit as margin for pyramid
-        pyramid_notional = min(unrealized * ecfg.nominal_leverage, pos["notional"] * 0.5)
-        pyramid_qty = pyramid_notional / current_price
-        pyramid_qty = self._round_qty(pyramid_qty, api_sym)
-        if pyramid_qty <= 0:
-            return False
-
-        side = "BUY" if pos["signal"] == 1 else "SELL"
-        result = self._place_order(
-            api_sym,
-            side,
-            pyramid_qty,
-            position_side=pos.get("position_side"),
-        )
-        if result is None:
-            return False
-
-        fill_price = float(result["avgPrice"])
-        fill_qty = float(result["executedQty"])
-        new_notional = fill_qty * fill_price
-
-        # Update position
-        old_notional = pos["notional"]
-        total_notional = old_notional + new_notional
-        blended = (pos["entry_price"] * old_notional + fill_price * new_notional) / total_notional
-        pos["entry_price"] = blended
-        pos["notional"] = total_notional
-
-        logger.info(
-            f"[{symbol}] PYRAMID: Added ${new_notional:.2f} from "
-            f"${unrealized:.2f} unrealized → total ${total_notional:.2f}"
-        )
-        self.discord.send(
-            embed={
-                "title": f"📈 {symbol} 피라미딩 | Wave 3/C 모멘텀",
-                "color": 0x4CAF50,
-                "description": "미실현 수익으로 추가진입. 스톱 BE로 이동.",
-                "fields": [
-                    {"name": "추가금액", "value": f"${new_notional:.2f}", "inline": True},
-                    {"name": "총포지션", "value": f"${total_notional:.2f}", "inline": True},
-                    {"name": "미실현", "value": f"${unrealized:.2f}", "inline": True},
                 ],
                 "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
             }

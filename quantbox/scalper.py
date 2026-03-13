@@ -67,7 +67,6 @@ from quantbox.strategy.rubberband import (
     RubberBandStrategy,
     compute_atr_pct,
 )
-from quantbox.strategy.elliott import ElliottConfig, ElliottStrategy
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
 from quantbox.core.commands import CommandsMixin
@@ -126,7 +125,6 @@ class RubberBandScalper(
         paper_mode: bool = False,
         config: RubberBandConfig | None = None,
         strategy_name: str = "rubberband",
-        elliott_config: ElliottConfig | None = None,
         vs_config: VolStraddleConfig | None = None,
         journal_db_path: str | None = None,
     ):
@@ -134,10 +132,11 @@ class RubberBandScalper(
         self.config = config or RubberBandConfig()
         self.strategy_name = strategy_name
 
-        if strategy_name == "elliott":
-            self.elliott_config = elliott_config or ElliottConfig()
-            self.strategy = ElliottStrategy(self.elliott_config)
-        elif strategy_name == "vol_straddle":
+        _valid_strategies = {"rubberband", "vol_straddle"}
+        if strategy_name not in _valid_strategies:
+            raise ValueError(f"Unknown strategy '{strategy_name}'. Valid: {sorted(_valid_strategies)}")
+
+        if strategy_name == "vol_straddle":
             self.vs_config = vs_config or VolStraddleConfig()
             self.strategy = VolStraddleStrategy(self.vs_config)
         else:
@@ -612,14 +611,9 @@ class RubberBandScalper(
         # 3. Fetch BTC klines for regime filter
         btc_close = self.download_klines("BTCUSDT", 200)
 
-        # 3b. v7.0: Fetch BTC 4h klines for MTF / Elliott macro bias
+        # 3b. Fetch BTC 4h klines for MTF confirmation
         btc_close_4h = None
-        if self.strategy_name == "elliott":
-            # Elliott needs 600+ bars of BTC 4h for 200/500 EMA macro bias
-            btc_close_4h = self.download_klines("BTCUSDT", 600, interval="4h")
-            if btc_close_4h is not None:
-                self.strategy.update_btc_data(btc_close_4h)
-        elif self.strategy_name == "vol_straddle":
+        if self.strategy_name == "vol_straddle":
             # VolStraddle doesn't use BTC as filter — skip 4h BTC fetch
             pass
         elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
@@ -719,14 +713,7 @@ class RubberBandScalper(
                         logger.info(f"  [STRADDLE] Last leg ({side}) closed ({exit_reason}) — straddle fully unwound")
                 if exit_reason == "partial_close":
                     self._partial_close_position(pos_key, current_price)
-                elif exit_reason == "confirm_entry":
-                    # Elliott: upgrade 2% exploratory → add 8% primary
-                    self._add_to_position(pos_key, current_price, balance)
-                elif exit_reason == "pyramid":
-                    # Elliott: pyramid using unrealized profits
-                    self._pyramid_position(pos_key, current_price, balance)
-                elif exit_reason == "cancel_exploration":
-                    # Elliott: confirmation timed out → close pilot
+                elif exit_reason in ("confirm_entry", "pyramid", "cancel_exploration"):
                     self._close_position(pos_key, exit_reason, current_price)
                 else:
                     self._close_position(pos_key, exit_reason, current_price)
@@ -858,14 +845,8 @@ class RubberBandScalper(
             # Wire up volume/taker/high/low data for v9 confluence scoring
             self.strategy.update_market_data(sym, volume, taker_buy, high, low)
 
-            # v7.0: Download 4h data for MTF confirmation / Elliott wave detection
-            if self.strategy_name == "elliott":
-                # Elliott needs 600+ bars of 4h OHLC for 500 EMA + ZigZag
-                result_4h = self.download_klines(sym, 600, interval="4h", full=True)
-                if result_4h is not None:
-                    c4h, h4h, l4h, _, _ = result_4h
-                    self.strategy.update_htf_data(sym, c4h, h4h, l4h)
-            elif self.strategy_name == "vol_straddle":
+            # v7.0: Download 4h data for MTF confirmation
+            if self.strategy_name == "vol_straddle":
                 # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
                 # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
                 n_bars_4h = 300 if (self.vs_config and self.vs_config.ma_cluster_enabled) else 100
@@ -881,7 +862,7 @@ class RubberBandScalper(
             signal = self.strategy.on_bar(sym, close, btc_close)
 
             # v12.0: Collect full diagnostic context (read-only, after on_bar)
-            if self.strategy_name != "elliott" and hasattr(self.strategy, "diagnose_bar"):
+            if hasattr(self.strategy, "diagnose_bar"):
                 diag = self.strategy.diagnose_bar(sym, close, btc_close)
                 diag["signal_actual"] = signal  # cross-verify with on_bar
                 scan_diags.append(diag)
@@ -1331,7 +1312,7 @@ class RubberBandScalper(
         S_d8 straddle to open simultaneous LONG+SHORT on the same symbol.
         Without this, all positionSide=LONG/SHORT orders fail with -4059.
 
-        One-Way mode is required for RubberBand/Elliott (they use reduceOnly).
+        One-Way mode is required for RubberBand (uses reduceOnly).
         """
         if self.paper_mode:
             return
@@ -1612,7 +1593,7 @@ class RubberBandScalper(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="QuantBox Scalper — Rubber Band / Elliott Wave / VolStraddle")
+    parser = argparse.ArgumentParser(description="QuantBox Scalper — Production strategy: vol_straddle")
     parser.add_argument("--paper", action="store_true", help="Paper trading mode (no real orders)")
     parser.add_argument("--once", action="store_true", help="Run a single cycle then exit")
     parser.add_argument("--lookback", type=int, default=None, help="Signal lookback bars (default: from .env/config)")
@@ -1622,9 +1603,9 @@ def main():
     )
     parser.add_argument(
         "--strategy",
-        choices=["rubberband", "elliott", "vol_straddle"],
+        choices=["rubberband", "vol_straddle"],
         default="vol_straddle",
-        help="Trading strategy: vol_straddle (default), rubberband, or elliott",
+        help="Trading strategy: vol_straddle (default, production) or rubberband",
     )
     args = parser.parse_args()
 
