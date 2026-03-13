@@ -363,6 +363,25 @@ class TestStateValidation:
         assert not ok
         assert "signal" in reason
 
+    def test_corrupt_symbol_field_warns_but_passes(self, caplog):
+        """Corrupt pos['symbol'] with ':' must warn but still return True (sanitized later)."""
+        import logging
+
+        from quantbox.scalper import RubberBandScalper
+
+        pos = {
+            "entry_price": 100.0,
+            "notional": 3000.0,
+            "leverage": 30,
+            "signal": 1,
+            "symbol": "TESTUSDT:LONG",  # corrupt compound key in symbol field
+        }
+        with caplog.at_level(logging.WARNING, logger="quantbox.scalper"):
+            ok, reason = RubberBandScalper._validate_restored_position("TESTUSDT:LONG", pos)
+
+        assert ok, "corrupt symbol field should warn but not reject"
+        assert any(":" in r.message and "TESTUSDT:LONG" in r.message for r in caplog.records)
+
     def test_corrupt_position_skipped_during_load(self, tmp_path):
         """Corrupt position in state file must be skipped, not crash the session."""
         import json

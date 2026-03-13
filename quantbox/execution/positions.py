@@ -119,7 +119,12 @@ class PositionMixin:
             # ── R44d V17: MA Cluster uses different leverage ──
             # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
             if "leverage_override" in sig_meta:
-                leverage = sig_meta["leverage_override"]
+                raw_lev = sig_meta["leverage_override"]
+                leverage = max(1.0, min(125.0, float(raw_lev)))
+                if leverage != raw_lev:
+                    logger.warning(
+                        f"[{symbol}] leverage_override clamped: {raw_lev} → {leverage:.0f} (must be [1, 125])"
+                    )
                 notional = per_slot_capital * leverage
                 logger.info(f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x (override, SL={sl_pct * 100:.0f}%)")
 
