@@ -23,8 +23,8 @@ D_TRAIL_ACT   = cfg.d_trail_activate                  # 0.01 (1.0%)
 D_TRAIL_DIST  = cfg.d_trail_distance                  # 0.002 (0.2%)
 S_TRAIL_ACT   = cfg.s_trail_activate                  # 0.015 (1.5%)
 S_TRAIL_DIST  = cfg.s_trail_distance                  # 0.001 (0.1%, r76: was 0.002)
-MA_TRAIL_ACT  = cfg.ma_cluster_trail_activate         # 0.04 (4%)
-MA_TRAIL_DIST = cfg.ma_cluster_trail_distance         # 0.005 (0.5%)
+MA_TRAIL_ACT  = cfg.ma_cluster_trail_activate         # 0.02 (2%)
+MA_TRAIL_DIST = cfg.ma_cluster_trail_distance         # 0.003 (0.3%, r75: was 0.005)
 VR_LN         = cfg.base_leverage / cfg.max_concurrent  # 30/10=3.0
 MA_LN         = cfg.ma_cluster_leverage / cfg.max_concurrent  # 21/10=2.1
 TBR_ENABLED   = cfg.f5_tbr_enabled                   # False (r47 이후)
@@ -63,6 +63,11 @@ exclude = set(cfg.exclude_symbols)  # USDCUSDT/TUSDUSDT/BUSDUSDT만 제외
 > ⚠️ **위반 선례 (2026-03-11):** r55/r56/r57이 `exclude_symbols` 방식으로 로딩 →
 > 상장폐지 3개(MKR/FTM/EOS) 포함 63심볼로 백테스트. 라이브(60sym)와 조건 불일치.
 > `symbol_whitelist` 방식으로 수정 후 전부 재실행함.
+
+> ⚠️ **Universe 불일치 발생 시 즉시 해야 할 것:**
+> 1. `cfg.symbol_whitelist`로 로딩하는 스크립트인지 먼저 확인
+> 2. 라이브 60sym과 백테스트 sym 수가 다르면 → 결과 즉시 무효, 재실행
+> 3. 신규 심볼 추가 시: 백테스트 먼저 → 검증 통과 → 라이브 추가 (순서 불변)
 
 ---
 
@@ -135,7 +140,6 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 
 | 버전 | 포함 전략 | 유니버스 | 기간 | N | PF | Calmar | DD | 비고 |
 |------|---------|---------|------|---|----|--------|----|-----|
-| v14.4.x baseline | D_mom8+MA | **60 syms** | 6yr | 5,515 | 1.273 | 15.9 | 69.7% | |
 | **v14.5.0 (프로덕션)** | D_mom8+MA | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% | canonical |
 | r73 3전략 trail | **D+S+MA** | **60 syms** | 5.67yr | 9,773 | 2.002 | 1695.6 | 40.5% | s_trail_dist=0.002 기준 |
 | **r76 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,775** | **2.484** | **9882** | **37.1%** | **trail canonical (s_trail_dist=0.001)** |
@@ -317,27 +321,7 @@ for param_value in param_grid:
 | 2026-03-11 | _offset 미적용 (r58 이전) | 단축 히스토리 심볼 슬롯 충돌 오류 | 신규 심볼 bar 0 ≠ 기존 심볼 bar 0 (시간 불일치) | 신규 심볼은 `data_15m[sym]["_offset"]` 적용 필수 |
 | (반복) | 복리 모델 혼동 | CAGR 보고 오류 | `compute_metrics` 1x ≠ 프로덕션 L/N | 레버리지 모델 항상 명시 |
 
-## 11b. 민감도 분석 핵심 발견 (r67, 2026-03-12)
-
-> `research/active/r66_r70/r67_sensitivity.py` — 7개 파라미터 × 7단계 sweep  
-> ⚠️ 초기 보고에서 PROD_IDX 버그 (d_trail_distance: idx=3 vs 실제 idx=2). 수정된 결과:
-
-| 파라미터 | 상태 | 발견 내용 |
-|----------|------|-----------|
-| `d_trail_distance=0.002` | ✅ **ROBUST** (but 단조 감소) | ±1 스텝 기준 통과. 하지만 **평탄 구간(plateau) 없음** — 작을수록 백테스트 성과 계속 상승 (0.001→PF 3.77, 0.002→PF 2.77). **trail-server-ratchet 구현 완료(e473e4d) 후** 0.001~0.0015 재최적화 가능. |
-| `d_tp=0.20` | ℹ️ **Dead parameter** | 전 범위에서 PF/N 변화 없음. 실제 청산은 trail stop이 전담, TP는 never hit. 20%는 안전 상한선. |
-| `d_sl=0.01` | ✅ ROBUST | ±1 스텝 → PF ±12%. 타이트한 SL이 N 늘고 PF 높음. |
-| `d_trail_activate=0.01` | ✅ ROBUST | 높을수록 PF 상승 (0.01 → PF 4.6), 하지만 N 감소. 현재값이 균형점. |
-| `s_vr_threshold=0.57` | ✅ ROBUST | ±1 스텝 → PF ±2%. 매우 안정적. |
-| `s_squeeze_dur=3` | ✅ ROBUST | ±1 스텝 → PF ±3%. 안정적. |
-| `base_leverage=30` | ✅ ROBUST | PF 변화 없음 (PF는 레버리지 무관). L/N만 바뀜. |
-
-**운영 규칙:**
-- `d_trail_distance` 증가 금지 (0.003: OOS=1.160 barely pass, 0.004: OOS=0.883 fail)
-- `d_trail_distance` 감소(0.001~0.0015)는 **backtest에서는 더 좋음** — trail-server-ratchet 구현 완료(e473e4d)로 live 갭 문제 해소. 재최적화 시 r65+ 데이터로 검증 필요
-- `d_tp`는 dead parameter — 수정해도 백테스트 수치 변화 없음
-- 새 파라미터 추가 시 반드시 sensitivity sweep 먼저 (cliff edge 사전 검출)
-- **PROD_IDX 주의:** sweep 배열에서 프로덕션값의 실제 인덱스를 수동 확인 필수 (`{k: 3}`으로 일괄 설정 금지)
+파라미터 민감도 분석: `research/active/r66_r70/r67_sensitivity.py` 및 `docs/backtest_results/202603/` 참조.
 
 ---
 
