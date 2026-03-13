@@ -102,6 +102,9 @@ class VolStraddleConfig(BaseSettings):
     # ── Risk Management ──
     max_concurrent: int = 10  # 10 slots (VR L/N=30/10=3.0, MA L/N=21/10=2.1)
     max_drawdown_pct: float = 0.30  # 30% session drawdown → halt (r48 analysis: P99 session DD)
+    max_exposure_multiplier: float = (
+        35.0  # Max total open notional / balance. 35x = 17% above 10×30x/10=30x theoretical max
+    )
 
     # ── Costs (conservative) ──
     fee_rate: float = 0.0002  # 0.02% maker fee per side
@@ -365,6 +368,12 @@ class VolStraddleConfig(BaseSettings):
             errors.append(f"ma_cluster_sl must be positive, got {self.ma_cluster_sl}")
         if self.fee_rate < 0:
             errors.append(f"fee_rate must be non-negative, got {self.fee_rate}")
+        if self.max_exposure_multiplier < self.base_leverage:
+            errors.append(
+                f"max_exposure_multiplier must be >= base_leverage, "
+                f"got max_exposure_multiplier={self.max_exposure_multiplier}, "
+                f"base_leverage={self.base_leverage}"
+            )
 
         if errors:
             raise ValueError("VolStraddleConfig safety constraint violations:\n  - " + "\n  - ".join(errors))
