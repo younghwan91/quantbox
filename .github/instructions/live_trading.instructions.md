@@ -14,10 +14,7 @@ applyTo: "quantbox/scalper.py,quantbox/execution/**/*.py"
 ```bash
 python3 -c "
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-from quantbox.core.settings import get_settings
 cfg = VolStraddleConfig()
-s = get_settings()
-print('=== VolStraddleConfig ===')
 print(f'd_sl={cfg.d_sl} d_tp={cfg.d_tp}')
 print(f'd_trail_activate={cfg.d_trail_activate} d_trail_distance={cfg.d_trail_distance}')
 print(f'base_leverage={cfg.base_leverage} max_concurrent={cfg.max_concurrent}')
@@ -29,9 +26,7 @@ print(f'dynamic_capital_enabled={cfg.dynamic_capital_enabled}')
 
 **VR Squeeze 프로덕션 기준값 (v14.17.0+):**
 - `d_sl=0.01` (1%), `d_tp=0.20` (20% dead cap — trail exits first)
-- `s_tp=0.05` (5% per straddle leg)
 - `d_trail_activate=0.01` (1.0%), `d_trail_distance=0.002` (0.2%)
-- `ma_cluster_trail_activate=0.02` (2%, r75)
 - `base_leverage=30.0`, `max_concurrent=10` → L/N=3.0
 - `s_squeeze_dur=3`, `s_vr_threshold=0.57`
 - `hedge_mode=True`, `dynamic_capital_enabled=False`
@@ -51,13 +46,12 @@ print(f'Hedge mode: {mode[\"dualSidePosition\"]}')  # must be True for vol_strad
 "
 ```
 
-### 1.3 State 파일 건강 확인 ← **신규 (Incident #4 방지)**
+### 1.3 State 파일 건강 확인
 ```bash
 python3 -c "
 import json
 state = json.load(open('data/state/scalper_state.json'))
 for sym, pos in state.get('positions', {}).items():
-    # 반드시 symbol 필드가 순수 Binance 심볼이어야 함 (':'가 없어야 함)
     api_sym = pos.get('symbol', sym)
     if ':' in api_sym:
         print(f'CORRUPT: {sym} symbol={api_sym} (has colon!)')
@@ -66,50 +60,7 @@ for sym, pos in state.get('positions', {}).items():
 "
 ```
 
-**CORRUPT 출력이 나오면** state 파일을 직접 수정한 후 세션 시작:
-```python
-# 수동 패치
-import json
-path = 'data/state/scalper_state.json'
-state = json.load(open(path))
-for key, pos in state['positions'].items():
-    sym_field = pos.get('symbol', '')
-    if ':' in sym_field:
-        parts = sym_field.rsplit(':', 1)
-        if parts[1] in ('LONG', 'SHORT'):
-            pos['symbol'] = parts[0]
-            if pos.get('position_side') is None:
-                pos['position_side'] = parts[1]
-json.dump(state, open(path, 'w'), indent=2)
-```
-
-### 1.4 신뢰성 모듈 상태 확인 (v14.22.0+)
-
-```bash
-# 시작 로그에서 모듈 초기화 확인
-head -30 logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1)
-```
-
-**정상 초기화 로그:**
-```
-[INFO] InFlight - Loaded N pending orders from disk
-[INFO] Scalper - RubberBandScalper initialized (LIVE) strategy=vol_straddle
-[INFO] Scalper - Position mode: Hedge (OK)
-[INFO] Scalper - Restoring state from ...
-[INFO] Scalper - Restored N positions, M trade records
-```
-
-**이상 징후 (즉시 확인):**
-- `InFlight - Failed to load` → `data/inflight/` 디렉토리 권한 확인
-- `RateLimiter - circuit open` 반복 → API 키 또는 바이낸스 서버 상태 확인
-- `ExposureGuard - BLOCKED` 시작 직후 → 잔고 대비 노출도 점검
-- `ReconJournal - Failed to init` → `data/recon/` 디렉토리 권한 확인
-
-**모듈 별 파일 위치:**
-```
-data/inflight/inflight_state.json   # InFlight 미체결 주문
-data/recon/recon.db                 # ReconJournal SQLite
-```
+부패 발견 시: `debugging.instructions.md` Section 1.1 Origin A 참조.
 
 ---
 
@@ -195,13 +146,9 @@ python3 -c "
 import os; from dotenv import load_dotenv; load_dotenv()
 from binance.client import Client
 c = Client(os.environ['BINANCE_API_KEY'], os.environ['BINANCE_API_SECRET'])
-for p in c.futures_position_information():
-    if abs(float(p['positionAmt'])) > 0:
-        entry = float(p['entryPrice'])
-        mark = float(p['markPrice'])
-        amt = float(p['positionAmt'])
-        pct = (mark-entry)/entry*100 if amt > 0 else (entry-mark)/entry*100
-        print(f\"{p['symbol']} {p['positionSide']}: pnl={pct:+.3f}%\")
+for p in [p for p in c.futures_position_information() if abs(float(p['positionAmt'])) > 0]:
+    e, m, a = float(p['entryPrice']), float(p['markPrice']), float(p['positionAmt'])
+    print(f\"{p['symbol']} {p['positionSide']}: pnl={(m-e)/e*100 if a>0 else (e-m)/e*100:+.3f}%\")
 "
 ```
 
@@ -220,23 +167,14 @@ grep "Bracket repair\|SERVER STOP\|FAILED" logs/bot/vol_straddle/$(ls -t logs/bo
 
 ## 5. 포지션 exit 예측
 
-### 5.1 Trail Exit (다음 바 클로즈 시점)
-```python
-from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-cfg = VolStraddleConfig()
-peak_gain = 0.01309  # state에서 읽은 값
-trail_stop = peak_gain - cfg.d_trail_distance
-current_pnl = -0.00331  # API에서 읽은 현재 PnL
-print(f'trail_stop={trail_stop*100:+.3f}%, exit={current_pnl < trail_stop}')
-```
+| Exit 종류 | 조건 | 실행 |
+|-----------|------|------|
+| Trail stop | `current_pnl < peak_gain - cfg.d_trail_distance` | 다음 바 클로즈에 MARKET |
+| Hard SL | LONG: `price ≤ entry × (1 - sl_pct)` / SHORT: `price ≥ entry × (1 + sl_pct)` | 서버 STOP 주문 |
+| Hard TP | LONG: `price ≥ entry × (1 + tp_pct)` / SHORT: 반대 | 서버 LIMIT 주문 |
+| Max hold | `bars_held ≥ max_hold` (기본 192 bars = 48h) | 다음 바에 강제 청산 |
 
-### 5.2 Hard SL / TP (서버 주문)
-- Hard SL: `entry × (1 - sl_pct)` (LONG) / `entry × (1 + sl_pct)` (SHORT)
-- Hard TP: `entry × (1 + tp_pct)` (LONG) / `entry × (1 - tp_pct)` (SHORT)
-
-### 5.3 Max Hold
-- `bars_held >= max_hold` → 다음 바에 강제 청산
-- 기본 max_hold=192 bars (15m × 192 = 48h)
+Trail 활성화: `cfg.d_trail_activate` (1.0%) 도달 후 `peak_gain` 갱신 시작.
 
 ---
 
@@ -249,20 +187,18 @@ import os; from dotenv import load_dotenv; load_dotenv()
 from binance.client import Client
 c = Client(os.environ['BINANCE_API_KEY'], os.environ['BINANCE_API_SECRET'])
 
-# 현재 포지션 조회
 positions = [p for p in c.futures_position_information() if abs(float(p['positionAmt'])) > 0]
 for p in positions:
     sym = p['symbol']
     amt = float(p['positionAmt'])
     side = 'SELL' if amt > 0 else 'BUY'
-    pos_side = p['positionSide']  # 'LONG' or 'SHORT'
+    pos_side = p['positionSide']
     qty = abs(amt)
     print(f"Closing {sym} {pos_side} qty={qty:.4f}")
-    # Hedge mode: positionSide 필수
     c.futures_create_order(
         symbol=sym, side=side, type='MARKET',
         quantity=qty, positionSide=pos_side,
-        reduceOnly=False,  # hedge mode에서 reduceOnly 불필요
+        reduceOnly=False,
     )
 ```
 
@@ -305,18 +241,6 @@ grep "Summary"                    $LOG | tail -5    # 잔고/WR 요약
 
 ---
 
-## 9. DD Halt 임계값 검증 (r48 학습)
+## 9. DD Halt 설정
 
-`max_drawdown_pct`는 **반드시 백테스트로 검증**. 직관으로 설정하면 정상 운영 중 반복 발동.
-
-**적정값 기준:** 세션 단위 DD P99 (100세션에 1번 발동 수준)
-
-```python
-# r48 결과 (Option D, 2020-2025, L/N=2.60):
-# Session P50=10.5%, P90=19.9%, P99=28.4% → halt=30% (round up to 5%)
-# halt=10%: 51.7% 세션에서 발동 (정상 운영 차단)
-# halt=30%: 0.5% 세션에서 발동 (이상 구간만)
-```
-
-검증 스크립트: `research/active/r47_r50/r48_dd_halt_analysis.py`  
-설정 위치: `config.py:max_drawdown_pct` + `.env:MAX_DRAWDOWN_PCT` (둘 다 변경 필수)
+DD halt 임계값: `config.py:max_drawdown_pct` + `.env:MAX_DRAWDOWN_PCT` 둘 다 변경 필수. 적정값은 백테스트 session DD P99 기준 (r48 research 참조).
