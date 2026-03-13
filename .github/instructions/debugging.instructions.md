@@ -8,6 +8,24 @@ applyTo: "quantbox/**/*.py,tests/**/*.py"
 
 ---
 
+## 0. 파라미터 답변 절대 규칙 (2026-03-13 추가)
+
+> **위반 사례:** ma_cluster_trail_activate를 기억(4%)으로 답변 → 실제 config는 2%. 오답.
+
+**파라미터 값을 말할 때는 반드시 코드를 먼저 읽고 답변. 대화 중이라도 예외 없음.**
+
+```python
+# 항상 이렇게 먼저 실행
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+cfg = VolStraddleConfig()
+print(cfg.ma_cluster_trail_activate)  # 기억으로 말하지 말고 출력값으로 말할 것
+```
+
+- 리서치(r75 등)에서 탐색한 값 ≠ 실제 config에 반영된 값. 반드시 구별.
+- "이전에 봤다", "r75에서 X였다" → 반드시 config 재확인 후 발언.
+
+---
+
 ## 1. Binance API 에러 코드 대응표
 
 ### -1022: Signature for this request is not valid
