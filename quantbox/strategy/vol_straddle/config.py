@@ -69,7 +69,7 @@ class VolStraddleConfig(BaseSettings):
     s_sl: float = 0.015  # 1.5% stop loss (per leg)
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
     s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg
-    s_trail_distance: float = 0.002  # r53: trail 0.2% behind peak
+    s_trail_distance: float = 0.001  # r76: 0.1% behind peak (was 0.2%, PF 4.876→9.349)
     straddle_enabled: bool = True  # S_d8 straddle mode enabled
     hedge_mode: bool = True  # Binance Hedge Mode (dualSidePosition=true)
 
