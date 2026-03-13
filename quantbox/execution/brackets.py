@@ -688,5 +688,3 @@ class BracketMixin:
             )
         else:
             logger.warning(f"[{symbol}] Trail SL ratchet FAILED — old SL preserved")
-
-    # ── Elliott: Add-to-position methods ──
