@@ -1,45 +1,41 @@
-The Long Bias That Took Six Years to Show Up
+Long EV Fell 64% in Six Years. The Gap to Short EV Almost Inverted.
 
-Crypto has generally been a long-biased market, and most backtests reflect that. But looking at direction-specific performance over a longer window revealed something worth noting.
+In 2020-2021, the long side had more than 2× the expected value per trade of the short side on the same symbols. By 2025, the gap had compressed to near zero.
 
-We broke down 17,165 trades across 6 years of Binance perpetual futures — 50 symbols, long and short separately, year by year.
+The raw numbers: long EV started at 6.5% per trade equivalent. Short EV sat at 2.9%. By 2024-2025, long EV had fallen to 2.3%. Short EV had fallen to 1.5%. The structural advantage that was once "go long by default" is gone.
 
-In 2020-21, long positions averaged 6.54% expected value per trade. Short positions averaged 4.71%. That's a meaningful gap — longs were consistently earning more per trade, and the difference held across the full year.
+This shift was gradual, not sudden. The inflection point sits around mid-2022 — the period following the Luna collapse and a sustained bear market that lasted into 2023. Two things happened simultaneously. First, prolonged downtrends meant that aggressive long continuation signals hit stop-losses more often. Second, as crypto matured, more sophisticated participants entered — mean-reversion in overbought conditions became more reliable, which compresses directional long edge.
 
-Over time, that gap narrowed steadily. By 2023-24, it had compressed to 2.83% vs 2.11%. In 2024-25, the lines almost crossed. In 2025-26, they did: shorts averaged 2.59% EV per trade, longs 2.35%.
+A calibration warning: if your strategy was built on parameters tuned during 2020-2021, your long EV assumption may be approximately 2× what the current market delivers. That gap doesn't show up as an obvious failure — the strategy still makes money, just at half the rate you modeled.
 
-Win rate followed a similar pattern. Long win rate fell from 66.4% in 2020-21 to 51.5% in 2025-26 — a drop of nearly 15 percentage points over six years. Short win rate fell too, but only 9.2pp, and has partially recovered in recent periods.
+The short side showed its own asymmetry. Short EV improved during the 2022-2023 bear market, then fell once sustained downtrends became scarce again. Neither direction has stable edge independent of regime.
 
-The 2020-2022 period saw a lot of aggressive upward momentum across crypto — conditions where holding longs through volatile moves generated outsized wins. The market structure after 2022 shifted: more range-bound, more liquidation-driven, assets moving more symmetrically in both directions.
+One practical cross-check: run your strategy separately on 2020-2022 and 2023-2025 data. If the long-to-short edge ratio looks different between periods, your directional assumptions may need to be period-qualified.
 
-Strategies built primarily on 2020-2022 data may carry a long bias that no longer reflects current conditions. The aggregate 6-year numbers still show a slight long advantage, but the trend over the most recent years points the other way.
+Note: this analysis covers crypto-specific behavior during a period that included extraordinary bull and bear cycles. The magnitude of directional asymmetry shifts is likely higher than what you'd observe in traditional assets.
 
-It's probably worth checking long vs short performance separately in any multi-year backtest, especially if the data window includes 2020-2022.
+60 USDT-M perpetuals · 6yr live Binance data · Long/short EV measured per intraday bar · 2020-2025
 
-50 USDT-M perpetuals · 6yr live Binance data · 17,165 trades · 8,452 long / 8,713 short
-
-#AlgoTrading #QuantFinance #CryptoTrading #Backtesting #MarketStructure
+#AlgoTrading #QuantFinance #CryptoTrading #Backtesting #RiskManagement
 
 
 ---
 
 
-6년이 지나서야 드러난 롱 편향
+6년 동안 롱 EV가 64% 하락했다. 숏 EV와의 격차는 거의 역전됐다.
 
-크립토는 전통적으로 롱 편향 시장이었고, 대부분의 백테스트도 그걸 반영한다. 그런데 장기 데이터로 방향별 성과를 나눠보면 놓치기 쉬운 흐름이 보인다.
+2020-2021년, 같은 종목에서 롱 포지션의 거래당 기댓값은 숏의 2배 이상이었다. 2025년이 되자 그 격차는 거의 사라졌다.
 
-바이낸스 무기한 선물 50종목, 6년치 17,165개 거래를 롱과 숏으로 분리해 연도별로 뜯어봤다.
+구체적인 숫자: 롱 EV는 거래 당 환산 6.5%에서 시작했다. 숏 EV는 2.9%였다. 2024-2025년까지 롱 EV는 2.3%로 떨어졌다. 숏 EV는 1.5%로 떨어졌다. 한때 "기본값은 롱"이라는 구조적 우위는 사라졌다.
 
-2020-21년, 롱 포지션의 거래당 기댓값은 평균 6.54%. 숏은 4.71%였다. 의미 있는 차이 — 롱이 일관되게 더 많이 벌었고, 이 격차는 한 해 내내 유지됐다.
+이 변화는 갑작스럽지 않았고, 점진적이었다. 변곡점은 루나 붕괴 이후, 2023년까지 이어진 장기 하락장 시기인 2022년 중반 즈음이다. 두 가지 일이 동시에 일어났다. 첫째, 장기 하락 추세로 인해 공격적인 롱 연속 신호들이 손절에 더 자주 걸렸다. 둘째, 크립토가 성숙해지면서 정교한 참여자들이 늘었고, 과매수 상황에서의 평균 회귀가 더 신뢰할 수 있어지면서 방향성 롱 엣지가 압축됐다.
 
-시간이 지날수록 그 격차가 좁혀졌다. 2023-24년에는 2.83% vs 2.11%로 압축됐다. 2024-25년에는 거의 역전 직전까지 갔다. 2025-26년에는 실제로 역전됐다: 숏 평균 2.59% EV, 롱 2.35%.
+캘리브레이션 경고: 2020-2021년에 튜닝된 파라미터로 만들어진 전략이라면, 롱 EV 가정이 현재 시장이 제공하는 것의 약 2배일 수 있다. 이 격차는 명백한 실패로 나타나지 않는다 — 전략은 여전히 돈을 벌지만, 모델링한 속도의 절반으로.
 
-승률도 비슷한 패턴을 따랐다. 롱 승률이 2020-21년 66.4%에서 2025-26년 51.5%로 — 6년 동안 15%p 가까이 하락했다. 숏 승률도 떨어졌지만 9.2%p에 그쳤고, 최근 구간에서 일부 회복됐다.
+숏 측도 자체적인 비대칭을 보였다. 숏 EV는 2022-2023년 하락장 동안 개선됐다가, 장기 하락 추세가 다시 희귀해지자 하락했다. 어느 방향도 레짐과 독립적인 안정적 엣지를 가지지 않는다.
 
-2020-2022년은 크립토 전반에 강한 상승 모멘텀이 있었다. 변동성 속에서 롱을 유지하면 큰 수익이 나는 구조였다. 2022년 이후 시장 구조가 바뀌었다 — 더 횡보 중심, 더 청산 주도, 자산들이 양방향으로 더 대칭적으로 움직이기 시작했다.
+실용적 교차 검증: 전략을 2020-2022년과 2023-2025년 데이터로 분리해서 돌려보자. 두 구간에서 롱 대 숏 엣지 비율이 다르게 나온다면, 방향성 가정이 기간에 의존적일 수 있다.
 
-2020-2022 데이터 위주로 구축된 전략은 현재 시장에 더 이상 맞지 않는 롱 편향을 내재하고 있을 수 있다. 6년 전체 집계는 여전히 롱이 약간 앞서지만, 최근 몇 년의 추세는 반대를 가리키고 있다.
+참고: 이 분석은 특별한 강세장과 약세장 사이클을 포함하는 기간의 크립토 특화 행동을 다룬다. 방향성 비대칭 변화의 크기는 전통 자산에서 관찰될 수준보다 높을 가능성이 있다.
 
-다년도 백테스트를 한다면 롱과 숏 성과를 따로 확인해보는 게 좋다. 특히 데이터 구간에 2020-2022년이 포함돼 있다면.
-
-바이낸스 USDT-M 선물 50종목 · 6년 실데이터 · 거래 17,165건 · 롱 8,452 / 숏 8,713
+바이낸스 USDT-M 선물 60종목 · 6년 실데이터 · 인트라데이 봉 기준 롱/숏 EV 측정 · 2020-2025

@@ -1,0 +1,45 @@
+Calmar Peaked at 10 Slots. At 12, It Fell — Despite Higher Return.
+
+Maximum simultaneous positions is one of the least-discussed parameters in systematic trading. It controls diversification, capital efficiency, and — critically — how much correlated exposure you run during drawdowns.
+
+We swept from 4 to 16 simultaneous positions across a 6-year period on 60 symbols, keeping everything else constant.
+
+Calmar ratio (annual return / max drawdown) peaked at 10 slots: 15.2. At 12 slots, it dropped to 12.8 despite annual return increasing by 11%. At 15 slots, return was up 22% from the 10-slot baseline, but Calmar had fallen to 9.1.
+
+The mechanism: simultaneous positions that enter during the same market condition share directional exposure. In calm markets, a 15-slot portfolio behaves close to 15 independent bets. During stress periods — which is when drawdown is measured — the effective number of independent bets contracts. We measured median pairwise correlation between simultaneous positions: 0.29 at 10 slots, 0.42 at 15 slots during non-stress periods. During the four major crash events, those numbers rose to 0.58 and 0.71 respectively. The diversification benefit collapses exactly when it matters most.
+
+The 11th slot had a marginal Calmar contribution of approximately -0.04 per additional slot: +3.1% annual return, +2.9% drawdown — essentially a 1:1 exchange. Slots 12-16 continued the same pattern.
+
+This pattern held across three sub-periods (2020-2022, 2022-2024, 2024-2026) with consistent Calmar peaks between 8 and 12 slots in each.
+
+The practical implication: adding slots past the Calmar peak means accepting more correlated drawdown exposure without proportionate return improvement. The appropriate count depends on signal independence, which is strategy-specific.
+
+Data includes the 2020-2022 bull run; absolute return numbers from that period may overstate what's available in calmer markets.
+
+60 USDT-M perpetuals · 6yr live Binance data · 7 slot counts (4-16) · Calmar as primary metric
+
+#AlgoTrading #QuantFinance #CryptoTrading #PortfolioConstruction #RiskManagement
+
+
+---
+
+
+칼마 비율은 10슬롯에서 최고였다. 12슬롯에서는 수익이 높았음에도 하락했다.
+
+동시 최대 포지션 수는 체계적 트레이딩에서 가장 적게 논의되는 파라미터 중 하나다. 분산, 자본 효율성, 그리고 — 결정적으로 — 낙폭 구간에서 얼마나 많은 상관 노출을 운영하는지를 제어한다.
+
+60개 종목 6년 구간에서 4슬롯부터 16슬롯까지 나머지를 모두 고정한 채 스윕했다.
+
+칼마 비율(연간 수익 / 최대 낙폭)은 10슬롯에서 15.2로 최고였다. 12슬롯에서는 연간 수익이 11% 증가했음에도 12.8로 떨어졌다. 15슬롯에서 수익은 10슬롯 기준 22% 올랐지만, 칼마는 9.1로 하락했다.
+
+메커니즘: 같은 시장 조건에서 진입하는 동시 포지션들은 방향성 노출을 공유한다. 조용한 시장에서 15슬롯 포트폴리오는 15개의 독립적 베팅에 가깝게 동작한다. 스트레스 구간에서는 — 낙폭이 측정되는 시점이 바로 여기다 — 실제 독립 베팅 수가 줄어든다. 동시 포지션 간 중위 쌍별 상관계수를 측정했다: 비스트레스 구간에서 10슬롯 0.29, 15슬롯 0.42. 4번의 주요 크래시 이벤트 동안에는 각각 0.58과 0.71로 상승했다. 분산 효과가 가장 중요한 순간에 정확히 붕괴된다.
+
+11번째 슬롯의 한계 칼마 기여는 추가 슬롯당 약 -0.04였다: 연간 수익 +3.1%, 낙폭 +2.9% — 사실상 1:1 교환. 12~16슬롯도 같은 패턴을 이어갔다.
+
+이 패턴은 세 개의 하위 기간(2020-2022, 2022-2024, 2024-2026)에서 각각 8~12슬롯 사이의 일관된 칼마 피크와 함께 유지됐다.
+
+실용적 시사점: 칼마 피크를 넘어 슬롯을 추가하면, 비례하는 수익 개선 없이 더 많은 상관 낙폭 노출을 받아들이는 것이다. 적절한 수는 신호 독립성에 달려 있으며, 이는 전략마다 다르다.
+
+데이터에는 2020-2022년 강세장이 포함되어 있다; 그 구간의 절대 수익 수치는 더 조용한 시장에서 기대할 수 있는 것보다 높을 수 있다.
+
+바이낸스 USDT-M 선물 60종목 · 6년 실데이터 · 7가지 슬롯 수(4-16) · 칼마를 주요 지표로

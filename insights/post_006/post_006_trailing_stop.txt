@@ -1,0 +1,41 @@
+99.9% Win Rate After TP1. Improving It by 10% Moves Total P&L by 0.015.
+
+Trailing stop optimization on profitable runners gets a lot of attention. The math doesn't justify that attention.
+
+We tested 18 trailing stop configurations across a 6-year period. The baseline reached the runner phase (first profit target hit) in 14.7% of all trades. Among those, 99.9% closed profitably — the loss cases were statistical noise.
+
+So the optimization budget when focused on runners: 14.7% of trades × 10% improvement in runner outcomes = 1.47% of trades improved. With average EV per trade at roughly 0.4%, a 10% improvement in that 1.47% population moves total profit factor by approximately 0.015. Not a measurement error — 0.015 on a scale where the baseline was 1.27.
+
+Across all 18 variants, 16 produced profit factors within ±0.03 of the baseline. The configurations that showed larger deviations moved in both directions — one variant hit 1.31, another hit 1.23. There's no consistent direction, which suggests noise rather than signal.
+
+The one finding that was directionally consistent: the variant that exited runners fastest generated 190 more completed trades over the 6-year period. More slot turnover. Those additional trades contributed incrementally to total return, but not through runner optimization — through additional fresh entries.
+
+The implication: if runner outcomes are already near-maximal, the optimization leverage is in the 85.3% of trades that never reach the runner phase. Those trades hit their stop or expire at time limit. That population has meaningful room for improvement, and improving it doesn't require near-perfect starting conditions.
+
+Bootstrap resampling across 1,000 paths: profit factor > 1.0 in 96.2% of cases for the baseline configuration. The 18-variant range was 95.1%–97.4% — statistically indistinguishable.
+
+60 USDT-M perpetuals · 6yr live Binance data · 18 trailing stop configurations · Runner defined as trade reaching first profit target
+
+#AlgoTrading #QuantFinance #CryptoTrading #RiskManagement #Backtesting
+
+
+---
+
+
+1차 목표 후 승률 99.9%. 10% 개선이 전체 손익에 주는 영향: 0.015.
+
+수익 중인 러너 포지션의 트레일링 스탑 최적화가 많은 주목을 받는다. 수학적으로는 그 주목이 정당하지 않다.
+
+6년 구간에서 18가지 트레일링 스탑 구성을 테스트했다. 기준선은 전체 거래의 14.7%가 러너 단계(첫 번째 수익 목표 달성)에 도달했다. 그 중 99.9%가 수익으로 마감됐다 — 손실 케이스는 통계적 노이즈였다.
+
+따라서 러너에 집중한 최적화 예산: 전체 거래의 14.7% × 러너 결과 10% 개선 = 거래의 1.47% 개선. 거래당 평균 EV가 약 0.4%일 때, 그 1.47% 모집단에서 10% 개선은 전체 수익 팩터를 약 0.015 움직인다. 측정 오차가 아니다 — 기준선이 1.27인 척도에서 0.015.
+
+18개 변형 전체에서 16개가 기준선의 ±0.03 이내 수익 팩터를 보였다. 더 큰 편차를 보인 구성들은 양방향으로 움직였다 — 한 변형은 1.31을 달성했고, 다른 것은 1.23을 달성했다. 일관된 방향이 없다는 것은 신호가 아닌 노이즈를 시사한다.
+
+방향적으로 일관된 발견은 하나였다: 러너를 가장 빨리 청산한 변형이 6년 구간에서 완료된 거래를 190건 더 생성했다. 더 많은 슬롯 회전율. 그 추가 거래들은 전체 수익에 점진적으로 기여했지만, 러너 최적화를 통해서가 아니라 — 추가적인 새로운 진입을 통해서였다.
+
+시사점: 러너 결과가 이미 거의 최대에 가깝다면, 최적화 레버리지는 러너 단계에 도달하지 못하는 85.3%의 거래에 있다. 그 거래들은 손절에 걸리거나 시간 제한으로 만료된다. 그 모집단에는 의미 있는 개선 여지가 있으며, 개선하는 데 거의 완벽한 시작 조건이 필요하지 않다.
+
+1,000개 경로에 걸친 부트스트랩 리샘플링: 기준 구성의 경우 96.2% 케이스에서 수익 팩터 > 1.0. 18개 변형 범위는 95.1%~97.4% — 통계적으로 구별 불가.
+
+바이낸스 USDT-M 선물 60종목 · 6년 실데이터 · 18가지 트레일링 스탑 구성 · 러너 = 첫 번째 수익 목표에 도달한 거래
