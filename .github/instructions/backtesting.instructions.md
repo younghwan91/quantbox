@@ -21,6 +21,8 @@ D_TP          = cfg.d_tp                              # 0.20 (20% dead cap — t
 D_SL          = cfg.d_sl                              # 0.01 (1%)
 D_TRAIL_ACT   = cfg.d_trail_activate                  # 0.01 (1.0%)
 D_TRAIL_DIST  = cfg.d_trail_distance                  # 0.002 (0.2%)
+S_TRAIL_ACT   = cfg.s_trail_activate                  # 0.015 (1.5%)
+S_TRAIL_DIST  = cfg.s_trail_distance                  # 0.001 (0.1%, r76: was 0.002)
 MA_TRAIL_ACT  = cfg.ma_cluster_trail_activate         # 0.04 (4%)
 MA_TRAIL_DIST = cfg.ma_cluster_trail_distance         # 0.005 (0.5%)
 VR_LN         = cfg.base_leverage / cfg.max_concurrent  # 30/10=3.0
@@ -127,27 +129,19 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 **허용 기준:** 최신 리포트 대비 N ±1%, PF ±1%  
 **이탈 시 → 즉시 중단.** 데이터 범위, config, 함수 버전 확인 먼저.
 
-**최신 정식 베이스라인 (v14.17.0, 2026-03-13 기준, commit=33c8487):**
+**최신 정식 베이스라인 (v14.21.0, 2026-03-14 기준, commit=6e07290):**
 
 | 버전 | 포함 전략 | 유니버스 | 기간 | N | PF | Calmar | DD | 비고 |
 |------|---------|---------|------|---|----|--------|----|-----|
 | v14.4.x baseline | D_mom8+MA | **60 syms** | 6yr | 5,515 | 1.273 | 15.9 | 69.7% | |
 | **v14.5.0 (프로덕션)** | D_mom8+MA | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% | canonical |
-| r56/r57 연구 베이스라인 | D_mom8+MA | **60 syms** | 6yr | 6,538 | 1.638 | 88.5 | 52.3% | 연구스크립트 |
-| r72 3전략 flat | D+S+MA | 60 syms | 5.67yr | 7,644 | 1.129 | 5.6 | 85.0% | flat TP=5%⚠️ |
-| **r73 D+MA trail** | D_mom8+MA | **60 syms** | 5.67yr | **4,874** | **1.414** | **31.4** | 49.7% | trail-aware |
-| **r73 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,773** | **2.002** | **1695.6** | 40.5% | **trail canonical** |
+| r73 3전략 trail | **D+S+MA** | **60 syms** | 5.67yr | 9,773 | 2.002 | 1695.6 | 40.5% | s_trail_dist=0.002 기준 |
+| **r76 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,775** | **2.484** | **9882** | **37.1%** | **trail canonical (s_trail_dist=0.001)** |
 
-> **r73 trail = 프로덕션 기준 수치.** flat sim(r72)은 과소평가이므로 구조 결정에 사용 금지.  
-> 3전략 combined trail: S_d8 dominant (82.4% 슬롯), MA 독립 (94.5%), D_mom8 cherry-pick (11.3%)  
-> **구조 결정(r73): Option A 채택 — 현상 유지 (Calmar 1695.6 >> OLD D+MA 31.4 × 1.1 = 34.5)**  
-> 60 syms = symbol_whitelist. **`exclude_symbols` 방식 사용 금지.**  
+> **r76 trail = 현재 프로덕션 기준 수치 (v14.21.0+).** r73은 이전 기준.
+> S_d8 standalone: N=7748, PF=9.349, MaxDD=4.3% (with s_trail_distance=0.001)
+> 3전략 combined trail: S_d8 dominant, MA 독립, D_mom8 cherry-pick
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
-
-**r73 슬롯 경쟁 (trail-aware):**
-- D_mom8: 2594 raw → **292 accepted (11.3%)** — r72 flat 6.2% 대비 개선됨 (trail timing 차이)
-- S_d8: 8683 raw → 7152 accepted (82.4%) — 독점이 정당함 (PF=4.948, Calmar=1813)
-- MA Cluster: 2464 raw → 2329 accepted (94.5%) — 4h TF 분리로 충돌 없음
 
 ---
 
