@@ -81,6 +81,145 @@ G_3TF = [TF_15m, TF_1h, TF_4h]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Tiered Slippage Model
+#  Based on Binance USDT-M perpetual 24h volume tiers.
+#  Calibrated for limit-chaser entries that enter on breakouts
+#  (price moving fast → worse fill than flat 0.08% assumes).
+# ══════════════════════════════════════════════════════════════════════════════
+
+# High-liquidity symbols: consistently >$500M daily volume on USDT-M perps.
+# These can be filled near mid-price with limit-chaser even during squeezes.
+_HIGH_LIQ_SYMS: frozenset[str] = frozenset(
+    {
+        "BTCUSDT",
+        "ETHUSDT",
+        "BNBUSDT",
+        "SOLUSDT",
+        "XRPUSDT",
+        "DOGEUSDT",
+        "ADAUSDT",
+        "AVAXUSDT",
+        "LINKUSDT",
+        "DOTUSDT",
+        "MATICUSDT",
+        "LTCUSDT",
+        "UNIUSDT",
+        "ATOMUSDT",
+        "FILUSDT",
+        "NEARUSDT",
+        "FTMUSDT",
+        "TRXUSDT",
+    }
+)
+
+# Thin/small-cap symbols: typically <$50M daily volume.
+# Bid-ask spreads widen sharply during vol spikes; limit-chaser often fills
+# near the far side of the spread. 0.16% round-trip is conservative.
+_LOW_LIQ_SYMS: frozenset[str] = frozenset(
+    {
+        "BANDUSDT",
+        "BELUSDT",
+        "ICXUSDT",
+        "IOSTUSDT",
+        "IOTAUSDT",
+        "KNCUSDT",
+        "LRCUSDT",
+        "RLCUSDT",
+        "RSRUSDT",
+        "SKLUSDT",
+        "STORJUSDT",
+        "TRBUSDT",
+        "ZENUSDT",
+        "ZRXUSDT",
+    }
+)
+
+# Everything else (mid-tier alts) falls into medium liquidity: 0.12%.
+_COST_HIGH_LIQ: float = 0.0008  # 0.08% round-trip (current flat default)
+_COST_MED_LIQ: float = 0.0012  # 0.12% round-trip
+_COST_LOW_LIQ: float = 0.0016  # 0.16% round-trip (thin markets)
+
+
+def get_symbol_slippage(symbol: str, conservative: bool = False) -> float:
+    """Return round-trip cost estimate for a symbol.
+
+    Assigns cost by 24h volume tier on Binance USDT-M perpetuals:
+      HIGH (≥$500M/day): 0.08%  — fills near mid even during squeezes
+      MED  ($50-500M/day): 0.12% — some spread widening on breakouts
+      LOW  (<$50M/day): 0.16%  — thin markets; spread widens sharply
+
+    Args:
+        symbol: Trading symbol e.g. 'BTCUSDT'.
+        conservative: If True, add 50% buffer to the tier cost.
+
+    Returns:
+        Round-trip cost fraction (e.g. 0.0008 = 0.08%).
+    """
+    if symbol in _HIGH_LIQ_SYMS:
+        cost = _COST_HIGH_LIQ
+    elif symbol in _LOW_LIQ_SYMS:
+        cost = _COST_LOW_LIQ
+    else:
+        cost = _COST_MED_LIQ
+    if conservative:
+        cost *= 1.5
+    return cost
+
+
+def simulate_with_tiered_slippage(
+    cfg: dict,
+    data_15m: dict,
+    data_1h: dict,
+    data_4h: dict,
+    strat: str,
+    mode: str = "flat",
+) -> list[tuple[str, int, int, float]]:
+    """Run collect_trades then adjust PnL by per-symbol slippage tier.
+
+    The base ``collect_trades()`` bakes in a flat cost (``COST_DIRECTIONAL``
+    or ``COST_STRADDLE``).  This function replaces that flat cost with a
+    per-symbol tiered cost by adjusting each trade's PnL:
+
+        pnl_tiered = pnl_flat - (tiered_cost - flat_cost)
+
+    For straddle trades (4 legs) the adjustment scales by 2×:
+        tiered_str_cost = 2 × get_symbol_slippage(sym, ...)
+        delta = tiered_str_cost - COST_STRADDLE
+
+    Args:
+        cfg: Strategy config dict (same as collect_trades).
+        data_15m: 15m OHLCV data dict.
+        data_1h: 1h OHLCV data dict.
+        data_4h: 4h OHLCV data dict.
+        strat: "D_mom8" or "S_d8".
+        mode: "flat" (unchanged), "tiered" (per-symbol), or
+              "conservative" (tiered + 50% buffer).
+
+    Returns:
+        List of (symbol, entry_bar_15m, exit_bar_15m, pnl_float).
+    """
+    if mode not in ("flat", "tiered", "conservative"):
+        raise ValueError(f"mode must be 'flat', 'tiered', or 'conservative', got {mode!r}")
+
+    trades = collect_trades(cfg, data_15m, data_1h, data_4h, strat)
+
+    if mode == "flat":
+        return trades
+
+    is_straddle = strat == "S_d8"
+    conservative = mode == "conservative"
+    flat_cost = COST_STRADDLE if is_straddle else COST_DIRECTIONAL
+
+    adjusted: list[tuple[str, int, int, float]] = []
+    for sym, entry, exit_b, pnl in trades:
+        sym_dir_cost = get_symbol_slippage(sym, conservative=conservative)
+        tiered_cost = sym_dir_cost * 2 if is_straddle else sym_dir_cost
+        delta = tiered_cost - flat_cost
+        adjusted.append((sym, entry, exit_b, pnl - delta))
+    return adjusted
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Numba-Compiled Trade Simulators
 # ══════════════════════════════════════════════════════════════════════════════
 
