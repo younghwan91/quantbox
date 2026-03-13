@@ -1,0 +1,45 @@
+Kelly Said 154x. We Run 30x. Here's Why That's the Right Choice.
+
+The Kelly Criterion gave us a lever size of 154x. We didn't take it. This is what happens when the math changes faster than your risk framework.
+
+The original leverage decision was made with a win rate of 25.9% and a reward-to-risk ratio of 3.75. Half-Kelly calculation: f* = WR - (1-WR)/RR = 0.6%, which with 10 position slots and a 1% stop-loss works out to 30.7x. We adopted 30x. That was the right answer to the right question at the time.
+
+Then the strategy improved. Win rate rose to 62.9%. R:R fell to 1.16 (tighter profit protection, earlier exits). New Kelly: WR=62.9%, RR=1.16 → f* = 54.6% → L = 54.6% × 10 / 1% = **154x**. For the straddle component, Kelly reaches 191x.
+
+Kelly at 154x means the math says running 5x more leverage than we currently do would still be inside the optimal zone. That number is almost certainly wrong in practice. The Kelly formula assumes exact and stable parameters, no execution slippage beyond what's modeled, and a stationary win rate. None of those hold perfectly in live markets.
+
+The win rate improvement came from two specific changes: a pullback entry filter added in research round 55, and a parameter relaxation in signal threshold. Both improved signal selectivity — fewer trades, higher quality. When filters improve, Kelly responds nonlinearly because the WR term is inside a subtraction. Going from 25.9% to 62.9% WR doesn't double Kelly; it multiplies it by roughly 50x when R:R is held constant.
+
+At 30x with a 1% stop-loss, the per-trade capital at risk is 3% of total equity per position. With 10 positions fully open, that's 30% at risk simultaneously — before considering correlation between positions during stress periods. That constraint is where the Kelly calculation breaks down: it's computed per-trade, not portfolio-level.
+
+Half-Kelly at 154x would imply 77x leverage per position, or 770% of equity at risk across 10 open positions. The number is mathematically correct and practically implausible.
+
+The appropriate response to improving parameters isn't to re-lever to the new Kelly. It's to treat the new Kelly number as confirmation that the current risk budget is conservative, and evaluate whether the strategy can absorb more capital through additional position slots — not more leverage per slot.
+
+60 USDT-M perpetuals · 6yr live Binance data · Kelly computed from live WR/RR metrics · MA: WR=36.7%, RR=2.21, Kelly=20.1x (adopted 21x)
+
+#AlgoTrading #QuantFinance #RiskManagement #CryptoTrading #QuantResearch
+
+
+---
+
+
+켈리 기준이 154배를 제시했다. 우리는 30배를 선택했다. 이것이 올바른 선택인 이유.
+
+켈리 기준이 154배 레버리지를 제안했다. 우리는 채택하지 않았다. 이것이 수학이 리스크 프레임워크보다 빠르게 바뀔 때 일어나는 일이다.
+
+원래 레버리지 결정은 승률 25.9%, 보상 대 위험 비율 3.75로 내려졌다. 하프 켈리 계산: f* = WR - (1-WR)/RR = 0.6%, 포지션 슬롯 10개와 손절 1%를 적용하면 30.7배가 된다. 30배를 채택했다. 당시 올바른 질문에 대한 올바른 답이었다.
+
+그 후 전략이 개선됐다. 승률이 62.9%로 상승했다. R:R은 1.16으로 하락했다(더 타이트한 수익 보호, 더 빠른 청산). 새로운 켈리: WR=62.9%, RR=1.16 → f*=54.6% → L = 54.6% × 10 / 1% = **154배**. 스트래들 컴포넌트는 켈리가 191배에 달한다.
+
+켈리 154배는 수학적으로 현재보다 5배 더 많은 레버리지를 사용해도 여전히 최적 구간 안에 있다고 말한다. 그 숫자는 실제로는 거의 확실히 틀렸다. 켈리 공식은 정확하고 안정적인 파라미터, 모델링한 것 이상의 실행 슬리피지 없음, 고정적인 승률을 가정한다. 라이브 시장에서는 이 중 어느 것도 완벽하게 성립하지 않는다.
+
+승률 개선은 두 가지 구체적 변경에서 비롯됐다: 55번째 연구에서 추가된 눌림목 진입 필터, 그리고 신호 임계값의 파라미터 완화. 둘 다 신호 선택성을 개선했다 — 더 적은 거래, 더 높은 품질. 필터가 개선될 때 켈리는 비선형적으로 반응한다. WR 항목이 뺄셈 안에 있기 때문이다. R:R이 고정될 때 승률이 25.9%에서 62.9%로 가는 것이 켈리를 두 배로 만들지 않는다; 약 50배 곱한다.
+
+30배에 손절 1%로, 거래당 자본 위험은 포지션당 총 자산의 3%다. 10개 포지션이 전부 열리면 동시에 30%가 위험에 처한다 — 스트레스 기간에 포지션 간 상관관계는 고려하기 전에. 이것이 켈리 계산이 무너지는 지점이다: 거래별로 계산되고, 포트폴리오 레벨이 아니다.
+
+154배의 하프 켈리는 포지션당 77배 레버리지, 또는 10개 오픈 포지션에서 총 자산의 770% 위험을 의미한다. 숫자는 수학적으로 맞고 실제로는 불가능하다.
+
+파라미터 개선에 대한 적절한 반응은 새로운 켈리로 다시 레버를 당기는 것이 아니다. 새로운 켈리 숫자를 현재 리스크 예산이 보수적이라는 확인으로 취급하고, 슬롯당 더 많은 레버리지가 아닌 추가 포지션 슬롯을 통해 전략이 더 많은 자본을 흡수할 수 있는지 평가하는 것이다.
+
+바이낸스 USDT-M 선물 60종목 · 6년 실데이터 · 라이브 WR/RR 지표로 켈리 계산 · MA: WR=36.7%, RR=2.21, 켈리=20.1배(채택: 21배)

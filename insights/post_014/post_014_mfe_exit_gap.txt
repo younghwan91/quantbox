@@ -1,0 +1,49 @@
+The Backtest Said +$125. Live Trading Delivered -$33. Same Signal, Same Bar.
+
+This is not slippage. It's a structural gap between how backtests model exits and how live systems execute them.
+
+The specific case: a long position on a crypto perpetual. Price rose 4.37% intrabar. A trailing profit protection threshold was set at 4.17% (trail stop = peak gain minus a 0.2% buffer). The threshold was breached during the bar. The position should have closed near the protection price.
+
+Backtest result: +$125 per position slot (30x leverage on a 4.17% gain).
+Live result: -$33 per position slot.
+Gap: $158.
+
+The mechanism is exact: the backtest assumes exit at the trailing stop trigger price. The live system checks the trailing stop at bar close, then places a market order at the next available price. Within that intraday bar, price moved from +4.37% to -1.1%. The bar's close was -1.1%. The market order filled there.
+
+Both systems detected the same threshold breach. The backtest model assumed intrabar execution. The live system executed at bar close. In a normal bar, that difference is small — the close is near the high, and the gap is a few basis points. In a spike-and-reverse bar, the gap reaches $158 per slot.
+
+We measured this across 6 years and 10,791 directional trades. Among trades that hit the trailing profit threshold (approximately 14.7% of all trades), the average backtest-to-live execution gap was 31bp per trade. In the top 5% of spike-and-reverse bars — the kind where this matters most — the gap averaged 4.1% in price terms, or roughly $123 per slot at 30x leverage.
+
+The aggregate effect: the backtest's profit factor of 1.99 was modeled on intrabar execution. A bar-close execution model, which reflects what actually happens in live trading, produces a profit factor of 1.41 for those trailing-exit trades specifically. That 29% reduction is concentrated in 14.7% of positions — the runners. The rest of the portfolio (positions that hit fixed stops or time limits) is unaffected.
+
+This isn't a bug in either system. It's a modeling assumption that's correct for the backtest's purpose and incorrect as a live trading prediction. Making the assumption explicit is the necessary step — not correcting one system, but labeling what each number represents.
+
+60 USDT-M perpetuals · 6yr live Binance data · 10,791 directional trades · Trail exit analysis · Intrabar vs. bar-close execution model
+
+#AlgoTrading #QuantFinance #Backtesting #CryptoTrading #RiskManagement
+
+
+---
+
+
+백테스트는 +$125를 말했다. 라이브 트레이딩은 -$33을 전달했다. 같은 신호, 같은 봉.
+
+이건 슬리피지가 아니다. 백테스트가 청산을 모델링하는 방식과 라이브 시스템이 실행하는 방식 사이의 구조적 갭이다.
+
+구체적 사례: 암호화폐 선물의 롱 포지션. 봉 내에서 가격이 4.37% 상승했다. 트레일링 수익 보호 임계값이 4.17%로 설정됐다(트레일 스탑 = 최고 수익에서 0.2% 버퍼를 뺀 값). 봉 내에서 임계값이 돌파됐다. 포지션은 보호 가격 근처에서 청산됐어야 했다.
+
+백테스트 결과: 포지션 슬롯당 +$125(4.17% 이익 × 30배 레버리지).
+라이브 결과: 포지션 슬롯당 -$33.
+갭: $158.
+
+메커니즘은 정확하다: 백테스트는 트레일링 스탑 트리거 가격에서 청산한다고 가정한다. 라이브 시스템은 봉 클로즈에서 트레일링 스탑을 확인한 후, 다음 가능한 가격에 시장가 주문을 낸다. 그 15분 봉 안에서 가격은 +4.37%에서 -1.1%로 움직였다. 봉의 종가는 -1.1%였다. 시장가 주문이 그곳에서 체결됐다.
+
+두 시스템 모두 같은 임계값 돌파를 감지했다. 백테스트 모델은 봉 내 실행을 가정했다. 라이브 시스템은 봉 클로즈에서 실행했다. 정상적인 봉에서 그 차이는 작다 — 클로즈가 고가에 가깝고, 갭은 몇 bp다. 급등 후 급락 봉에서 갭은 슬롯당 $158에 달한다.
+
+6년 10,791건의 방향성 거래에서 이를 측정했다. 트레일링 수익 임계값에 도달한 거래(전체 거래의 약 14.7%)에서 평균 백테스트 대비 라이브 실행 갭은 거래당 31bp였다. 급등 후 급락 봉의 상위 5%에서 — 이것이 가장 중요한 구간 — 갭은 가격 기준 평균 4.1%, 또는 30배 레버리지에서 슬롯당 약 $123이었다.
+
+집계 효과: 백테스트의 수익 팩터 1.99는 봉 내 실행으로 모델링됐다. 실거래에서 실제 일어나는 것을 반영하는 봉 클로즈 실행 모델은 트레일링 청산 거래에 한정해 수익 팩터 1.41을 생성한다. 그 29% 하락은 전체 포지션의 14.7%에 집중된다 — 러너들. 나머지 포트폴리오(고정 손절이나 시간 제한에 걸린 포지션)는 영향을 받지 않는다.
+
+이건 어느 시스템의 버그가 아니다. 백테스트 목적에는 맞고 라이브 트레이딩 예측으로는 틀린 모델링 가정이다. 가정을 명시하는 것이 필요한 단계다 — 한 시스템을 수정하는 것이 아니라, 각 숫자가 무엇을 나타내는지 레이블링하는 것.
+
+바이낸스 USDT-M 선물 60종목 · 6년 실데이터 · 방향성 거래 10,791건 · 트레일 청산 분석 · 봉 내 실행 vs 봉 클로즈 실행 모델
