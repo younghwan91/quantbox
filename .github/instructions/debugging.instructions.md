@@ -462,3 +462,73 @@ def validate(...) -> PreflightResult:
 ```
 
 `tests/test_preflight.py`에 각 조건마다 테스트 추가 필수.
+
+---
+
+## 8. 핵심 트레이딩 로직 안전장치 (Audit 2026-03-XX)
+
+7개 버그를 코드 감사로 발견 후 수정. 수정 후 19개 테스트 추가 (`tests/test_critical_path_guards.py`).
+
+### 8.1 F2: SHORT force-close 가격 (`reconciliation.py`)
+
+WOULD_TRIGGER 발동 시 force-close 가격:
+- LONG → `bidPrice` (매수자가 지불할 가격 = 매도에 유리)
+- SHORT → `askPrice` (매도자가 받을 가격 = 매수에 유리)
+
+```python
+# 수정 후 (~L173 reconciliation.py)
+_fc_price = float(_book["bidPrice"] if signal == 1 else _book["askPrice"])
+```
+
+**진단:** SHORT force-close 후 PnL이 예상보다 나쁘면 (bid로 매수하면 ask보다 불리) L173 확인.
+
+### 8.2 A2: HWM 음수/0 복원 (`scalper.py`)
+
+state 파일 오염 시 HWM=-999 같은 값 복원 가능 → `(hwm - balance) / hwm` ZeroDivisionError.
+
+```python
+# _load_state() 내 positions 복원 후
+if self._high_water_mark <= 0:
+    self._high_water_mark = balance
+if self._initial_balance <= 0:
+    self._initial_balance = balance
+```
+
+### 8.3 C1: stop_mult 음수 가드 (`brackets.py`)
+
+```python
+if stop_mult < 0:
+    return None  # SL이 entry 반대방향에 배치될 것임
+```
+
+### 8.4 D1: target_retrace 가드 (`brackets.py`)
+
+```python
+if target_retrace <= 0:
+    return None  # TP 방향 역전
+if move_size * target_retrace >= 1.0:
+    return None  # SHORT에서 trigger_price ≤ 0
+# target_retrace=1.5 (RubberBand 기본값) + move_size=0.03 → total=0.045 < 1.0 → 허용
+```
+
+### 8.5 B3: sl_pct=0 가드 (`strategy.py`)
+
+```python
+# 수정 전: if not trail_active and worst_gain <= -sl_pct
+# 수정 후:
+if not trail_active and sl_pct > 0 and worst_gain <= -sl_pct:
+```
+
+`sl_pct=0` (config 오염) 시 ANY loss에서 SL exit → 가드 없으면 즉시 청산.
+
+### 8.6 F3: bracket repair qty=0 가드 (`reconciliation.py`)
+
+극소 notional 포지션은 qty rounding 후 0이 됨 → API reject → repair loop 무한 실패.
+
+```python
+quantity = self._round_qty(quantity, api_sym)
+if quantity <= 0:
+    logger.error(...)
+    self.discord.send(...)
+    continue  # skip repair
+```

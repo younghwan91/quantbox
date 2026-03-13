@@ -1141,7 +1141,25 @@ class RubberBandScalper(
         self._initial_balance = state.get("initial_balance", 0)
         self._high_water_mark = state.get("high_water_mark", 0)
 
-        self._trade_history = state.get("trade_history", [])
+        raw_history = state.get("trade_history", [])
+        # A1: Validate trade_history records — drop corrupt entries (missing/non-numeric pnl fields)
+        valid_history = []
+        for rec in raw_history:
+            if not isinstance(rec, dict):
+                logger.warning(f"Trade history: dropping non-dict record {rec!r}")
+                continue
+            pnl_usd = rec.get("pnl_usd")
+            pnl_pct = rec.get("pnl_pct")
+            if not (isinstance(pnl_usd, (int, float)) and isinstance(pnl_pct, (int, float))):
+                logger.warning(f"Trade history: dropping corrupt record (non-numeric pnl) — {rec!r}")
+                continue
+            valid_history.append(rec)
+        if len(valid_history) < len(raw_history):
+            logger.warning(
+                f"Trade history: dropped {len(raw_history) - len(valid_history)} corrupt records "
+                f"({len(valid_history)}/{len(raw_history)} kept)"
+            )
+        self._trade_history = valid_history
         self._cycle_count = 0  # Always reset per session (new log file each run)
 
         # Restore positions
@@ -1159,6 +1177,21 @@ class RubberBandScalper(
             self._initial_balance = balance
             self._trade_history = []
             logger.info(f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history cleared")
+
+        # A2: Guard — HWM/initial_balance corrupt (0 or negative) → reset to current balance
+        # Prevents ZeroDivisionError in (hwm - balance) / hwm and DD halt triggering immediately
+        if self._high_water_mark <= 0 or self._initial_balance <= 0:
+            balance = self.get_balance()
+            if self._high_water_mark <= 0:
+                logger.warning(
+                    f"Restored HWM={self._high_water_mark:.2f} invalid — resetting to balance ${balance:.2f}"
+                )
+                self._high_water_mark = balance
+            if self._initial_balance <= 0:
+                logger.warning(
+                    f"Restored initial_balance={self._initial_balance:.2f} invalid — resetting to balance ${balance:.2f}"
+                )
+                self._initial_balance = balance
 
         for sym, pos in positions.items():
             # T1-2: Validate critical fields before restoring to prevent
