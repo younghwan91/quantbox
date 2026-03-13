@@ -232,7 +232,7 @@ class TestStraddleUnchanged:
         """Straddle uses s_trail_activate/s_trail_distance, not d_trail params."""
         cfg = strat.config
         assert cfg.s_trail_activate == pytest.approx(0.015)
-        assert cfg.s_trail_distance == pytest.approx(0.002)
+        assert cfg.s_trail_distance == pytest.approx(0.001)  # r76: updated from 0.002
         # Ensure they differ from D_mom8 params
         assert cfg.s_trail_activate != cfg.d_trail_activate
 
