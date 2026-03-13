@@ -1000,6 +1000,8 @@ class VolStraddleStrategy:
             "max_hold": max_hold,
             "is_straddle": kwargs.get("is_straddle", False),
             "strategy_type": kwargs.get("strategy_type", meta.get("strategy_type", "vr_squeeze")),
+            # Balance at open time (for trade record accuracy)
+            "balance_before": kwargs.get("balance_before"),
             # Entry timestamp (for trade journal)
             "opened_at": datetime.now(timezone.utc).isoformat(),
             # R43 Trailing Stop (directional only, VR squeeze only)

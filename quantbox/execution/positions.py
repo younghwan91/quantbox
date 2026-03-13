@@ -315,6 +315,9 @@ class PositionMixin:
             except Exception as exc:
                 logger.warning(f"[{symbol}] Exchange dedup check failed ({exc}), proceeding anyway")
 
+        # Capture balance before order fills (used in trade record for accurate tracking).
+        balance_before = self.get_balance()
+
         result = self._place_order(
             symbol,
             side,
@@ -401,6 +404,7 @@ class PositionMixin:
                 max_hold=max_hold,
                 position_side=pos_side,
                 is_straddle=is_straddle,
+                balance_before=balance_before,
             )
 
             # Paper balance cost
@@ -569,6 +573,7 @@ class PositionMixin:
             server_sl_order_id=sl_order_id,
             server_tp_order_id=tp_order_id,
             confidence=self.strategy.get_last_confidence(symbol),
+            balance_before=balance_before,
         )
 
         # v12.5: Set partial TP flag AFTER open_position() created the dict
@@ -822,7 +827,7 @@ class PositionMixin:
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": self.get_balance(),
+                    "balance_before": closed_pos.get("balance_before") or self.get_balance(),
                     "balance_after": self.get_balance(),
                 }
                 self._trade_history.append(trade)
@@ -918,7 +923,7 @@ class PositionMixin:
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
-            "balance_before": self.get_balance(),
+            "balance_before": pos.get("balance_before") or self.get_balance(),
             "balance_after": self.get_balance(),
         }
         self._trade_history.append(trade)
@@ -1235,7 +1240,7 @@ class PositionMixin:
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": self.get_balance(),
+                    "balance_before": closed_pos.get("balance_before") or self.get_balance(),
                     "balance_after": self.get_balance(),
                 }
                 self._trade_history.append(trade)
@@ -1423,7 +1428,6 @@ class PositionMixin:
             self._paper_balance -= close_cost
 
         # Trade record
-        balance_before = self.get_balance()
         trade = {
             "symbol": api_symbol,
             "signal": pos["signal"],
@@ -1439,7 +1443,7 @@ class PositionMixin:
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
-            "balance_before": balance_before,
+            "balance_before": pos.get("balance_before") or self.get_balance(),
             "balance_after": self.get_balance(),
         }
         self._trade_history.append(trade)
