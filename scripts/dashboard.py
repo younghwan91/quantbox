@@ -247,8 +247,19 @@ def load_trades() -> pd.DataFrame:
     )
     conn.close()
     if not df.empty and "exit_time" in df.columns:
-        df["exit_time"] = pd.to_datetime(df["exit_time"], utc=True, errors="coerce")
+        # format="ISO8601" handles mixed precision (seconds vs microseconds) in pandas 2.x
+        df["exit_time"] = pd.to_datetime(df["exit_time"], format="ISO8601", utc=True, errors="coerce")
     return df
+
+
+def _strat_tag(strategy_type: str) -> tuple[str, str]:
+    """Return (css_class, display_label) for a strategy_type value."""
+    s = str(strategy_type)
+    if "straddle" in s:
+        return "tag-vr-s", "S_d8"
+    if "directional" in s or "squeeze" in s:
+        return "tag-vr-d", "VR"
+    return "tag-ma", "MA"
 
 
 def win_streak(df: pd.DataFrame) -> tuple[str, int]:
@@ -566,8 +577,8 @@ def render():
                     avg_mae = grp["mae_pct"].mean() if "mae_pct" in grp else 0
                     avg_b   = grp["bars_held"].mean()
                     tot_cls = "pos" if tot_s >= 0 else "neg"
-                    tag_cls = "tag-vr-s" if "straddle" in strat else ("tag-vr-d" if "directional" in strat else "tag-ma")
-                    label   = "S_d8" if "straddle" in strat else ("D_mom8" if "directional" in strat else "MA CLU")
+                    tag_cls, label = _strat_tag(strat)
+                    label = label if "straddle" in strat or "squeeze" in strat or "directional" in strat else "MA CLU"
                     strat_rows += f"""
 <tr>
   <td><span class="{tag_cls}">{label}</span></td>
@@ -600,10 +611,9 @@ def render():
                     pnl      = r["pnl_usd"]
                     pct_cls  = "pos" if pnl >= 0 else "neg"
                     side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
-                    tag_cls  = "tag-vr-s" if "straddle" in str(r["strategy_type"]) else ("tag-vr-d" if "directional" in str(r["strategy_type"]) else "tag-ma")
+                    tag_cls, strat_label = _strat_tag(r["strategy_type"])
                     t        = str(r["exit_time"])[:16]
                     mfe      = r.get("mfe_pct", 0) or 0
-                    strat_label = "S_d8" if "straddle" in str(r["strategy_type"]) else ("D_mom8" if "directional" in str(r["strategy_type"]) else "MA")
                     trade_rows += f"""
 <tr>
   <td class="neu" style="text-align:left">{t}</td>
@@ -712,11 +722,10 @@ def render():
                 pnl      = r["pnl_usd"]
                 pct_cls  = "pos" if pnl >= 0 else "neg"
                 side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
-                tag_cls  = "tag-vr-s" if "straddle" in str(r["strategy_type"]) else ("tag-vr-d" if "directional" in str(r["strategy_type"]) else "tag-ma")
+                tag_cls, strat_label = _strat_tag(r["strategy_type"])
                 t        = str(r["exit_time"])[:16]
                 mfe      = r.get("mfe_pct", 0) or 0
                 mae      = r.get("mae_pct", 0) or 0
-                strat_label = "S_d8" if "straddle" in str(r["strategy_type"]) else ("D_mom8" if "directional" in str(r["strategy_type"]) else "MA")
                 trade_rows += f"""
 <tr>
   <td class="neu">{t}</td>
@@ -838,8 +847,9 @@ def render():
 
                 strat_comp = ""
                 for _, r in grp_strat.iterrows():
-                    label   = "S_d8" if "straddle" in str(r["strategy_type"]) else ("D_mom8" if "directional" in str(r["strategy_type"]) else "MA CLUSTER")
-                    tag_cls = "tag-vr-s" if "straddle" in str(r["strategy_type"]) else ("tag-vr-d" if "directional" in str(r["strategy_type"]) else "tag-ma")
+                    tag_cls, label = _strat_tag(r["strategy_type"])
+                    if "straddle" not in str(r["strategy_type"]) and "squeeze" not in str(r["strategy_type"]) and "directional" not in str(r["strategy_type"]):
+                        label = "MA CLUSTER"
                     tot_cls = "pos" if r["total"] >= 0 else "neg"
                     pf_str2 = f"{r['pf']:.2f}" if r["pf"] != float("inf") else "∞"
                     strat_comp += f"""
