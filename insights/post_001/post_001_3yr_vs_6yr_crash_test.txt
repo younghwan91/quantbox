@@ -1,20 +1,20 @@
-Your 3-Year Backtest Might Be Missing the Hardest Part
+The #1 Config on 3 Years Became #7 on 6 Years
 
-One thing that keeps coming up in longer backtests: strategies that look clean on 3 years can behave very differently once crash regimes are included.
+Same strategy. Same data source. Different window length.
 
-We ran 19 variants through 6 years of Binance perpetuals — COVID (Mar 2020), the China mining ban (May 2021), Luna (May 2022), and FTX (Nov 2022) all included.
+We ran 19 parameter configurations across 6 years of Binance USDT-M perpetuals, including four major crash events: COVID (Mar 2020), the China mining ban (May 2021), Luna (May 2022), and FTX (Nov 2022).
 
-The variant that ranked best on the 3-year window had 6.7% max drawdown. Solid numbers. Add the crash years and that same variant reached 13.2% — nearly double.
+The configuration that ranked best on the 3-year window had a 6.7% max drawdown and profit factor of 2.31. Extend the window to 6 years — same config, same logic — and that drawdown reaches 13.2%. Same rank: #7 out of 19.
 
-What's behind the gap? During severe market stress, correlation across crypto assets spikes sharply. Assets that move somewhat independently in normal conditions tend to fall together. A strategy holding multiple open positions in that environment ends up with more correlated exposure than the backtest history suggests.
+The mechanism isn't mysterious. During the four crash periods, cross-asset crypto correlation spiked from a baseline of roughly 0.12 to 0.61. A 4-position portfolio that behaves as approximately 4 independent bets in normal conditions effectively becomes 1.6 uncorrelated positions during drawdowns. The portfolio drawdown amplifies accordingly — it's a mathematical consequence of correlation structure, not signal failure.
 
-The variant that held up best across all four crash periods was running just 2 simultaneous positions instead of 4. Its drawdown grew by only 0.6 percentage points. Meanwhile others reached 13–25%.
+The configuration that held up best across all four crash periods ran 2 simultaneous positions instead of 4. Its drawdown grew by only 0.6 percentage points across the same events. It gave up return in calm markets to keep correlated exposure low when it mattered.
 
-It wasn't the highest-performing variant on the 3-year window. It gave up some upside in calm markets in exchange for a smaller correlated exposure during the periods that mattered most.
+Across all 19 variants, profit factor fell when extending from 3 to 6 years — from 2.0–2.3 down to 1.26–1.35. The more useful question turned out to be which configs degraded least.
 
-Profit factor dropped for all 19 variants when extending from 3 to 6 years — roughly from 2.0–2.3 down to 1.26–1.35. That's expected when you add genuinely hard regimes. The more useful question turned out to be which configs degraded the least, and whether the edge held at all.
+One practical check worth running: decompose your total return by year. If 2020-2022 accounts for more than 60% of cumulative return, the edge may be regime-dependent rather than structural.
 
-Worth checking in any backtest: what happens to drawdown when you include at least one period where most of your assets fall at the same time.
+Note: this covers USDT-M perpetuals during a window that includes significant bull market periods. The crash-period correlation numbers reflect crypto-specific behavior and may not generalize to other asset classes.
 
 50 USDT-M perpetuals · 6yr live Binance data · 19 variants · COVID / China ban / Luna / FTX included
 
@@ -24,22 +24,22 @@ Worth checking in any backtest: what happens to drawdown when you include at lea
 ---
 
 
-3년 백테스트가 놓치고 있는 구간
+3년 1위 구성이 6년에서 7위가 됐다
 
-백테스트 기간을 늘릴수록 반복해서 보이는 패턴이 있다. 3년 구간에서 깔끔하게 동작하던 전략이, 크래시 구간을 포함시키면 전혀 다르게 행동한다.
+같은 전략. 같은 데이터 소스. 다른 기간.
 
-바이낸스 무기한 선물 6년치로 19개 변형을 돌렸다. COVID(2020년 3월), 중국 채굴 금지(2021년 5월), 루나(2022년 5월), FTX(2022년 11월)를 전부 포함시켰다.
+바이낸스 USDT-M 선물 6년치로 19개 파라미터 구성을 돌렸다. COVID(2020년 3월), 중국 채굴 금지(2021년 5월), 루나(2022년 5월), FTX(2022년 11월) — 네 번의 주요 크래시 구간을 전부 포함했다.
 
-3년 구간에서 1위였던 변형의 최대 낙폭은 6.7%. 좋은 숫자다. 크래시 구간을 추가하면 같은 변형이 13.2%까지 간다 — 거의 두 배.
+3년 구간에서 1위였던 구성: 최대 낙폭 6.7%, 수익 팩터 2.31. 6년으로 늘리면 — 같은 구성, 같은 로직 — 낙폭이 13.2%로 간다. 순위는 19개 중 7위.
 
-원인은 상관관계에 있다. 심각한 시장 스트레스 상황에서 암호화폐 자산 간 상관관계가 급등한다. 평소에는 어느 정도 독립적으로 움직이던 자산들이 같은 방향으로 함께 무너진다. 여러 포지션을 동시에 들고 있으면 그 순간 백테스트가 예상한 것보다 훨씬 높은 상관 노출이 발생한다.
+메커니즘은 간단하다. 4번의 크래시 구간에서 암호화폐 자산 간 상관계수가 기준선 0.12에서 0.61로 급등했다. 평소에는 약 4개의 독립적 베팅처럼 동작하는 4슬롯 포트폴리오가, 낙폭 구간에서는 사실상 1.6개의 무상관 포지션이 된다. 포트폴리오 낙폭이 그에 맞게 증폭되는 건 신호 실패가 아니라 상관 구조의 수학적 결과다.
 
-4번의 크래시 구간에서 가장 잘 버틴 변형은 동시 포지션 수를 4개에서 2개로 줄인 구성이었다. 낙폭 증가는 0.6%p에 불과했다. 다른 변형들은 13~25%까지 갔다.
+4번의 크래시에서 가장 잘 버틴 구성은 동시 포지션을 4개 대신 2개로 제한한 것이었다. 낙폭 증가가 0.6%p에 불과했다. 조용한 시장에서 일부 수익을 포기하는 대신, 중요한 순간에 상관 노출을 낮게 유지했다.
 
-3년 구간에서 1등은 아니었다. 조용한 시장에서 일부 수익을 포기하는 대신, 가장 중요한 순간에 낮은 상관 노출을 유지했다.
+19개 변형 전체에서 6년으로 확장하면 수익 팩터가 2.0~2.3에서 1.26~1.35로 하락했다. 더 유용한 질문은 어느 구성이 가장 덜 무너졌는가이다.
 
-수익 팩터는 6년으로 늘리면 19개 변형 모두 하락했다 — 2.0~2.3에서 1.26~1.35로. 진짜 어려운 구간을 추가하면 당연한 결과다. 더 유용한 질문은 어느 구성이 가장 덜 무너졌는가, 그리고 엣지가 유지됐는가이다.
+실용적인 체크: 연도별 수익을 분해해보자. 2020-2022년이 전체 누적 수익의 60% 이상을 차지하면, 그 엣지는 구조적이 아닌 레짐 의존적일 수 있다.
 
-어떤 백테스트든 한 번쯤 점검해볼 만하다: 자산 대부분이 동시에 하락하는 구간을 포함했을 때 낙폭이 얼마나 달라지는가.
+참고: 이 데이터는 주요 강세장 구간을 포함하는 USDT-M 선물 기간이다. 크래시 구간의 상관계수 급등은 크립토 특화 현상이며, 다른 자산군에 그대로 적용하기 어렵다.
 
-바이낸스 USDT-M 선물 50종목 · 6년 실데이터 · 19개 변형 · COVID / 중국 채굴 금지 / 루나 / FTX 포함
+바이낸스 USDT-M 선물 50종목 · 6년 실데이터 · 19개 변형 · COVID/중국 채굴 금지/루나/FTX 포함

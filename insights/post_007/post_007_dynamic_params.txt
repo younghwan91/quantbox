@@ -1,0 +1,41 @@
+224 Configurations. 3 Regime Types. Static Won by Calmar 5.8 vs 3.1.
+
+Regime-adaptive parameter switching is a compelling idea. The logic is obvious: use tighter parameters in volatile regimes, wider ones in calm regimes. The data didn't support it.
+
+We tested 224 configurations of regime-adaptive logic across 3 volatility regime classifications (high / medium / low) over 6 years. Every configuration specified different entry and exit parameters for each regime. The baseline used static parameters throughout.
+
+Static won on Calmar (5.8 vs peak adaptive of 3.1). It also won on profit factor (1.27 vs 1.21) and net return. The adaptive configurations had higher per-trade EV (+3.6bp average), but lower total return.
+
+The mechanism: the signal's natural selectivity already functions as a volatility filter. In low-volatility periods, the signal fires infrequently by construction — the conditions required for an entry are harder to meet when the market is quiet. Adding an explicit low-volatility gate double-filtered the same condition. The result was 28% fewer trades in the configurations where it mattered most, without a proportional improvement in per-trade edge. Trade frequency loss dominated the per-trade EV gain.
+
+The failure mode is worth being specific about: adaptive params improved quality. They failed at the portfolio level because the portfolio's return is quality × quantity. Cutting quantity 28% while improving quality 3.6bp/trade is a losing exchange when per-trade EV is roughly 40bp.
+
+One configuration did show promise: the high-vol regime variant, which used wider parameters when volatility was elevated. This is less double-filtering and more expanding the capture window when conditions allow. Calmar for this subset: 4.1.
+
+Intellectual honesty note: we only tested regime-switching with two or three categories. Continuous parameter adaptation wasn't covered. The finding is about discrete regime switching, not regime-awareness broadly.
+
+60 USDT-M perpetuals · 6yr live Binance data · 224 adaptive configurations · 3 regime types · Static baseline comparison
+
+#AlgoTrading #QuantFinance #CryptoTrading #Backtesting #QuantResearch
+
+
+---
+
+
+224개 구성. 3가지 레짐 유형. 정적 파라미터가 칼마 5.8 대 3.1로 승리했다.
+
+레짐 적응형 파라미터 전환은 설득력 있는 아이디어다. 논리는 명확하다: 변동성이 높은 레짐에서는 더 타이트한 파라미터, 조용한 레짐에서는 더 넓은 파라미터를 사용하자. 데이터는 이를 지지하지 않았다.
+
+6년 동안 3가지 변동성 레짐 분류(높음/중간/낮음)에 걸쳐 224개의 레짐 적응 로직 구성을 테스트했다. 모든 구성이 각 레짐에 대해 다른 진입과 청산 파라미터를 지정했다. 기준선은 전체에 걸쳐 정적 파라미터를 사용했다.
+
+정적이 칼마에서 승리했다(5.8 대 적응형 최고치 3.1). 수익 팩터(1.27 대 1.21)와 순수익에서도 승리했다. 적응형 구성들은 거래당 더 높은 EV(평균 +3.6bp)를 가졌지만, 전체 수익은 더 낮았다.
+
+메커니즘: 신호의 자연적 선택성이 이미 변동성 필터로 기능한다. 저변동성 기간에, 신호는 구조적으로 드물게 발동된다 — 시장이 조용할 때 진입에 요구되는 조건을 충족하기가 더 어렵다. 명시적인 저변동성 게이트를 추가하면 같은 조건을 이중 필터링하는 것이다. 결과는 가장 중요한 구성에서 거래 28% 감소였으며, 거래당 엣지의 비례적 개선은 없었다. 거래 빈도 손실이 거래당 EV 이득을 압도했다.
+
+실패 방식은 구체적으로 말할 가치가 있다: 적응형 파라미터는 품질을 개선했다. 포트폴리오 레벨에서 실패한 것은 포트폴리오 수익 = 품질 × 수량이기 때문이다. 거래당 EV가 약 40bp일 때 수량을 28% 줄이면서 품질을 3.6bp/거래 개선하는 건 손해 보는 교환이다.
+
+가능성을 보인 구성이 하나 있었다: 변동성이 높을 때 더 넓은 파라미터를 사용한 고변동성 레짐 변형. 이는 이중 필터링이 아닌, 조건이 허락할 때 포착 범위를 확장하는 것이다. 이 서브셋의 칼마: 4.1.
+
+지적 정직성 메모: 우리는 두세 가지 카테고리의 레짐 전환만 테스트했다. 연속적인 파라미터 적응은 다루지 않았다. 이 발견은 이산적 레짐 전환에 관한 것이지, 레짐 인식 전반에 관한 것이 아니다.
+
+바이낸스 USDT-M 선물 60종목 · 6년 실데이터 · 224개 적응형 구성 · 3가지 레짐 유형 · 정적 기준선 비교

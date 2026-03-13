@@ -1,20 +1,23 @@
-Win Rate Tells Half the Story
+68.5% Win Rate. 6pp Safety Margin. One Bad Month Erases It.
 
-Win rate tends to get a lot of attention when evaluating strategies. Higher feels safer. But there's a related number that's worth looking at alongside it: the breakeven win rate.
+Win rate gets most of the attention. The number that matters more is the gap between your win rate and your breakeven win rate.
 
-Breakeven WR is simply 1 / (1 + R:R). It's the win rate at which the strategy stops making money. The gap between your actual win rate and that breakeven point is your real buffer — how much your win rate can deteriorate before the edge disappears.
+Breakeven WR = 1 / (1 + R:R). At R:R = 0.6, that's 62.5%. A strategy with 68.5% win rate and R:R 0.6 has a 6 percentage point buffer before the edge disappears.
 
-We compared 5 exit configurations across 6 years of Binance data, tested through bull, choppy sideways, and bear market regimes.
+Win rate is regime-sensitive. In trending conditions, a momentum-based approach might win 68% of the time. In choppy or mean-reverting markets, that same logic may win 58%. A 6pp safety margin doesn't survive that shift.
 
-The baseline had the highest win rate: 68.5%. But its R:R was 0.6, which put the breakeven at 62.5%. That's a safety margin of just 6 percentage points. In choppy or mean-reverting conditions, win rates can compress quickly — and 6pp doesn't leave much room.
+We compared 5 exit configurations across 6 years of Binance data, testing through distinct bull, sideways, and bear market periods.
 
-The other configurations ran lower win rates (57–67%) but higher R:R ratios (1.2–1.7). Their breakeven win rates fell to 38–45%, giving safety margins of 19–22 percentage points.
+The baseline: 68.5% WR, R:R 0.6, breakeven at 62.5% — 6pp buffer.
+Configurations 2-5: 57–67% WR, R:R 1.2–1.7, breakeven at 38–45% — buffers of 19–22pp.
 
-Across all three market regimes — bull, chop, and bear — the lower-WR configurations showed more stable profit factors. The high-WR config performed well in trending conditions, but its buffer shrank considerably when the market regime shifted.
+Across all three market regimes, the lower-WR configurations showed more stable profit factors. The high-WR baseline performed well in trending conditions. In choppy regimes, its buffer compressed exactly as predicted: win rate fell, and the strategy was operating near its breakeven threshold.
 
-The reason is structural: win rate is sensitive to market conditions. A strategy that wins 68% of the time in trending markets might win 58% in choppy ones. R:R, on the other hand, is determined by exit logic and doesn't shift as dramatically with regime changes.
+The structural reason: win rate shifts with market conditions because it's determined by how often price moves in the direction of the signal. R:R doesn't shift the same way because it's determined by the exit logic — how you define a win and a loss. One is a market variable. The other is an engineering decision.
 
-Breakeven win rate = 1 / (1 + R:R). Worth calculating for any strategy before sizing up.
+Two configurations held statistically positive edge (bootstrap PF > 1.0 in 97%+ of resampled paths) in all three regime periods. The high-WR baseline held in two out of three.
+
+This measurement covers 6 years of USDT-M perpetuals including the 2020-2022 bull run. Win rate numbers from that window likely overstate what's available in calmer regimes.
 
 50 USDT-M perpetuals · 6yr live Binance data · 5 exit configurations · Bull / Chop / Bear regime classification
 
@@ -24,22 +27,25 @@ Breakeven win rate = 1 / (1 + R:R). Worth calculating for any strategy before si
 ---
 
 
-승률은 이야기의 절반만 한다
+승률 68.5%. 안전 마진 6%p. 한 달이면 사라진다.
 
-전략을 평가할 때 승률이 많은 주목을 받는다. 높을수록 안전하게 느껴진다. 하지만 함께 봐야 할 숫자가 하나 더 있다: 손익분기 승률.
+승률이 많은 주목을 받는다. 정작 더 중요한 숫자는 실제 승률과 손익분기 승률 사이의 간격이다.
 
-손익분기 승률은 1 / (1 + R:R)이다. 전략이 돈을 버는 것을 멈추는 승률이다. 실제 승률과 이 손익분기점 사이의 간격이 진짜 안전 마진 — 엣지가 사라지기 전까지 승률이 얼마나 악화될 수 있는지를 나타낸다.
+손익분기 승률 = 1 / (1 + R:R). R:R이 0.6이면 62.5%다. 승률 68.5%에 R:R 0.6인 전략은 엣지가 사라지기 전까지 6%p의 버퍼가 있다.
 
-6년치 바이낸스 데이터로 5가지 청산 구성을 상승장, 횡보장, 하락장 구간 모두에서 비교했다.
+승률은 레짐에 민감하다. 추세장에서 모멘텀 기반 접근법이 68%를 이긴다면, 같은 로직이 횡보나 평균회귀 구간에서는 58%를 이길 수 있다. 6%p 버퍼는 그 변화를 버텨내지 못한다.
 
-기준선은 승률이 가장 높았다: 68.5%. 하지만 R:R이 0.6이라 손익분기 승률은 62.5%였다. 안전 마진이 6%p에 불과하다. 횡보나 평균회귀 구간에서 승률은 빠르게 압축된다 — 6%p는 여유가 없다.
+6년치 바이낸스 데이터로 5가지 청산 구성을 상승장, 횡보장, 하락장 구간에서 비교했다.
 
-나머지 구성들은 승률이 낮았다(57~67%). 대신 R:R이 1.2~1.7로 높았다. 손익분기 승률이 38~45%까지 낮아지면서 안전 마진이 19~22%p로 늘어났다.
+기준선: 승률 68.5%, R:R 0.6, 손익분기 62.5% — 버퍼 6%p.
+구성 2-5: 승률 57~67%, R:R 1.2~1.7, 손익분기 38~45% — 버퍼 19~22%p.
 
-상승장, 횡보장, 하락장 세 구간 모두에서 낮은 승률 구성들이 더 안정적인 수익 팩터를 보였다. 높은 승률 구성은 추세장에서는 잘 동작했지만, 시장 구조가 바뀌자 버퍼가 빠르게 줄었다.
+세 구간 모두에서 낮은 승률 구성이 더 안정적인 수익 팩터를 보였다. 기준선은 추세장에서 잘 동작했다. 횡보 구간에서는 예측대로 버퍼가 압축됐다 — 승률이 떨어지면서 전략이 손익분기점 근처에서 운영됐다.
 
-이유는 구조적이다: 승률은 시장 상황에 민감하다. 추세장에서 68% 이기는 전략이 횡보장에서 58%로 떨어질 수 있다. R:R은 반면 청산 로직이 결정하므로, 시장 구조 변화에 그만큼 극적으로 바뀌지 않는다.
+구조적 이유: 승률은 시장 조건에 따라 변한다. 가격이 신호 방향으로 움직이는 빈도가 시장 구조에 달려 있기 때문이다. R:R은 청산 로직이 결정한다 — 수익과 손실을 어떻게 정의하는가. 하나는 시장 변수고, 다른 하나는 엔지니어링 결정이다.
 
-손익분기 승률 = 1 / (1 + R:R). 규모를 키우기 전에 계산해볼 만한 숫자다.
+세 레짐 모두에서 통계적으로 양의 엣지(부트스트랩 리샘플링 97%+ 경로에서 PF > 1.0)를 유지한 구성은 2개였다. 높은 승률 기준선은 3개 구간 중 2개에서만 유지됐다.
+
+이 측정은 2020-2022년 강세장을 포함하는 6년 USDT-M 선물 데이터다. 그 구간의 승률 수치는 더 조용한 시장에서 기대할 수 있는 것보다 높게 나올 수 있다.
 
 바이낸스 USDT-M 선물 50종목 · 6년 실데이터 · 5가지 청산 구성 · 상승장/횡보장/하락장 구간 분류
