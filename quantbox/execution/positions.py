@@ -112,6 +112,9 @@ class PositionMixin:
             max_hold = sig_meta.get("max_hold", vs.get_max_hold(tf_label))
             is_straddle = sig_meta.get("straddle", False)
             strategy_type = sig_meta.get("strategy_type", "vr_squeeze")
+            # Split vr_squeeze into vr_straddle / vr_directional for dashboard
+            if strategy_type == "vr_squeeze":
+                strategy_type = "vr_straddle" if is_straddle else "vr_directional"
 
             # ── R44d V17: MA Cluster uses different leverage ──
             # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
@@ -120,9 +123,9 @@ class PositionMixin:
                 notional = per_slot_capital * leverage
                 logger.info(f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x (override, SL={sl_pct * 100:.0f}%)")
 
-            # ── R34 CW-Tier Conviction Sizing (VR squeeze only) ──
+            # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
             conviction_score = sig_meta.get("conviction_score", 0)
-            if vs.cw_enabled and vs.cw_multipliers and strategy_type == "vr_squeeze":
+            if vs.cw_enabled and vs.cw_multipliers and "vr" in strategy_type:
                 idx = min(conviction_score, len(vs.cw_multipliers) - 1)
                 cw_mult = vs.cw_multipliers[idx]
                 notional *= cw_mult
