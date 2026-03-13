@@ -125,6 +125,10 @@ class QuantBoxSettings(BaseSettings):
     discord_bot_token: str | None = None
     discord_channel_id: int | None = None
 
+    # ── 상태 파일 백업 ──
+    state_remote_backup_dir: str | None = None  # 원격/2차 백업 경로 (e.g. /mnt/nas/quantbox)
+    state_max_log_age_days: int = 30  # 로그 로테이션: N일 이상 된 로그 파일 삭제
+
     @model_validator(mode="after")
     def _resolve_api_secret(self) -> "QuantBoxSettings":
         """BINANCE_API_SECRET 또는 BINANCE_SECRET 중 하나만 있으면 OK.

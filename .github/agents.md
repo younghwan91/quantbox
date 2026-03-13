@@ -1,7 +1,7 @@
 # QuantBox Agent Instructions
 
 > 코드 사실(Facts) 레퍼런스. 원칙은 `copilot-instructions.md` 참조.  
-> **현재 프로덕션:** VolStraddle v14.17.0 (--strategy vol_straddle)
+> **현재 프로덕션:** VolStraddle v14.24.0 + 5 신뢰성 모듈 (--strategy vol_straddle)
 
 ---
 
@@ -18,6 +18,12 @@
 | **LimitOrderChaser** (`limit_chaser.py`) | 메이커 지정가 추격 주문. 타임아웃 시 시장가 폴백 |
 | **State Persistence** (`state_persistence.py`) | JSON 기반 상태 영속화. 원자적 쓰기. 크래시 복구 지원 |
 | **Drawdown / Daily Loss Breaker** | 세션 HWM 10% / 당일 5% 초과 시 자동 포지션 청산 + 일시정지 |
+| **RateLimiter + CircuitBreaker** (`core/rate_limiter.py`) | API 호출 스로틀링 + 연속 에러 시 자동 차단 (v14.22.0) |
+| **HeartbeatMonitor** (`core/heartbeat.py`) | 메인 루프 정지 감지, Discord 봇 재연결 (v14.22.0) |
+| **InFlightTracker** (`execution/inflight.py`) | 미체결 주문 실시간 추적, 크래시 복구 지원 (v14.22.0) |
+| **ExposureGuard** (`execution/exposure.py`) | 세션 노출도 상한선 (`max_exposure_multiplier=35.0`), 초과 시 신규 진입 차단 (v14.23.0) |
+| **ReconJournal** (`execution/recon_journal.py`) | SQLite 감사 로그. 10종 이벤트 (ghost, bracket, exposure 등) (v14.23.0) |
+| **TradingStrategy** (`strategy/protocol.py`) | 14멤버 전략 Protocol 인터페이스. `@runtime_checkable` (v14.24.0) |
 | **Discord Bot/Notifier** (`bot.py`, `discord.py`) | 원격 제어(!status, !close all 등) 및 실시간 알림 |
 
 ### 1.1 프로덕션 전략 구성 (v14.17.x — VolStraddle, r73)
@@ -91,6 +97,8 @@ MaxHold:     48h (192바 @15m)
 | `bot_utils.py` | `get_git_commit()`, `setup_logging()`, `GIT_COMMIT` | 봇 시작 유틸리티. 커밋 SHA 추적, 로그 핸들러 설정. `GIT_COMMIT`은 import 시 1회 평가 |
 | `scalper_state.py` | `save_scalper_state()`, `load_scalper_state()`, `rotate_state_backups()`, `STATE_FILE`, `PAPER_STATE_FILE` | 라이브 봇 JSON 상태 영속화. tmpfile→os.replace 원자적 쓰기. 크래시 복구 지원 |
 | `loop_mixin.py` | `LoopMixin` | 타이밍/디스플레이. `_wait_for_bar()`, `_next_bar_time()`, `_log_summary()`, `_log_vr_distribution()`, `_print_startup_banner()` |
+| `rate_limiter.py` | `RateLimiter`, `CircuitBreaker` | API 호출 스로틀링 + 연속 에러 차단 (v14.22.0) |
+| `heartbeat.py` | `HeartbeatMonitor` | 메인 루프 정지 감지, Discord 봇 재연결 (v14.22.0) |
 
 ### 3.2 `quantbox/strategy/`
 
@@ -101,21 +109,26 @@ MaxHold:     48h (192바 @15m)
 | `vol_straddle/` | `VolStraddleConfig`, `VolStraddleStrategy`, `compute_vr`, `compute_momentum`, `gen_vr_signal`, `gen_vr_dur_signal`, `make_direction_momentum`, `resample_ohlcv` | VR 압축 + D_mom8 방향 + **S_d8 스트래들** (VR<0.55, 8바 스퀴즈). Hedge Mode 복합 키 (`SYM:LONG`/`SYM:SHORT`). 완성된 바만 참조 (zero lookahead) |
 | `alpha_engine.py` | `AlphaEngine`, `AlphaConfig` | 멀티팩터 신호 |
 | `vol_selector.py` | `VolatilitySelector` | 실현변동성 기반 심볼 선택 |
+| `protocol.py` | `TradingStrategy` | 14멤버 Protocol 인터페이스. `@runtime_checkable`. 전략 확장 표준 (v14.24.0) |
 
 ### 3.3 `quantbox/backtest/`
 
 | 파일 | 핵심 클래스/함수 | 역할 |
 |------|------------------|------|
 | `vectorized_backtest.py` | `VectorizedBacktest`, `BacktestConfig`, `BacktestResult`, `_backtest_core_partial` | Numba 가속 백테스트. 단일/포트폴리오 지원. Delta-based 비용 모델 (부분 청산 대응) |
+| `trade_sim.py` | `collect_trades`, `portfolio_sim`, `compute_metrics`, `sim_directional_trailing`, `sim_straddle_trailing` | 슬롯 경쟁 시뮬레이터. `sim_directional_trailing()` / `sim_straddle_trailing()` — v14.24.0에서 research/r43에서 이전됨 |
 
 ### 3.4 `quantbox/execution/`
 
-| 파일 | 역할 |
-|------|------|
-| `brackets.py` | `BracketMixin` — SL/TP 알고주문 배치/감지/repair |
-| `positions.py` | `PositionMixin` — 포지션 진입/청산/사이징 |
-| `reconciliation.py` | `ReconciliationMixin` — 거래소 상태 동기화, ghost 감지 |
-| `data_mixin.py` | `DataMixin` — `get_trading_symbols()`, `get_symbol_info()`, `download_klines()`. 마지막 미완성 캔들 자동 제거 (backtest-live parity) |
+| 파일 | 핵심 클래스 | 역할 |
+|------|------------|------|
+| `brackets.py` | `BracketMixin` | SL/TP 알고주문 배치/감지/repair |
+| `positions.py` | `PositionMixin` | 포지션 진입/청산/사이징 |
+| `reconciliation.py` | `ReconciliationMixin` | 거래소 상태 동기화, ghost 감지 |
+| `data_mixin.py` | `DataMixin` | `get_trading_symbols()`, `get_symbol_info()`, `download_klines()`. 마지막 미완성 캔들 자동 제거 (backtest-live parity) |
+| `inflight.py` | `InFlightTracker` | 미체결 주문 실시간 추적, 크래시 복구 지원 (v14.22.0) |
+| `exposure.py` | `ExposureGuard` | 세션 노출도 상한선, max_exposure_multiplier=35.0 (v14.23.0) |
+| `recon_journal.py` | `ReconJournal` | SQLite 감사 로그, 10종 이벤트 타입 (v14.23.0) |
 
 ### 3.5 `quantbox/data/`
 
@@ -217,6 +230,10 @@ MaxHold:     48h (192바 @15m)
 | `core/bot_utils.py` 수정 | `scalper.py`, `loop_mixin.py` (GIT_COMMIT import) |
 | Discord 명령어 추가 | `bot.py`, `test_discord_bot.py` |
 | 새 모듈/파일 추가 | `README.md` 프로젝트 구조, 해당 `__init__.py`, 테스트 파일, `agents.md` |
+| `strategy/protocol.py` 추가 | 새 strategy 구현 시 TradingStrategy Protocol 준수 필수 |
+| `core/rate_limiter.py` 추가 | scalper.py 모든 API 호출에 throttle 자동 적용 |
+| `execution/exposure.py` 추가 | 신규 진입 시 ExposureGuard.check() 통과 필요 |
+| `execution/recon_journal.py` 추가 | reconciliation.py ghost/bracket 이벤트 자동 기록 |
 
 ---
 
