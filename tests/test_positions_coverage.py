@@ -553,6 +553,7 @@ class TestClosePaths:
             "trail_active": False,
             "opened_at": "2026-03-09T10:00:00+00:00",
             "strategy_type": "vr_squeeze",
+            "balance_before": 1234.0,
         }
         return pos_key
 
@@ -650,6 +651,30 @@ class TestClosePaths:
 
         trade = scalper._trade_history[-1]
         assert trade["entry_time"] == "2026-03-09T10:00:00+00:00"
+
+    def test_close_balance_before_is_open_balance_not_close_balance(self):
+        """balance_before in trade record must reflect the balance AT OPEN, not close.
+        Regression test for bug where balance_before == balance_after (both close-time).
+        """
+        scalper = self._make_close_scalper()
+        # Simulate open balance ($1234) stored on position at open time
+        pos_key = self._setup_position(scalper)  # position has balance_before=1234.0
+        # Simulate a different (lower) balance at close time
+        scalper.get_balance = MagicMock(return_value=1220.0)
+
+        scalper._close_position(pos_key, reason="take_profit", current_price=105.0)
+
+        trade = scalper._trade_history[-1]
+        # balance_before must be the open-time value (1234), not close-time (1220)
+        assert trade["balance_before"] == pytest.approx(1234.0), (
+            f"balance_before should be open-time balance 1234.0, got {trade['balance_before']}"
+        )
+        # balance_after is close-time balance (mocked to 1220)
+        assert trade["balance_after"] == pytest.approx(1220.0), (
+            f"balance_after should be close-time balance 1220.0, got {trade['balance_after']}"
+        )
+        # They should differ
+        assert trade["balance_before"] != trade["balance_after"]
 
     def test_close_cancels_server_orders_first(self):
         """SL and TP server orders cancelled before close order is placed."""
