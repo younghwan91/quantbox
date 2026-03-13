@@ -1247,6 +1247,48 @@ class RubberBandScalper(
             if cooldown_data:
                 logger.info(f"Restored MA cluster cooldown for {len(cooldown_data)} symbols")
 
+        # Startup exchange cross-check: warn immediately if exchange has
+        # positions not present in restored state (reverse ghost candidates).
+        if not self.paper_mode:
+            self._startup_exchange_crosscheck()
+
+    def _startup_exchange_crosscheck(self) -> None:
+        """Cross-check exchange positions against restored internal state at startup.
+
+        Detects positions that exist on the exchange but were not in the state
+        file — these are 'reverse ghosts' with no SL/TP protection.
+        Logs a WARNING and sends a Discord alert immediately so the operator
+        is aware before the first reconciliation cycle fires.
+        """
+        try:
+            exchange_positions = self.client.futures_position_information()
+        except Exception as exc:
+            logger.warning(f"Startup exchange cross-check failed: {exc}")
+            return
+
+        for p in exchange_positions:
+            amt = float(p.get("positionAmt", "0"))
+            if amt == 0:
+                continue
+            sym = p["symbol"]
+            pos_side = p.get("positionSide", "BOTH")
+            check_key = f"{sym}:{pos_side}" if pos_side in ("LONG", "SHORT") else sym
+            if check_key not in self.strategy.active_positions:
+                notional = abs(float(p.get("notional", "0")))
+                upnl = float(p.get("unRealizedProfit", "0"))
+                logger.warning(
+                    f"[{check_key}] STARTUP CROSSCHECK: Untracked position on exchange! "
+                    f"notional=${notional:.2f} uPnL={upnl:+.2f} — "
+                    f"No SL/TP. Will be auto-closed in first reconciliation cycle."
+                )
+                self.discord.send(
+                    content=(
+                        f"⚠️ **Startup: Untracked position [{check_key}]** — "
+                        f"notional=${notional:.2f} uPnL={upnl:+.2f}. "
+                        f"No SL/TP protection. Auto-close pending (next reconciliation cycle)."
+                    )
+                )
+
     # ==================== Entry Points ====================
 
     def _ensure_position_mode(self) -> None:
