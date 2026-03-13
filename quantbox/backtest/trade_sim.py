@@ -277,6 +277,7 @@ def collect_trades(
     Args:
         cfg: Strategy config dict with keys:
             sp, lp, d_vr, s_vr, s_dur, d_sl, s_sl, tp.
+            Build from VolStraddleConfig — do NOT hardcode values.
         data_15m: {symbol: {close, high, low, vr_X_Y, mom_8, ...}}.
         data_1h: Same structure, 1h resampled.
         data_4h: Same structure, 4h resampled.
@@ -285,6 +286,28 @@ def collect_trades(
     Returns:
         List of (symbol, entry_bar_15m, exit_bar_15m, pnl_float).
     """
+    # ── Guard: verify required keys come from config, not hardcoded ──────────
+    _REQUIRED_CFG_KEYS = {"sp", "lp", "d_sl", "s_sl", "tp", "d_vr", "s_vr", "s_dur"}
+    _missing = _REQUIRED_CFG_KEYS - cfg.keys()
+    if _missing:
+        raise ValueError(
+            f"collect_trades() cfg dict missing required keys: {sorted(_missing)}.\n"
+            "Build from VolStraddleConfig():\n"
+            "  from quantbox.strategy.vol_straddle.config import VolStraddleConfig\n"
+            "  cfg_obj = VolStraddleConfig()\n"
+            "  cfg = {'sp': cfg_obj.vr_short, 'lp': cfg_obj.vr_long,\n"
+            "         'd_vr': cfg_obj.d_vr_threshold, 's_vr': cfg_obj.s_vr_threshold,\n"
+            "         's_dur': cfg_obj.s_squeeze_dur, 'd_sl': cfg_obj.d_sl,\n"
+            "         's_sl': cfg_obj.s_sl, 'tp': cfg_obj.d_tp}"
+        )
+    if not (0 < cfg["d_sl"] < 0.20):
+        raise ValueError(f"cfg['d_sl']={cfg['d_sl']} out of valid range (0, 0.20). Check config source.")
+    if not (0 < cfg["tp"] <= 1.0):
+        raise ValueError(f"cfg['tp']={cfg['tp']} out of valid range (0, 1.0]. Check config source.")
+    if strat not in ("D_mom8", "S_d8"):
+        raise ValueError(f"strat must be 'D_mom8' or 'S_d8', got {strat!r}")
+    # ─────────────────────────────────────────────────────────────────────────
+
     sp = cfg["sp"]
     lp = cfg["lp"]
     vr_key = f"vr_{sp}_{lp}"

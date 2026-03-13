@@ -3,27 +3,26 @@
 **바이낸스 USDT-M 선물 VR 스퀴즈 시스템 — Dual-Axis Squeeze (VR + MA Cluster)**
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-v14.4.2-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-1685%20passed-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-v14.17.0-green.svg)]()
+[![Tests](https://img.shields.io/badge/tests-1727%20passed-brightgreen.svg)]()
 [![Coverage](https://img.shields.io/badge/coverage-77%25-green.svg)]()
 [![Branch](https://img.shields.io/badge/branch-main-blue.svg)]()
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(30x)와 MA Cluster Squeeze(21x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
 
-> **현재 상태**: Live Trading | Tag `v14.4.2` | 1596 tests passed
+> **현재 상태**: Live Trading | Tag `v14.17.0` | 1727 tests passed
 
 ## 🌟 주요 기능
 
-### 🎯 VolStraddle — VR Compression Detector (v14.3.0, 배포 중)
+### 🎯 VolStraddle — VR Compression Detector (v14.17.0, 배포 중)
 - **Volatility Ratio (VR) 압축 감지**: `VR = ATR(8)/ATR(56) < 0.50` — 변동성 압축 후 폭발 포착
 - **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
 - **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정 (D_mom8)
 - **S_d8 스트래들**: VR < 0.55 × 4바 지속 → 양방향 동시 진입 (Hedge Mode)
-- **파라미터**: SL=1%, 하드TP=12%, Trailing +2%/0.3%, MaxHold=48h (192/48/12바)
-- **R43 Trailing**: d_tp=12% 하드 TP + activate +2% / trail_distance 0.3%
-- **F5 TBR Gate (v14.3.0)**: Taker Buy Ratio z>±0.5 → D_mom8 30.9% 차단 (PF +0.04)
+- **파라미터**: SL=1%, 하드TP=20%(dead cap), Trailing activate +1.0%/distance 0.2%, MaxHold=48h
+- **r69 Trail 개선**: d_trail_activate 0.005→0.010 — 수익 보존 강화 (PF 전 연도 개선)
 - **30x @10 slots** (L/N=3.0, Half-Kelly), 6년 연속 흑자, Bootstrap P(PF≥1.0)=100%
-- **불변 엣지 (v14.3.0, 4.73yr, F5 TBR 활성)**: N=2,229 (D+S), PF=1.308, WR=49.5%, EV=+36.7bp
+- **현재 엣지 (r73, 5.67yr, trail)**: D+S+MA 3전략, PF=2.002, Calmar=1695.6, 60 syms
 - **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
 
 ### 📐 MA Cluster Squeeze — 4h SMA Convergence Breakout (V17, R45, 배포 중)
@@ -34,8 +33,8 @@
 - **Simple Exit**: SL=2%, TP=8%, MaxHold=12바 (48h), 트레일링 스탑 없음
 - **R45 Zombie Filter**: `max_duration=24` 바 초과 클러스터 차단 (오래된 클러스터 제거)
 - **R45 Momentum Filter**: `abs(momentum) < 0.010` 차단 (거스름 없는 약한 신호 제거)
-- **불변 엣지 (R45, 4.73yr)**: N=1,631, PF=1.365, WR=38.1%, EV=+42.6bp
-- **결합 포트폴리오 (v14.3.0)**: N=3,713, PF=1.324, Calmar=24.7, P(PF≥1.0)=100%, 6/6년 흑자
+- **MA Cluster 현재 엣지**: N=2,329 accepted, PF=MA-class, 4h TF 독립, VR와 94.5% 비중복
+- **결합 포트폴리오 (r73, 5.67yr)**: D+S+MA 3전략, PF=2.002, Calmar=1695.6, P(PF≥1.0)=100%, 5/5년 흑자
 
 ### 🔥 레거시 전략 (v14.0.0 이전, 비프로덕션)
 
@@ -217,25 +216,25 @@ research/                   # 리서치 스크립트 (r번호 체계)
 docs/
 └── backtest_results/
     ├── 202602/             # 2026-02 백테스트 리포트 (31개)
-    └── 202603/             # 2026-03 백테스트 리포트 (22개, 현재)
-tests/                      # 유닛 테스트 (994개, 47 파일)
+    └── 202603/             # 2026-03 백테스트 리포트 (64개, 현재)
+tests/                      # 유닛 테스트 (1727개, 47 파일)
 \`\`\`
 
-## 📈 성과 지표 (v14.4.x — Dual-Axis Squeeze, r47 exit)
+## 📈 성과 지표 (v14.17.x — Dual-Axis Squeeze, r73 trail)
 
 ### 불변 엣지 지표 (leverage·기간 무관)
 
-| 지표 | VR Squeeze | MA Cluster R45 | 결합 (프로덕션) |
-|------|---|---|---|
-| N (trade 수) | ~2,466 | ~1,631 | **~4,097** |
-| PF | ~1.31 | ~1.37 | **~1.521** |
-| WR | ~50% | ~38% | ~45% |
-| Sharpe (L/N) | — | — | **~5.06** |
-| Bootstrap P(PF≥1.0) | 100% | 100% | 100% |
-| 연속 흑자 (6년) | ✓ | ✓ | ✓ |
+| 지표 | VR Squeeze (D_mom8) | VR Straddle (S_d8) | MA Cluster | 결합 (프로덕션) |
+|------|---|---|---|---|
+| N (trade 수) | ~292 accepted | ~7,152 accepted | ~2,329 accepted | **~9,773** |
+| PF | — | **4.948** | — | **2.002** |
+| Calmar | — | 1813 | — | **1695.6** |
+| Bootstrap P(PF≥1.0) | 100% | 100% | 100% | 100% |
+| 연속 흑자 | ✓ | ✓ | ✓ | ✓ |
 
-> 정확한 수치는 최신 리포트 참조: `docs/backtest_results/202603/20260308_52c16b4_r47_exit_ab_test.md`  
-> **레버리지 구조**: VR 30x×1%SL → L/N=3.0 | MA 21x×2%SL → L/N=2.1 (Half-Kelly)
+> 데이터: 5.67yr (2020~2026-03), 60 syms, 0.08% RT 비용, trail-aware sim (r73)  
+> **레버리지 구조**: VR 30x×1%SL → L/N=3.0 | MA 21x×2%SL → L/N=2.1 (Half-Kelly)  
+> S_d8 dominant (82.4% 슬롯), MA 독립 (94.5%), D_mom8 cherry-pick (11.3%)
 
 ## 🧪 테스트
 

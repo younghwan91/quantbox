@@ -181,19 +181,19 @@ def test_short_position_buy_stop():
 
 
 def test_ma_cluster_uses_correct_distance():
-    """MA cluster strategy uses ma_cluster_trail_distance (0.005, not 0.002)."""
+    """MA cluster strategy uses ma_cluster_trail_distance (0.003, r75: was 0.005)."""
     s = _make_scalper()
     _setup_mocks(s)
     s._place_algo_order = MagicMock(return_value="new_sl_ma")
 
-    # Peak = 0.020, trail_distance = 0.005 → trail_stop_gain = 0.015
+    # Peak = 0.020, trail_distance = 0.003 → trail_stop_gain = 0.017
     pos = _make_pos(trail_active=True, peak_gain=0.020, strategy_type="ma_cluster", trail_sl_ratcheted=-999.0)
     s._ratchet_trail_sl("TESTUSDT:LONG", pos)
 
-    # trigger = 100 × (1 + 0.015) = 101.50
+    # trigger = 100 × (1 + 0.017) = 101.70
     call_kwargs = s._place_algo_order.call_args.kwargs
-    assert abs(call_kwargs["trigger_price"] - 101.50) < 0.01
-    assert abs(pos["_trail_sl_ratcheted"] - 0.015) < 1e-9
+    assert abs(call_kwargs["trigger_price"] - 101.70) < 0.01
+    assert abs(pos["_trail_sl_ratcheted"] - 0.017) < 1e-9
 
 
 # ─────────────────────────────────────────────────────────────────────────────

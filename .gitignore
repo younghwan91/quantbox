@@ -42,3 +42,4 @@ secrets.json
 /reports/
 /temp/
 devlog/.coverage
+.hypothesis/

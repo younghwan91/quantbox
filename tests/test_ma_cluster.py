@@ -523,8 +523,8 @@ class TestMaClusterConfig:
     def test_defaults(self):
         cfg = VolStraddleConfig()
         assert cfg.ma_cluster_enabled is True
-        assert cfg.ma_cluster_pct == 0.03
-        assert cfg.ma_cluster_min_duration == 8
+        assert cfg.ma_cluster_pct == 0.02  # r75: 3%→2%
+        assert cfg.ma_cluster_min_duration == 6  # r75: 8→6
         assert cfg.ma_cluster_max_duration == 24
         assert cfg.ma_cluster_min_momentum == 0.01
         assert cfg.ma_cluster_sl == 0.02
@@ -651,11 +651,14 @@ class TestStrategyIntegration:
         meta = strategy.get_last_signal_meta("BTCUSDT")
         assert meta.get("strategy_type") != "ma_cluster"
 
-    def test_position_exit_no_trail_for_ma_cluster(self):
-        """MA cluster positions use simple SL/TP, not trailing stop."""
-        strategy = self._make_strategy()
+    def test_position_exit_trail_for_ma_cluster(self):
+        """MA cluster uses trailing stop (trail_activate=2%, trail_distance=0.3%, r75).
 
-        # Open a MA cluster position
+        Below trail_activate: no trail. Above: trail activates and fires on retrace.
+        """
+        strategy = self._make_strategy()
+        cfg = strategy.config
+
         strategy.open_position(
             symbol="BTCUSDT",
             signal=1,
@@ -669,30 +672,43 @@ class TestStrategyIntegration:
             max_hold=12,
             position_side="LONG",
         )
-        # Manually set strategy_type (would come from signal metadata)
         key = "BTCUSDT:LONG"
         strategy._positions[key]["strategy_type"] = "ma_cluster"
 
-        # Price moves to +3% (past trail_activate=2%)
-        # For VR squeeze, trailing would activate. For MA cluster, no trail.
+        trail_activate = cfg.ma_cluster_trail_activate  # 0.02
+        trail_distance = cfg.ma_cluster_trail_distance  # 0.003
+
+        # Phase 1: price below trail_activate (1%) — no trail yet
+        result = strategy.update_position(
+            key,
+            101.0,
+            current_high=101.0,
+            current_low=100.8,
+        )
+        assert result is None
+        assert strategy._positions[key]["trail_active"] is False
+
+        # Phase 2: price past trail_activate (3% > 2%) — trail activates
         result = strategy.update_position(
             key,
             103.0,
-            current_high=103.5,
-            current_low=102.5,
+            current_high=103.0,
+            current_low=102.8,
         )
-        assert result is None  # No exit yet
+        assert result is None
+        assert strategy._positions[key]["trail_active"] is True
 
-        # Price drops back to +0.5% — VR trail would exit, MA cluster holds
+        # Phase 3: retrace past trail_distance → trailing_stop exit
+        peak_gain = strategy._positions[key]["peak_gain"]
+        trail_stop_gain = peak_gain - trail_distance
+        low_exit = 100.0 * (1.0 + trail_stop_gain - 0.001)
         result = strategy.update_position(
             key,
-            100.5,
+            low_exit,
             current_high=103.0,
-            current_low=100.0,
+            current_low=low_exit,
         )
-        # MA cluster: worst_gain for LONG = (100.0 - 100) / 100 = 0%
-        # SL = 2%, so no stop loss hit
-        assert result is None
+        assert result == "trailing_stop", f"Expected trailing_stop, got {result}"
 
     def test_ma_cluster_stop_loss(self):
         """MA cluster position hits SL at 2%."""

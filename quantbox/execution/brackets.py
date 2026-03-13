@@ -137,6 +137,13 @@ class BracketMixin:
         if self.paper_mode:
             return f"paper_sl_{int(time.time() * 1000)}"
 
+        # C1: Guard — stop_mult must be positive (negative = inverted SL direction)
+        if stop_mult < 0:
+            logger.error(
+                f"[{symbol}] SL INVARIANT: stop_mult={stop_mult:.4f} < 0 — would place SL in wrong direction. Aborting."
+            )
+            return None
+
         # Stop price: entry ± (move_size * stop_mult) with 0.5% buffer
         stop_distance = move_size * stop_mult
         buffer = 0.005  # 0.5% extra beyond stop to ensure fill
@@ -240,6 +247,20 @@ class BracketMixin:
         """
         if self.paper_mode:
             return f"paper_tp_{int(time.time() * 1000)}"
+
+        # D1/D4: Guard — target_retrace must be positive (zero/negative = inverted or no TP)
+        # and move_size × target_retrace must not exceed 100% (SHORT trigger_price would go ≤ 0)
+        if target_retrace <= 0:
+            logger.error(
+                f"[{symbol}] TP INVARIANT: target_retrace={target_retrace:.4f} ≤ 0 — would invert or zero TP. Aborting."
+            )
+            return None
+        if move_size * target_retrace >= 1.0:
+            logger.error(
+                f"[{symbol}] TP INVARIANT: move_size={move_size:.4f} × target_retrace={target_retrace:.4f} "
+                f"= {move_size * target_retrace:.4f} ≥ 1.0 — SHORT trigger_price would be ≤ 0. Aborting."
+            )
+            return None
 
         # TP price: entry ± (move_size * target_retrace)
         target_distance = move_size * target_retrace

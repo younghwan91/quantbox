@@ -17,9 +17,9 @@ applyTo: "research/**/*.py,scripts/**/*.py,quantbox/research/**/*.py"
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 cfg = VolStraddleConfig()
 
-D_TP          = cfg.d_tp                              # 0.12 (12%)
+D_TP          = cfg.d_tp                              # 0.20 (20% dead cap — trail exits first)
 D_SL          = cfg.d_sl                              # 0.01 (1%)
-D_TRAIL_ACT   = cfg.d_trail_activate                  # 0.005 (0.5%)
+D_TRAIL_ACT   = cfg.d_trail_activate                  # 0.01 (1.0%)
 D_TRAIL_DIST  = cfg.d_trail_distance                  # 0.002 (0.2%)
 MA_TRAIL_ACT  = cfg.ma_cluster_trail_activate         # 0.04 (4%)
 MA_TRAIL_DIST = cfg.ma_cluster_trail_distance         # 0.005 (0.5%)
@@ -29,7 +29,7 @@ TBR_ENABLED   = cfg.f5_tbr_enabled                   # False (r47 이후)
 ```
 
 **체크 항목:**
-- [ ] `d_tp` 확인 (0.12. 0.05 아님)
+- [ ] `d_tp` 확인 (0.20 — dead cap; 실제 청산은 trail이 전담. 0.05/0.12 아님)
 - [ ] trailing stop 파라미터 확인 (`d_trail_activate`, `d_trail_distance`)
 - [ ] `f5_tbr_enabled` 확인 (현재 False)
 - [ ] `VR_LN = base_leverage / max_concurrent` (3.0). 하드코딩 2.5 등 금지
@@ -105,33 +105,49 @@ compute_metrics(pnl, data_years) → {
 
 ```python
 # Phase 1: 정적 파라미터로 베이스라인 재현
+# ✅ collect_trades() 에 전달하는 cfg dict — 올바른 키 이름
 static_cfg = {
-    "d_tp": 0.12, "d_sl": 0.01,
-    "d_trail_activate": 0.005, "d_trail_distance": 0.002,
-    ...  # config.py에서 읽은 값
+    "sp":    cfg.vr_short,           # e.g. 4
+    "lp":    cfg.vr_long,            # e.g. 24
+    "d_vr":  cfg.d_vr_threshold,     # directional VR threshold
+    "s_vr":  cfg.s_vr_threshold,     # straddle VR threshold
+    "s_dur": cfg.s_squeeze_dur,      # squeeze duration filter
+    "d_sl":  cfg.d_sl,               # directional SL (0.01)
+    "s_sl":  cfg.s_sl,               # straddle SL (0.015)
+    "tp":    cfg.d_tp,               # TP cap (0.20 — trail exits first)
 }
-baseline_trades = collect_trades(static_cfg, ...)
+baseline_trades = collect_trades(static_cfg, data_15m, data_1h, data_4h, strat="D_mom8")
 baseline_pnl    = portfolio_sim(baseline_trades, max_concurrent=10)
 baseline_m      = compute_metrics(baseline_pnl, data_years)
 
 print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
-# 최신 정식 리포트 값과 ±1% 이내인지 확인
+# 최신 정식 리포트 값과 ±5% 이내인지 확인
 ```
 
 **허용 기준:** 최신 리포트 대비 N ±1%, PF ±1%  
 **이탈 시 → 즉시 중단.** 데이터 범위, config, 함수 버전 확인 먼저.
 
-**최신 정식 베이스라인 (v14.5.2+, 2026-03-11 기준, commit=6253fa0):**
+**최신 정식 베이스라인 (v14.17.0, 2026-03-13 기준, commit=33c8487):**
 
-| 버전 | 유니버스 | 기간 | N | PF | Calmar | DD |
-|------|---------|------|---|----|--------|----|
-| v14.4.x baseline | **60 syms** | 6yr | 5,515 | 1.273 | 15.9 | 69.7% |
-| **v14.5.0 (프로덕션)** | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% |
-| **r56/r57 연구 베이스라인** | **60 syms** | 6yr | **6,538** | **1.638** | 88.5 | 52.3% |
+| 버전 | 포함 전략 | 유니버스 | 기간 | N | PF | Calmar | DD | 비고 |
+|------|---------|---------|------|---|----|--------|----|-----|
+| v14.4.x baseline | D_mom8+MA | **60 syms** | 6yr | 5,515 | 1.273 | 15.9 | 69.7% | |
+| **v14.5.0 (프로덕션)** | D_mom8+MA | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% | canonical |
+| r56/r57 연구 베이스라인 | D_mom8+MA | **60 syms** | 6yr | 6,538 | 1.638 | 88.5 | 52.3% | 연구스크립트 |
+| r72 3전략 flat | D+S+MA | 60 syms | 5.67yr | 7,644 | 1.129 | 5.6 | 85.0% | flat TP=5%⚠️ |
+| **r73 D+MA trail** | D_mom8+MA | **60 syms** | 5.67yr | **4,874** | **1.414** | **31.4** | 49.7% | trail-aware |
+| **r73 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,773** | **2.002** | **1695.6** | 40.5% | **trail canonical** |
 
-> v14.5.0 = 프로덕션 canonical (trade_sim.py 기반). r56/r57 베이스라인은 연구 스크립트 자체 구현 기반.
-> 60 syms = symbol_whitelist (상장폐지 MKR/FTM/EOS 제외). **`exclude_symbols` 방식 사용 금지.**
+> **r73 trail = 프로덕션 기준 수치.** flat sim(r72)은 과소평가이므로 구조 결정에 사용 금지.  
+> 3전략 combined trail: S_d8 dominant (82.4% 슬롯), MA 독립 (94.5%), D_mom8 cherry-pick (11.3%)  
+> **구조 결정(r73): Option A 채택 — 현상 유지 (Calmar 1695.6 >> OLD D+MA 31.4 × 1.1 = 34.5)**  
+> 60 syms = symbol_whitelist. **`exclude_symbols` 방식 사용 금지.**  
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
+
+**r73 슬롯 경쟁 (trail-aware):**
+- D_mom8: 2594 raw → **292 accepted (11.3%)** — r72 flat 6.2% 대비 개선됨 (trail timing 차이)
+- S_d8: 8683 raw → 7152 accepted (82.4%) — 독점이 정당함 (PF=4.948, Calmar=1813)
+- MA Cluster: 2464 raw → 2329 accepted (94.5%) — 4h TF 분리로 충돌 없음
 
 ---
 
@@ -291,7 +307,7 @@ for param_value in param_grid:
 
 | 날짜 | 실패 | 증상 | 원인 | 규칙 |
 |------|------|------|------|------|
-| 2026-03-07 | 하드코딩 파라미터 | N/PF 2배 차이 | `tp=0.05` ≠ `cfg.d_tp=0.12` | 항상 `cfg = VolStraddleConfig()` |
+| 2026-03-07 | 하드코딩 파라미터 | N/PF 2배 차이 | `tp=0.05` ≠ `cfg.d_tp` (현재 0.20 dead cap) | 항상 `cfg = VolStraddleConfig()` |
 | 2026-02-26 | 4h MTF 룩어헤드 | WR 83% vs 실전 36% | `i//16` (개발중 바) | `(i//16) - 1` (완성 바) |
 | 2026-03-05 | 동적 자본 공식 오류 | 슬롯 2에서 마진 부족 | `balance/(n+1)` → 첫 슬롯 50% | 고정 `balance/max_concurrent` |
 | 2026-03-06 | 알고 주문 상태 미검출 | SL/TP 체결 누락 | `TRIGGERED`만 확인, `FINISHED` 누락 | `TRIGGERED` + `FINISHED` 둘 다 |
@@ -309,17 +325,17 @@ for param_value in param_grid:
 
 | 파라미터 | 상태 | 발견 내용 |
 |----------|------|-----------|
-| `d_trail_distance=0.002` | ✅ **ROBUST** (but 단조 감소) | ±1 스텝 기준 통과. 하지만 **평탄 구간(plateau) 없음** — 작을수록 백테스트 성과 계속 상승 (0.001→PF 3.77, 0.002→PF 2.77). 0.001을 안 쓰는 이유: bar-close MARKET 실행 갭(r65) — 0.1% trail은 15분 바 노이즈에 의한 오청산 위험. `trail-server-ratchet` 구현 후 재최적화 대상. |
-| `d_tp=0.12` | ℹ️ **Dead parameter** | 전 범위에서 PF/N 변화 없음. 실제 청산은 trail stop이 전담, TP는 never hit. |
+| `d_trail_distance=0.002` | ✅ **ROBUST** (but 단조 감소) | ±1 스텝 기준 통과. 하지만 **평탄 구간(plateau) 없음** — 작을수록 백테스트 성과 계속 상승 (0.001→PF 3.77, 0.002→PF 2.77). **trail-server-ratchet 구현 완료(e473e4d) 후** 0.001~0.0015 재최적화 가능. |
+| `d_tp=0.20` | ℹ️ **Dead parameter** | 전 범위에서 PF/N 변화 없음. 실제 청산은 trail stop이 전담, TP는 never hit. 20%는 안전 상한선. |
 | `d_sl=0.01` | ✅ ROBUST | ±1 스텝 → PF ±12%. 타이트한 SL이 N 늘고 PF 높음. |
-| `d_trail_activate=0.005` | ✅ ROBUST | 높을수록 PF 상승 (0.01 → PF 4.6), 하지만 N 감소. 현재값 균형점. |
+| `d_trail_activate=0.01` | ✅ ROBUST | 높을수록 PF 상승 (0.01 → PF 4.6), 하지만 N 감소. 현재값이 균형점. |
 | `s_vr_threshold=0.57` | ✅ ROBUST | ±1 스텝 → PF ±2%. 매우 안정적. |
 | `s_squeeze_dur=3` | ✅ ROBUST | ±1 스텝 → PF ±3%. 안정적. |
 | `base_leverage=30` | ✅ ROBUST | PF 변화 없음 (PF는 레버리지 무관). L/N만 바뀜. |
 
 **운영 규칙:**
 - `d_trail_distance` 증가 금지 (0.003: OOS=1.160 barely pass, 0.004: OOS=0.883 fail)
-- `d_trail_distance` 감소(0.001~0.0015)는 **backtest에서는 더 좋음** — 단, trail-server-ratchet 구현 전까지 live에서는 bar-close 실행 갭으로 역효과 가능
+- `d_trail_distance` 감소(0.001~0.0015)는 **backtest에서는 더 좋음** — trail-server-ratchet 구현 완료(e473e4d)로 live 갭 문제 해소. 재최적화 시 r65+ 데이터로 검증 필요
 - `d_tp`는 dead parameter — 수정해도 백테스트 수치 변화 없음
 - 새 파라미터 추가 시 반드시 sensitivity sweep 먼저 (cliff edge 사전 검출)
 - **PROD_IDX 주의:** sweep 배열에서 프로덕션값의 실제 인덱스를 수동 확인 필수 (`{k: 3}`으로 일괄 설정 금지)
