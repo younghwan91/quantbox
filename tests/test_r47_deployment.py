@@ -257,20 +257,20 @@ class TestConcurrentPositionTrailIsolation:
     """두 전략이 동시에 포지션을 보유할 때 trail 파라미터가 독립 동작."""
 
     def test_d_activates_at_0pt5_ma_does_not(self, strategy, cfg):
-        """2% 수익: BTC(D_mom8) trail 활성화, ETH(MA cluster) trail 미활성화."""
+        """1.5% 수익: BTC(D_mom8) trail 활성화(1%), ETH(MA cluster) trail 미활성화(2%, r75)."""
         btc_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
         eth_key = _open_ma_cluster(strategy, "ETHUSDT", signal=1, entry=100.0)
 
-        # 두 종목 모두 2% 수익 (BTC D trail 활성화 수준, MA는 미달)
-        _tick(strategy, btc_key, 102.0, high=102.0, low=101.98)
-        _tick(strategy, eth_key, 102.0, high=102.0, low=101.98)
+        # D_mom8 trail_activate=1%, MA trail_activate=2% → 1.5%에서 D만 활성화
+        _tick(strategy, btc_key, 101.5, high=101.5, low=101.48)
+        _tick(strategy, eth_key, 101.5, high=101.5, low=101.48)
 
         btc_pos = strategy._positions[btc_key]
         eth_pos = strategy._positions[eth_key]
 
-        assert btc_pos["trail_active"] is True, "BTC(D_mom8) 2%에서 trail_active=True 필요"
+        assert btc_pos["trail_active"] is True, "BTC(D_mom8) 1.5%에서 trail_active=True 필요"
         assert eth_pos.get("trail_active", False) is False, (
-            "ETH(MA cluster) 2%에서 trail_active=False 필요 (MA threshold=4%)"
+            "ETH(MA cluster) 1.5%에서 trail_active=False 필요 (MA threshold=2%, r75)"
         )
 
     def test_independent_peak_gain_tracking(self, strategy, cfg):
@@ -566,10 +566,10 @@ class TestPastIncidentPrevention:
         assert cfg.d_trail_distance == 0.002, f"r47: trail_distance=0.002 (0.2%). got={cfg.d_trail_distance}"
 
     def test_ma_cluster_trail_activate_not_zero(self, cfg):
-        """MA cluster trail은 4% (너무 타이트한 trail로 조기 종료 방지)."""
-        assert cfg.ma_cluster_trail_activate == 0.04, (
-            f"MA cluster trail_activate=0.04. got={cfg.ma_cluster_trail_activate}"
+        """MA cluster trail은 2%/0.3% (r75 최적화: 4%/0.5% → 2%/0.3%)."""
+        assert cfg.ma_cluster_trail_activate == 0.02, (
+            f"MA cluster trail_activate=0.02 (r75). got={cfg.ma_cluster_trail_activate}"
         )
-        assert cfg.ma_cluster_trail_distance == 0.005, (
-            f"MA cluster trail_distance=0.005. got={cfg.ma_cluster_trail_distance}"
+        assert cfg.ma_cluster_trail_distance == 0.003, (
+            f"MA cluster trail_distance=0.003 (r75). got={cfg.ma_cluster_trail_distance}"
         )
