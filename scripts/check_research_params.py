@@ -76,7 +76,7 @@ def check_file(path: Path) -> list[tuple[int, str, str]]:
     except OSError:
         return []
 
-    rel = str(path.relative_to(REPO_ROOT))
+    rel = str(path.resolve().relative_to(REPO_ROOT)) if not path.is_absolute() else str(path.relative_to(REPO_ROOT))
     violations: list[tuple[int, str, str]] = []
 
     for lineno, line in enumerate(lines, start=1):
