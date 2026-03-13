@@ -121,6 +121,43 @@ grep -n "futures_change_leverage\|leverage > 1" quantbox/scalper.py | head -5
 
 ---
 
+### Incident #6: Reverse Ghost Position (2026-03-13)
+
+**증상:** 이전 세션에서 열린 포지션이 state에 없어 SL/TP 없이 방치됨
+```
+[BANDUSDT] State out of sync — position exists on exchange but not in internal state.
+No SL/TP protection. Reverse ghost check in _reconcile_positions() will auto-close.
+(21:00~21:15 2회 WARNING 후 3시간 방치)
+```
+
+**원인 체인:**
+1. 이전 세션에서 BANDUSDT LONG 진입 (balance ~$130일 때, notional=$403)
+2. 세션 종료 시 state 파일에 BANDUSDT 미저장 (crash 또는 비정상 종료)
+3. 새 세션 시작: state 복원 시 BANDUSDT 없음
+4. BANDUSDT squeeze 신호 발생 → exchange dedup 감지 → 진입만 차단
+5. `_reconcile_positions()`는 state→exchange 방향만 체크 (ghost 감지)
+   exchange→state 방향 체크 없음 (reverse ghost 미탐지) ← **버그**
+6. BANDUSDT는 SL/TP 없이 ~3시간 방치
+
+**식별 방법:**
+```
+grep "State out of sync\|Untracked position\|REVERSE GHOST" logs/...
+```
+
+**수정 (v14.5.x):**
+- `_reconcile_positions()` Phase 2 추가: exchange→state reverse ghost 탐지 + 즉시 시장가 청산
+- `_startup_exchange_crosscheck()` 추가: 세션 시작 시 미추적 포지션 즉시 Discord 경고
+- 테스트: `tests/test_reconciliation_reverse_ghost.py` (11개)
+
+**재발 방지 확인:**
+```bash
+grep -n "REVERSE GHOST\|reverse ghost\|_startup_exchange_crosscheck" quantbox/execution/reconciliation.py quantbox/scalper.py
+# reconciliation.py에 Phase 2 있어야 함
+# scalper.py에 _startup_exchange_crosscheck 있어야 함
+```
+
+---
+
 ### -4028: Leverage not supported for this symbol
 
 **증상:** 레버리지가 심볼 최대치 초과
@@ -267,10 +304,16 @@ cp data/state/scalper_state_backup_YYYYMMDD_HHMMSS.json data/state/scalper_state
 4. **타임프레임 혼용:** 4h 바를 15m 루프에서 참조 시 `j = (i // ratio) - 1` 확인
 5. **포지션 크기:** L/N 값 확인 (VR=3.0, MA=2.1)
 6. **데이터 기간:** 강세장만 백테스트 → 실제와 다른 시장 환경
-7. **D_trail 파라미터 소스 오염 (r53 인시던트, 2026-03-08):** `backtest_v14_3_0.py`의 `D_TRAIL_ACTIVATE=0.02/D_TRAIL_DISTANCE=0.003` import 절대 금지. 항상 `cfg = VolStraddleConfig()`에서 직접 읽어야 함. r47 이후 프로덕션 값은 `0.005/0.002`. 구버전 파일에서 import 시 D_mom8 결과가 조용히 틀림.
-8. **Trail bar-close 실행 갭 (r65 발견, 2026-03-11):** 백테스트는 trail_stop_gain 정확 가격에 청산. 라이브는 bar CLOSE에서 MARKET 주문 → 급락 바에서 최대 $158/slot 손실 갭. D_mom8 단독 ΔPF=-0.950 (48% 저하). → `feature/trail-server-ratchet` 구현 전까지 라이브 PF는 백테스트보다 낮음이 정상.
+7. **D_trail 파라미터 소스 오염 (r53 인시던트, 2026-03-08):** `backtest_v14_3_0.py`의 `D_TRAIL_ACTIVATE=0.02/D_TRAIL_DISTANCE=0.003` import 절대 금지. 항상 `cfg = VolStraddleConfig()`에서 직접 읽어야 함. **r69 이후 프로덕션 값은 `0.010/0.002`** (r47~r68: 0.005/0.002). 구버전 파일에서 import 시 D_mom8 결과가 조용히 틀림.
+8. **Trail bar-close 실행 갭 (r65 발견, 2026-03-11, ✅ ratchet 구현 완료):**
+   - 기존 문제: 라이브는 bar CLOSE에서 MARKET 주문 → 급락 바에서 최대 $158/slot 손실 갭. D_mom8 ΔPF=-0.950 (48% 저하).
+   - **해결:** Trail Server Ratchet 구현 완료 (commit `e473e4d`, `trail_server_ratchet_enabled=True`)
+     - trail_active 활성화 후 매 bar마다 서버에 STOP 주문을 `peak_gain - trail_distance` 가격에 배치/업데이트
+     - 최소 0.1% 개선 시에만 API 호출 (스팸 방지)
+     - `quantbox/execution/brackets.py:574-670` `_ratchet_trail_sl()`
+     - 현재 라이브 PF 갭은 ratchet 이전 포지션 or paper mode에서만 발생 가능
 
-   **진단:** 대시보드에서 MFE >> |PnL|이고 trailing_stop 청산이면 이 갭이 원인.
+   **진단:** 대시보드에서 MFE >> |PnL|이고 trailing_stop 청산이면 이 갭이 원인 (ratchet 이전 포지션).
    ```
    SUIUSDT LONG VR: MFE=+131%, PnL=-$33 → 한 15m 바에 +4.37% → -1.1%
    백테스트: trail_stop_gain=4.17% → +$125 / 라이브: close=-1.1% → -$33
@@ -419,3 +462,73 @@ def validate(...) -> PreflightResult:
 ```
 
 `tests/test_preflight.py`에 각 조건마다 테스트 추가 필수.
+
+---
+
+## 8. 핵심 트레이딩 로직 안전장치 (Audit 2026-03-XX)
+
+7개 버그를 코드 감사로 발견 후 수정. 수정 후 19개 테스트 추가 (`tests/test_critical_path_guards.py`).
+
+### 8.1 F2: SHORT force-close 가격 (`reconciliation.py`)
+
+WOULD_TRIGGER 발동 시 force-close 가격:
+- LONG → `bidPrice` (매수자가 지불할 가격 = 매도에 유리)
+- SHORT → `askPrice` (매도자가 받을 가격 = 매수에 유리)
+
+```python
+# 수정 후 (~L173 reconciliation.py)
+_fc_price = float(_book["bidPrice"] if signal == 1 else _book["askPrice"])
+```
+
+**진단:** SHORT force-close 후 PnL이 예상보다 나쁘면 (bid로 매수하면 ask보다 불리) L173 확인.
+
+### 8.2 A2: HWM 음수/0 복원 (`scalper.py`)
+
+state 파일 오염 시 HWM=-999 같은 값 복원 가능 → `(hwm - balance) / hwm` ZeroDivisionError.
+
+```python
+# _load_state() 내 positions 복원 후
+if self._high_water_mark <= 0:
+    self._high_water_mark = balance
+if self._initial_balance <= 0:
+    self._initial_balance = balance
+```
+
+### 8.3 C1: stop_mult 음수 가드 (`brackets.py`)
+
+```python
+if stop_mult < 0:
+    return None  # SL이 entry 반대방향에 배치될 것임
+```
+
+### 8.4 D1: target_retrace 가드 (`brackets.py`)
+
+```python
+if target_retrace <= 0:
+    return None  # TP 방향 역전
+if move_size * target_retrace >= 1.0:
+    return None  # SHORT에서 trigger_price ≤ 0
+# target_retrace=1.5 (RubberBand 기본값) + move_size=0.03 → total=0.045 < 1.0 → 허용
+```
+
+### 8.5 B3: sl_pct=0 가드 (`strategy.py`)
+
+```python
+# 수정 전: if not trail_active and worst_gain <= -sl_pct
+# 수정 후:
+if not trail_active and sl_pct > 0 and worst_gain <= -sl_pct:
+```
+
+`sl_pct=0` (config 오염) 시 ANY loss에서 SL exit → 가드 없으면 즉시 청산.
+
+### 8.6 F3: bracket repair qty=0 가드 (`reconciliation.py`)
+
+극소 notional 포지션은 qty rounding 후 0이 됨 → API reject → repair loop 무한 실패.
+
+```python
+quantity = self._round_qty(quantity, api_sym)
+if quantity <= 0:
+    logger.error(...)
+    self.discord.send(...)
+    continue  # skip repair
+```

@@ -16,7 +16,7 @@
      - L/N: `base_leverage / max_concurrent` (VR=30/10=3.0, MA=21/10=2.1) — 하드코딩 금지
      - SL 값, 슬리피지/수수료 (round-trip = 0.0008)
    - **위반 선례 (2026-03-07):** `backtest_v14_3_0.py`가 `tp=0.05`(flat) + `VR_LN=2.5`, `MA_LN=1.2` 사용 →
-     실제 프로덕션은 `tp=0.12` + trailing stop + `VR_LN=3.0`, `MA_LN=2.1`. N/PF/CAGR 전부 틀린 수치 보고.
+     실제 프로덕션은 `tp=0.20` (dead cap) + trailing stop + `VR_LN=3.0`, `MA_LN=2.1`. N/PF/CAGR 전부 틀린 수치 보고.
 
 3. **Test-Code Parity** — 모든 기능에 `pytest` 테스트 필수. 짧고 효과적인 테스트 우선. 테스트 없는 코드 = 미완성.
 
@@ -146,3 +146,4 @@ fix(config): SL 파라미터 조정 (ref: r48 DD halt 분석)
 | #3 | 2026-03-05 | slot sizing 테스트는 반드시 **`n_active > 0` 상태** 포함. 전체 10슬롯 마진 합계 검증 |
 | #4 | 2026-03-06 | `_check_order_filled()` — `TRIGGERED` **+ `FINISHED`** 둘 다 체결 처리. ghost 발견 시 반대편 주문도 취소 |
 | #5 | 2026-03-08 | Hedge Mode close는 `reduce_only=False` → leverage guard는 **`if not reduce_only and leverage > 1:`** |
+| #6 | 2026-03-13 | **config 파라미터는 반드시 `VolStraddleConfig()`에서 직접 읽어야 함.** `d_trail_activate`는 r69에서 0.005→0.010으로 변경됨. skills 문서/research 스크립트에 하드코딩 또는 이전 값 사용 시 결과 전부 무효 |

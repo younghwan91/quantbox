@@ -275,14 +275,14 @@ class VolStraddleConfig(BaseSettings):
     # Complementary strategy: 4 SMAs cluster → breakout.
     # Fires when VR squeeze is idle (93.7% non-overlapping).
     ma_cluster_enabled: bool = True  # Enable MA cluster signals
-    ma_cluster_pct: float = 0.03  # Max spread among 4 SMAs (3%)
-    ma_cluster_min_duration: int = 8  # Min 4h bars in cluster (≈32h)
+    ma_cluster_pct: float = 0.02  # Max spread among 4 SMAs (r75: 3%→2%, tighter cluster)
+    ma_cluster_min_duration: int = 6  # Min 4h bars in cluster (r75: 8→6, ≈24h)
     ma_cluster_max_duration: int = 24  # Max 4h bars in cluster (R45: zombie filter)
     ma_cluster_min_momentum: float = 0.01  # Min |momentum| for entry (R45: was 0.003)
     ma_cluster_sl: float = 0.02  # 2% stop loss
     ma_cluster_tp: float = 0.08  # 8% hard TP ceiling (safety; r47: trailing fires first)
-    ma_cluster_trail_activate: float = 0.04  # r47: activate trailing at +4% gain
-    ma_cluster_trail_distance: float = 0.005  # r47: trail 0.5% behind peak
+    ma_cluster_trail_activate: float = 0.02  # r75: 4%→2% (earlier trail activation)
+    ma_cluster_trail_distance: float = 0.003  # r75: 0.5%→0.3% (tighter trail)
 
     # r65: Server-side trail SL ratchet — closes bar-close execution gap (ΔPF=-0.950)
     # When True, places/updates Binance STOP order at trail_stop_gain price after

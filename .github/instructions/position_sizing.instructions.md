@@ -19,9 +19,12 @@ notional = per_slot_capital * base_leverage  # per_slot × 30
 
 | 파라미터 | 값 | 출처 |
 |----------|-----|------|
-| `base_leverage` | 30x | `config.py:81` |
-| `max_concurrent` | 10 | `config.py:86` |
+| `base_leverage` | 30x | `config.py` |
+| `max_concurrent` | 10 | `config.py` |
 | `L/N` (risk per trade) | **3.0** | 30 / 10 |
+| `d_trail_activate` | **0.010** (1.0%) | `config.py` (r69에서 0.005→0.010 변경) |
+| `d_trail_distance` | 0.002 (0.2%) | `config.py` |
+| `d_tp` | 0.20 (**dead param** — trail이 먼저 실행) | `config.py` |
 
 **잔고 $1000일 때 예시:**
 - `per_slot_capital = $1000 / 10 = $100`

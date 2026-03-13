@@ -1,7 +1,7 @@
 # QuantBox Agent Instructions
 
 > 코드 사실(Facts) 레퍼런스. 원칙은 `copilot-instructions.md` 참조.  
-> **현재 프로덕션:** VolStraddle v14.8.0 (--strategy vol_straddle)
+> **현재 프로덕션:** VolStraddle v14.17.0 (--strategy vol_straddle)
 
 ---
 
@@ -20,22 +20,22 @@
 | **Drawdown / Daily Loss Breaker** | 세션 HWM 10% / 당일 5% 초과 시 자동 포지션 청산 + 일시정지 |
 | **Discord Bot/Notifier** (`bot.py`, `discord.py`) | 원격 제어(!status, !close all 등) 및 실시간 알림 |
 
-### 1.1 프로덕션 전략 구성 (v14.4.x — VolStraddle, r47)
+### 1.1 프로덕션 전략 구성 (v14.17.x — VolStraddle, r73)
 
 > ⚠️ **파라미터 source of truth = `quantbox/strategy/vol_straddle/config.py`.**  
 > 아래는 빠른 참조용. 반드시 config.py 읽어서 확인.
 
-**VolStraddle v14.4.x 핵심 파라미터:**
+**VolStraddle v14.17.x 핵심 파라미터:**
 ```
 전략:        VolStraddle (--strategy vol_straddle)
 레버리지:    VR base_leverage=30, MA ma_cluster_leverage=21, max_concurrent=10
 L/N:         VR=3.0, MA=2.1
 SL:          VR d_sl=1%, MA ma_cluster_sl=2%
-Exit (VR):   hard TP=12%, trailing activate=+0.5%, trail_distance=0.2%  ← r47 기준
-TBR Gate:    f5_tbr_enabled=False  ← r47 이후 비활성
+Exit (VR):   hard TP=20% (dead cap), trailing activate=+1.0%, trail_distance=0.2%  ← r69 기준
+TBR Gate:    f5_tbr_enabled=False
 MaxHold:     48h (192바 @15m)
 비용 (RT):   0.08% (0.04%/side × 2)
-베이스라인:  v14.5.0 PF=1.563, Calmar=57.9 (S_d8 trailing, 60 syms, 6yr, 2026-03-08)
+베이스라인:  r73 3전략 trail: PF=2.002, Calmar=1695.6 (D+S+MA, 60 syms, 5.67yr, 2026-03-13)
 ```
 
 ---
@@ -233,7 +233,7 @@ MaxHold:     48h (192바 @15m)
 | `d_vr_threshold` | 0.50 | D_mom8 진입 VR 임계값 |
 | `d_sl` | 0.01 (1%) | D 손절 |
 | `d_tp` | 0.12 (12%) | D 하드 TP |
-| `d_trail_activate` | **0.005 (+0.5%)** | 트레일링 활성화 수익 ← r47 변경 |
+| `d_trail_activate` | **0.010 (+1.0%)** | 트레일링 활성화 수익 ← r69 변경 |
 | `d_trail_distance` | **0.002 (0.2%)** | 트레일링 거리 ← r47 변경 |
 | `s_vr_threshold` | 0.55 | S_d8 스트래들 VR 임계값 |
 | `s_squeeze_dur` | 4 bars | 스트래들 최소 지속 기간 |

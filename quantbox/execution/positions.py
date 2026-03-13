@@ -112,17 +112,25 @@ class PositionMixin:
             max_hold = sig_meta.get("max_hold", vs.get_max_hold(tf_label))
             is_straddle = sig_meta.get("straddle", False)
             strategy_type = sig_meta.get("strategy_type", "vr_squeeze")
+            # Split vr_squeeze into vr_straddle / vr_directional for dashboard
+            if strategy_type == "vr_squeeze":
+                strategy_type = "vr_straddle" if is_straddle else "vr_directional"
 
             # ── R44d V17: MA Cluster uses different leverage ──
             # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
             if "leverage_override" in sig_meta:
-                leverage = sig_meta["leverage_override"]
+                raw_lev = sig_meta["leverage_override"]
+                leverage = max(1.0, min(125.0, float(raw_lev)))
+                if leverage != raw_lev:
+                    logger.warning(
+                        f"[{symbol}] leverage_override clamped: {raw_lev} → {leverage:.0f} (must be [1, 125])"
+                    )
                 notional = per_slot_capital * leverage
                 logger.info(f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x (override, SL={sl_pct * 100:.0f}%)")
 
-            # ── R34 CW-Tier Conviction Sizing (VR squeeze only) ──
+            # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
             conviction_score = sig_meta.get("conviction_score", 0)
-            if vs.cw_enabled and vs.cw_multipliers and strategy_type == "vr_squeeze":
+            if vs.cw_enabled and vs.cw_multipliers and "vr" in strategy_type:
                 idx = min(conviction_score, len(vs.cw_multipliers) - 1)
                 cw_mult = vs.cw_multipliers[idx]
                 notional *= cw_mult
@@ -306,11 +314,15 @@ class PositionMixin:
                         logger.warning(
                             f"[{symbol}] State out of sync — "
                             f"position exists on exchange but not in internal state. "
-                            f"Reconciliation will fix this."
+                            f"No SL/TP protection. "
+                            f"Reverse ghost check in _reconcile_positions() will auto-close."
                         )
                     return False
             except Exception as exc:
                 logger.warning(f"[{symbol}] Exchange dedup check failed ({exc}), proceeding anyway")
+
+        # Capture balance before order fills (used in trade record for accurate tracking).
+        balance_before = self.get_balance()
 
         result = self._place_order(
             symbol,
@@ -398,6 +410,7 @@ class PositionMixin:
                 max_hold=max_hold,
                 position_side=pos_side,
                 is_straddle=is_straddle,
+                balance_before=balance_before,
             )
 
             # Paper balance cost
@@ -566,6 +579,7 @@ class PositionMixin:
             server_sl_order_id=sl_order_id,
             server_tp_order_id=tp_order_id,
             confidence=self.strategy.get_last_confidence(symbol),
+            balance_before=balance_before,
         )
 
         # v12.5: Set partial TP flag AFTER open_position() created the dict
@@ -819,7 +833,7 @@ class PositionMixin:
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": self.get_balance(),
+                    "balance_before": closed_pos.get("balance_before") or self.get_balance(),
                     "balance_after": self.get_balance(),
                 }
                 self._trade_history.append(trade)
@@ -915,7 +929,7 @@ class PositionMixin:
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
-            "balance_before": self.get_balance(),
+            "balance_before": pos.get("balance_before") or self.get_balance(),
             "balance_after": self.get_balance(),
         }
         self._trade_history.append(trade)
@@ -1232,7 +1246,7 @@ class PositionMixin:
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": self.get_balance(),
+                    "balance_before": closed_pos.get("balance_before") or self.get_balance(),
                     "balance_after": self.get_balance(),
                 }
                 self._trade_history.append(trade)
@@ -1420,7 +1434,6 @@ class PositionMixin:
             self._paper_balance -= close_cost
 
         # Trade record
-        balance_before = self.get_balance()
         trade = {
             "symbol": api_symbol,
             "signal": pos["signal"],
@@ -1436,7 +1449,7 @@ class PositionMixin:
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
-            "balance_before": balance_before,
+            "balance_before": pos.get("balance_before") or self.get_balance(),
             "balance_after": self.get_balance(),
         }
         self._trade_history.append(trade)

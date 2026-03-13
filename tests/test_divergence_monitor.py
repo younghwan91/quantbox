@@ -38,9 +38,9 @@ class TestDivergenceAlert:
     def test_message_pf_only(self):
         alert = DivergenceAlert(
             pf_live=0.5,
-            pf_baseline=1.563,
+            pf_baseline=2.002,
             wr_live=0.43,
-            wr_baseline=0.434,
+            wr_baseline=0.461,
             n_trades=50,
             triggered_by=["pf"],
         )
@@ -53,9 +53,9 @@ class TestDivergenceAlert:
     def test_message_wr_only(self):
         alert = DivergenceAlert(
             pf_live=1.2,
-            pf_baseline=1.563,
+            pf_baseline=2.002,
             wr_live=0.28,
-            wr_baseline=0.434,
+            wr_baseline=0.461,
             n_trades=50,
             triggered_by=["wr"],
         )
@@ -65,9 +65,9 @@ class TestDivergenceAlert:
     def test_message_both(self):
         alert = DivergenceAlert(
             pf_live=0.5,
-            pf_baseline=1.563,
+            pf_baseline=2.002,
             wr_live=0.28,
-            wr_baseline=0.434,
+            wr_baseline=0.461,
             n_trades=50,
             triggered_by=["pf", "wr"],
         )
@@ -77,9 +77,9 @@ class TestDivergenceAlert:
     def test_triggered_by_list(self):
         alert = DivergenceAlert(
             pf_live=0.5,
-            pf_baseline=1.563,
+            pf_baseline=2.002,
             wr_live=0.28,
-            wr_baseline=0.434,
+            wr_baseline=0.461,
             n_trades=50,
             triggered_by=["pf", "wr"],
         )
@@ -124,17 +124,17 @@ class TestDivergenceMonitorBasic:
         assert result is None  # exactly at threshold → no alert
 
     def test_wr_gap_triggers(self, tmp_path):
-        # baseline 43.4%, gap=10pp → alert if live WR < 33.4%
+        # baseline 46.1%, gap=10pp → alert if live WR < 36.1%
         mon = _monitor(tmp_path, wr_gap_pp=10.0, pf_threshold=0.0)
         result = mon.check(_stats(n=30, wr=0.33, pf=1.5))
         assert result is not None
         assert "wr" in result.triggered_by
 
     def test_wr_gap_just_below_threshold_no_trigger(self, tmp_path):
-        # gap exactly = 10pp boundary: 43.4 - 33.4 = 10.0pp → alert
+        # baseline 46.1%, gap exactly at boundary: 46.1 - 36.1 = 10.0pp → alert
         mon = _monitor(tmp_path, wr_gap_pp=10.0, pf_threshold=0.0)
-        # 43.4 - 33.5 = 9.9pp < 10pp → no alert
-        result = mon.check(_stats(n=30, wr=0.335, pf=1.5))
+        # 46.1 - 36.2 = 9.9pp < 10pp → no alert
+        result = mon.check(_stats(n=30, wr=0.362, pf=1.5))
         assert result is None
 
     def test_both_triggered(self, tmp_path):
@@ -152,8 +152,8 @@ class TestDivergenceMonitorBasic:
     def test_baseline_values(self, tmp_path):
         mon = _monitor(tmp_path)
         result = mon.check(_stats(n=50, wr=0.20, pf=0.30))
-        assert result.pf_baseline == pytest.approx(1.563)
-        assert result.wr_baseline == pytest.approx(0.434)
+        assert result.pf_baseline == pytest.approx(2.002)
+        assert result.wr_baseline == pytest.approx(0.461)
 
 
 # ── TestDivergenceMonitorCooldown ─────────────────────────────────────────────
@@ -225,10 +225,53 @@ class TestDivergenceMonitorConfig:
 
     def test_custom_wr_gap(self, tmp_path):
         mon = _monitor(tmp_path, wr_gap_pp=5.0, pf_threshold=0.0)
-        # baseline 43.4%, gap=5pp → alert if live < 38.4%
-        result = mon.check(_stats(n=30, wr=0.38, pf=1.5))
+        # baseline 46.1%, gap=5pp → alert if live < 41.1%
+        result = mon.check(_stats(n=30, wr=0.40, pf=1.5))
         assert result is not None
 
     def test_default_cooldown_path(self):
         mon = DivergenceMonitor()
         assert "divergence_last_alert.json" in str(mon._cooldown_path)
+
+
+# ── TestEVDriftCheck ──────────────────────────────────────────────────────────
+
+
+class TestEVDriftCheck:
+    """EV (basis points per trade) sign check — negative EV = no edge."""
+
+    def _stats_ev(self, n: int, wr: float, pf: float, ev_bp: float | None = None) -> dict:
+        d = {"n_trades": n, "win_rate": wr, "profit_factor": pf}
+        if ev_bp is not None:
+            d["ev_bp"] = ev_bp
+        return d
+
+    def test_negative_ev_triggers_alert(self, tmp_path):
+        mon = _monitor(tmp_path, pf_threshold=0.0, wr_gap_pp=100.0)  # disable PF/WR checks
+        result = mon.check(self._stats_ev(n=30, wr=0.50, pf=1.2, ev_bp=-5.0))
+        assert result is not None
+        assert "ev" in result.triggered_by
+
+    def test_zero_ev_triggers_alert(self, tmp_path):
+        mon = _monitor(tmp_path, pf_threshold=0.0, wr_gap_pp=100.0)
+        result = mon.check(self._stats_ev(n=30, wr=0.50, pf=1.2, ev_bp=0.0))
+        # ev=0.0 is not < 0, so no trigger
+        assert result is None
+
+    def test_positive_ev_no_trigger(self, tmp_path):
+        mon = _monitor(tmp_path, pf_threshold=0.0, wr_gap_pp=100.0)
+        result = mon.check(self._stats_ev(n=30, wr=0.50, pf=1.2, ev_bp=15.0))
+        assert result is None
+
+    def test_missing_ev_skips_check(self, tmp_path):
+        """If ev_bp not in stats dict, the EV check is silently skipped."""
+        mon = _monitor(tmp_path, pf_threshold=0.0, wr_gap_pp=100.0)
+        result = mon.check(self._stats_ev(n=30, wr=0.50, pf=1.2))  # no ev_bp key
+        assert result is None
+
+    def test_negative_ev_message_descriptive(self, tmp_path):
+        mon = _monitor(tmp_path, pf_threshold=0.0, wr_gap_pp=100.0)
+        result = mon.check(self._stats_ev(n=30, wr=0.50, pf=1.2, ev_bp=-12.3))
+        assert result is not None
+        assert "EV" in result.message
+        assert "expectancy" in result.message

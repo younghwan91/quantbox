@@ -423,6 +423,48 @@ class TestPositionSizing:
         # per_slot=$100, notional=$100×21=$2100, qty=21
         assert abs(qty - 21.0) < 0.1, f"Expected ~21, got {qty}"
 
+    def test_leverage_override_zero_clamped_to_1(self, caplog):
+        """leverage_override=0 → clamped to 1.0 with WARNING (not ZeroDivision)."""
+        import logging
+
+        cfg = VolStraddleConfig(
+            dynamic_capital_enabled=False,
+            soft_equity_scale=False,
+            cw_enabled=False,
+            base_leverage=30.0,
+        )
+        scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
+        _mock_open(scalper)
+        _set_signal_meta(scalper, strategy_type="ma_cluster", leverage_override=0, sl=0.02)
+        with caplog.at_level(logging.WARNING, logger="quantbox.execution.positions"):
+            _open(scalper, 1000.0)
+
+        qty = float(scalper._place_order.call_args[0][2])
+        # clamped to 1 → notional=$100×1=$100 → qty=1 (price=100)
+        assert qty >= 1.0, f"qty must be >= 1, got {qty}"
+        assert any("clamped" in r.message for r in caplog.records)
+
+    def test_leverage_override_exceeds_max_clamped_to_125(self, caplog):
+        """leverage_override=200 → clamped to 125.0 with WARNING."""
+        import logging
+
+        cfg = VolStraddleConfig(
+            dynamic_capital_enabled=False,
+            soft_equity_scale=False,
+            cw_enabled=False,
+            base_leverage=30.0,
+        )
+        scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
+        _mock_open(scalper)
+        _set_signal_meta(scalper, strategy_type="ma_cluster", leverage_override=200, sl=0.02)
+        with caplog.at_level(logging.WARNING, logger="quantbox.execution.positions"):
+            _open(scalper, 1000.0)
+
+        qty = float(scalper._place_order.call_args[0][2])
+        # clamped to 125 → notional=$100×125=$12500 → qty=125 (price=100)
+        assert abs(qty - 125.0) < 0.5, f"Expected ~125, got {qty}"
+        assert any("clamped" in r.message for r in caplog.records)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestBracketPlacement — L319-454
@@ -553,6 +595,7 @@ class TestClosePaths:
             "trail_active": False,
             "opened_at": "2026-03-09T10:00:00+00:00",
             "strategy_type": "vr_squeeze",
+            "balance_before": 1234.0,
         }
         return pos_key
 
@@ -650,6 +693,30 @@ class TestClosePaths:
 
         trade = scalper._trade_history[-1]
         assert trade["entry_time"] == "2026-03-09T10:00:00+00:00"
+
+    def test_close_balance_before_is_open_balance_not_close_balance(self):
+        """balance_before in trade record must reflect the balance AT OPEN, not close.
+        Regression test for bug where balance_before == balance_after (both close-time).
+        """
+        scalper = self._make_close_scalper()
+        # Simulate open balance ($1234) stored on position at open time
+        pos_key = self._setup_position(scalper)  # position has balance_before=1234.0
+        # Simulate a different (lower) balance at close time
+        scalper.get_balance = MagicMock(return_value=1220.0)
+
+        scalper._close_position(pos_key, reason="take_profit", current_price=105.0)
+
+        trade = scalper._trade_history[-1]
+        # balance_before must be the open-time value (1234), not close-time (1220)
+        assert trade["balance_before"] == pytest.approx(1234.0), (
+            f"balance_before should be open-time balance 1234.0, got {trade['balance_before']}"
+        )
+        # balance_after is close-time balance (mocked to 1220)
+        assert trade["balance_after"] == pytest.approx(1220.0), (
+            f"balance_after should be close-time balance 1220.0, got {trade['balance_after']}"
+        )
+        # They should differ
+        assert trade["balance_before"] != trade["balance_after"]
 
     def test_close_cancels_server_orders_first(self):
         """SL and TP server orders cancelled before close order is placed."""

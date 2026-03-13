@@ -1,11 +1,12 @@
 """Live-Backtest Divergence Monitor.
 
-Compares live trade journal statistics against the v14.5.0 canonical backtest
+Compares live trade journal statistics against the r73 canonical backtest
 baseline. Fires a DivergenceAlert when WR/PF diverge beyond thresholds.
 
-Canonical baseline (v14.5.0, 60 syms, 6yr, commit 7399f4c):
-  PF  = 1.563
-  WR  = 43.4%
+Canonical baseline (r73, 3-strat trail, 60 syms, 5.67yr, commit 33c8487):
+  PF  = 2.002
+  WR  = 46.1%
+  EV  = +40.1 bp/trade
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ── v14.5.0 canonical backtest baseline ──────────────────────────────────────
-_BASELINE_PF: float = 1.563
-_BASELINE_WR: float = 0.434  # 43.4%
+# ── r73 canonical backtest baseline ──────────────────────────────────────────
+# r73 3-strat trail: D_mom8 + S_d8 + MA Cluster, 60 syms, 5.67yr, commit 33c8487
+_BASELINE_PF: float = 2.002
+_BASELINE_WR: float = 0.461  # 46.1%
+_BASELINE_EV_BP: float = 40.1  # basis points per trade
 
 
 @dataclass
@@ -66,6 +69,7 @@ class DivergenceMonitor:
 
     BASELINE_PF: float = _BASELINE_PF
     BASELINE_WR: float = _BASELINE_WR
+    BASELINE_EV_BP: float = _BASELINE_EV_BP
 
     def __init__(
         self,
@@ -105,12 +109,16 @@ class DivergenceMonitor:
 
         pf_live = stats.get("profit_factor", 0.0)
         wr_live = stats.get("win_rate", 0.0)
+        ev_bp_live = stats.get("ev_bp", None)  # Optional: basis points per trade
 
         triggered: list[str] = []
         if pf_live < self.pf_threshold:
             triggered.append("pf")
         if (self.BASELINE_WR - wr_live) * 100 >= self.wr_gap_pp:
             triggered.append("wr")
+        # EV sign check: negative EV means strategy has no edge in live trading
+        if ev_bp_live is not None and ev_bp_live < 0:
+            triggered.append("ev")
 
         if not triggered:
             return None
@@ -131,6 +139,8 @@ class DivergenceMonitor:
         if "wr" in triggered:
             gap = (self.BASELINE_WR - wr_live) * 100
             parts.append(f"WR {wr_live * 100:.1f}% is {gap:.1f}pp below baseline {self.BASELINE_WR * 100:.1f}%")
+        if "ev" in triggered:
+            parts.append(f"EV {ev_bp_live:.1f}bp < 0 — strategy has no positive expectancy in live trading")
         alert.message = "; ".join(parts)
 
         self._save_cooldown()
