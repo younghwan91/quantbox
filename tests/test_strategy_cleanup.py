@@ -15,8 +15,35 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+def _make_scalper(strategy_name: str, **kwargs):
+    """Build a mocked scalper without real Binance API calls."""
+    from quantbox.scalper import RubberBandScalper
+
+    with (
+        patch("quantbox.scalper.get_settings") as mock_settings,
+        patch("quantbox.scalper.Client"),
+        patch("quantbox.scalper.DiscordNotifier"),
+        patch("quantbox.scalper.DiscordBotRunner", None),
+    ):
+        mock_settings.return_value = MagicMock(
+            binance_api_key="k",
+            binance_api_secret="s",
+            binance_testnet=False,
+            discord_webhook_url="",
+            discord_bot_token="",
+            discord_channel_id="",
+            paper_balance=1000.0,
+        )
+        return RubberBandScalper(
+            paper_mode=True,
+            strategy_name=strategy_name,
+            **kwargs,
+        )
 
 
 # ──────────────────────────────────────────────
@@ -61,19 +88,17 @@ def test_strategy_name_bad_raises():
 
 
 def test_strategy_name_vol_straddle_ok():
-    from quantbox.scalper import RubberBandScalper
     from quantbox.strategy.vol_straddle import VolStraddleStrategy
 
-    s = RubberBandScalper(paper_mode=True, strategy_name="vol_straddle")
+    s = _make_scalper("vol_straddle")
     assert isinstance(s.strategy, VolStraddleStrategy)
     assert s.strategy_name == "vol_straddle"
 
 
 def test_strategy_name_rubberband_ok():
-    from quantbox.scalper import RubberBandScalper
     from quantbox.strategy.rubberband import RubberBandStrategy
 
-    s = RubberBandScalper(paper_mode=True, strategy_name="rubberband")
+    s = _make_scalper("rubberband")
     assert isinstance(s.strategy, RubberBandStrategy)
     assert s.strategy_name == "rubberband"
 
