@@ -3,7 +3,7 @@
 Extracted from scalper.py to reduce file size and isolate concerns.
 Methods in this mixin rely on instance attributes set by RubberBandScalper.__init__:
     self.strategy         — active strategy instance
-    self.strategy_name    — 'vol_straddle' / 'rubberband' / 'elliott'
+    self.strategy_name    — 'vol_straddle' / 'rubberband'
     self.config           — RubberBandConfig
     self.vs_config        — VolStraddleConfig
     self._cfg             — active config (vs_config or config)
