@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from quantbox.core.types import ApiSymbol, Side, PositionSide
+    from quantbox.strategy.protocol import TradingStrategy
 
 import argparse
 import logging
@@ -85,6 +86,15 @@ from quantbox.execution.reconciliation import ReconciliationMixin
 from quantbox.core.trade_journal import TradeJournal
 from quantbox.core.divergence_monitor import DivergenceMonitor
 
+# ── Reliability modules (Phase 3 integration) ──
+from pathlib import Path
+
+from quantbox.core.heartbeat import Heartbeat
+from quantbox.core.rate_limiter import RateLimiter
+from quantbox.execution.exposure import ExposureGuard
+from quantbox.execution.inflight import InFlightTracker, OrderIntent, PendingOrder
+from quantbox.execution.recon_journal import ReconJournal
+
 load_dotenv()
 
 # ──────────────────────── Logging ──────────────────────────────────────
@@ -136,6 +146,7 @@ class RubberBandScalper(
         if strategy_name not in _valid_strategies:
             raise ValueError(f"Unknown strategy '{strategy_name}'. Valid: {sorted(_valid_strategies)}")
 
+        self.strategy: TradingStrategy
         if strategy_name == "vol_straddle":
             self.vs_config = vs_config or VolStraddleConfig()
             self.strategy = VolStraddleStrategy(self.vs_config)
@@ -210,6 +221,39 @@ class RubberBandScalper(
             wr_gap_pp=_vs_cfg.divergence_wr_gap_pp if _vs_cfg else 10.0,
             cooldown_hours=_vs_cfg.divergence_cooldown_hours if _vs_cfg else 24.0,
         )
+
+        # ── Reliability modules (Phase 3) ──
+        try:
+            self._rate_limiter = RateLimiter()
+        except Exception as e:
+            logger.error(f"RateLimiter init failed: {e}")
+            self._rate_limiter = None
+
+        try:
+            self._heartbeat = Heartbeat(stall_threshold_s=300.0)
+        except Exception as e:
+            logger.error(f"Heartbeat init failed: {e}")
+            self._heartbeat = None
+
+        try:
+            _max_mult = self.vs_config.max_exposure_multiplier if strategy_name == "vol_straddle" else 35.0
+            self._exposure_guard = ExposureGuard(max_multiplier=_max_mult)
+        except Exception as e:
+            logger.error(f"ExposureGuard init failed: {e}")
+            self._exposure_guard = None
+
+        try:
+            inflight_path = Path("data/state/inflight_orders.json")
+            self._inflight = InFlightTracker(persist_path=inflight_path)
+        except Exception as e:
+            logger.error(f"InFlightTracker init failed: {e}")
+            self._inflight = None
+
+        try:
+            self._recon_journal = ReconJournal(Path("data/journal/recon.db"))
+        except Exception as e:
+            logger.error(f"ReconJournal init failed: {e}")
+            self._recon_journal = None
 
         # Control flags
         self._stop_requested: bool = False
@@ -463,6 +507,25 @@ class RubberBandScalper(
                         logger.error(f"[{symbol}] Leverage set failed: {e} — ABORTING order")
                         return None
 
+            # ── InFlight: record pending BEFORE API call ──
+            _inflight_key: str | None = None
+            try:
+                if self._inflight is not None:
+                    _intent = (
+                        OrderIntent.EXIT if reduce_only or (leverage <= 1 and position_side) else OrderIntent.ENTRY
+                    )
+                    _pending = PendingOrder(
+                        intent=_intent,
+                        symbol=symbol,
+                        side=side,
+                        position_side=position_side,
+                        quantity=quantity,
+                        order_type="LIMIT",
+                    )
+                    _inflight_key = self._inflight.record_pending(_pending)
+            except Exception:
+                pass
+
             result: ChaseResult = self._chaser.chase_limit_order(
                 symbol=symbol,
                 side=side,
@@ -481,6 +544,13 @@ class RubberBandScalper(
                 ),
             )
 
+            # ── InFlight: confirm after API call ──
+            try:
+                if self._inflight is not None and _inflight_key:
+                    self._inflight.confirm(_inflight_key)
+            except Exception:
+                pass
+
             if result.status == ChaseFillStatus.NO_POSITION:
                 logger.warning(f"[{symbol}] NO POSITION on exchange — reduceOnly rejected. Position already closed.")
                 return {"status": "NO_POSITION"}
@@ -495,6 +565,13 @@ class RubberBandScalper(
                     f"{result.filled_quantity:.6f} @ {result.avg_price:.4f} "
                     f"(chase={result.chase_count})"
                 )
+                # ── Rate limiter: record successful API call ──
+                try:
+                    if self._rate_limiter is not None:
+                        self._rate_limiter.record_request(weight=1)
+                        self._rate_limiter.record_success()
+                except Exception:
+                    pass
                 return {
                     "avgPrice": str(result.avg_price),
                     "executedQty": str(result.filled_quantity),
@@ -505,6 +582,19 @@ class RubberBandScalper(
                 logger.error(f"[{symbol}] Order FAILED: {side} {quantity:.6f} (status={result.status.value})")
                 return None
 
+        except BinanceAPIException as e:
+            # ── Rate limiter: detect 429 / rate limit errors ──
+            try:
+                if self._rate_limiter is not None:
+                    is_rate, retry = RateLimiter.parse_rate_limit_error(str(e))
+                    if is_rate:
+                        backoff = self._rate_limiter.record_failure(retry)
+                        logger.warning(f"[{symbol}] Rate limit hit — backing off {backoff:.1f}s")
+                        time.sleep(backoff)
+            except Exception:
+                pass
+            logger.error(f"[{symbol}] Order error: {e}")
+            return None
         except Exception as e:
             logger.error(f"[{symbol}] Order error: {e}")
             return None
@@ -529,6 +619,14 @@ class RubberBandScalper(
         5. Save state
         """
         self._cycle_count += 1
+
+        # ── Rate limiter: throttle if approaching API limit ──
+        try:
+            if self._rate_limiter is not None:
+                self._rate_limiter.wait_if_needed(weight=5)
+        except Exception as e:
+            logger.error(f"RateLimiter.wait_if_needed error: {e}")
+
         balance = self.get_balance()
 
         # 0. Process interactive bot commands
@@ -807,6 +905,13 @@ class RubberBandScalper(
         # 7. Periodic summary (every cycle for active positions, full every hour)
         if self.strategy.n_active > 0 or self._cycle_count % 4 == 0:
             self._log_summary(balance)
+
+        # ── Heartbeat: record successful cycle completion ──
+        try:
+            if self._heartbeat is not None:
+                self._heartbeat.beat()
+        except Exception as e:
+            logger.error(f"Heartbeat.beat error: {e}")
 
     def _scan_entries(
         self,
@@ -1266,6 +1371,18 @@ class RubberBandScalper(
         if not self.paper_mode:
             self._startup_exchange_crosscheck()
 
+        # ── InFlight: check for stale orders from previous session ──
+        try:
+            if self._inflight is not None:
+                stale = self._inflight.get_stale_orders(max_age_s=300)
+                if stale:
+                    logger.warning(f"Found {len(stale)} stale in-flight orders from previous session")
+                    for key, order in stale.items():
+                        logger.warning(f"  Stale: {key} → {order.symbol} {order.intent.value}")
+                    self._inflight.clear_all()
+        except Exception as e:
+            logger.error(f"InFlight stale check error: {e}")
+
     def _startup_exchange_crosscheck(self) -> None:
         """Cross-check exchange positions against restored internal state at startup.
 
@@ -1501,6 +1618,20 @@ class RubberBandScalper(
 
         while not self._stop_requested:
             try:
+                # ── Heartbeat stall check ──
+                try:
+                    if (
+                        self._heartbeat is not None
+                        and self._heartbeat.is_stalled()
+                        and not self._heartbeat.stall_alerted
+                    ):
+                        stall_s = self._heartbeat.seconds_since_last_beat()
+                        logger.critical(f"Main loop stall detected: {stall_s:.0f}s since last cycle")
+                        self.discord.notify_heartbeat(stall_s)
+                        self._heartbeat.stall_alerted = True
+                except Exception as e:
+                    logger.error(f"Heartbeat stall check error: {e}")
+
                 # Refresh universe periodically
                 if time.monotonic() - last_universe_refresh > UNIVERSE_REFRESH_INTERVAL:
                     symbols = self.get_trading_symbols()
@@ -1538,6 +1669,13 @@ class RubberBandScalper(
         # Stop Discord bot
         if self._bot_runner:
             self._bot_runner.stop()
+
+        # Close ReconJournal DB
+        try:
+            if self._recon_journal is not None:
+                self._recon_journal.close()
+        except Exception:
+            pass
 
         total_pnl = sum(t["pnl_usd"] for t in self._trade_history)
         n_trades = len(self._trade_history)

@@ -47,9 +47,10 @@ from research.active.r31_r40.scaling_r38 import (
     COST_DIRECTIONAL, COST_STRADDLE, G_3TF, CFG_V13,
 )
 from research.active.r41_r45.r43_exit_improvement import (
-    sim_directional_trailing, year_metrics, get_year_boundaries,
+    year_metrics, get_year_boundaries,
     symbol_performance, collect_trades_variant,
 )
+from quantbox.backtest.trade_sim import sim_directional_trailing
 from research.active.r41_r45.r43b_exit_improvement import (
     split_data_temporal, make_split_vr,
 )

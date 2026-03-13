@@ -254,6 +254,17 @@ class PositionMixin:
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
             return False
 
+        # ── ExposureGuard: block entry if total exposure exceeds cap ──
+        try:
+            _exp_guard = getattr(self, "_exposure_guard", None)
+            if _exp_guard is not None:
+                current_notional = sum(abs(float(p.get("notional", 0))) for p in self.strategy._positions.values())
+                if not _exp_guard.can_open(current_notional, notional, balance):
+                    logger.warning(f"[{symbol}] Exposure cap hit — skipping entry")
+                    return False
+        except Exception as e:
+            logger.error(f"[{symbol}] ExposureGuard check error: {e}")
+
         # T2-1 runtime guard: entry_price=0 → ZeroDivisionError in quantity calc
         if entry_price <= 0:
             logger.error(f"[{symbol}] INVARIANT VIOLATION: entry_price={entry_price!r} (must be > 0) — aborting open")
