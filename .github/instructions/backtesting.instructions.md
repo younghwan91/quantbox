@@ -121,25 +121,27 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 **허용 기준:** 최신 리포트 대비 N ±1%, PF ±1%  
 **이탈 시 → 즉시 중단.** 데이터 범위, config, 함수 버전 확인 먼저.
 
-**최신 정식 베이스라인 (v14.17.0, 2026-03-13 기준, commit=325bb97):**
+**최신 정식 베이스라인 (v14.17.0, 2026-03-13 기준, commit=33c8487):**
 
 | 버전 | 포함 전략 | 유니버스 | 기간 | N | PF | Calmar | DD | 비고 |
 |------|---------|---------|------|---|----|--------|----|-----|
 | v14.4.x baseline | D_mom8+MA | **60 syms** | 6yr | 5,515 | 1.273 | 15.9 | 69.7% | |
 | **v14.5.0 (프로덕션)** | D_mom8+MA | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% | canonical |
 | r56/r57 연구 베이스라인 | D_mom8+MA | **60 syms** | 6yr | 6,538 | 1.638 | 88.5 | 52.3% | 연구스크립트 |
-| **r72 3전략 combined** | **D+S+MA** | **60 syms** | **5.67yr** | **7,644** | **1.129** | **5.6** | 85.0% | flat TP=5%⚠️ |
-| r72 3전략 (2-slot straddle) | D+S+MA | 60 syms | 5.67yr | 11,505 | 1.121 | 6.1 | 68.8% | live 모델 |
+| r72 3전략 flat | D+S+MA | 60 syms | 5.67yr | 7,644 | 1.129 | 5.6 | 85.0% | flat TP=5%⚠️ |
+| **r73 D+MA trail** | D_mom8+MA | **60 syms** | 5.67yr | **4,874** | **1.414** | **31.4** | 49.7% | trail-aware |
+| **r73 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,773** | **2.002** | **1695.6** | 40.5% | **trail canonical** |
 
-> ⚠️ r72는 flat TP=5% sim (trail 없음). 프로덕션 trail 기준 PF/Calmar은 더 높음.  
-> v14.5.0 = D_mom8+MA만 (S_d8 제외). **S_d8 포함 combined는 r72가 최초.**  
-> 60 syms = symbol_whitelist (상장폐지 MKR/FTM/EOS 제외). **`exclude_symbols` 방식 사용 금지.**  
+> **r73 trail = 프로덕션 기준 수치.** flat sim(r72)은 과소평가이므로 구조 결정에 사용 금지.  
+> 3전략 combined trail: S_d8 dominant (82.4% 슬롯), MA 독립 (94.5%), D_mom8 cherry-pick (11.3%)  
+> **구조 결정(r73): Option A 채택 — 현상 유지 (Calmar 1695.6 >> OLD D+MA 31.4 × 1.1 = 34.5)**  
+> 60 syms = symbol_whitelist. **`exclude_symbols` 방식 사용 금지.**  
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
 
-**r72 슬롯 경쟁 핵심 발견:**
-- D_mom8: 2181 raw → **135 accepted (6.2%)** — S_d8에 의해 거의 완전 차단
-- S_d8: 5819 raw → 5334 accepted (91.7%)
-- MA Cluster: 2464 raw → 2175 accepted (88.3%, 4h TF 분리로 충돌 적음)
+**r73 슬롯 경쟁 (trail-aware):**
+- D_mom8: 2594 raw → **292 accepted (11.3%)** — r72 flat 6.2% 대비 개선됨 (trail timing 차이)
+- S_d8: 8683 raw → 7152 accepted (82.4%) — 독점이 정당함 (PF=4.948, Calmar=1813)
+- MA Cluster: 2464 raw → 2329 accepted (94.5%) — 4h TF 분리로 충돌 없음
 
 ---
 
