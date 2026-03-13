@@ -8,24 +8,6 @@ applyTo: "quantbox/**/*.py,tests/**/*.py"
 
 ---
 
-## 0. 파라미터 답변 절대 규칙 (2026-03-13 추가)
-
-> **위반 사례:** ma_cluster_trail_activate를 기억(4%)으로 답변 → 실제 config는 2%. 오답.
-
-**파라미터 값을 말할 때는 반드시 코드를 먼저 읽고 답변. 대화 중이라도 예외 없음.**
-
-```python
-# 항상 이렇게 먼저 실행
-from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-cfg = VolStraddleConfig()
-print(cfg.ma_cluster_trail_activate)  # 기억으로 말하지 말고 출력값으로 말할 것
-```
-
-- 리서치(r75 등)에서 탐색한 값 ≠ 실제 config에 반영된 값. 반드시 구별.
-- "이전에 봤다", "r75에서 X였다" → 반드시 config 재확인 후 발언.
-
----
-
 ## 1. Binance API 에러 코드 대응표
 
 ### -1022: Signature for this request is not valid
@@ -141,37 +123,13 @@ grep -n "futures_change_leverage\|leverage > 1" quantbox/scalper.py | head -5
 
 ### Incident #6: Reverse Ghost Position (2026-03-13)
 
-**증상:** 이전 세션에서 열린 포지션이 state에 없어 SL/TP 없이 방치됨
-```
-[BANDUSDT] State out of sync — position exists on exchange but not in internal state.
-No SL/TP protection. Reverse ghost check in _reconcile_positions() will auto-close.
-(21:00~21:15 2회 WARNING 후 3시간 방치)
-```
+**증상:** exchange에 포지션이 있지만 state에 없어 SL/TP 없이 방치됨.
+**원인:** `_reconcile_positions()`가 exchange→state 역방향 체크 없음.
+**수정 (v14.5.x):** `_reconcile_positions()` Phase 2 + `_startup_exchange_crosscheck()` 추가.
 
-**원인 체인:**
-1. 이전 세션에서 BANDUSDT LONG 진입 (balance ~$130일 때, notional=$403)
-2. 세션 종료 시 state 파일에 BANDUSDT 미저장 (crash 또는 비정상 종료)
-3. 새 세션 시작: state 복원 시 BANDUSDT 없음
-4. BANDUSDT squeeze 신호 발생 → exchange dedup 감지 → 진입만 차단
-5. `_reconcile_positions()`는 state→exchange 방향만 체크 (ghost 감지)
-   exchange→state 방향 체크 없음 (reverse ghost 미탐지) ← **버그**
-6. BANDUSDT는 SL/TP 없이 ~3시간 방치
-
-**식별 방법:**
-```
-grep "State out of sync\|Untracked position\|REVERSE GHOST" logs/...
-```
-
-**수정 (v14.5.x):**
-- `_reconcile_positions()` Phase 2 추가: exchange→state reverse ghost 탐지 + 즉시 시장가 청산
-- `_startup_exchange_crosscheck()` 추가: 세션 시작 시 미추적 포지션 즉시 Discord 경고
-- 테스트: `tests/test_reconciliation_reverse_ghost.py` (11개)
-
-**재발 방지 확인:**
 ```bash
-grep -n "REVERSE GHOST\|reverse ghost\|_startup_exchange_crosscheck" quantbox/execution/reconciliation.py quantbox/scalper.py
-# reconciliation.py에 Phase 2 있어야 함
-# scalper.py에 _startup_exchange_crosscheck 있어야 함
+grep "State out of sync\|REVERSE GHOST" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1)
+grep -n "REVERSE GHOST\|_startup_exchange_crosscheck" quantbox/execution/reconciliation.py quantbox/scalper.py
 ```
 
 ---
@@ -323,19 +281,7 @@ cp data/state/scalper_state_backup_YYYYMMDD_HHMMSS.json data/state/scalper_state
 5. **포지션 크기:** L/N 값 확인 (VR=3.0, MA=2.1)
 6. **데이터 기간:** 강세장만 백테스트 → 실제와 다른 시장 환경
 7. **D_trail 파라미터 소스 오염 (r53 인시던트, 2026-03-08):** `backtest_v14_3_0.py`의 `D_TRAIL_ACTIVATE=0.02/D_TRAIL_DISTANCE=0.003` import 절대 금지. 항상 `cfg = VolStraddleConfig()`에서 직접 읽어야 함. **r69 이후 프로덕션 값은 `0.010/0.002`** (r47~r68: 0.005/0.002). 구버전 파일에서 import 시 D_mom8 결과가 조용히 틀림.
-8. **Trail bar-close 실행 갭 (r65 발견, 2026-03-11, ✅ ratchet 구현 완료):**
-   - 기존 문제: 라이브는 bar CLOSE에서 MARKET 주문 → 급락 바에서 최대 $158/slot 손실 갭. D_mom8 ΔPF=-0.950 (48% 저하).
-   - **해결:** Trail Server Ratchet 구현 완료 (commit `e473e4d`, `trail_server_ratchet_enabled=True`)
-     - trail_active 활성화 후 매 bar마다 서버에 STOP 주문을 `peak_gain - trail_distance` 가격에 배치/업데이트
-     - 최소 0.1% 개선 시에만 API 호출 (스팸 방지)
-     - `quantbox/execution/brackets.py:574-670` `_ratchet_trail_sl()`
-     - 현재 라이브 PF 갭은 ratchet 이전 포지션 or paper mode에서만 발생 가능
-
-   **진단:** 대시보드에서 MFE >> |PnL|이고 trailing_stop 청산이면 이 갭이 원인 (ratchet 이전 포지션).
-   ```
-   SUIUSDT LONG VR: MFE=+131%, PnL=-$33 → 한 15m 바에 +4.37% → -1.1%
-   백테스트: trail_stop_gain=4.17% → +$125 / 라이브: close=-1.1% → -$33
-   ```
+8. **Trail bar-close 실행 갭:** Trail ratchet 구현 완료 (commit `e473e4d`, v14.5+). MFE >> |PnL| + trailing_stop 청산이면 ratchet 이전 포지션. 신규 포지션은 자동 해결.
 
 ---
 
@@ -371,14 +317,6 @@ python -m pytest tests/ -x -q
 ---
 
 ## 7. Scalper 함수 시그니처 & 테스트 패턴 (이 세션에서 반복 실수 방지용)
-
-### 7.1 자주 틀리는 함수 시그니처 (3회 이상 실수)
-
-| 함수 | 올바른 시그니처 | 흔한 실수 |
-|------|---------------|-----------|
-| `_close_position` | `(pos_key, reason, price)` — 3개 | 4번째 arg `balance` 추가 → TypeError |
-| `_scan_entries` | `(symbols, btc_close, balance, max_entries)` — 4개 필수 | 3개만 전달, max_entries 생략 |
-| `_build_rb_scalper()` | `rb_cfg=None` param 있음 | kwarg 없이 정의하면 unexpected kwarg 에러 |
 
 ### 7.2 Compound Key vs API Symbol
 
@@ -454,35 +392,6 @@ python -m pytest tests/ -x -q  # 전체 (1586+ tests)
 
 ---
 
-## 9. OrderPreflight — 중앙화된 주문 검증 게이트 (v14.5.x~)
-
-`_place_order()` 진입 시 항상 `OrderPreflight.validate()`가 호출됨.
-추가 검증이 필요할 때 `quantbox/execution/preflight.py`에 추가:
-
-```python
-from quantbox.execution.preflight import OrderPreflight, PreflightResult
-
-# 현재 검증 항목:
-# 1. symbol — ':' 포함 금지, 빈 문자열 금지
-# 2. side — 'BUY' or 'SELL' 만
-# 3. quantity > 0
-# 4. leverage ≥ 1
-# 5. step_size 정렬 (entry 전용; reduce_only=True는 skip)
-
-# 새 체크 추가 예시:
-@staticmethod
-def validate(...) -> PreflightResult:
-    ...
-    # 6. 새 조건 추가
-    if some_new_condition:
-        return PreflightResult(False, "reason string")
-    return PreflightResult(True)
-```
-
-`tests/test_preflight.py`에 각 조건마다 테스트 추가 필수.
-
----
-
 ## 8. 핵심 트레이딩 로직 안전장치 (Audit 2026-03-XX)
 
 7개 버그를 코드 감사로 발견 후 수정. 수정 후 19개 테스트 추가 (`tests/test_critical_path_guards.py`).
@@ -552,67 +461,3 @@ if quantity <= 0:
 ```
 
 ---
-
-## 10. 신뢰성 모듈 진단 (v14.22.0~v14.24.0)
-
-### Rate Limiter & Circuit Breaker
-
-```bash
-grep "circuit\|RateLimiter\|throttle\|rate_limit" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
-# 정상: 출력 없거나 간헐적 "throttled" — 자동 복구
-# 이상: 반복적 "circuit open" → API 키 확인 또는 바이낸스 서버 상태 확인
-```
-
-### ExposureGuard 진단
-
-```python
-from quantbox.execution.exposure import ExposureGuard
-from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-cfg = VolStraddleConfig()
-print(f'max_exposure_multiplier={cfg.max_exposure_multiplier}')  # 35.0
-# 로그에서 "Exposure blocked" 검색
-```
-
-```bash
-grep "Exposure blocked\|exposure cap\|ExposureGuard" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
-# 출력이 있으면 잔고 대비 노출도가 35배를 초과한 상태
-# 정상 상황: 10슬롯 × 30x = 300% 노출 → 35배 cap 넉넉히 여유
-# 비정상: 반복 출력 → positions.py 마진 계산 점검
-```
-
-### ReconJournal 감사 로그
-
-```bash
-# 감사 DB 파일 확인
-ls -lh data/recon/recon.db 2>/dev/null || echo "ReconJournal DB not yet created (no recon events)"
-
-# 이벤트 통계
-python3 -c "
-import sqlite3, os
-db_path = 'data/recon/recon.db'
-if os.path.exists(db_path):
-    conn = sqlite3.connect(db_path)
-    rows = conn.execute('SELECT event_type, COUNT(*) as cnt FROM recon_events GROUP BY event_type ORDER BY cnt DESC').fetchall()
-    for r in rows:
-        print(f'  {r[0]}: {r[1]}')
-    conn.close()
-else:
-    print('No recon DB yet')
-"
-```
-
-**10종 이벤트 타입:**
-- `GHOST_DETECTED` / `GHOST_CLOSED` — 내부 상태에 없는 포지션 감지/청산
-- `REVERSE_GHOST` / `REVERSE_GHOST_CLOSED` — 거래소에만 있는 포지션 감지/청산
-- `SERVER_SL_FILL` / `SERVER_TP_FILL` — 서버 SL/TP 체결
-- `BRACKET_REPAIR` / `BRACKET_REPAIR_FAIL` — SL/TP 재설정 성공/실패
-- `POSITION_ADOPTED` — 미추적 포지션 채택
-- `EXPOSURE_BLOCKED` — 노출도 상한 초과로 진입 차단
-
-### InFlightTracker 진단
-
-```bash
-grep "inflight\|InFlight\|pending order" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
-# "Loaded N pending orders from disk" — 시작 시 크래시 전 미체결 주문 복원
-# "Stale order detected" — 오래된 미체결 주문 → 자동 상태 재동기화
-```
