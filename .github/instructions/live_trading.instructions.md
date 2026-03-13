@@ -31,7 +31,7 @@ print(f'dynamic_capital_enabled={cfg.dynamic_capital_enabled}')
 - `d_sl=0.01` (1%), `d_tp=0.20` (20% dead cap — trail exits first)
 - `s_tp=0.05` (5% per straddle leg)
 - `d_trail_activate=0.01` (1.0%), `d_trail_distance=0.002` (0.2%)
-- `ma_cluster_trail_activate=0.04` (4%)
+- `ma_cluster_trail_activate=0.02` (2%, r75)
 - `base_leverage=30.0`, `max_concurrent=10` → L/N=3.0
 - `s_squeeze_dur=3`, `s_vr_threshold=0.57`
 - `hedge_mode=True`, `dynamic_capital_enabled=False`
