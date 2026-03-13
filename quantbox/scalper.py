@@ -609,18 +609,10 @@ class RubberBandScalper(
 
     # ==================== Main Cycle ====================
 
-    def _cycle(self, symbols: list[str]) -> None:
-        """Process one 15m bar across all symbols.
-
-        1. Process bot commands (pause/stop/close)
-        2. Get BTC klines for regime filter
-        3. Manage existing positions
-        4. Check for new entries (skip if paused)
-        5. Save state
-        """
+    def _preflight(self) -> tuple[float, bool]:
+        """Rate limit, balance fetch, bot commands. Returns (balance, stop_requested)."""
         self._cycle_count += 1
 
-        # ── Rate limiter: throttle if approaching API limit ──
         try:
             if self._rate_limiter is not None:
                 self._rate_limiter.wait_if_needed(weight=5)
@@ -629,11 +621,11 @@ class RubberBandScalper(
 
         balance = self.get_balance()
 
-        # 0. Process interactive bot commands
         self._process_bot_commands()
-        if self._stop_requested:
-            return
+        return balance, self._stop_requested
 
+    def _log_cycle_header(self, balance: float) -> None:
+        """Print cycle header and log HWM / DD / cumPnL stats."""
         header = format_cycle_header(
             cycle=self._cycle_count,
             balance=balance,
@@ -642,7 +634,6 @@ class RubberBandScalper(
         )
         print(header)
 
-        # ── Enhanced cycle header with HWM / DD / cum PnL ──
         hwm = self._high_water_mark if self._high_water_mark > 0 else balance
         dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
         cum_pnl = sum(t["pnl_usd"] for t in self._trade_history)
@@ -655,10 +646,13 @@ class RubberBandScalper(
             f"Trades={n_trades} CumPnL=${cum_pnl:+.2f}"
         )
 
-        # ── Position status moved AFTER _sync_server_orders ──
-        # (SL/TP status must be checked after sync, not before)
+    def _check_risk_and_halt(self, balance: float) -> tuple[bool, bool]:
+        """Risk limits + invariants + drawdown halt management.
 
-        # 1. Risk check
+        Returns:
+            (halt_stop, risk_blocked) — if halt_stop is True, caller should
+            return immediately. risk_blocked is forwarded to entry scanning.
+        """
         risk_blocked = self._check_risk_limits(balance)
 
         # T3-5: Invariant check every cycle
@@ -666,7 +660,6 @@ class RubberBandScalper(
         if violations:
             logger.error(f"INVARIANT VIOLATIONS ({len(violations)}): " + "; ".join(violations))
 
-        # 2. Close positions on drawdown halt
         if self._drawdown_halt:
             # Close any remaining positions
             for pos_key in list(self.strategy.active_positions):
@@ -676,7 +669,6 @@ class RubberBandScalper(
                 self._close_position(pos_key, "drawdown_halt", price)
 
             # v14.0.1: Auto-recover when DD drops below threshold
-            # after all positions are closed.
             if self.strategy.n_active == 0:
                 hwm = self._high_water_mark if self._high_water_mark > 0 else balance
                 dd = (hwm - balance) / hwm if hwm > 0 else 0.0
@@ -694,6 +686,7 @@ class RubberBandScalper(
                         )
                     )
                     self._drawdown_halt = False
+                    # Fall through — cycle continues normally after recovery
                 else:
                     logger.info(
                         f"DD halt active — {dd * 100:.1f}% DD "
@@ -701,23 +694,28 @@ class RubberBandScalper(
                         f"All positions closed, waiting for HWM reset on restart."
                     )
                     self._save_state()
-                    return
+                    return True, True
             else:
                 self._save_state()
-                return
+                return True, True
 
-        # 3. Fetch BTC klines for regime filter
+        return False, risk_blocked
+
+    def _sync_exchange(self) -> tuple[object, object]:
+        """Fetch BTC klines, sync server orders, reconcile, log position status.
+
+        Returns (btc_close, btc_close_4h) arrays.
+        """
+        # Fetch BTC klines for regime filter
         btc_close = self.download_klines("BTCUSDT", 200)
 
-        # 3b. Fetch BTC 4h klines for MTF confirmation
         btc_close_4h = None
         if self.strategy_name == "vol_straddle":
-            # VolStraddle doesn't use BTC as filter — skip 4h BTC fetch
-            pass
+            pass  # VolStraddle doesn't use BTC as filter
         elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
             btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
 
-        # 3c. v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
+        # v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
         self._sync_server_orders()
 
         # v12.5.1: Reconcile positions with exchange AFTER sync
@@ -752,15 +750,15 @@ class RubberBandScalper(
                 f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}"
             )
 
-        # 4. Process existing positions (always, even when paused)
+        return btc_close, btc_close_4h
+
+    def _manage_active_positions(self) -> None:
+        """Process existing positions: update, exit, ratchet SL."""
         for pos_key in list(self.strategy.active_positions):
             # Extract Binance symbol from compound key (e.g., BTCUSDT:LONG → BTCUSDT)
             api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
 
-            # v12.3.2: Download full OHLC for active positions to compute
-            # fresh ATR. Previously only close was downloaded, so runner
-            # trailing used stale ATR from entry time (on_bar never called
-            # for symbols with open positions).
+            # v12.3.2: Download full OHLC for active positions to compute fresh ATR.
             result_full = self.download_klines(api_sym, 200, full=True)
             if result_full is None:
                 continue
@@ -835,83 +833,116 @@ class RubberBandScalper(
                     ):
                         self._ratchet_trail_sl(pos_key, pos)
 
-        # 5. Look for new entries (skip if risk blocked or paused)
+    def _scan_entry_opportunities(
+        self,
+        symbols: list[str],
+        btc_close: object,
+        balance: float,
+        btc_close_4h: object,
+        risk_blocked: bool = False,
+    ) -> None:
+        """Gate and run entry scanning: paused, risk, daily breaker, balance stale."""
         if self._paused:
             logger.info("⏸️ Paused — skipping new entries")
-        elif not risk_blocked:
-            # ── G7: Daily Loss Circuit Breaker ──
-            if self.strategy_name == "vol_straddle" and self.vs_config.daily_loss_limit_pct > 0:
-                today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                if self._daily_loss_date != today_utc:
-                    # New UTC day — reset counter
-                    self._daily_loss_date = today_utc
-                    self._daily_realized_pnl = 0.0
-                    self._daily_loss_blocked = False
-                    logger.info(f"G7 DailyBreaker: reset for {today_utc}")
-                # Accumulate closed PnL from today's trades
-                self._daily_realized_pnl = sum(
-                    t["pnl_usd"] for t in self._trade_history if t.get("time", "").startswith(today_utc)
+            return
+
+        if risk_blocked:
+            return
+
+        # ── G7: Daily Loss Circuit Breaker ──
+        if self.strategy_name == "vol_straddle" and self.vs_config.daily_loss_limit_pct > 0:
+            today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if self._daily_loss_date != today_utc:
+                # New UTC day — reset counter
+                self._daily_loss_date = today_utc
+                self._daily_realized_pnl = 0.0
+                self._daily_loss_blocked = False
+                logger.info(f"G7 DailyBreaker: reset for {today_utc}")
+            # Accumulate closed PnL from today's trades
+            self._daily_realized_pnl = sum(
+                t["pnl_usd"] for t in self._trade_history if t.get("time", "").startswith(today_utc)
+            )
+            limit_usd = balance * self.vs_config.daily_loss_limit_pct
+            if not self._daily_loss_blocked and self._daily_realized_pnl < -limit_usd:
+                self._daily_loss_blocked = True
+                logger.warning(
+                    f"⛔ G7 DailyBreaker TRIGGERED: "
+                    f"today PnL=${self._daily_realized_pnl:.2f} < "
+                    f"-${limit_usd:.2f} ({self.vs_config.daily_loss_limit_pct * 100:.0f}% limit). "
+                    f"No new entries until UTC midnight."
                 )
-                limit_usd = balance * self.vs_config.daily_loss_limit_pct
-                if not self._daily_loss_blocked and self._daily_realized_pnl < -limit_usd:
-                    self._daily_loss_blocked = True
-                    logger.warning(
-                        f"⛔ G7 DailyBreaker TRIGGERED: "
-                        f"today PnL=${self._daily_realized_pnl:.2f} < "
-                        f"-${limit_usd:.2f} ({self.vs_config.daily_loss_limit_pct * 100:.0f}% limit). "
-                        f"No new entries until UTC midnight."
+                self.discord.send(
+                    content=(
+                        f"⛔ **Daily Loss Limit Hit** — "
+                        f"Realized PnL today: ${self._daily_realized_pnl:.2f} "
+                        f"(limit -${limit_usd:.2f}). "
+                        f"No new entries until midnight UTC."
                     )
-                    self.discord.send(
-                        content=(
-                            f"⛔ **Daily Loss Limit Hit** — "
-                            f"Realized PnL today: ${self._daily_realized_pnl:.2f} "
-                            f"(limit -${limit_usd:.2f}). "
-                            f"No new entries until midnight UTC."
-                        )
-                    )
-                if self._daily_loss_blocked:
-                    logger.info(
-                        f"G7 DailyBreaker active: today PnL=${self._daily_realized_pnl:.2f}. Skipping new entries."
-                    )
-            if not self._daily_loss_blocked:
-                # T1-4: Block new entries when balance is stale (API failure).
-                # Stale balance → per_slot_capital may be incorrect → wrong sizing.
-                if not getattr(self, "_balance_fetch_ok", True):
-                    logger.warning(
-                        f"T1-4 Balance fetch FAILED — skipping new entries this cycle "
-                        f"(using {'stale $' + str(round(balance, 2)) if balance > 0 else 'NO DATA'})"
-                    )
-                    if not getattr(self, "_balance_alert_sent", False):
-                        self.discord.send(
-                            content=(
-                                f"⚠️ **잔고 조회 실패** — 이번 사이클 신규 진입 차단. "
-                                f"{'최종 잔고 $' + str(round(balance, 2)) + ' 사용 중' if balance > 0 else '잔고 불명 (0)'}. "
-                                f"거래소 API 확인 요망."
-                            )
-                        )
-                        self._balance_alert_sent = True
-                else:
-                    self._balance_alert_sent = False  # Reset alert flag on recovery
-                    available_slots = self._cfg.max_concurrent - self.strategy.n_active
-                    if available_slots > 0:
-                        self._scan_entries(symbols, btc_close, balance, available_slots, btc_close_4h=btc_close_4h)
+                )
+            if self._daily_loss_blocked:
+                logger.info(f"G7 DailyBreaker active: today PnL=${self._daily_realized_pnl:.2f}. Skipping new entries.")
+                return
 
-        # 6. Save state
+        # T1-4: Block new entries when balance is stale (API failure).
+        if not getattr(self, "_balance_fetch_ok", True):
+            logger.warning(
+                f"T1-4 Balance fetch FAILED — skipping new entries this cycle "
+                f"(using {'stale $' + str(round(balance, 2)) if balance > 0 else 'NO DATA'})"
+            )
+            if not getattr(self, "_balance_alert_sent", False):
+                self.discord.send(
+                    content=(
+                        f"⚠️ **잔고 조회 실패** — 이번 사이클 신규 진입 차단. "
+                        f"{'최종 잔고 $' + str(round(balance, 2)) + ' 사용 중' if balance > 0 else '잔고 불명 (0)'}. "
+                        f"거래소 API 확인 요망."
+                    )
+                )
+                self._balance_alert_sent = True
+            return
+
+        self._balance_alert_sent = False  # Reset alert flag on recovery
+        available_slots = self._cfg.max_concurrent - self.strategy.n_active
+        if available_slots > 0:
+            self._scan_entries(symbols, btc_close, balance, available_slots, btc_close_4h=btc_close_4h)
+
+    def _cycle_housekeeping(self, balance: float) -> None:
+        """Save state, divergence check, summary log, heartbeat."""
         self._save_state()
-
-        # 8. Divergence check (every 10 trades)
         self._check_divergence()
-
-        # 7. Periodic summary (every cycle for active positions, full every hour)
         if self.strategy.n_active > 0 or self._cycle_count % 4 == 0:
             self._log_summary(balance)
-
-        # ── Heartbeat: record successful cycle completion ──
         try:
             if self._heartbeat is not None:
                 self._heartbeat.beat()
         except Exception as e:
             logger.error(f"Heartbeat.beat error: {e}")
+
+    def _cycle(self, symbols: list[str]) -> None:
+        """Process one 15m bar across all symbols.
+
+        Orchestrates seven private methods — each testable in isolation:
+          1. _preflight()                 rate limit, balance, bot commands
+          2. _log_cycle_header()          logging only
+          3. _check_risk_and_halt()       risk limits, DD halt (may return early)
+          4. _sync_exchange()             BTC klines, server sync, reconcile
+          5. _manage_active_positions()   per-position update / exit / ratchet
+          6. _scan_entry_opportunities()  paused / daily-breaker / scan gates
+          7. _cycle_housekeeping()        save, divergence, summary, heartbeat
+        """
+        balance, stop = self._preflight()
+        if stop:
+            return
+
+        self._log_cycle_header(balance)
+
+        halt_stop, risk_blocked = self._check_risk_and_halt(balance)
+        if halt_stop:
+            return
+
+        btc_close, btc_close_4h = self._sync_exchange()
+        self._manage_active_positions()
+        self._scan_entry_opportunities(symbols, btc_close, balance, btc_close_4h, risk_blocked=risk_blocked)
+        self._cycle_housekeeping(balance)
 
     def _scan_entries(
         self,
