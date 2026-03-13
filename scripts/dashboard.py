@@ -133,6 +133,8 @@ hr { border-color: #2a2a2a !important; margin: 6px 0 !important; }
 .neu  { color: #999 !important; }
 .sym  { color: #FFFFFF !important; font-weight: bold; letter-spacing: 0.04em; }
 .tag-vr { color: #4A90D9; font-size: 0.88rem; }
+.tag-vr-s { color: #C084FC; font-size: 0.88rem; }
+.tag-vr-d { color: #4A90D9; font-size: 0.88rem; }
 .tag-ma { color: #C8960C; font-size: 0.88rem; }
 .long-tag  { color: #00C853; font-size: 0.88rem; letter-spacing: 0.06em; }
 .short-tag { color: #D50000; font-size: 0.88rem; letter-spacing: 0.06em; }
@@ -357,8 +359,8 @@ def chart_trades_scatter(df: pd.DataFrame) -> go.Figure | None:
 
     fig = go.Figure()
     for strat, grp in d.groupby("strategy_type"):
-        color = "#4A90D9" if "vr" in str(strat) else "#C8960C"
-        label = "VR SQUEEZE" if "vr" in str(strat) else "MA CLUSTER"
+        color = "#C084FC" if "straddle" in str(strat) else ("#4A90D9" if "vr" in str(strat) else "#C8960C")
+        label = "S_d8" if "straddle" in str(strat) else ("D_mom8" if "directional" in str(strat) else "MA CLUSTER")
         fig.add_trace(go.Scatter(
             x=grp["exit_time"], y=grp["pnl_usd"],
             mode="markers",
@@ -564,8 +566,8 @@ def render():
                     avg_mae = grp["mae_pct"].mean() if "mae_pct" in grp else 0
                     avg_b   = grp["bars_held"].mean()
                     tot_cls = "pos" if tot_s >= 0 else "neg"
-                    tag_cls = "tag-vr" if "vr" in strat else "tag-ma"
-                    label   = "VR SQZ" if "vr" in strat else "MA CLU"
+                    tag_cls = "tag-vr-s" if "straddle" in strat else ("tag-vr-d" if "directional" in strat else "tag-ma")
+                    label   = "S_d8" if "straddle" in strat else ("D_mom8" if "directional" in strat else "MA CLU")
                     strat_rows += f"""
 <tr>
   <td><span class="{tag_cls}">{label}</span></td>
@@ -598,15 +600,16 @@ def render():
                     pnl      = r["pnl_usd"]
                     pct_cls  = "pos" if pnl >= 0 else "neg"
                     side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
-                    tag_cls  = "tag-vr" if "vr" in str(r["strategy_type"]) else "tag-ma"
+                    tag_cls  = "tag-vr-s" if "straddle" in str(r["strategy_type"]) else ("tag-vr-d" if "directional" in str(r["strategy_type"]) else "tag-ma")
                     t        = str(r["exit_time"])[:16]
                     mfe      = r.get("mfe_pct", 0) or 0
+                    strat_label = "S_d8" if "straddle" in str(r["strategy_type"]) else ("D_mom8" if "directional" in str(r["strategy_type"]) else "MA")
                     trade_rows += f"""
 <tr>
   <td class="neu" style="text-align:left">{t}</td>
   <td class="sym" style="text-align:left">{r['symbol']}</td>
   <td><span class="{side_cls}">{r['direction']}</span></td>
-  <td><span class="{tag_cls}">{'VR' if 'vr' in str(r['strategy_type']) else 'MA'}</span></td>
+  <td><span class="{tag_cls}">{strat_label}</span></td>
   <td class="{pct_cls}">${pnl:+.2f}</td>
   <td class="neu">{mfe:+.1f}%</td>
   <td class="neu">{r['bars_held']}</td>
@@ -709,16 +712,17 @@ def render():
                 pnl      = r["pnl_usd"]
                 pct_cls  = "pos" if pnl >= 0 else "neg"
                 side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
-                tag_cls  = "tag-vr" if "vr" in str(r["strategy_type"]) else "tag-ma"
+                tag_cls  = "tag-vr-s" if "straddle" in str(r["strategy_type"]) else ("tag-vr-d" if "directional" in str(r["strategy_type"]) else "tag-ma")
                 t        = str(r["exit_time"])[:16]
                 mfe      = r.get("mfe_pct", 0) or 0
                 mae      = r.get("mae_pct", 0) or 0
+                strat_label = "S_d8" if "straddle" in str(r["strategy_type"]) else ("D_mom8" if "directional" in str(r["strategy_type"]) else "MA")
                 trade_rows += f"""
 <tr>
   <td class="neu">{t}</td>
   <td class="sym">{r['symbol']}</td>
   <td><span class="{side_cls}">{r['direction']}</span></td>
-  <td><span class="{tag_cls}">{'VR' if 'vr' in str(r['strategy_type']) else 'MA'}</span></td>
+  <td><span class="{tag_cls}">{strat_label}</span></td>
   <td>${r['entry_price']:,.4f}</td>
   <td>${r['exit_price']:,.4f}</td>
   <td class="{pct_cls}">{r['pnl_pct']:+.2f}%</td>
@@ -834,8 +838,8 @@ def render():
 
                 strat_comp = ""
                 for _, r in grp_strat.iterrows():
-                    label   = "VR SQUEEZE" if "vr" in str(r["strategy_type"]) else "MA CLUSTER"
-                    tag_cls = "tag-vr" if "vr" in str(r["strategy_type"]) else "tag-ma"
+                    label   = "S_d8" if "straddle" in str(r["strategy_type"]) else ("D_mom8" if "directional" in str(r["strategy_type"]) else "MA CLUSTER")
+                    tag_cls = "tag-vr-s" if "straddle" in str(r["strategy_type"]) else ("tag-vr-d" if "directional" in str(r["strategy_type"]) else "tag-ma")
                     tot_cls = "pos" if r["total"] >= 0 else "neg"
                     pf_str2 = f"{r['pf']:.2f}" if r["pf"] != float("inf") else "∞"
                     strat_comp += f"""
