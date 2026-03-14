@@ -319,6 +319,7 @@ class VolStraddleStrategy:
                         "vr": vr_val,
                         "momentum": 0.0,
                         "straddle": True,
+                        "strategy_type": "straddle",
                         "d_overlap": d_overlap,
                         "conviction_score": score,
                         "conviction_cond": cond,
