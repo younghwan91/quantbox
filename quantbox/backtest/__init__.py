@@ -14,7 +14,8 @@ Usage:
 
     # Trade-event (VolStraddle / any SL-TP strategy)
     from quantbox.backtest.trade_sim import (
-        collect_trades, portfolio_sim, compute_metrics,
+        collect_trades, portfolio_sim, portfolio_sim_with_details,
+        get_straddle_syms, compute_metrics,
         sim_directional_trades, sim_straddle_trades,
     )
 """
