@@ -71,6 +71,8 @@ class VolStraddleConfig(BaseSettings):
     s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg
     s_trail_distance: float = 0.001  # r76: 0.1% behind peak (was 0.2%, PF 4.876→9.349)
     straddle_enabled: bool = True  # S_d8 straddle mode enabled
+    straddle_max_slots: int = 6  # Max slots consumed by STRD (1 pair = 2 slots → max 3 pairs)
+    # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR/MA.
     hedge_mode: bool = True  # Binance Hedge Mode (dualSidePosition=true)
 
     # ── Direction ──
@@ -337,6 +339,11 @@ class VolStraddleConfig(BaseSettings):
             )
         if self.max_concurrent < 1:
             errors.append(f"max_concurrent must be >= 1, got {self.max_concurrent}")
+        if self.straddle_max_slots < 2:
+            errors.append(f"straddle_max_slots must be >= 2 (at least 1 pair), got {self.straddle_max_slots}")
+        # Auto-cap: if max_concurrent is reduced (e.g. --max-slots 5), straddle cap adjusts silently.
+        if self.straddle_max_slots > self.max_concurrent:
+            object.__setattr__(self, "straddle_max_slots", self.max_concurrent)
         if self.d_trail_distance <= 0:
             errors.append(f"d_trail_distance must be positive, got {self.d_trail_distance}")
         if self.d_trail_distance >= self.d_trail_activate:
