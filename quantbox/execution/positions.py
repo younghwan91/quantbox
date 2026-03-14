@@ -410,6 +410,7 @@ class PositionMixin:
                 max_hold=max_hold,
                 position_side=pos_side,
                 is_straddle=is_straddle,
+                strategy_type=strategy_type,
                 balance_before=balance_before,
             )
 
