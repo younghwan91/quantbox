@@ -136,8 +136,13 @@ hr { border-color: #2a2a2a !important; margin: 6px 0 !important; }
 .tag-vr-s { color: #C084FC; font-size: 0.88rem; }
 .tag-vr-d { color: #4A90D9; font-size: 0.88rem; }
 .tag-ma { color: #C8960C; font-size: 0.88rem; }
+.tag-unk { color: #666; font-size: 0.88rem; }
 .long-tag  { color: #00C853; font-size: 0.88rem; letter-spacing: 0.06em; }
 .short-tag { color: #D50000; font-size: 0.88rem; letter-spacing: 0.06em; }
+.reason-sl   { color: #D50000; font-size: 0.80rem; }
+.reason-recon { color: #FF8C00; font-size: 0.80rem; }
+.reason-trail { color: #4A90D9; font-size: 0.80rem; }
+.reason-norm { color: #999; font-size: 0.80rem; }
 
 /* ── BAR CHART ── */
 .bar-row   { display: flex; align-items: center; margin: 4px 0; font-size: 0.92rem; }
@@ -228,11 +233,18 @@ def fetch_positions() -> list[dict]:
 
 
 def load_state_bars() -> dict:
+    """Return {pos_key: {"bars": int, "strategy": str}} from state file."""
     if not STATE.exists():
         return {}
     try:
         s = json.load(open(STATE))
-        return {sym: pos.get("bars_held", 0) for sym, pos in s.get("positions", {}).items()}
+        return {
+            sym: {
+                "bars":     pos.get("bars_held", 0),
+                "strategy": pos.get("strategy_type", ""),
+            }
+            for sym, pos in s.get("positions", {}).items()
+        }
     except Exception:
         return {}
 
@@ -259,7 +271,25 @@ def _strat_tag(strategy_type: str) -> tuple[str, str]:
         return "tag-vr-s", "S_d8"
     if "directional" in s or "squeeze" in s:
         return "tag-vr-d", "VR"
+    if s in ("", "unknown", "None"):
+        return "tag-unk", "?"
     return "tag-ma", "MA"
+
+
+def _reason_tag(reason: str) -> tuple[str, str]:
+    """Return (css_class, display_label) for an exit_reason value."""
+    r = str(reason)
+    if r in ("server_sl", "stop_loss"):
+        return "reason-sl", "SL"
+    if r == "reconciliation_close":
+        return "reason-recon", "RECON"
+    if r == "trailing_stop":
+        return "reason-trail", "TRAIL"
+    if r == "drawdown_halt":
+        return "reason-sl", "DD HALT"
+    if r == "max_hold":
+        return "reason-norm", "MAX HOLD"
+    return "reason-norm", r
 
 
 def win_streak(df: pd.DataFrame) -> tuple[str, int]:
@@ -544,13 +574,21 @@ def render():
                 rows_html = ""
                 for p in positions:
                     sym_key   = f"{p['symbol']}:{p['side']}"
-                    bars      = bars_map.get(sym_key, bars_map.get(p["symbol"], "?"))
-                    pct_class = "pos" if p["pct"] >= 0 else "neg"
-                    side_cls  = "long-tag" if p["side"] == "LONG" else "short-tag"
+                    state_meta = bars_map.get(sym_key, bars_map.get(p["symbol"], {}))
+                    if isinstance(state_meta, dict):
+                        bars     = state_meta.get("bars", "?")
+                        strategy = state_meta.get("strategy", "")
+                    else:
+                        bars     = state_meta  # backward-compat
+                        strategy = ""
+                    pct_class         = "pos" if p["pct"] >= 0 else "neg"
+                    side_cls          = "long-tag" if p["side"] == "LONG" else "short-tag"
+                    tag_cls, strat_lbl = _strat_tag(strategy)
                     rows_html += f"""
 <tr>
   <td class="sym">{p['symbol']}</td>
   <td><span class="{side_cls}">{p['side']}</span></td>
+  <td><span class="{tag_cls}">{strat_lbl}</span></td>
   <td>${p['entry']:,.4f}</td>
   <td>${p['mark']:,.4f}</td>
   <td class="{pct_class}">{p['pct']:+.2f}%</td>
@@ -560,7 +598,7 @@ def render():
 </tr>"""
                 st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
-<tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>MARK</th>
+<tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>STRAT</th><th>ENTRY</th><th>MARK</th>
 <th>PnL%</th><th>PnL USD</th><th>BARS</th><th>NOTIONAL</th></tr>
 {rows_html}
 </table></div>""", unsafe_allow_html=True)
@@ -612,6 +650,7 @@ def render():
                     pct_cls  = "pos" if pnl >= 0 else "neg"
                     side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
                     tag_cls, strat_label = _strat_tag(r["strategy_type"])
+                    rsn_cls, rsn_label   = _reason_tag(r["exit_reason"])
                     t        = str(r["exit_time"])[:16]
                     mfe      = r.get("mfe_pct", 0) or 0
                     trade_rows += f"""
@@ -623,7 +662,7 @@ def render():
   <td class="{pct_cls}">${pnl:+.2f}</td>
   <td class="neu">{mfe:+.1f}%</td>
   <td class="neu">{r['bars_held']}</td>
-  <td class="neu" style="text-align:left">{r['exit_reason']}</td>
+  <td><span class="{rsn_cls}">{rsn_label}</span></td>
 </tr>"""
                 st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
@@ -723,6 +762,7 @@ def render():
                 pct_cls  = "pos" if pnl >= 0 else "neg"
                 side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
                 tag_cls, strat_label = _strat_tag(r["strategy_type"])
+                rsn_cls, rsn_label   = _reason_tag(r["exit_reason"])
                 t        = str(r["exit_time"])[:16]
                 mfe      = r.get("mfe_pct", 0) or 0
                 mae      = r.get("mae_pct", 0) or 0
@@ -739,7 +779,7 @@ def render():
   <td class="neu">{mfe:+.1f}%</td>
   <td class="neu">{mae:.1f}%</td>
   <td class="neu">{r['bars_held']}</td>
-  <td class="neu">{r['exit_reason']}</td>
+  <td><span class="{rsn_cls}">{rsn_label}</span></td>
 </tr>"""
             st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
