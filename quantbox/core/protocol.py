@@ -96,6 +96,9 @@ class ScalperProtocol(Protocol):
     # ── Trade journal (optional) ──────────────────────────────────────────
     _journal: Any
 
+    # ── Exchange notional cache (set by _reconcile_positions each cycle) ──
+    _cached_exchange_notionals: dict[str, float]
+
     # ── Methods: balance & symbol info ───────────────────────────────────
     def get_balance(self) -> float:
         """Return current USDT futures wallet balance."""

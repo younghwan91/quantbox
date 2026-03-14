@@ -149,6 +149,33 @@ class PositionMixin:
                 )
                 notional = max_notional
 
+            # ── Cumulative notional pre-check: account for existing exchange positions ──
+            # Prevents -2027 when partial fill or untracked position already exists.
+            # _cached_exchange_notionals is set by _reconcile_positions() each cycle.
+            if max_notional:
+                pos_side_key = (
+                    f"{symbol}:{'LONG' if signal == 1 else 'SHORT'}"
+                    if hasattr(self, "vs_config") and self.vs_config.hedge_mode
+                    else symbol
+                )
+                cached = getattr(self, "_cached_exchange_notionals", {})
+                existing_notional = cached.get(pos_side_key, 0.0)
+                if existing_notional > 0:
+                    remaining_budget = max_notional - existing_notional
+                    if remaining_budget <= 0:
+                        logger.warning(
+                            f"[{symbol}] Skipping entry: already at max notional "
+                            f"(exchange={existing_notional:.0f} ≥ max={max_notional:.0f})"
+                        )
+                        return False
+                    if notional > remaining_budget:
+                        logger.warning(
+                            f"[{symbol}] Notional reduced for cumulative cap: "
+                            f"${notional:.0f} → ${remaining_budget:.0f} "
+                            f"(existing=${existing_notional:.0f} + new would exceed ${max_notional:.0f})"
+                        )
+                        notional = remaining_budget
+
         else:
             # Position sizing — v10.0: dynamic capital allocation
             if cfg.dynamic_capital_enabled:
