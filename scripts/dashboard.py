@@ -924,6 +924,68 @@ def render():
 {strat_comp}
 </table></div>""", unsafe_allow_html=True)
 
+            # ── STRD monthly WR monitor (cliff sensitivity warning) ────────
+            strd_df = df[df["strategy_type"].str.contains("straddle", na=False, case=False)]
+            if len(strd_df) >= 5:
+                st.markdown('<div class="bb-header">STRD MONTHLY WIN RATE  —  CLIFF MONITOR</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<span class="neu" style="font-size:11px">'
+                    "⚠️ r77: s_trail_activate=0.015 is a sharp cliff — ±0.003 → PF drops 60-75%. "
+                    "OOS WR baseline: ~65%. Alert if monthly WR falls below 55%."
+                    "</span>",
+                    unsafe_allow_html=True,
+                )
+
+                strd_m = strd_df.copy()
+                strd_m["month"] = strd_m["exit_time"].dt.to_period("M").astype(str)
+                monthly = (
+                    strd_m.groupby("month")
+                    .agg(
+                        n=("pnl_usd", "count"),
+                        wr=("pnl_usd", lambda x: (x > 0).mean() * 100),
+                        total=("pnl_usd", "sum"),
+                    )
+                    .reset_index()
+                    .sort_values("month")
+                )
+
+                STRD_WR_OOS = 65.0   # r77 OOS WR baseline
+                STRD_WR_WARN = 55.0  # alert threshold
+
+                rows_html = ""
+                any_warn = False
+                for _, row in monthly.iterrows():
+                    wr_color = (
+                        "#00C853" if row["wr"] >= STRD_WR_OOS
+                        else ("#FF8C00" if row["wr"] >= STRD_WR_WARN else "#D50000")
+                    )
+                    warn = " ⚠️" if row["wr"] < STRD_WR_WARN else ""
+                    if warn:
+                        any_warn = True
+                    tot_cls = "pos" if row["total"] >= 0 else "neg"
+                    rows_html += (
+                        f'<tr><td>{row["month"]}</td>'
+                        f'<td>{int(row["n"])}</td>'
+                        f'<td style="color:{wr_color};font-weight:bold">'
+                        f'{row["wr"]:.1f}%{warn}</td>'
+                        f'<td class="{tot_cls}">${row["total"]:+,.2f}</td></tr>'
+                    )
+
+                st.markdown(
+                    f'<div class="tbl-wrap"><table class="bb-table">'
+                    f"<tr><th>MONTH</th><th>TRADES</th>"
+                    f"<th>WIN RATE (OOS={STRD_WR_OOS:.0f}%)</th><th>TOTAL PnL</th></tr>"
+                    f"{rows_html}</table></div>",
+                    unsafe_allow_html=True,
+                )
+
+                if any_warn:
+                    st.error(
+                        "🚨 STRD WR < 55% detected in one or more months. "
+                        "Check s_trail_activate (cliff at 0.015±0.003). "
+                        "Consider pausing STRD or running r81 sweep."
+                    )
+
     # ── Auto refresh ──────────────────────────────────────────────────────────
     time.sleep(REFRESH)
     st.cache_data.clear()
