@@ -6,6 +6,19 @@ applyTo: "quantbox/scalper.py,quantbox/execution/**/*.py"
 > **목적:** AI 에이전트가 라이브 세션을 안전하게 시작, 재시작, 종료할 수 있도록.
 > 모든 절차는 실제 자금 손실 및 버그 사례에서 도출됨. 순서 임의 변경 금지.
 
+## ⚡ 포지션 상태 조회 — 반드시 스크립트 사용
+
+> **규칙:** 포지션 PnL·SL·TP·trail 상태를 물어보면 수작업 계산 절대 금지.
+> 반드시 아래 스크립트를 실행하고 출력을 그대로 보고한다.
+
+```bash
+python3 scripts/check_positions.py
+```
+
+출력 항목: strategy_type별 올바른 SL%, 서버 triggerPrice(직접 조회), 달러 PnL, SL까지 거리%, 고아 주문.
+
+> 이 스크립트 없이 수작업으로 SL 가격을 계산하면 strategy_type을 무시하는 실수가 발생한다 (Incident 2026-03-13).
+
 ---
 
 ## 1. 세션 시작 전 체크리스트 (Pre-Flight)
@@ -169,12 +182,21 @@ grep "Bracket repair\|SERVER STOP\|FAILED" logs/bot/vol_straddle/$(ls -t logs/bo
 
 | Exit 종류 | 조건 | 실행 |
 |-----------|------|------|
-| Trail stop | `current_pnl < peak_gain - cfg.d_trail_distance` | 다음 바 클로즈에 MARKET |
+| Trail stop | `current_pnl < peak_gain - trail_distance` | 다음 바 클로즈에 MARKET |
 | Hard SL | LONG: `price ≤ entry × (1 - sl_pct)` / SHORT: `price ≥ entry × (1 + sl_pct)` | 서버 STOP 주문 |
 | Hard TP | LONG: `price ≥ entry × (1 + tp_pct)` / SHORT: 반대 | 서버 LIMIT 주문 |
 | Max hold | `bars_held ≥ max_hold` (기본 192 bars = 48h) | 다음 바에 강제 청산 |
 
-Trail 활성화: `cfg.d_trail_activate` (1.0%) 도달 후 `peak_gain` 갱신 시작.
+**strategy_type별 SL/trail 파라미터 (state의 `strategy_type` 필드 먼저 읽을 것):**
+
+| strategy_type | sl_pct | trail_activate | trail_distance |
+|--------------|--------|---------------|---------------|
+| `vr_squeeze` | `cfg.d_sl` = 0.01 (1%) | `cfg.d_trail_activate` = 0.01 | `cfg.d_trail_distance` = 0.002 |
+| `straddle` | `cfg.s_sl` = 0.015 (1.5%) | `cfg.s_trail_activate` = 0.015 | `cfg.s_trail_distance` = 0.001 |
+| `ma_cluster` | `cfg.ma_cluster_sl` = 0.02 (2%) | `cfg.ma_cluster_trail_activate` = 0.02 | `cfg.ma_cluster_trail_distance` = 0.003 |
+
+> ⚠️ SL 가격을 계산할 때 strategy_type 무시하고 d_sl=1%로 계산하면 틀린다 (Incident 2026-03-13).
+> **가장 확실한 방법:** state의 `server_sl_order_id`로 `/fapi/v1/openAlgoOrders`에서 `triggerPrice` 직접 읽기.
 
 ---
 
