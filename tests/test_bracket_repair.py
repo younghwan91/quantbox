@@ -274,6 +274,86 @@ class TestSaveStateOnServerFill:
 
         scalper._save_state.assert_called_once()
 
+    def test_record_server_fill_writes_to_journal(self):
+        """_record_server_fill must write to journal.sqlite (dashboard bug fix).
+
+        Previously, ghost reconciliation and server SL/TP closes were appended
+        to _trade_history but never recorded in journal.sqlite, causing them to
+        be invisible in the dashboard's Recent Trades tab.
+        """
+        from unittest.mock import MagicMock
+
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper.discord = MagicMock()
+
+        mock_journal = MagicMock()
+        scalper._journal = mock_journal
+
+        scalper.strategy.open_position(
+            symbol="COMPUSDT",
+            signal=1,
+            entry_price=18.38,
+            notional=1569.0,
+            leverage=30,
+            move_size=0.02,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
+        )
+
+        scalper._record_server_fill("COMPUSDT", 18.36, 0, "ghost_reconcile")
+
+        mock_journal.record.assert_called_once()
+        trade_arg = mock_journal.record.call_args[0][0]
+        assert trade_arg["symbol"] == "COMPUSDT"
+        assert trade_arg["reason"] == "ghost_reconcile"
+        assert "strategy_type" in trade_arg
+
+    def test_server_partial_tp_writes_to_journal(self):
+        """_handle_server_partial_tp_fill must write to journal.sqlite.
+
+        Previously, server partial TP (50% close → runner mode) was appended
+        to _trade_history but never recorded in journal.sqlite.
+        """
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper.discord = MagicMock()
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._place_server_stop_loss = MagicMock(return_value=None)
+
+        mock_journal = MagicMock()
+        scalper._journal = mock_journal
+
+        pos = {
+            "symbol": "BTCUSDT",
+            "signal": 1,
+            "entry_price": 80000.0,
+            "notional": 2400.0,
+            "bars_held": 5,
+            "move_size": 0.02,
+            "strategy_type": "vr_squeeze",
+            "best_pnl": 0.02,
+            "worst_pnl": -0.005,
+            "opened_at": "2026-03-15T05:00:00+00:00",
+            "balance_before": 1300.0,
+            "partial_closed": False,
+            "_server_partial_tp_filled": False,
+            "server_sl_order_id": 12345,
+            "server_tp_order_id": 67890,
+            "server_tp_is_partial": True,
+            "position_side": "LONG",
+        }
+
+        scalper._handle_server_partial_tp_fill("BTCUSDT", pos, fill_price=81600.0, fill_qty=0.015)
+
+        mock_journal.record.assert_called_once()
+        trade_arg = mock_journal.record.call_args[0][0]
+        assert trade_arg["symbol"] == "BTCUSDT"
+        assert trade_arg["reason"] == "server_partial_tp"
+        assert "strategy_type" in trade_arg
+        assert trade_arg["strategy_type"] == "vr_squeeze"
+        assert trade_arg["pnl_usd"] > 0  # TP should be profitable
+
     def test_wait_for_bar_saves_after_sync(self):
         """_wait_for_bar calls _save_state() after _sync_server_orders()."""
         scalper = _make_scalper(paper=False)
