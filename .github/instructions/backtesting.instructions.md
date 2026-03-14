@@ -227,8 +227,17 @@ L/N=3.0 VR CAGR: +X% (4.7년 복리)
 
 > ⚠️ **실전 교훈 (2026-03-05):** `n_active=0` 단일 진입만 테스트 → 2번째 슬롯에서 마진 부족 `-2019`.
 
-**반드시:** `portfolio_sim(trades, max_concurrent=10)` — 15나 다른 값 금지.  
+**반드시:**
+- `portfolio_sim(trades, max_concurrent=10)` — VR/MA 단독 또는 혼합 백테스트
+- `portfolio_sim(trades, max_concurrent=5)` — **STRD(S_d8) 단독 백테스트** ← r79 발견
+  
 마진 공식: `balance / 10 × 30 (VR)` or `balance / 10 × 21 (MA)` ≤ available margin.
+
+> ⚠️ **STRD 슬롯 패리티 규칙 (r79, 2026-03-15):**
+> 1 straddle = 2 positions → `n_active += 2` → live에서 max 5 straddle 동시 가능.
+> 백테스트에서 `max_concurrent=10` 사용 시 N이 **18.6% 과대추정** (r79 확인).
+> STRD 단독 백테스트는 반드시 `portfolio_sim(max_concurrent=5)` 사용.
+> 혼합 백테스트(VR+STRD)는 두 전략이 슬롯을 공유하므로 `max_concurrent=10` 유지.
 
 ---
 
@@ -326,7 +335,7 @@ for param_value in param_grid:
 | 2026-03-09 | `.env` VS_ 파라미터 덮어쓰기 | config.py 변경 적용 안 됨 | 38개 VS_ 중복 in `.env` (pydantic-settings 우선순위) | `.env`는 override만. 기본값은 `config.py`만. |
 | 2026-03-11 | Universe 불일치 (r55/r56/r57) | 63sym 백테스트 vs 60sym 라이브 | `exclude_symbols`는 스테이블코인만 제외, 상장폐지 포함 | 반드시 `cfg.symbol_whitelist` 사용 |
 | 2026-03-11 | _offset 미적용 (r58 이전) | 단축 히스토리 심볼 슬롯 충돌 오류 | 신규 심볼 bar 0 ≠ 기존 심볼 bar 0 (시간 불일치) | 신규 심볼은 `data_15m[sym]["_offset"]` 적용 필수 |
-| (반복) | 복리 모델 혼동 | CAGR 보고 오류 | `compute_metrics` 1x ≠ 프로덕션 L/N | 레버리지 모델 항상 명시 |
+| 2026-03-15 | STRD 슬롯 패리티 오류 (r78) | N 18.6% 과대추정 | `portfolio_sim(max=10)` → 10 straddle 허용, 라이브는 max 5 | STRD 단독: `portfolio_sim(max_concurrent=5)` |
 
 파라미터 민감도 분석: `research/active/r66_r70/r67_sensitivity.py` 및 `docs/backtest_results/202603/` 참조.
 
