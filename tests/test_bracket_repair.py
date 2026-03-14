@@ -274,6 +274,41 @@ class TestSaveStateOnServerFill:
 
         scalper._save_state.assert_called_once()
 
+    def test_record_server_fill_writes_to_journal(self):
+        """_record_server_fill must write to journal.sqlite (dashboard bug fix).
+
+        Previously, ghost reconciliation and server SL/TP closes were appended
+        to _trade_history but never recorded in journal.sqlite, causing them to
+        be invisible in the dashboard's Recent Trades tab.
+        """
+        from unittest.mock import MagicMock
+
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+        scalper.discord = MagicMock()
+
+        mock_journal = MagicMock()
+        scalper._journal = mock_journal
+
+        scalper.strategy.open_position(
+            symbol="COMPUSDT",
+            signal=1,
+            entry_price=18.38,
+            notional=1569.0,
+            leverage=30,
+            move_size=0.02,
+            server_sl_order_id=None,
+            server_tp_order_id=None,
+        )
+
+        scalper._record_server_fill("COMPUSDT", 18.36, 0, "ghost_reconcile")
+
+        mock_journal.record.assert_called_once()
+        trade_arg = mock_journal.record.call_args[0][0]
+        assert trade_arg["symbol"] == "COMPUSDT"
+        assert trade_arg["reason"] == "ghost_reconcile"
+        assert "strategy_type" in trade_arg
+
     def test_wait_for_bar_saves_after_sync(self):
         """_wait_for_bar calls _save_state() after _sync_server_orders()."""
         scalper = _make_scalper(paper=False)
