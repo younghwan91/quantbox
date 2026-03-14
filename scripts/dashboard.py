@@ -242,6 +242,25 @@ def load_state_bars() -> dict:
         return {}
 
 
+def load_state_strategies() -> dict:
+    """Return {pos_key: strategy_type} from state file. Key format: 'SYMBOL:SIDE'."""
+    if not STATE.exists():
+        return {}
+    try:
+        s = json.load(open(STATE))
+        result = {}
+        for sym, pos in s.get("positions", {}).items():
+            strat = pos.get("strategy_type", "vr_squeeze")
+            is_straddle = pos.get("is_straddle", False)
+            # Patch in-flight: state written before code fix may have vr_squeeze for straddles
+            if is_straddle and strat == "vr_squeeze":
+                strat = "straddle"
+            result[sym] = strat
+        return result
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=28, show_spinner=False)
 def load_trades() -> pd.DataFrame:
     if not DB.exists():
@@ -471,10 +490,11 @@ def render():
     now_utc = pd.Timestamp.now(tz="UTC")
     now_str = now_utc.strftime("%Y-%m-%d  %H:%M UTC")
 
-    acct      = fetch_account()
-    positions = fetch_positions()
-    bars_map  = load_state_bars()
-    df        = load_trades()
+    acct          = fetch_account()
+    positions     = fetch_positions()
+    bars_map      = load_state_bars()
+    strategies_map = load_state_strategies()
+    df            = load_trades()
 
     wallet     = acct.get("wallet", 0)
     unrealized = acct.get("unrealized", 0)
@@ -576,12 +596,15 @@ def render():
                 for p in positions:
                     sym_key   = f"{p['symbol']}:{p['side']}"
                     bars      = bars_map.get(sym_key, bars_map.get(p["symbol"], "?"))
+                    strat_type = strategies_map.get(sym_key, strategies_map.get(p["symbol"], "vr_squeeze"))
+                    strat_cls, strat_label = _strat_tag(strat_type)
                     pct_class = "pos" if p["pct"] >= 0 else "neg"
                     side_cls  = "long-tag" if p["side"] == "LONG" else "short-tag"
                     rows_html += f"""
 <tr>
   <td class="sym">{p['symbol']}</td>
   <td><span class="{side_cls}">{p['side']}</span></td>
+  <td><span class="{strat_cls}">{strat_label}</span></td>
   <td>${p['entry']:,.4f}</td>
   <td>${p['mark']:,.4f}</td>
   <td class="{pct_class}">{p['pct']:+.2f}%</td>
@@ -591,7 +614,7 @@ def render():
 </tr>"""
                 st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
-<tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>MARK</th>
+<tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>STRAT</th><th>ENTRY</th><th>MARK</th>
 <th>PnL%</th><th>PnL USD</th><th>BARS</th><th>NOTIONAL</th></tr>
 {rows_html}
 </table></div>""", unsafe_allow_html=True)
