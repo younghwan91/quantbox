@@ -72,11 +72,11 @@ class TestRiskMode:
         )
 
     def test_dd_halt_not_too_tight(self, cfg: VolStraddleConfig) -> None:
-        """DD halt must be ≥ 25% — r48 analysis: P99 session DD = 28.4%, halt=30%."""
-        assert cfg.max_drawdown_pct >= 0.25, (
+        """DD halt must be ≥ 10% — STRD-dominant era (MaxDD=2.6% BT, r82)."""
+        assert cfg.max_drawdown_pct >= 0.10, (
             f"max_drawdown_pct={cfg.max_drawdown_pct:.0%} is too tight. "
-            f"r48 analysis: P99 session DD = 28.4% → halt=30% prevents normal halts. "
-            f"Minimum recommended: 0.25 (25%)."
+            f"STRD-dominant portfolio MaxDD=2.6% (r82). "
+            f"15% halt gives 6x headroom. Minimum recommended: 0.10 (10%)."
         )
 
 
