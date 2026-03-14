@@ -378,6 +378,8 @@ class ReconciliationMixin:
         # (positionSide=LONG and SHORT). Use compound key to avoid
         # one side overwriting the other → false ghost detection.
         exchange_map: dict[str, float] = {}
+        exchange_pos_detail: dict[str, dict] = {}  # full position data for journaling
+        cached_notionals: dict[str, float] = {}  # {key: notional_usd} for -2027 pre-check
         for p in exchange_positions:
             amt = float(p.get("positionAmt", "0"))
             if amt != 0:
@@ -387,6 +389,12 @@ class ReconciliationMixin:
                 else:
                     key = p["symbol"]
                 exchange_map[key] = amt
+                exchange_pos_detail[key] = p
+                entry_px = float(p.get("entryPrice", 0) or 0)
+                cached_notionals[key] = abs(amt) * entry_px
+
+        # Cache for cumulative notional pre-check in _open_position()
+        self._cached_exchange_notionals: dict[str, float] = cached_notionals
 
         # Check each internal position against exchange
         for sym in list(self.strategy.active_positions):
@@ -637,6 +645,40 @@ class ReconciliationMixin:
                     order_kwargs["positionSide"] = pos_side_str
                 self.client.futures_create_order(**order_kwargs)
                 logger.info(f"[{ex_key}] Reverse ghost auto-closed: {close_side} {abs(ex_amt):.6f} MARKET.")
+                # ── TradeJournal: record reverse ghost in main journal.sqlite ──
+                try:
+                    _tj = getattr(self, "_journal", None)
+                    if _tj is not None:
+                        _pos_detail = exchange_pos_detail.get(ex_key, {})
+                        _entry_px = float(_pos_detail.get("entryPrice", 0) or 0)
+                        _mark_px = float(_pos_detail.get("markPrice", 0) or 0)
+                        _upnl = float(_pos_detail.get("unRealizedProfit", 0) or 0)
+                        _notional = abs(ex_amt) * _entry_px if _entry_px else 0
+                        _pnl_pct = (_upnl / _notional * 100) if _notional else 0
+                        _signal = 1 if pos_side_str == "LONG" else -1
+                        _tj.record(
+                            {
+                                "symbol": api_sym,
+                                "signal": _signal,
+                                "strategy_type": "unknown",
+                                "entry_price": _entry_px,
+                                "exit_price": _mark_px,
+                                "pnl_pct": _pnl_pct,
+                                "pnl_usd": _upnl,
+                                "mfe_pct": None,
+                                "mae_pct": None,
+                                "notional": _notional,
+                                "bars_held": 0,
+                                "reason": "reconciliation_close",
+                                "time": datetime.now(timezone.utc).isoformat(),
+                                "entry_time": None,
+                                "balance_before": None,
+                                "balance_after": None,
+                            }
+                        )
+                        logger.info(f"[{ex_key}] Reverse ghost journaled: PnL=${_upnl:+.2f}")
+                except Exception as _je:
+                    logger.warning(f"[{ex_key}] Reverse ghost journal failed: {_je}")
                 # ── ReconJournal: record reverse ghost close ──
                 try:
                     _rj = getattr(self, "_recon_journal", None)
