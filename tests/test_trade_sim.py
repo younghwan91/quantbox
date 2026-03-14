@@ -496,6 +496,47 @@ class TestPortfolioSim:
         assert pnl[0] == 0.01
         assert pnl[1] == 0.02
 
+    def test_straddle_syms_consumes_2_slots(self):
+        """Straddle trades consume 2 slots, blocking a 3rd trade when max=2."""
+        # Straddle on ETCUSDT takes 2 of 2 slots → SOLUSDT blocked
+        trades = [
+            ("ETCUSDT", 0, 100, 0.05),  # straddle: uses 2 slots
+            ("SOLUSDT", 5, 50, 0.02),  # directional: needs 1 slot → blocked
+        ]
+        strd_syms = frozenset(["ETCUSDT"])
+        pnl = portfolio_sim(trades, 2, straddle_syms=strd_syms)
+        assert len(pnl) == 1
+        assert pnl[0] == pytest.approx(0.05)
+
+    def test_straddle_syms_allows_when_slots_available(self):
+        """Straddle + directional both accepted when enough slots exist."""
+        trades = [
+            ("ETCUSDT", 0, 100, 0.05),  # straddle: uses 2 slots (of 3)
+            ("SOLUSDT", 5, 50, 0.02),  # directional: uses 1 slot (of 3)
+        ]
+        strd_syms = frozenset(["ETCUSDT"])
+        pnl = portfolio_sim(trades, 3, straddle_syms=strd_syms)
+        assert len(pnl) == 2
+
+    def test_straddle_syms_mixed_with_vr(self):
+        """Mixed VR+STRD: straddle counts as 2, max_concurrent=10 → max 5 straddle."""
+        # 5 straddle = 10 slots exactly, 6th straddle blocked
+        strd_syms = frozenset([f"SYM{i}" for i in range(6)])
+        trades = [(f"SYM{i}", i, i + 50, 0.01) for i in range(6)]
+        pnl = portfolio_sim(trades, 10, straddle_syms=strd_syms)
+        assert len(pnl) == 5  # 6th blocked: would need 12 slots
+
+    def test_straddle_syms_none_backward_compat(self):
+        """Without straddle_syms, original single-slot behaviour is preserved."""
+        trades = [
+            ("ETCUSDT", 0, 100, 0.05),
+            ("SOLUSDT", 5, 50, 0.02),
+            ("BTCUSDT", 10, 80, 0.03),
+        ]
+        # All fit in 3 slots (1 each), classic behaviour
+        pnl = portfolio_sim(trades, 3)
+        assert len(pnl) == 3
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  compute_metrics

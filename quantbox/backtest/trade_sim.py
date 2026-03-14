@@ -755,6 +755,7 @@ def collect_trades(
 def portfolio_sim(
     all_trades: list[tuple[str, int, int, float]],
     max_concurrent: int,
+    straddle_syms: frozenset[str] | None = None,
 ) -> np.ndarray:
     """Filter trades by max concurrent positions, no same-symbol overlap.
 
@@ -764,7 +765,18 @@ def portfolio_sim(
 
     Args:
         all_trades: List of (symbol, entry_bar, exit_bar, pnl).
-        max_concurrent: Max simultaneous positions.
+        max_concurrent: Max simultaneous slots (e.g. 10 for live config).
+        straddle_syms: Optional set of symbols whose trades are S_d8 straddles.
+            Each straddle trade consumes 2 slots (LONG+SHORT legs) matching
+            live behaviour where each leg occupies one of the 10 slots.
+            Usage for mixed VR+STRD backtest::
+
+                strd_trades = collect_trades(cfg, ..., "S_d8")
+                strd_syms = frozenset(sym for sym, *_ in strd_trades)
+                pnl = portfolio_sim(vr_trades + strd_trades, 10, straddle_syms=strd_syms)
+
+            For standalone STRD-only backtests use ``max_concurrent=5`` instead
+            (r79 convention — avoids the need for this parameter).
 
     Returns:
         1-D array of accepted trade PnLs (in chronological order).
@@ -774,16 +786,18 @@ def portfolio_sim(
     active: list[tuple[str, int]] = []  # (symbol, exit_bar)
 
     for sym, entry, exit_b, pnl_val in trades:
+        slots = 2 if (straddle_syms and sym in straddle_syms) else 1
         # Expire finished trades
         active = [(s, e) for s, e in active if e > entry]
         # Same-symbol block
         sym_active = any(s == sym for s, _ in active)
         if sym_active:
             continue
-        # Slot limit
-        if len(active) >= max_concurrent:
+        # Slot limit: straddle needs 2 free slots
+        if len(active) + slots > max_concurrent:
             continue
-        active.append((sym, exit_b))
+        # Consume `slots` entries so the active slot count is accurate
+        active.extend([(sym, exit_b)] * slots)
         accepted_pnl.append(pnl_val)
 
     return np.array(accepted_pnl) if accepted_pnl else np.empty(0)
@@ -792,6 +806,7 @@ def portfolio_sim(
 def portfolio_sim_with_details(
     all_trades: list[tuple[str, int, int, float]],
     max_concurrent: int,
+    straddle_syms: frozenset[str] | None = None,
 ) -> tuple[np.ndarray, list[tuple[str, int, int, float]]]:
     """Portfolio sim that also returns accepted trades with metadata.
 
@@ -801,7 +816,9 @@ def portfolio_sim_with_details(
 
     Args:
         all_trades: List of (symbol, entry_bar, exit_bar, pnl).
-        max_concurrent: Max simultaneous positions.
+        max_concurrent: Max simultaneous slots.
+        straddle_syms: Optional set of straddle symbols (consume 2 slots each).
+            See ``portfolio_sim`` docstring for usage.
 
     Returns:
         (pnl_array, accepted_trades_list).
@@ -811,17 +828,40 @@ def portfolio_sim_with_details(
     active: list[tuple[str, int]] = []
 
     for sym, entry, exit_b, pnl_val in trades:
+        slots = 2 if (straddle_syms and sym in straddle_syms) else 1
         active = [(s, e) for s, e in active if e > entry]
         sym_active = any(s == sym for s, _ in active)
         if sym_active:
             continue
-        if len(active) >= max_concurrent:
+        if len(active) + slots > max_concurrent:
             continue
-        active.append((sym, exit_b))
+        active.extend([(sym, exit_b)] * slots)
         accepted.append((sym, entry, exit_b, pnl_val))
 
     pnl = np.array([t[3] for t in accepted]) if accepted else np.empty(0)
     return pnl, accepted
+
+
+def get_straddle_syms(strd_trades: list[tuple[str, int, int, float]]) -> frozenset[str]:
+    """Return the set of symbols present in a straddle trade list.
+
+    Convenience helper for building the ``straddle_syms`` argument to
+    ``portfolio_sim`` / ``portfolio_sim_with_details`` in mixed backtests.
+
+    Example::
+
+        strd_trades = collect_trades(cfg, data_15m, data_1h, data_4h, "S_d8")
+        vr_trades   = collect_trades(cfg, data_15m, data_1h, data_4h, "D_mom8")
+        strd_syms   = get_straddle_syms(strd_trades)
+        pnl = portfolio_sim(vr_trades + strd_trades, 10, straddle_syms=strd_syms)
+
+    Args:
+        strd_trades: Trades returned by ``collect_trades(..., strat="S_d8")``.
+
+    Returns:
+        frozenset of symbol strings.
+    """
+    return frozenset(t[0] for t in strd_trades)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
