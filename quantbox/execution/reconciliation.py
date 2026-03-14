@@ -877,6 +877,7 @@ class ReconciliationMixin:
         cost = notional * self.config.round_trip_cost
         net_pnl = pnl_usd - cost
 
+        _now = datetime.now(timezone.utc).isoformat()
         trade = {
             "symbol": api_sym,
             "signal": pos["signal"],
@@ -887,9 +888,23 @@ class ReconciliationMixin:
             "notional": notional,
             "bars_held": pos["bars_held"],
             "reason": reason,
-            "time": datetime.now(timezone.utc).isoformat(),
+            "time": _now,
+            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "mfe_pct": pos.get("best_pnl", 0.0) * 100,
+            "mae_pct": pos.get("worst_pnl", 0.0) * 100,
+            "entry_time": pos.get("opened_at"),
+            "balance_before": pos.get("balance_before"),
+            "balance_after": None,  # updated after _save_state
         }
         self._trade_history.append(trade)
+
+        # Write to persistent journal (dashboard reads from here)
+        _tj = getattr(self, "_journal", None)
+        if _tj is not None:
+            try:
+                _tj.record(trade)
+            except Exception as _je:
+                logger.warning(f"[{symbol}] Journal write failed in _record_server_fill: {_je}")
 
         # v12.3.1: Save state immediately after recording server fill.
         # Without this, a crash before end-of-cycle _save_state() creates
