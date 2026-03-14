@@ -1153,9 +1153,28 @@ class RubberBandScalper(
 
         entries_made = 0
         straddle_opened: dict[str, set[int]] = {}  # {sym: {signals opened}} for rollback
+        straddle_blocked: set[str] = set()  # symbols blocked by straddle slot cap
         for sym, signal, move, close, is_straddle in candidates:
             if entries_made >= max_entries:
                 break
+
+            # ── Straddle slot cap — skip both legs if cap reached ──
+            if is_straddle:
+                if sym in straddle_blocked:
+                    continue  # second leg of an already-blocked pair
+                if sym not in straddle_opened:
+                    # First leg: check if opening a new pair would exceed the cap.
+                    cfg_strd_max = self.vs_config.straddle_max_slots
+                    active_straddle_pairs = sum(
+                        1 for k, p in self.strategy._positions.items() if ":LONG" in k and p.get("is_straddle", False)
+                    )
+                    if active_straddle_pairs * 2 >= cfg_strd_max:
+                        straddle_blocked.add(sym)
+                        logger.info(
+                            f"[{sym}] Straddle BLOCKED: {active_straddle_pairs} pairs active "
+                            f"({active_straddle_pairs * 2}/{cfg_strd_max} slots) — cap reached"
+                        )
+                        continue
 
             # ── G6: BTC Trend Gate — block directional LONG when BTC below MA ──
             # Straddle is direction-neutral (LONG+SHORT) → G6 does not apply.
