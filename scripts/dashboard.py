@@ -135,9 +135,14 @@ hr { border-color: #2a2a2a !important; margin: 6px 0 !important; }
 .tag-vr { color: #4A90D9; font-size: 0.88rem; }
 .tag-vr-s { color: #C084FC; font-size: 0.88rem; }
 .tag-vr-d { color: #4A90D9; font-size: 0.88rem; }
-.tag-ma { color: #C8960C; font-size: 0.88rem; }
+.tag-ma  { color: #C8960C; font-size: 0.88rem; }
+.tag-unk { color: #8B949E; font-size: 0.88rem; }
 .long-tag  { color: #00C853; font-size: 0.88rem; letter-spacing: 0.06em; }
 .short-tag { color: #D50000; font-size: 0.88rem; letter-spacing: 0.06em; }
+.reason-sl    { color: #F85149; font-size: 0.82rem; }
+.reason-recon { color: #D29922; font-size: 0.82rem; }
+.reason-trail { color: #58A6FF; font-size: 0.82rem; }
+.reason-norm  { color: #8B949E; font-size: 0.82rem; }
 
 /* ── BAR CHART ── */
 .bar-row   { display: flex; align-items: center; margin: 4px 0; font-size: 0.92rem; }
@@ -254,12 +259,38 @@ def load_trades() -> pd.DataFrame:
 
 def _strat_tag(strategy_type: str) -> tuple[str, str]:
     """Return (css_class, display_label) for a strategy_type value."""
-    s = str(strategy_type)
+    s = str(strategy_type).lower()
     if "straddle" in s:
-        return "tag-vr-s", "S_d8"
-    if "directional" in s or "squeeze" in s:
+        return "tag-vr-s", "STRD"
+    if "squeeze" in s or "vr" in s:
         return "tag-vr-d", "VR"
-    return "tag-ma", "MA"
+    if "ma" in s or "cluster" in s:
+        return "tag-ma", "MA CLU"
+    return "tag-unk", "?"
+
+
+def _reason_tag(reason: str) -> tuple[str, str]:
+    """Return (css_class, display_label) for an exit_reason value."""
+    r = str(reason)
+    if r in ("server_sl", "stop_loss"):
+        return "reason-sl", "SL"
+    if r == "reconciliation_close":
+        return "reason-recon", "RECON"
+    if r == "trailing_stop":
+        return "reason-trail", "TRAIL"
+    if r == "drawdown_halt":
+        return "reason-sl", "DD HALT"
+    if r == "max_hold":
+        return "reason-norm", "MAX HOLD"
+    return "reason-norm", r
+
+
+def _fmt_pct(v: object) -> str:
+    """Format a pct float, returning '–' for None / NaN."""
+    import math
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return "–"
+    return f"{float(v):+.1f}%"
 
 
 def win_streak(df: pd.DataFrame) -> tuple[str, int]:
@@ -573,20 +604,21 @@ def render():
                     n_s     = len(grp)
                     wr_s    = grp["pnl_usd"].gt(0).mean() * 100
                     tot_s   = grp["pnl_usd"].sum()
-                    avg_mfe = grp["mfe_pct"].mean() if "mfe_pct" in grp else 0
-                    avg_mae = grp["mae_pct"].mean() if "mae_pct" in grp else 0
+                    _mfe    = grp["mfe_pct"].mean() if "mfe_pct" in grp else None
+                    _mae    = grp["mae_pct"].mean() if "mae_pct" in grp else None
+                    avg_mfe_disp = _fmt_pct(_mfe)
+                    avg_mae_disp = _fmt_pct(_mae)
                     avg_b   = grp["bars_held"].mean()
                     tot_cls = "pos" if tot_s >= 0 else "neg"
                     tag_cls, label = _strat_tag(strat)
-                    label = label if "straddle" in strat or "squeeze" in strat or "directional" in strat else "MA CLU"
                     strat_rows += f"""
 <tr>
   <td><span class="{tag_cls}">{label}</span></td>
   <td>{n_s}</td>
   <td>{wr_s:.0f}%</td>
   <td class="{tot_cls}">${tot_s:+.0f}</td>
-  <td class="neu">{avg_mfe:+.2f}%</td>
-  <td class="neu">{avg_mae:.2f}%</td>
+  <td class="neu">{avg_mfe_disp}</td>
+  <td class="neu">{avg_mae_disp}</td>
   <td class="neu">{avg_b:.0f}b</td>
 </tr>"""
                 st.markdown(f"""
@@ -605,15 +637,16 @@ def render():
             if df.empty:
                 st.markdown('<span class="neu">No closed trades.</span>', unsafe_allow_html=True)
             else:
-                recent     = df.sort_values("id", ascending=False).head(15)
+                recent     = df.sort_values("exit_time", ascending=False).head(15)
                 trade_rows = ""
                 for _, r in recent.iterrows():
                     pnl      = r["pnl_usd"]
                     pct_cls  = "pos" if pnl >= 0 else "neg"
                     side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
                     tag_cls, strat_label = _strat_tag(r["strategy_type"])
+                    rsn_cls, rsn_label   = _reason_tag(r["exit_reason"])
                     t        = str(r["exit_time"])[:16]
-                    mfe      = r.get("mfe_pct", 0) or 0
+                    mfe_disp = _fmt_pct(r.get("mfe_pct"))
                     trade_rows += f"""
 <tr>
   <td class="neu" style="text-align:left">{t}</td>
@@ -621,9 +654,9 @@ def render():
   <td><span class="{side_cls}">{r['direction']}</span></td>
   <td><span class="{tag_cls}">{strat_label}</span></td>
   <td class="{pct_cls}">${pnl:+.2f}</td>
-  <td class="neu">{mfe:+.1f}%</td>
+  <td class="neu">{mfe_disp}</td>
   <td class="neu">{r['bars_held']}</td>
-  <td class="neu" style="text-align:left">{r['exit_reason']}</td>
+  <td><span class="{rsn_cls}">{rsn_label}</span></td>
 </tr>"""
                 st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
@@ -716,16 +749,17 @@ def render():
             # ── Full trade table (all, newest first) ─────────────────────────
             st.markdown(f'<div class="bb-header">ALL TRADES  <span class="neu">({n_trades})</span></div>',
                         unsafe_allow_html=True)
-            all_sorted = df.sort_values("id", ascending=False)
+            all_sorted = df.sort_values("exit_time", ascending=False)
             trade_rows = ""
             for _, r in all_sorted.iterrows():
                 pnl      = r["pnl_usd"]
                 pct_cls  = "pos" if pnl >= 0 else "neg"
                 side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
                 tag_cls, strat_label = _strat_tag(r["strategy_type"])
+                rsn_cls, rsn_label   = _reason_tag(r["exit_reason"])
                 t        = str(r["exit_time"])[:16]
-                mfe      = r.get("mfe_pct", 0) or 0
-                mae      = r.get("mae_pct", 0) or 0
+                mfe_disp = _fmt_pct(r.get("mfe_pct"))
+                mae_disp = _fmt_pct(r.get("mae_pct"))
                 trade_rows += f"""
 <tr>
   <td class="neu">{t}</td>
@@ -736,10 +770,10 @@ def render():
   <td>${r['exit_price']:,.4f}</td>
   <td class="{pct_cls}">{r['pnl_pct']:+.2f}%</td>
   <td class="{pct_cls}">${pnl:+.2f}</td>
-  <td class="neu">{mfe:+.1f}%</td>
-  <td class="neu">{mae:.1f}%</td>
+  <td class="neu">{mfe_disp}</td>
+  <td class="neu">{mae_disp}</td>
   <td class="neu">{r['bars_held']}</td>
-  <td class="neu">{r['exit_reason']}</td>
+  <td><span class="{rsn_cls}">{rsn_label}</span></td>
 </tr>"""
             st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
@@ -759,8 +793,8 @@ def render():
             pf_val   = _pf(df)
             sh_val   = _sharpe(df)
             dd_val   = _max_drawdown(df)
-            avg_mfe  = df["mfe_pct"].mean() if "mfe_pct" in df.columns else 0
-            avg_mae  = df["mae_pct"].mean() if "mae_pct" in df.columns else 0
+            avg_mfe  = df["mfe_pct"].mean() if "mfe_pct" in df.columns else None
+            avg_mae  = df["mae_pct"].mean() if "mae_pct" in df.columns else None
             avg_hold = df["bars_held"].mean()
 
             pf_color = "#00C853" if pf_val >= 1.5 else ("#FF8C00" if pf_val >= 1.0 else "#D50000")
@@ -784,11 +818,11 @@ def render():
   </div>
   <div class="mini-stat">
     <div class="lbl">AVG MFE</div>
-    <div class="val" style="color:#00C853">{avg_mfe:+.2f}%</div>
+    <div class="val" style="color:#00C853">{_fmt_pct(avg_mfe)}</div>
   </div>
   <div class="mini-stat">
     <div class="lbl">AVG MAE</div>
-    <div class="val" style="color:#D50000">{avg_mae:.2f}%</div>
+    <div class="val" style="color:#D50000">{_fmt_pct(avg_mae)}</div>
   </div>
   <div class="mini-stat">
     <div class="lbl">AVG HOLD</div>
