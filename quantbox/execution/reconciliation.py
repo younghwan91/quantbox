@@ -809,8 +809,22 @@ class ReconciliationMixin:
             "bars_held": pos["bars_held"],
             "reason": "server_partial_tp",
             "time": datetime.now(timezone.utc).isoformat(),
+            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "mfe_pct": pos.get("best_pnl", 0.0) * 100,
+            "mae_pct": pos.get("worst_pnl", 0.0) * 100,
+            "entry_time": pos.get("opened_at"),
+            "balance_before": pos.get("balance_before"),
+            "balance_after": None,
         }
         self._trade_history.append(trade)
+
+        _tj = getattr(self, "_journal", None)
+        if _tj is not None:
+            try:
+                _tj.record(trade)
+            except Exception as _je:
+                logger.warning(f"[{symbol}] Journal write failed in _handle_server_partial_tp_fill: {_je}")
+
         self._save_state()
 
         fraction = self.config.partial_exit_fraction
