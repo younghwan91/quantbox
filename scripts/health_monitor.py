@@ -223,7 +223,16 @@ def check_journal_drift(state: dict) -> bool:
 
 
 def check_straddle_orphans(state: dict) -> bool:
-    """Alert if a straddle position has no matching pair (persisted ≥ 2 bars)."""
+    """Alert ONLY on true entry-failure orphans (bars_held < 2).
+
+    Normal straddle lifecycle: one leg closes naturally (SL/trail), the other
+    continues running with its own SL/TP. That is NOT an orphan — do not alert.
+
+    True orphan: entry failed for one leg so the other was never opened.
+    P3 rollback (scalper._scan_entries) handles this within the same cycle,
+    so by the time health_monitor runs the position will already be gone.
+    This check serves as a backstop for missed rollbacks only.
+    """
     positions = state.get("positions", {})
     straddle_pos = {
         k: v for k, v in positions.items()
@@ -237,23 +246,23 @@ def check_straddle_orphans(state: dict) -> bool:
         bars = pos.get("bars_held", 0)
         by_sym[sym].append((side, bars))
 
-    orphans = []
+    # Only flag if solo AND very young (missed P3 rollback)
+    true_orphans = []
     for sym, entries in by_sym.items():
         if len(entries) == 1:
             side, bars = entries[0]
-            # Only alert if persisted ≥ 2 bars (not just opened and waiting)
-            if bars >= 2:
-                orphans.append(f"{sym}:{side}(bars={bars})")
+            if bars <= 2:  # entry-failure orphan only
+                true_orphans.append(f"{sym}:{side}(bars={bars})")
 
-    if orphans:
+    if true_orphans:
         alert(
-            "Straddle 고아 포지션",
-            f"페어 없이 {len(orphans)}개 포지션이 방치 중: {', '.join(orphans)}",
-            [{"name": "고아", "value": "\n".join(orphans), "inline": False}],
+            "Straddle Entry 실패 고아",
+            f"P3 롤백이 처리 못 한 포지션: {', '.join(true_orphans)}. 수동 확인 필요.",
+            [{"name": "고아", "value": "\n".join(true_orphans), "inline": False}],
             critical=True,
         )
         return True
-    ok_msg(f"Straddle 페어 정상 ({len(by_sym)}쌍)")
+    ok_msg(f"Straddle 정상 ({len(by_sym)}쌍, 단독={sum(1 for e in by_sym.values() if len(e)==1)}개 실행 중)")
     return False
 
 
