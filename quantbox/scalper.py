@@ -1163,6 +1163,15 @@ class RubberBandScalper(
                 if sym in straddle_blocked:
                     continue  # second leg of an already-blocked pair
                 if sym not in straddle_opened:
+                    # First leg: upfront check — need at least 2 remaining slots for LONG+SHORT.
+                    remaining_slots = max_entries - entries_made
+                    if remaining_slots < 2:
+                        straddle_blocked.add(sym)
+                        logger.info(
+                            f"[{sym}] Straddle BLOCKED: only {remaining_slots} slot(s) remaining "
+                            f"(need 2 for LONG+SHORT pair)"
+                        )
+                        continue
                     # First leg: check if opening a new pair would exceed the cap.
                     cfg_strd_max = self.vs_config.straddle_max_slots
                     active_straddle_pairs = sum(
