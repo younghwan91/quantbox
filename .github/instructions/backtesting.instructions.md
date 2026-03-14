@@ -233,11 +233,22 @@ L/N=3.0 VR CAGR: +X% (4.7년 복리)
   
 마진 공식: `balance / 10 × 30 (VR)` or `balance / 10 × 21 (MA)` ≤ available margin.
 
-> ⚠️ **STRD 슬롯 패리티 규칙 (r79, 2026-03-15):**
+> ⚠️ **STRD 슬롯 패리티 규칙 (r79 발견 → T1에서 코드 수정 완료, commit 3b43bb2):**
 > 1 straddle = 2 positions → `n_active += 2` → live에서 max 5 straddle 동시 가능.
-> 백테스트에서 `max_concurrent=10` 사용 시 N이 **18.6% 과대추정** (r79 확인).
-> STRD 단독 백테스트는 반드시 `portfolio_sim(max_concurrent=5)` 사용.
-> 혼합 백테스트(VR+STRD)는 두 전략이 슬롯을 공유하므로 `max_concurrent=10` 유지.
+> 백테스트에서 `max_concurrent=10` + `straddle_syms` 미사용 시 N이 **18.6% 과대추정** (r79 확인).
+>
+> **STRD 단독 백테스트:**
+> ```python
+> pnl = portfolio_sim(strd_trades, max_concurrent=5)
+> ```
+>
+> **혼합(VR + STRD) 백테스트 — 반드시 `straddle_syms` 전달:**
+> ```python
+> from quantbox.backtest.trade_sim import get_straddle_syms
+> strd_syms = get_straddle_syms(strd_trades)
+> pnl = portfolio_sim(vr_trades + strd_trades, 10, straddle_syms=strd_syms)
+> ```
+> `straddle_syms` 없이 `max_concurrent=10`만 쓰면 straddle이 1슬롯으로 처리 → 수치 무효.
 
 ---
 

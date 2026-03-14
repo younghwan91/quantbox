@@ -322,3 +322,143 @@ class TestStrategyTypeAutoHeal:
         pos = scalper.strategy._positions.get("ETHUSDT:LONG")
         assert pos is not None
         assert pos.get("strategy_type") == "vr_squeeze", "Directional VR position must keep 'vr_squeeze' label"
+
+
+# ---------------------------------------------------------------------------
+# TestStraddleSlotCap — straddle_max_slots enforcement
+# ---------------------------------------------------------------------------
+
+
+def _straddle_pos_cap(sym: str, side: str) -> dict:
+    """Minimal straddle position dict for slot cap tests."""
+    return {
+        "symbol": sym,
+        "signal": 1 if side == "LONG" else -1,
+        "entry_price": 1.0,
+        "notional": 3000.0,
+        "bars_held": 5,
+        "peak_gain": 0.0,
+        "best_pnl": 0.0,
+        "worst_pnl": 0.0,
+        "server_sl_order_id": "sl_cap",
+        "server_tp_order_id": "tp_cap",
+        "sl": 0.015,
+        "tp": 0.05,
+        "tf": "15m",
+        "position_side": side,
+        "trail_active": False,
+        "strategy_type": "straddle",
+        "is_straddle": True,
+        "leverage": 30,
+        "move_size": 1.0,
+        "entry_stop_mult": None,
+        "partial_closed": False,
+        "highest_since_tp1": 0.0,
+        "trail_floor": None,
+        "opened_at": "2026-01-01T00:00:00+00:00",
+    }
+
+
+class TestStraddleSlotCap:
+    """straddle_max_slots: third pair must be blocked when cap is reached."""
+
+    def _run_slot_cap_check(self, scalper, candidates: list) -> list[str]:
+        """Simulate the straddle slot cap portion of _scan_entries().
+
+        Returns list of symbols for which _open_position was called.
+        """
+        opened_syms: list[str] = []
+        straddle_blocked: set[str] = set()
+        straddle_opened: dict[str, set[int]] = {}
+
+        for sym, signal, _move, _close, is_straddle in candidates:
+            if is_straddle:
+                if sym in straddle_blocked:
+                    continue
+                if sym not in straddle_opened:
+                    cfg_strd_max = scalper.vs_config.straddle_max_slots
+                    active_straddle_pairs = sum(
+                        1
+                        for k, p in scalper.strategy._positions.items()
+                        if ":LONG" in k and p.get("is_straddle", False)
+                    )
+                    if active_straddle_pairs * 2 >= cfg_strd_max:
+                        straddle_blocked.add(sym)
+                        continue
+
+            opened_syms.append(sym)
+            straddle_opened.setdefault(sym, set()).add(signal)
+
+        return opened_syms
+
+    def test_new_pair_blocked_when_cap_reached(self):
+        """With straddle_max_slots=4 and 2 active pairs, a 3rd pair is blocked."""
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        scalper = _build_vs_scalper(vs_config=VolStraddleConfig(straddle_max_slots=4))
+
+        # Inject 2 straddle pairs = 4 slots (at cap)
+        for sym in ("XRPUSDT", "ETHUSDT"):
+            scalper.strategy._positions[f"{sym}:LONG"] = _straddle_pos_cap(sym, "LONG")
+            scalper.strategy._positions[f"{sym}:SHORT"] = _straddle_pos_cap(sym, "SHORT")
+
+        assert scalper.vs_config.straddle_max_slots == 4
+        assert (
+            sum(1 for k, p in scalper.strategy._positions.items() if ":LONG" in k and p.get("is_straddle", False)) == 2
+        ), "Should have 2 active straddle LONG legs"
+
+        # 3rd pair candidate
+        candidates = [
+            ("AVAXUSDT", 1, 0.03, [1.0] * 20, True),
+            ("AVAXUSDT", -1, 0.03, [1.0] * 20, True),
+        ]
+        opened = self._run_slot_cap_check(scalper, candidates)
+
+        assert "AVAXUSDT" not in opened, "3rd straddle pair must be blocked when cap=4 and 2 pairs active"
+
+    def test_new_pair_allowed_under_cap(self):
+        """With straddle_max_slots=6 and 2 active pairs (4 slots), a 3rd pair is allowed."""
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        scalper = _build_vs_scalper(vs_config=VolStraddleConfig(straddle_max_slots=6))
+
+        # Inject 2 pairs = 4 slots (2 slots remaining)
+        for sym in ("XRPUSDT", "ETHUSDT"):
+            scalper.strategy._positions[f"{sym}:LONG"] = _straddle_pos_cap(sym, "LONG")
+            scalper.strategy._positions[f"{sym}:SHORT"] = _straddle_pos_cap(sym, "SHORT")
+
+        candidates = [
+            ("AVAXUSDT", 1, 0.03, [1.0] * 20, True),
+            ("AVAXUSDT", -1, 0.03, [1.0] * 20, True),
+        ]
+        opened = self._run_slot_cap_check(scalper, candidates)
+
+        assert "AVAXUSDT" in opened, "3rd pair should open when 4/6 slots used"
+        assert opened.count("AVAXUSDT") == 2, "Both LONG and SHORT legs must pass"
+
+    def test_second_leg_not_double_blocked(self):
+        """When SHORT is the second leg of a partially-opened pair, it is NOT blocked."""
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        scalper = _build_vs_scalper(vs_config=VolStraddleConfig(straddle_max_slots=4))
+
+        # 1 active pair = 2 slots (cap=4 → still 2 slots free for 2nd pair)
+        scalper.strategy._positions["XRPUSDT:LONG"] = _straddle_pos_cap("XRPUSDT", "LONG")
+        scalper.strategy._positions["XRPUSDT:SHORT"] = _straddle_pos_cap("XRPUSDT", "SHORT")
+
+        candidates = [
+            ("ETHUSDT", 1, 0.03, [1.0] * 20, True),
+            ("ETHUSDT", -1, 0.03, [1.0] * 20, True),
+        ]
+        opened = self._run_slot_cap_check(scalper, candidates)
+
+        # Both LONG and SHORT of ETHUSDT should open (2nd pair, within cap)
+        assert opened.count("ETHUSDT") == 2, "Both legs of a new pair must open if within cap"
+
+    def test_config_auto_cap_when_max_concurrent_reduced(self):
+        """straddle_max_slots is auto-capped to max_concurrent when it would exceed it."""
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        cfg = VolStraddleConfig(max_concurrent=4)  # straddle_max_slots default=6 > 4
+        assert cfg.straddle_max_slots == 4, "straddle_max_slots must be auto-capped to max_concurrent"
+        assert cfg.straddle_max_slots <= cfg.max_concurrent
