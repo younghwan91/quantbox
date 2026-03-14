@@ -362,20 +362,28 @@ def _straddle_pos_cap(sym: str, side: str) -> dict:
 class TestStraddleSlotCap:
     """straddle_max_slots: third pair must be blocked when cap is reached."""
 
-    def _run_slot_cap_check(self, scalper, candidates: list) -> list[str]:
+    def _run_slot_cap_check(self, scalper, candidates: list, max_entries: int = 10) -> list[str]:
         """Simulate the straddle slot cap portion of _scan_entries().
 
         Returns list of symbols for which _open_position was called.
         """
         opened_syms: list[str] = []
+        entries_made: int = 0
         straddle_blocked: set[str] = set()
         straddle_opened: dict[str, set[int]] = {}
 
         for sym, signal, _move, _close, is_straddle in candidates:
+            if entries_made >= max_entries:
+                break
             if is_straddle:
                 if sym in straddle_blocked:
                     continue
                 if sym not in straddle_opened:
+                    # Upfront check: need ≥2 remaining slots for LONG+SHORT
+                    remaining_slots = max_entries - entries_made
+                    if remaining_slots < 2:
+                        straddle_blocked.add(sym)
+                        continue
                     cfg_strd_max = scalper.vs_config.straddle_max_slots
                     active_straddle_pairs = sum(
                         1
@@ -387,6 +395,7 @@ class TestStraddleSlotCap:
                         continue
 
             opened_syms.append(sym)
+            entries_made += 1
             straddle_opened.setdefault(sym, set()).add(signal)
 
         return opened_syms
@@ -462,3 +471,31 @@ class TestStraddleSlotCap:
         cfg = VolStraddleConfig(max_concurrent=4)  # straddle_max_slots default=6 > 4
         assert cfg.straddle_max_slots == 4, "straddle_max_slots must be auto-capped to max_concurrent"
         assert cfg.straddle_max_slots <= cfg.max_concurrent
+
+    def test_straddle_blocked_when_only_one_slot_remaining(self):
+        """Straddle must NOT open when only 1 slot remains — avoids LONG-only orphan."""
+        scalper = _build_vs_scalper()
+
+        candidates = [
+            ("COMPUSDT", 1, 0.04, [1.0] * 20, True),  # LONG
+            ("COMPUSDT", -1, 0.04, [1.0] * 20, True),  # SHORT
+        ]
+        # max_entries=1 → only 1 slot left
+        opened = self._run_slot_cap_check(scalper, candidates, max_entries=1)
+
+        assert "COMPUSDT" not in opened, (
+            "Straddle must be fully blocked when only 1 slot remains — "
+            "prevents COMP-style orphan (LONG opens, SHORT blocked)"
+        )
+
+    def test_straddle_allowed_when_exactly_two_slots_remaining(self):
+        """Straddle opens normally when exactly 2 slots remain."""
+        scalper = _build_vs_scalper()
+
+        candidates = [
+            ("COMPUSDT", 1, 0.04, [1.0] * 20, True),
+            ("COMPUSDT", -1, 0.04, [1.0] * 20, True),
+        ]
+        opened = self._run_slot_cap_check(scalper, candidates, max_entries=2)
+
+        assert opened.count("COMPUSDT") == 2, "Both LONG and SHORT must open when exactly 2 slots remain"
