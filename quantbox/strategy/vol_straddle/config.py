@@ -71,8 +71,9 @@ class VolStraddleConfig(BaseSettings):
     s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg
     s_trail_distance: float = 0.001  # r76: 0.1% behind peak (was 0.2%, PF 4.876→9.349)
     straddle_enabled: bool = True  # S_d8 straddle mode enabled
-    straddle_max_slots: int = 6  # Max slots consumed by STRD (1 pair = 2 slots → max 3 pairs)
-    # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR/MA.
+    straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
+    # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR.
+    # r82: strd_max=8 → Calmar +67% vs strd_max=6. VR 2슬롯 보험 유지.
     hedge_mode: bool = True  # Binance Hedge Mode (dualSidePosition=true)
 
     # ── Direction ──
@@ -103,7 +104,7 @@ class VolStraddleConfig(BaseSettings):
 
     # ── Risk Management ──
     max_concurrent: int = 10  # 10 slots (VR L/N=30/10=3.0, MA L/N=21/10=2.1)
-    max_drawdown_pct: float = 0.30  # 30% session drawdown → halt (r48 analysis: P99 session DD)
+    max_drawdown_pct: float = 0.15  # 15% session drawdown → halt (STRD-dominant: MaxDD=2.6% BT)
     max_exposure_multiplier: float = (
         35.0  # Max total open notional / balance. 35x = 17% above 10×30x/10=30x theoretical max
     )
@@ -134,11 +135,11 @@ class VolStraddleConfig(BaseSettings):
 
     # ── SoftTight DD Scaling (safety mechanism) ──
     soft_equity_scale: bool = True
-    soft_eq_dd1: float = 0.02  # 2% DD → 80% sizing
+    soft_eq_dd1: float = 0.015  # 1.5% DD → 80% sizing (tightened from 2%)
     soft_eq_scale1: float = 0.80
-    soft_eq_dd2: float = 0.04  # 4% DD → 60% sizing
+    soft_eq_dd2: float = 0.03  # 3% DD → 60% sizing (tightened from 4%)
     soft_eq_scale2: float = 0.60
-    soft_eq_dd3: float = 0.06  # 6% DD → 40% sizing
+    soft_eq_dd3: float = 0.05  # 5% DD → 40% sizing (tightened from 6%)
     soft_eq_scale3: float = 0.40
 
     # ── CW-Tier Conviction Sizing (R34 validated) ──
