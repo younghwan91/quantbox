@@ -280,7 +280,7 @@ class VolStraddleConfig(BaseSettings):
     # ── MA Cluster Squeeze (R44d V17, 4h-only) ──
     # Complementary strategy: 4 SMAs cluster → breakout.
     # Fires when VR squeeze is idle (93.7% non-overlapping).
-    ma_cluster_enabled: bool = True  # Enable MA cluster signals
+    ma_cluster_enabled: bool = False  # Disabled: live PF=0.309 (N=16), 96% of account losses
     ma_cluster_pct: float = 0.02  # Max spread among 4 SMAs (r75: 3%→2%, tighter cluster)
     ma_cluster_min_duration: int = 6  # Min 4h bars in cluster (r75: 8→6, ≈24h)
     ma_cluster_max_duration: int = 24  # Max 4h bars in cluster (R45: zombie filter)
