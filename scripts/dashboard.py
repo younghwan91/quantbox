@@ -22,7 +22,7 @@ load_dotenv()
 
 DB = Path(__file__).parent.parent / "data" / "journal.sqlite"
 STATE = Path(__file__).parent.parent / "data" / "state" / "scalper_state.json"
-REAL = "ABS(pnl_pct) < 10 AND symbol NOT LIKE 'TEST%' AND symbol NOT LIKE '%:%'"
+REAL = "ABS(pnl_pct) < 10 AND symbol NOT LIKE 'TEST%' AND symbol NOT LIKE '%:%' AND session != 'paper'"
 REFRESH = 30
 POSITIONS_TTL = 10
 
