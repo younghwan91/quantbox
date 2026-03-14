@@ -268,3 +268,60 @@ class TestStartupExchangeCrosscheck:
 
         # Should not raise
         scalper._startup_exchange_crosscheck()
+
+
+# ---------------------------------------------------------------------------
+# Tests: P1 — Reverse ghost auto-close is recorded in main journal.sqlite
+# ---------------------------------------------------------------------------
+
+
+class TestReverseGhostJournaling:
+    """Reverse ghost close must appear in journal.sqlite (not only in recon_journal)."""
+
+    def test_reverse_ghost_calls_journal_record(self):
+        """_journal.record() is called when reverse ghost is auto-closed successfully."""
+        from unittest.mock import MagicMock
+
+        scalper = _build_vs_scalper()
+        scalper.paper_mode = False
+
+        # Inject a mock journal that records calls
+        mock_journal = MagicMock()
+        scalper._journal = mock_journal
+
+        exchange_positions = [
+            _make_exchange_position("BANDUSDT", "LONG", QTY),
+            _make_zero_position("BANDUSDT", "SHORT"),
+        ]
+        scalper.client.futures_position_information.return_value = exchange_positions
+
+        scalper._reconcile_positions()
+
+        # journal.record() must have been called
+        assert mock_journal.record.called, (
+            "journal.record() was not called — reverse ghost close not recorded in journal.sqlite"
+        )
+        call_kwargs = mock_journal.record.call_args[0][0]
+        assert call_kwargs["symbol"] == "BANDUSDT"
+        assert call_kwargs["reason"] == "reconciliation_close"
+
+    def test_reverse_ghost_journal_not_called_on_api_failure(self):
+        """If auto-close order fails, journal.record() must NOT be called with garbage data."""
+        from unittest.mock import MagicMock
+
+        scalper = _build_vs_scalper()
+        scalper.paper_mode = False
+
+        mock_journal = MagicMock()
+        scalper._journal = mock_journal
+
+        exchange_positions = [
+            _make_exchange_position("BANDUSDT", "LONG", QTY),
+        ]
+        scalper.client.futures_position_information.return_value = exchange_positions
+        scalper.client.futures_create_order.side_effect = Exception("APIError(-2019)")
+
+        scalper._reconcile_positions()
+
+        # journal.record should NOT be called when close failed
+        mock_journal.record.assert_not_called()

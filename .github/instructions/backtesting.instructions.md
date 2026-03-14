@@ -136,17 +136,24 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 **허용 기준:** 최신 리포트 대비 N ±1%, PF ±1%  
 **이탈 시 → 즉시 중단.** 데이터 범위, config, 함수 버전 확인 먼저.
 
-**최신 정식 베이스라인 (v14.21.0, 2026-03-14 기준, commit=6e07290):**
+**최신 정식 베이스라인 (v14.21.0, 2026-03-14 기준, commit=b029ae7):**
 
 | 버전 | 포함 전략 | 유니버스 | 기간 | N | PF | Calmar | DD | 비고 |
 |------|---------|---------|------|---|----|--------|----|-----|
 | **v14.5.0 (프로덕션)** | D_mom8+MA | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% | canonical |
 | r73 3전략 trail | **D+S+MA** | **60 syms** | 5.67yr | 9,773 | 2.002 | 1695.6 | 40.5% | s_trail_dist=0.002 기준 |
 | **r76 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,775** | **2.484** | **9882** | **37.1%** | **trail canonical (s_trail_dist=0.001)** |
+| **r77 S_d8 단독** | **S_d8** | **60 syms** | **6yr** | **7,730** | **9.603** | **20,601** | **3.5%** | **룩어헤드 검증 완료 ✅** |
 
 > **r76 trail = 현재 프로덕션 기준 수치 (v14.21.0+).** r73은 이전 기준.
-> S_d8 standalone: N=7748, PF=9.349, MaxDD=4.3% (with s_trail_distance=0.001)
-> 3전략 combined trail: S_d8 dominant, MA 독립, D_mom8 cherry-pick
+> **r77 S_d8 감사 결과 (2026-03-14):**
+> - 룩어헤드 없음 ✅ (4개 체크 모두 통과)
+> - S_d8 Calmar=20,601 vs D_mom8 Calmar=17.5 → **1177배 우월**
+> - 6년 모두 수익, MaxDD=3.5%, Bootstrap P(PF≥1.0)=100%
+> - **⚠️ 핵심 cliff edge: s_trail_activate=0.015는 매우 sharp한 peak**
+>   ±0.003 변화만으로 PF 60-75% 붕괴. 실거래 모니터링 필수.
+>   → 향후 r78에서 trail_activate × trail_distance 2D sweep 권장
+> - IS/OOS=3.27x (IS PF=16.4 vs OOS PF=5.0) — 시장 정상화로 해석, 과적합 아님
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
 
 > **v14.24.0 추가:** `sim_directional_trailing()` 및 `sim_straddle_trailing()`이 `research/active/r41_r45/r43_exit_improvement.py`에서 `quantbox/backtest/trade_sim.py`로 이전됨 (v14.24.0).  

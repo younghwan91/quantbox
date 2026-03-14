@@ -105,6 +105,22 @@ logger = logging.getLogger("Scalper")
 # ──────────────── Diagnostic Logger ─────────────────────
 from quantbox.utils.diagnostics import _diag_logger  # noqa: E402
 
+# ──────────────────────── Helpers ──────────────────────────────────────────
+
+
+def _healed_strategy_type(pos: dict) -> str:
+    """Return strategy_type, auto-healing straddle positions mislabeled as vr_squeeze.
+
+    Positions opened before commit 0ac2e2b (strategy_type propagation fix) were
+    stored with strategy_type='vr_squeeze' even when is_straddle=True.  Detect
+    and correct on state restore so the dashboard / journal always show 'straddle'.
+    """
+    raw = pos.get("strategy_type", "vr_squeeze")
+    if pos.get("is_straddle", False) and raw == "vr_squeeze":
+        return "straddle"
+    return raw
+
+
 # ──────────────────────── Scalper Class ────────────────────────────────
 
 
@@ -1136,6 +1152,7 @@ class RubberBandScalper(
             )
 
         entries_made = 0
+        straddle_opened: dict[str, set[int]] = {}  # {sym: {signals opened}} for rollback
         for sym, signal, move, close, is_straddle in candidates:
             if entries_made >= max_entries:
                 break
@@ -1165,6 +1182,37 @@ class RubberBandScalper(
 
             if self._open_position(sym, signal, close, balance):
                 entries_made += 1
+                if is_straddle:
+                    straddle_opened.setdefault(sym, set()).add(signal)
+
+        # ── Straddle half-open rollback ──
+        # If only one leg of a straddle opened (e.g., SHORT failed -2027),
+        # immediately close the orphaned leg to restore delta-neutral intent.
+        for sym, signals_opened in straddle_opened.items():
+            if len(signals_opened) == 1:
+                opened_signal = next(iter(signals_opened))
+                side_str = "LONG" if opened_signal == 1 else "SHORT"
+                pos_key = f"{sym}:{side_str}"
+                logger.error(
+                    f"[{sym}] Straddle incomplete: only {side_str} opened (counterpart failed). "
+                    f"Rolling back {side_str} to avoid unintended directional exposure."
+                )
+                self.discord.send(
+                    content=(
+                        f"⚠️ **[{sym}] Straddle half-open** — {side_str} opened but counterpart failed. "
+                        f"Auto-closing {side_str} (rollback)."
+                    )
+                )
+                # Use last close price as rollback price
+                close_arr = next((c for s, sig, _, c, is_s in candidates if s == sym and is_s), None)
+                rollback_price = float(close_arr[-1]) if close_arr is not None else 0.0
+                closed = self._close_position(pos_key, "straddle_rollback", rollback_price)
+                if not closed:
+                    logger.error(f"[{sym}] Straddle rollback FAILED — manual intervention required!")
+                    self.discord.send(
+                        content=(f"🚨 **[{sym}] Straddle rollback FAILED** — {side_str} is orphaned. Close manually.")
+                    )
+                entries_made -= 1
 
         if entries_made > 0:
             logger.info(f"Opened {entries_made} new positions (from {len(candidates)} candidates)")
@@ -1349,7 +1397,7 @@ class RubberBandScalper(
                 tp=pos.get("tp"),
                 tf=pos.get("tf"),
                 max_hold=pos.get("max_hold"),
-                strategy_type=pos.get("strategy_type", "vr_squeeze"),
+                strategy_type=_healed_strategy_type(pos),
                 is_straddle=pos.get("is_straddle", False),
             )
             # Restore bars_held and PBT runner state
@@ -1377,7 +1425,7 @@ class RubberBandScalper(
                 # v14.0: Restore per-signal fields (sl/tp/tf/max_hold/strategy_type).
                 # Without this, crash recovery defaults to VR squeeze params
                 # for ALL positions — breaking MA cluster SL/TP/max_hold/exit routing.
-                self.strategy._positions[sym]["strategy_type"] = pos.get("strategy_type", "vr_squeeze")
+                self.strategy._positions[sym]["strategy_type"] = _healed_strategy_type(pos)
                 self.strategy._positions[sym]["sl"] = pos.get("sl", self.strategy._positions[sym].get("sl"))
                 self.strategy._positions[sym]["tp"] = pos.get("tp", self.strategy._positions[sym].get("tp"))
                 self.strategy._positions[sym]["tf"] = pos.get("tf", self.strategy._positions[sym].get("tf"))
