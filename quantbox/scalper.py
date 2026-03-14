@@ -768,8 +768,52 @@ class RubberBandScalper(
 
         return btc_close, btc_close_4h
 
+    def _close_straddle_orphans(self) -> None:
+        """Detect and close straddle legs that lost their counterpart.
+
+        A straddle orphan arises when one leg exits (SL/trail/maxhold) but the
+        counterpart is not automatically closed.  Running without a pair turns a
+        delta-neutral volatility bet into an unintended directional position.
+
+        Called at the top of every _manage_active_positions cycle.
+        """
+        if self.strategy_name != "vol_straddle":
+            return
+
+        from collections import defaultdict
+
+        straddle_by_sym: dict[str, list[str]] = defaultdict(list)
+        for pk, pos in self.strategy._positions.items():
+            if pos.get("is_straddle") or pos.get("strategy_type") == "straddle":
+                sym = pk.split(":")[0] if ":" in pk else pk
+                straddle_by_sym[sym].append(pk)
+
+        for sym, keys in straddle_by_sym.items():
+            if len(keys) == 1:
+                orphan_key = keys[0]
+                orphan_pos = self.strategy._positions.get(orphan_key)
+                bars = orphan_pos.get("bars_held", 0) if orphan_pos else 0
+                # Give 1 bar grace period in case pair is still being placed
+                if bars < 2:
+                    continue
+                logger.warning(
+                    f"[STRADDLE-ORPHAN] {orphan_key} has no pair (bars={bars}). "
+                    "Auto-closing to restore delta-neutral intent."
+                )
+                self.discord.send(
+                    content=(
+                        f"⚠️ **[{sym}] Straddle orphan detected** — "
+                        f"`{orphan_key}` has no counterpart (bars={bars}). "
+                        "Auto-closing."
+                    )
+                )
+                result = self.download_klines(sym, 10, full=True)
+                close_price = float(result[0][-1]) if result is not None else 0.0
+                self._close_position(orphan_key, "straddle_orphan", close_price)
+
     def _manage_active_positions(self) -> None:
         """Process existing positions: update, exit, ratchet SL."""
+        self._close_straddle_orphans()
         for pos_key in list(self.strategy.active_positions):
             # Extract Binance symbol from compound key (e.g., BTCUSDT:LONG → BTCUSDT)
             api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
