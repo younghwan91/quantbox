@@ -95,10 +95,12 @@ from quantbox.backtest.trade_sim import (
 compute_metrics(pnl, data_years) → {
     "N": 총 거래 수,
     "PF": profit factor (수익 합 / 손실 합),
-    "WR": 승률,
-    "EV": 기댓값(bp) per trade — 레버리지 무관한 순수 엣지 지표,
-    "Sharpe": 연간 샤프,
-    "MaxDD": 최대 낙폭 (1x 복리 기준),
+    "WR": 승률 — **이미 퍼센트 스케일** (50.6, NOT 0.506). ×100 하면 5060% 버그!
+    "EV_bp": 기댓값(bp) per trade — 레버리지 무관한 순수 엣지 지표,
+    "RR": risk/reward ratio,
+    "max_dd_pct": 최대 낙폭 (1x 복리 기준, %).
+    "ann_ret_pct": 연간 수익률 (1x compound, %),
+    "calmar": Calmar ratio,
     ...
 }
 ```
@@ -144,6 +146,7 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 | r73 3전략 trail | **D+S+MA** | **60 syms** | 5.67yr | 9,773 | 2.002 | 1695.6 | 40.5% | s_trail_dist=0.002 기준 |
 | **r76 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,775** | **2.484** | **9882** | **37.1%** | **trail canonical (s_trail_dist=0.001)** |
 | **r77 S_d8 단독** | **S_d8** | **60 syms** | **6yr** | **7,730** | **9.603** | **20,601** | **3.5%** | **룩어헤드 검증 완료 ✅** |
+| r84 G_4TF (현행) | **S_d8** | **60 syms** | **6yr** | **6,290** | **10.23** | **10,175** | **2.6%** | max_concurrent=5 (슬롯 패리티) |
 
 > **r76 trail = 현재 프로덕션 기준 수치 (v14.21.0+).** r73은 이전 기준.
 > **r77 S_d8 감사 결과 (2026-03-14):**
@@ -152,8 +155,10 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 > - 6년 모두 수익, MaxDD=3.5%, Bootstrap P(PF≥1.0)=100%
 > - **⚠️ 핵심 cliff edge: s_trail_activate=0.015는 매우 sharp한 peak**
 >   ±0.003 변화만으로 PF 60-75% 붕괴. 실거래 모니터링 필수.
->   → 향후 r78에서 trail_activate × trail_distance 2D sweep 권장
-> - IS/OOS=3.27x (IS PF=16.4 vs OOS PF=5.0) — 시장 정상화로 해석, 과적합 아님
+> **r84 TF별 분석 (2026-03-15):** 4h TF가 가장 좋은 신호 품질(PF=61, EV=150bp)이나
+> G_4TF가 8.1× 더 좋은 Calmar (슬롯 활용도 때문). 15m이 전체 N의 53.5% 기여.
+> **r85 2D trail sweep (2026-03-15):** act=0.015는 genuine peak (양방향 cliff 확인).
+> (act=0.015, dist=0.0005) IS Calmar=24,204 (+138%) — OOS 검증 전 변경 금지.
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
 
 > **v14.24.0 추가:** `sim_directional_trailing()` 및 `sim_straddle_trailing()`이 `research/active/r41_r45/r43_exit_improvement.py`에서 `quantbox/backtest/trade_sim.py`로 이전됨 (v14.24.0).  
