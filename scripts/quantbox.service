@@ -4,17 +4,23 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
 User=young
 WorkingDirectory=/home/user/Documents/git/quantbox
+EnvironmentFile=/home/user/.env.quantbox
 Environment="PATH=/home/user/Documents/git/quantbox/.venv/bin:/usr/local/bin:/usr/bin:/bin"
 ExecStart=/home/user/Documents/git/quantbox/.venv/bin/python3 -m quantbox.scalper --strategy vol_straddle
 
-# Auto-restart on crash
-Restart=always
-RestartSec=15
+# Watchdog: systemd kills if no ping in 20 min (15m bar wait = ~900s + 300s margin)
+WatchdogSec=1200
 
-# Log to journald (use: journalctl -u quantbox -f)
+# Auto-restart on crash with rate limiting
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Log to journald
 StandardOutput=journal
 StandardError=journal
 
