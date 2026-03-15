@@ -213,17 +213,21 @@ def fetch_positions() -> list[dict]:
             amt = float(p["positionAmt"])
             if abs(amt) == 0:
                 continue
-            entry = float(p["entryPrice"])
-            mark  = float(p["markPrice"])
-            upnl  = float(p["unRealizedProfit"])
-            pct   = (mark - entry) / entry * 100 if amt > 0 else (entry - mark) / entry * 100
+            entry    = float(p["entryPrice"])
+            mark     = float(p["markPrice"])
+            upnl     = float(p["unRealizedProfit"])
+            leverage = int(p.get("leverage", 30))
+            pct      = (mark - entry) / entry * 100 if amt > 0 else (entry - mark) / entry * 100
+            roi_pct  = pct * leverage
             rows.append({
-                "symbol": p["symbol"],
-                "side":   p["positionSide"],
-                "entry":  entry,
-                "mark":   mark,
-                "pct":    pct,
-                "upnl":   upnl,
+                "symbol":   p["symbol"],
+                "side":     p["positionSide"],
+                "entry":    entry,
+                "mark":     mark,
+                "pct":      pct,
+                "roi_pct":  roi_pct,
+                "leverage": leverage,
+                "upnl":     upnl,
                 "notional": abs(float(p["notional"])),
             })
         return sorted(rows, key=lambda x: x["pct"], reverse=True)
@@ -369,23 +373,59 @@ def _max_drawdown(df: pd.DataFrame) -> float:
 
 # ─── Chart builders ───────────────────────────────────────────────────────────
 def chart_equity(df: pd.DataFrame) -> go.Figure | None:
-    """Equity curve: balance_after over time."""
-    if df.empty or "balance_after" not in df.columns:
+    """Equity curve: cumulative pnl_usd over time (start_balance + cumsum)."""
+    if df.empty or "pnl_usd" not in df.columns or "exit_time" not in df.columns:
         return None
-    d = df.dropna(subset=["balance_after", "exit_time"]).sort_values("exit_time")
+    d = df.dropna(subset=["pnl_usd", "exit_time"]).sort_values("exit_time").copy()
     if d.empty:
         return None
 
+    # Derive start balance from first non-NULL balance_before; fallback to 0
+    start_balance = 0.0
+    if "balance_before" in d.columns:
+        first_valid = d["balance_before"].dropna()
+        if not first_valid.empty:
+            start_balance = float(first_valid.iloc[0])
+
+    d["equity"] = start_balance + d["pnl_usd"].cumsum()
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=d["exit_time"], y=d["balance_after"],
-        mode="lines",
-        line=dict(color="#FF8C00", width=2),
-        fill="tozeroy",
-        fillcolor="rgba(255,140,0,0.06)",
-        name="Balance",
-        hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f}<extra></extra>",
-    ))
+
+    # If balance_source column exists, split solid vs dashed segments
+    if "balance_source" in d.columns:
+        real_mask = d["balance_source"] != "interpolated"
+        interp_mask = d["balance_source"] == "interpolated"
+        if real_mask.any():
+            dr = d[real_mask]
+            fig.add_trace(go.Scatter(
+                x=dr["exit_time"], y=dr["equity"],
+                mode="lines",
+                line=dict(color="#FF8C00", width=2),
+                fill="tozeroy",
+                fillcolor="rgba(255,140,0,0.06)",
+                name="Equity",
+                hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f}<extra></extra>",
+            ))
+        if interp_mask.any():
+            di = d[interp_mask]
+            fig.add_trace(go.Scatter(
+                x=di["exit_time"], y=di["equity"],
+                mode="lines",
+                line=dict(color="#FF8C00", width=1, dash="dot"),
+                name="Equity (interpolated)",
+                hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f} (interp)<extra></extra>",
+            ))
+    else:
+        fig.add_trace(go.Scatter(
+            x=d["exit_time"], y=d["equity"],
+            mode="lines",
+            line=dict(color="#FF8C00", width=2),
+            fill="tozeroy",
+            fillcolor="rgba(255,140,0,0.06)",
+            name="Equity",
+            hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f}<extra></extra>",
+        ))
+
     fig.update_layout(**PLOT_LAYOUT, title=dict(text="EQUITY CURVE", font=dict(color="#FF8C00", size=11), x=0))
     return fig
 
@@ -608,14 +648,16 @@ def render():
   <td>${p['entry']:,.4f}</td>
   <td>${p['mark']:,.4f}</td>
   <td class="{pct_class}">{p['pct']:+.2f}%</td>
+  <td class="{pct_class}">{p['roi_pct']:+.2f}%</td>
   <td class="{pct_class}">${p['upnl']:+.2f}</td>
+  <td class="neu">{p['leverage']}x</td>
   <td class="neu">{bars}/192</td>
   <td class="neu">${p['notional']:,.0f}</td>
 </tr>"""
                 st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>STRAT</th><th>ENTRY</th><th>MARK</th>
-<th>PnL%</th><th>PnL USD</th><th>BARS</th><th>NOTIONAL</th></tr>
+<th>Price%</th><th>ROI%</th><th>PnL USD</th><th>LEV</th><th>BARS</th><th>NOTIONAL</th></tr>
 {rows_html}
 </table></div>""", unsafe_allow_html=True)
 
@@ -721,7 +763,7 @@ def render():
             if fig_eq:
                 st.plotly_chart(fig_eq, use_container_width=True)
             else:
-                st.markdown('<span class="neu">balance_after data unavailable.</span>', unsafe_allow_html=True)
+                st.markdown('<span class="neu">No pnl_usd data for equity curve.</span>', unsafe_allow_html=True)
 
             # ── Individual P&L bars ───────────────────────────────────────────
             fig_pnl = chart_pnl_bars(df)
@@ -729,14 +771,21 @@ def render():
                 st.plotly_chart(fig_pnl, use_container_width=True)
 
             # ── Summary strip ─────────────────────────────────────────────────
-            if "balance_after" in df.columns and df["balance_after"].notna().any():
-                start_bal = df.dropna(subset=["balance_after"]).iloc[0]["balance_before"] \
-                    if "balance_before" in df.columns else None
-                end_bal   = df.dropna(subset=["balance_after"]).iloc[-1]["balance_after"]
-                max_dd    = _max_drawdown(df)
-                dd_color  = "#00C853" if max_dd < 10 else ("#FF8C00" if max_dd < 20 else "#D50000")
-                start_str = f"${start_bal:,.2f}" if start_bal is not None else "—"
-                st.markdown(f"""
+            start_bal: float | None = None
+            end_bal:   float | None = None
+            if "balance_before" in df.columns:
+                first_bb = df["balance_before"].dropna()
+                if not first_bb.empty:
+                    start_bal = float(first_bb.iloc[0])
+            if "balance_after" in df.columns:
+                last_ba = df["balance_after"].dropna()
+                if not last_ba.empty:
+                    end_bal = float(last_ba.iloc[-1])
+            max_dd    = _max_drawdown(df)
+            dd_color  = "#00C853" if max_dd < 10 else ("#FF8C00" if max_dd < 20 else "#D50000")
+            start_str = f"${start_bal:,.2f}" if start_bal is not None else "—"
+            end_str   = f"${end_bal:,.2f}"   if end_bal   is not None else "—"
+            st.markdown(f"""
 <div class="mini-grid">
   <div class="mini-stat">
     <div class="lbl">START BALANCE</div>
@@ -744,7 +793,7 @@ def render():
   </div>
   <div class="mini-stat">
     <div class="lbl">CURRENT BALANCE</div>
-    <div class="val">${end_bal:,.2f}</div>
+    <div class="val">{end_str}</div>
   </div>
   <div class="mini-stat">
     <div class="lbl">TOTAL REALIZED</div>
