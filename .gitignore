@@ -43,3 +43,6 @@ secrets.json
 /temp/
 devlog/.coverage
 .hypothesis/
+
+# OMC runtime state
+.omc/
