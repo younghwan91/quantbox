@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS trades (
     balance_after   REAL,
     session         TEXT,
     commit_sha      TEXT,
+    straddle_pair_id TEXT,
     created_at      TEXT    DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_key ON trades(symbol, exit_time);
@@ -65,6 +66,12 @@ class TradeJournal:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(_SCHEMA)
+            # Schema migration: 기존 DB에 straddle_pair_id 컬럼 추가 (멱등성 보장)
+            try:
+                conn.execute("ALTER TABLE trades ADD COLUMN straddle_pair_id TEXT")
+                conn.commit()
+            except Exception:
+                pass  # 이미 존재하는 컬럼
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -105,14 +112,15 @@ class TradeJournal:
             trade.get("balance_after"),
             self.session,
             self._commit_sha,
+            trade.get("straddle_pair_id"),
         )
         sql = """
             INSERT OR IGNORE INTO trades
                 (symbol, strategy_type, direction, entry_price, exit_price,
                  pnl_pct, pnl_usd, mfe_pct, mae_pct, notional, bars_held,
                  entry_time, exit_time, exit_reason,
-                 balance_before, balance_after, session, commit_sha)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 balance_before, balance_after, session, commit_sha, straddle_pair_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -176,6 +184,39 @@ class TradeJournal:
             "avg_mfe_pct": row["avg_mfe_pct"] or 0.0,
             "avg_mae_pct": row["avg_mae_pct"] or 0.0,
         }
+
+    def get_pair_pnl(self, pair_id: str) -> dict | None:
+        """페어 단위 PnL 조회 (스트래들 LONG + SHORT 합산).
+
+        Args:
+            pair_id: straddle_pair_id 값.
+
+        Returns:
+            Dict with keys: pair_id, long_pnl, short_pnl, net_pnl,
+            long_bars, short_bars, long_reason, short_reason.
+            None if no trades found for this pair.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT direction, pnl_usd, bars_held, exit_reason FROM trades WHERE straddle_pair_id = ?",
+                (pair_id,),
+            ).fetchall()
+        if not rows:
+            return None
+        result: dict = {"pair_id": pair_id, "long_pnl": 0.0, "short_pnl": 0.0, "net_pnl": 0.0}
+        for row in rows:
+            direction, pnl_usd, bars, reason = row["direction"], row["pnl_usd"], row["bars_held"], row["exit_reason"]
+            pnl_usd = pnl_usd or 0.0
+            if direction == "LONG":
+                result["long_pnl"] = pnl_usd
+                result["long_bars"] = bars
+                result["long_reason"] = reason
+            else:
+                result["short_pnl"] = pnl_usd
+                result["short_bars"] = bars
+                result["short_reason"] = reason
+        result["net_pnl"] = result["long_pnl"] + result["short_pnl"]
+        return result
 
     def get_recent(self, limit: int = 20) -> list[dict]:
         """Return the most recent ``limit`` trades as list of dicts."""
