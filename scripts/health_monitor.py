@@ -39,20 +39,22 @@ JOURNAL_PATH = ROOT / "data" / "journal.sqlite"
 CHECK_INTERVAL = 300  # 5분
 
 # DD 경보 임계값
-DD_WARN_PCT = 0.08   # 8%  — 경고 (SoftTight 최소 단계 이미 진입)
-DD_CRIT_PCT = 0.12   # 12% — 위험 (max_dd=15% 접근)
+DD_WARN_PCT = 0.08  # 8%  — 경고 (SoftTight 최소 단계 이미 진입)
+DD_CRIT_PCT = 0.12  # 12% — 위험 (max_dd=15% 접근)
 
 # Journal drift — 24h 기준 허용 오차
-DRIFT_WARN = 2       # 2건 초과 → 경고
-DRIFT_CRIT = 5       # 5건 초과 → 위험
+DRIFT_WARN = 2  # 2건 초과 → 경고
+DRIFT_CRIT = 5  # 5건 초과 → 위험
 
 
 # ── Discord ──────────────────────────────────────────────────────────────────
+
 
 def _get_notifier():
     """Return DiscordNotifier instance (lazy import to avoid circular deps)."""
     try:
         from quantbox.notifications.discord import DiscordNotifier
+
         return DiscordNotifier()
     except Exception:
         return None
@@ -90,9 +92,11 @@ def ok_msg(msg: str) -> None:
 
 # ── Binance helpers ───────────────────────────────────────────────────────────
 
+
 def _get_client():
     try:
         from binance.client import Client
+
         return Client(os.environ["BINANCE_API_KEY"], os.environ["BINANCE_API_SECRET"])
     except Exception:
         return None
@@ -132,6 +136,7 @@ def get_live_balance() -> float | None:
 
 # ── State helpers ─────────────────────────────────────────────────────────────
 
+
 def load_state() -> dict | None:
     if not STATE_PATH.exists():
         return None
@@ -149,9 +154,7 @@ def _journal_count_24h() -> int:
     try:
         cut = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         conn = sqlite3.connect(JOURNAL_PATH)
-        row = conn.execute(
-            "SELECT COUNT(*) FROM trades WHERE exit_time >= ?", (cut,)
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM trades WHERE exit_time >= ?", (cut,)).fetchone()
         conn.close()
         return row[0] if row else 0
     except Exception:
@@ -165,6 +168,7 @@ def _state_count_24h(history: list[dict]) -> int:
 
 
 # ── Health Checks ─────────────────────────────────────────────────────────────
+
 
 def check_stale_state(state: dict) -> bool:
     """Alert if scalper hasn't saved state in > 30 minutes."""
@@ -181,8 +185,10 @@ def check_stale_state(state: dict) -> bool:
             alert(
                 "Scalper 응답 없음",
                 f"마지막 state 저장이 **{age_min}분** 전입니다. 스칼퍼가 멈췄을 수 있습니다.",
-                [{"name": "saved_at", "value": saved_at_str[:19], "inline": True},
-                 {"name": "경과", "value": f"{age_min}분", "inline": True}],
+                [
+                    {"name": "saved_at", "value": saved_at_str[:19], "inline": True},
+                    {"name": "경과", "value": f"{age_min}분", "inline": True},
+                ],
                 critical=True,
             )
             return True
@@ -203,9 +209,11 @@ def check_journal_drift(state: dict) -> bool:
         alert(
             "Journal Drift 심각",
             f"최근 24h: state={s_count}건, DB={j_count}건. **{drift}건** 누락.",
-            [{"name": "state(24h)", "value": str(s_count), "inline": True},
-             {"name": "DB(24h)", "value": str(j_count), "inline": True},
-             {"name": "누락", "value": str(drift), "inline": True}],
+            [
+                {"name": "state(24h)", "value": str(s_count), "inline": True},
+                {"name": "DB(24h)", "value": str(j_count), "inline": True},
+                {"name": "누락", "value": str(drift), "inline": True},
+            ],
             critical=True,
         )
         return True
@@ -213,9 +221,11 @@ def check_journal_drift(state: dict) -> bool:
         alert(
             "Journal Drift 경고",
             f"최근 24h: state={s_count}건, DB={j_count}건. {drift}건 누락.",
-            [{"name": "state(24h)", "value": str(s_count), "inline": True},
-             {"name": "DB(24h)", "value": str(j_count), "inline": True},
-             {"name": "누락", "value": str(drift), "inline": True}],
+            [
+                {"name": "state(24h)", "value": str(s_count), "inline": True},
+                {"name": "DB(24h)", "value": str(j_count), "inline": True},
+                {"name": "누락", "value": str(drift), "inline": True},
+            ],
         )
         return True
     ok_msg(f"Journal 정상 (24h state={s_count}, DB={j_count}, drift={drift})")
@@ -234,10 +244,7 @@ def check_straddle_orphans(state: dict) -> bool:
     This check serves as a backstop for missed rollbacks only.
     """
     positions = state.get("positions", {})
-    straddle_pos = {
-        k: v for k, v in positions.items()
-        if v.get("is_straddle") or v.get("strategy_type") == "straddle"
-    }
+    straddle_pos = {k: v for k, v in positions.items() if v.get("is_straddle") or v.get("strategy_type") == "straddle"}
 
     by_sym: dict[str, list[tuple[str, int]]] = defaultdict(list)
     for key, pos in straddle_pos.items():
@@ -262,8 +269,33 @@ def check_straddle_orphans(state: dict) -> bool:
             critical=True,
         )
         return True
-    ok_msg(f"Straddle 정상 ({len(by_sym)}쌍, 단독={sum(1 for e in by_sym.values() if len(e)==1)}개 실행 중)")
+    ok_msg(f"Straddle 정상 ({len(by_sym)}쌍, 단독={sum(1 for e in by_sym.values() if len(e) == 1)}개 실행 중)")
     return False
+
+
+def check_straddle_pairs(state: dict) -> None:
+    """straddle_pair_id 기반 고아 레그 체크 (intra-session 고아 감지 백스탑).
+
+    scalper 내부의 Phase 3 고아 감지가 놓친 케이스를 잡습니다.
+    straddle_orphan_since_cycle이 설정된 포지션 → 즉시 알림.
+    """
+    positions = state.get("positions", {})
+    orphaned = []
+    for sym, pos in positions.items():
+        if pos.get("is_straddle") and pos.get("straddle_orphan_since_cycle") is not None:
+            since = pos["straddle_orphan_since_cycle"]
+            orphaned.append(f"{sym}(since_cycle={since})")
+
+    straddle_count = sum(1 for p in positions.values() if p.get("is_straddle"))
+    if orphaned:
+        alert(
+            "스트래들 고아 포지션",
+            f"고아 레그: {', '.join(orphaned)}",
+            [{"name": "고아", "value": "\n".join(orphaned), "inline": False}],
+            critical=len(orphaned) > 1,
+        )
+    else:
+        ok_msg(f"Straddle pairs: {straddle_count // 2}쌍, 고아=0")
 
 
 def check_drawdown(state: dict) -> bool:
@@ -293,9 +325,11 @@ def check_drawdown(state: dict) -> bool:
         alert(
             f"DD 위험 {dd_pct:.1f}%",
             f"HWM ${hwm:,.0f} → 현재 ${balance:,.0f} ({src}). max_dd=15% 접근 중!",
-            [{"name": "HWM", "value": f"${hwm:,.2f}", "inline": True},
-             {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
-             {"name": "DD", "value": f"{dd_pct:.1f}%", "inline": True}],
+            [
+                {"name": "HWM", "value": f"${hwm:,.2f}", "inline": True},
+                {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
+                {"name": "DD", "value": f"{dd_pct:.1f}%", "inline": True},
+            ],
             critical=True,
         )
         return True
@@ -303,13 +337,57 @@ def check_drawdown(state: dict) -> bool:
         alert(
             f"DD 경고 {dd_pct:.1f}%",
             f"SoftTight 0.4× 작동 중. HWM ${hwm:,.0f} → 현재 ${balance:,.0f} ({src}).",
-            [{"name": "HWM", "value": f"${hwm:,.2f}", "inline": True},
-             {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
-             {"name": "DD", "value": f"{dd_pct:.1f}%", "inline": True}],
+            [
+                {"name": "HWM", "value": f"${hwm:,.2f}", "inline": True},
+                {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
+                {"name": "DD", "value": f"{dd_pct:.1f}%", "inline": True},
+            ],
         )
         return True
     ok_msg(f"DD 정상 {dd_pct:.1f}% (HWM ${hwm:,.0f} / bal ${balance:,.0f} via {src})")
     return False
+
+
+def check_bracket_coverage(state: dict) -> None:
+    """Check that every active position has a server SL algo order."""
+    positions = state.get("positions", {})
+    if not positions:
+        ok_msg("Bracket coverage: no positions")
+        return
+
+    unprotected = []
+    for sym, pos in positions.items():
+        sl_oid = pos.get("server_sl_order_id")
+        if not sl_oid:
+            unprotected.append(sym)
+
+    if unprotected:
+        alert(
+            "브라켓 누락",
+            f"SL 없는 포지션: {', '.join(unprotected)}",
+            critical=len(unprotected) > 1,
+        )
+    else:
+        ok_msg(f"Bracket coverage: all {len(positions)} positions have SL")
+
+
+def check_restart_frequency(state: dict) -> None:
+    """Alert if restart_count > 3 (rapid restart scenario)."""
+    restart_count = state.get("restart_count", 0)
+    last_restart = state.get("last_restart_at")
+
+    if restart_count > 3:
+        alert(
+            "빈번한 재시작",
+            f"restart_count={restart_count} — 빠른 재시작 반복 의심",
+            fields=[
+                {"name": "재시작 횟수", "value": str(restart_count), "inline": True},
+                {"name": "마지막 재시작", "value": last_restart or "N/A", "inline": True},
+            ],
+            critical=restart_count > 5,
+        )
+    else:
+        ok_msg(f"Restart frequency: count={restart_count} (OK)")
 
 
 def check_ghost_positions(state: dict) -> bool:
@@ -344,11 +422,12 @@ def check_ghost_positions(state: dict) -> bool:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 def run_checks() -> int:
     """Run all health checks. Returns number of alerts fired."""
-    print(f"\n{'='*58}")
+    print(f"\n{'=' * 58}")
     print(f"[MONITOR] {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    print(f"{'='*58}")
+    print(f"{'=' * 58}")
 
     state = load_state()
     if state is None:
@@ -363,8 +442,11 @@ def run_checks() -> int:
     n_alerts += int(check_stale_state(state))
     n_alerts += int(check_journal_drift(state))
     n_alerts += int(check_straddle_orphans(state))
+    check_straddle_pairs(state)
     n_alerts += int(check_drawdown(state))
     n_alerts += int(check_ghost_positions(state))
+    check_bracket_coverage(state)
+    check_restart_frequency(state)
 
     if n_alerts == 0:
         print("[MONITOR] ✅ All checks passed")
@@ -377,7 +459,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="QuantBox Health Monitor")
     parser.add_argument("--once", action="store_true", help="Run once and exit (cron 용)")
     parser.add_argument(
-        "--interval", type=int, default=CHECK_INTERVAL,
+        "--interval",
+        type=int,
+        default=CHECK_INTERVAL,
         help=f"점검 주기 (초, 기본값: {CHECK_INTERVAL})",
     )
     args = parser.parse_args()
