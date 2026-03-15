@@ -54,30 +54,46 @@ def _load_trade_sim_constants() -> tuple:
         w15 = cfg.warmup_15m
         w1h = int(cfg.warmup_15m / 4)
         w4h = int(cfg.warmup_15m / 16) + 1
+        w30 = cfg.warmup_30m
         mh15 = cfg.max_hold_15m
+        mh30 = cfg.max_hold_30m
         mh1h = cfg.max_hold_1h
         mh4h = cfg.max_hold_4h
-        return cost_dir, cost_str, w15, w1h, w4h, mh15, mh1h, mh4h
+        return cost_dir, cost_str, w15, w30, w1h, w4h, mh15, mh30, mh1h, mh4h
     except Exception:
         # Fallback to hardcoded defaults if config cannot be loaded
-        return 0.0008, 0.0016, 200, 50, 13, 192, 48, 12
+        return 0.0008, 0.0016, 200, 100, 50, 13, 192, 96, 48, 12
 
 
-_COST_DIRECTIONAL, _COST_STRADDLE, _W15m, _W1h, _W4h, _MH15m, _MH1h, _MH4h = _load_trade_sim_constants()
+(
+    _COST_DIRECTIONAL,
+    _COST_STRADDLE,
+    _W15m,
+    _W30m,
+    _W1h,
+    _W4h,
+    _MH15m,
+    _MH30m,
+    _MH1h,
+    _MH4h,
+) = _load_trade_sim_constants()
 
 COST_DIRECTIONAL: float = _COST_DIRECTIONAL  # 2 × round-trip (entry + exit)
 COST_STRADDLE: float = _COST_STRADDLE  # 4 sides (long + short entry/exit)
 
 # Warmup periods — bars to skip before first signal (long ATR needs data).
 WARMUP_15m: int = _W15m
+WARMUP_30m: int = _W30m
 WARMUP_1h: int = _W1h
 WARMUP_4h: int = _W4h
 
 # Timeframe definitions: (label, ratio_vs_15m, warmup, max_hold_dir, max_hold_straddle)
 TF_15m = ("15m", 1, WARMUP_15m, _MH15m, _MH15m * 2)
+TF_30m = ("30m", 2, WARMUP_30m, _MH30m, _MH30m * 2)
 TF_1h = ("1h", 4, WARMUP_1h, _MH1h, _MH1h * 2)
 TF_4h = ("4h", 16, WARMUP_4h, _MH4h, _MH4h * 2)
 G_3TF = [TF_15m, TF_1h, TF_4h]
+G_4TF = [TF_15m, TF_30m, TF_1h, TF_4h]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -645,10 +661,13 @@ def collect_trades(
     data_1h: dict,
     data_4h: dict,
     strat: str,
+    *,
+    tf_group: list | None = None,
+    tf_priority: bool = False,
 ) -> list[tuple[str, int, int, float]]:
     """Collect all trades as (symbol, entry_15m, exit_15m, pnl).
 
-    Scans 15m / 1h / 4h timeframes, converts bar indices to 15m base,
+    Scans multiple timeframes, converts bar indices to 15m base,
     and deduplicates overlapping trades per symbol.
 
     Args:
@@ -659,6 +678,11 @@ def collect_trades(
         data_1h: Same structure, 1h resampled.
         data_4h: Same structure, 4h resampled.
         strat: "D_mom8" or "S_d8".
+        tf_group: List of TF tuples to scan. None → G_3TF (backward-compat).
+            Use G_4TF for production parity (includes 30m).
+        tf_priority: If True, higher TFs take priority — trades from a higher
+            TF block lower-TF trades on the same symbol during the same
+            time window (matches live on_bar first-match-wins behavior).
 
     Returns:
         List of (symbol, entry_bar_15m, exit_bar_15m, pnl_float).
@@ -688,7 +712,6 @@ def collect_trades(
     sp = cfg["sp"]
     lp = cfg["lp"]
     vr_key = f"vr_{sp}_{lp}"
-    tf_data_map = {1: data_15m, 4: data_1h, 16: data_4h}
     is_straddle = strat == "S_d8"
 
     d_sl = cfg["d_sl"]
@@ -698,51 +721,106 @@ def collect_trades(
     s_vr = cfg["s_vr"]
     s_dur = cfg["s_dur"]
 
+    # Resolve TF group — default G_3TF for backward compat
+    active_tfs = tf_group if tf_group is not None else G_3TF
+
+    # Build tf_data_map including 30m if needed
+    tf_data_map: dict[int, dict] = {1: data_15m, 4: data_1h, 16: data_4h}
+    if any(ratio == 2 for _, ratio, *_ in active_tfs):
+        tf_data_map[2] = build_resampled(data_15m, 2)
+
     all_trades: list[tuple[str, int, int, float]] = []
 
     for sym in sorted(data_15m.keys()):
-        sym_trades: list[tuple[int, int, float]] = []
+        if tf_priority:
+            # TF priority mode: process higher TFs first (descending ratio),
+            # each accepted trade blocks lower TFs for the same time window.
+            # This matches live on_bar() first-match-wins behavior.
+            sorted_tfs = sorted(active_tfs, key=lambda t: t[1], reverse=True)
+            occupied: list[tuple[int, int]] = []  # (entry_15m, exit_15m) of accepted trades
 
-        for tf_label, ratio, warmup, mh_d, mh_s in G_3TF:
-            d_tf = tf_data_map.get(ratio)
-            if d_tf is None or sym not in d_tf:
-                continue
-            d = d_tf[sym]
-            c = d["close"]
-            h = d["high"]
-            lo = d["low"]
-            vr = d.get(vr_key)
-            if vr is None:
-                continue
+            for tf_label, ratio, warmup, mh_d, mh_s in sorted_tfs:
+                d_tf = tf_data_map.get(ratio)
+                if d_tf is None or sym not in d_tf:
+                    continue
+                d = d_tf[sym]
+                c = d["close"]
+                h = d["high"]
+                lo = d["low"]
+                vr = d.get(vr_key)
+                if vr is None:
+                    continue
 
-            sl = s_sl if is_straddle else d_sl
-            mh = mh_s if is_straddle else mh_d
+                sl = s_sl if is_straddle else d_sl
+                mh = mh_s if is_straddle else mh_d
 
-            if is_straddle:
-                sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
-                p, e, x = sim_straddle_trades(c, h, lo, sig, sl, tp, mh, COST_STRADDLE)
-            else:
-                sig = gen_vr_signal(vr, d_vr, warmup)
-                dire = make_direction_momentum(sig, d["mom_8"])
-                p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, COST_DIRECTIONAL)
+                if is_straddle:
+                    sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
+                    p, e, x = sim_straddle_trades(c, h, lo, sig, sl, tp, mh, COST_STRADDLE)
+                else:
+                    sig = gen_vr_signal(vr, d_vr, warmup)
+                    dire = make_direction_momentum(sig, d["mom_8"])
+                    p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, COST_DIRECTIONAL)
 
-            for k in range(len(p)):
-                entry_15m = int(e[k]) * ratio
-                exit_15m = int(x[k]) * ratio + (ratio - 1)
-                sym_trades.append((entry_15m, exit_15m, float(p[k])))
+                for k in range(len(p)):
+                    entry_15m = int(e[k]) * ratio
+                    exit_15m = int(x[k]) * ratio + (ratio - 1)
+                    # Check if this trade overlaps with any already-accepted higher-TF trade
+                    blocked = False
+                    for oe, ox in occupied:
+                        if entry_15m <= ox and exit_15m >= oe:
+                            blocked = True
+                            break
+                    if not blocked:
+                        all_trades.append((sym, entry_15m, exit_15m, float(p[k])))
+                        occupied.append((entry_15m, exit_15m))
 
-        # Per-symbol time dedup: sort by entry, reject overlapping
-        sym_trades.sort(key=lambda x: x[0])
-        accepted: list[tuple[int, int]] = []
-        for entry_15m, exit_15m, pnl_val in sym_trades:
-            conflict = False
-            for ae, ax in accepted:
-                if entry_15m <= ax and exit_15m >= ae:
-                    conflict = True
-                    break
-            if not conflict:
-                all_trades.append((sym, entry_15m, exit_15m, pnl_val))
-                accepted.append((entry_15m, exit_15m))
+            # Sort occupied for consistency (already mostly sorted due to TF processing order)
+            occupied.sort()
+        else:
+            # Original behavior: collect from all TFs independently, then time-dedup
+            sym_trades: list[tuple[int, int, float]] = []
+
+            for tf_label, ratio, warmup, mh_d, mh_s in active_tfs:
+                d_tf = tf_data_map.get(ratio)
+                if d_tf is None or sym not in d_tf:
+                    continue
+                d = d_tf[sym]
+                c = d["close"]
+                h = d["high"]
+                lo = d["low"]
+                vr = d.get(vr_key)
+                if vr is None:
+                    continue
+
+                sl = s_sl if is_straddle else d_sl
+                mh = mh_s if is_straddle else mh_d
+
+                if is_straddle:
+                    sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
+                    p, e, x = sim_straddle_trades(c, h, lo, sig, sl, tp, mh, COST_STRADDLE)
+                else:
+                    sig = gen_vr_signal(vr, d_vr, warmup)
+                    dire = make_direction_momentum(sig, d["mom_8"])
+                    p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, COST_DIRECTIONAL)
+
+                for k in range(len(p)):
+                    entry_15m = int(e[k]) * ratio
+                    exit_15m = int(x[k]) * ratio + (ratio - 1)
+                    sym_trades.append((entry_15m, exit_15m, float(p[k])))
+
+            # Per-symbol time dedup: sort by entry, reject overlapping
+            sym_trades.sort(key=lambda x: x[0])
+            accepted: list[tuple[int, int]] = []
+            for entry_15m, exit_15m, pnl_val in sym_trades:
+                conflict = False
+                for ae, ax in accepted:
+                    if entry_15m <= ax and exit_15m >= ae:
+                        conflict = True
+                        break
+                if not conflict:
+                    all_trades.append((sym, entry_15m, exit_15m, pnl_val))
+                    accepted.append((entry_15m, exit_15m))
 
     return all_trades
 
