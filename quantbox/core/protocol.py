@@ -96,6 +96,9 @@ class ScalperProtocol(Protocol):
     # ── Trade journal (optional) ──────────────────────────────────────────
     _journal: Any
 
+    # ── Recon journal (optional) ────────────────────────────────────────
+    _recon_journal: Any
+
     # ── Exchange notional cache (set by _reconcile_positions each cycle) ──
     _cached_exchange_notionals: dict[str, float]
 
@@ -153,8 +156,8 @@ class ScalperProtocol(Protocol):
         """Place server-side algo (STOP_MARKET / TAKE_PROFIT_MARKET) order."""
         ...
 
-    def _cancel_server_order(self, symbol: str, order_id: str, label: str = "order") -> None:
-        """Cancel a server-side algo order by ID."""
+    def _cancel_server_order(self, symbol: str, order_id: str, label: str = "order") -> bool:
+        """Cancel a server-side algo order by ID. Returns True on success or benign error."""
         ...
 
     def _lookup_actual_fill(self, symbol: str, expected_qty: str, order_type: str) -> dict[str, Any] | None:
@@ -187,12 +190,24 @@ class ScalperProtocol(Protocol):
         """Place server-side TP algo order; return algo order ID or None."""
         ...
 
-    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
-        """Cancel a server-side SL algo order."""
+    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> bool:
+        """Cancel a server-side SL algo order. Returns True on success or benign error."""
         ...
 
-    def _cancel_server_take_profit(self, symbol: str, order_id: str) -> None:
-        """Cancel a server-side TP algo order."""
+    def _cancel_server_take_profit(self, symbol: str, order_id: str) -> bool:
+        """Cancel a server-side TP algo order. Returns True on success or benign error."""
+        ...
+
+    def _verify_algo_order_active(self, algo_id: str, symbol: str) -> str | None:
+        """Verify an algo order is still active. Returns status string or None."""
+        ...
+
+    def _check_bracket_staleness(self) -> None:
+        """Check if any SL algo orders have expired or been cancelled."""
+        ...
+
+    def _verify_ratchet(self, sym: str, pos: dict, expected_price: float) -> bool:
+        """Verify a ratchet SL update was accepted. Returns True if OK."""
         ...
 
     def _check_order_filled(self, symbol: str, order_id: str) -> dict[str, Any] | None:
@@ -200,6 +215,10 @@ class ScalperProtocol(Protocol):
         ...
 
     # ── Methods: position lifecycle ───────────────────────────────────────
+    def _get_pair_counterpart(self, pos_key: str) -> str | None:
+        """Find counterpart position key for a straddle pair."""
+        ...
+
     def _close_position(self, symbol: str, reason: str, current_price: float) -> bool:
         """Close position by key (may be compound 'SYMBOL:SIDE'); return success flag."""
         ...
@@ -246,6 +265,14 @@ class ScalperProtocol(Protocol):
 
     def _handle_command(self, cmd: Any) -> str:
         """Dispatch a BotCommand to the appropriate handler."""
+        ...
+
+    def _cmd_adopt(self, position_key: str) -> str:
+        """Adopt an orphan exchange position into internal state."""
+        ...
+
+    def _cmd_close_orphan(self, position_key: str) -> str:
+        """Market close an orphan exchange position."""
         ...
 
     def _cmd_status(self) -> str: ...

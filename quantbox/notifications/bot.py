@@ -51,6 +51,8 @@ class CommandType(Enum):
     PNL = auto()
     BLACKLIST = auto()
     HELP = auto()
+    ADOPT = auto()
+    CLOSE_ORPHAN = auto()
 
 
 @dataclass
@@ -80,6 +82,8 @@ HELP_TEXT = """```
 !pnl          세션 손익 요약
 !blacklist    블랙리스트 조회
 !blacklist clear  블랙리스트 초기화
+!adopt <KEY>        고아 포지션 채택 (예: SUIUSDT:LONG)
+!close-orphan <KEY> 고아 포지션 청산
 !help         이 메시지
 ─────────────────────────
 ```"""
@@ -202,6 +206,14 @@ class TradingBot(discord.Client):
             return BotCommand(command=CommandType.BLACKLIST)
         elif cmd == "!help":
             return BotCommand(command=CommandType.HELP)
+        elif cmd == "!adopt":
+            if len(parts) < 2:
+                raise ValueError("`!adopt <포지션키>` 형식으로 입력 (예: `!adopt SUIUSDT:LONG`)")
+            return BotCommand(command=CommandType.ADOPT, args={"position_key": parts[1]})
+        elif cmd == "!close-orphan":
+            if len(parts) < 2:
+                raise ValueError("`!close-orphan <포지션키>` 형식으로 입력 (예: `!close-orphan SUIUSDT:LONG`)")
+            return BotCommand(command=CommandType.CLOSE_ORPHAN, args={"position_key": parts[1]})
         else:
             return None
 
