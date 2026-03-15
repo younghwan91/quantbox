@@ -103,8 +103,14 @@ class ScalperProtocol(Protocol):
     _cached_exchange_notionals: dict[str, float]
 
     # ── Methods: balance & symbol info ───────────────────────────────────
+    _cycle_balance: float | None
+
     def get_balance(self) -> float:
         """Return current USDT futures wallet balance."""
+        ...
+
+    def _get_cycle_balance(self) -> float:
+        """사이클당 1회 balance API 호출 캐시 — 중복 API 호출 방지."""
         ...
 
     def get_symbol_info(self, symbol: str) -> dict[str, Any]:

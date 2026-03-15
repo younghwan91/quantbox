@@ -879,8 +879,9 @@ class PositionMixin:
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": closed_pos.get("balance_before") or self.get_balance(),
-                    "balance_after": self.get_balance(),
+                    "balance_before": closed_pos.get("balance_before") or self._get_cycle_balance(),
+                    "balance_after": self._get_cycle_balance(),
+                    "straddle_pair_id": closed_pos.get("straddle_pair_id"),
                 }
                 self._trade_history.append(trade)
                 self._journal.record(trade)
@@ -975,8 +976,9 @@ class PositionMixin:
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self.get_balance(),
-            "balance_after": self.get_balance(),
+            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
+            "balance_after": self._get_cycle_balance(),
+            "straddle_pair_id": pos.get("straddle_pair_id"),
         }
         self._trade_history.append(trade)
         self._journal.record(trade)
@@ -1138,8 +1140,9 @@ class PositionMixin:
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": closed_pos.get("balance_before") or self.get_balance(),
-                    "balance_after": self.get_balance(),
+                    "balance_before": closed_pos.get("balance_before") or self._get_cycle_balance(),
+                    "balance_after": self._get_cycle_balance(),
+                    "straddle_pair_id": closed_pos.get("straddle_pair_id"),
                 }
                 self._trade_history.append(trade)
                 self._journal.record(trade)
@@ -1341,8 +1344,8 @@ class PositionMixin:
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self.get_balance(),
-            "balance_after": self.get_balance(),
+            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
+            "balance_after": self._get_cycle_balance(),
             "straddle_pair_id": pos.get("straddle_pair_id"),
         }
         self._trade_history.append(trade)
