@@ -869,7 +869,13 @@ class ReconciliationMixin:
                 pos.pop("straddle_orphan_since_cycle", None)
                 continue
 
-            # 카운터파트 없음 — 고아 상태
+            # 카운터파트 없음 — 합법적 청산 여부 확인
+            if pos.get("counterpart_legitimately_closed"):
+                # 카운터파트가 server SL/TP로 정상 청산됨 — 생존 레그는 추세를 타도록 놔둠
+                pos.pop("straddle_orphan_since_cycle", None)
+                continue
+
+            # 진짜 고아 — 카운터파트 없고 합법적 청산 기록도 없음
             if pos.get("straddle_orphan_since_cycle") is None:
                 pos["straddle_orphan_since_cycle"] = self._cycle_count
                 grace = _cfg_vs.orphan_auto_close_cycles if _cfg_vs else 4
@@ -1144,6 +1150,12 @@ class ReconciliationMixin:
                         f"카운터파트 {counterpart_key_before} 아직 오픈 "
                         f"(SL={'OK' if counterpart_has_sl else '없음'} "
                         f"TP={'OK' if counterpart_has_tp else '없음'})"
+                    )
+                    # 카운터파트에 합법적 청산 플래그 설정 — Phase 3에서 survivor로 인식
+                    counterpart_pos["counterpart_legitimately_closed"] = True
+                    logger.info(
+                        f"[{symbol}] 카운터파트 {counterpart_key_before}: "
+                        f"legitimate_closed 플래그 설정 (server fill로 청산됨)"
                     )
                 else:
                     logger.info(f"[{symbol}] 스트래들 페어 완전 청산 (pair_id={pair_id}): 양 다리 모두 청산됨")
