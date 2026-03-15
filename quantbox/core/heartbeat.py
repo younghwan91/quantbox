@@ -6,6 +6,8 @@ Tracks the last successful cycle time and detects stalls.
 import logging
 import time
 
+from quantbox.core.sd_notify import sd_notify
+
 logger = logging.getLogger("Heartbeat")
 
 
@@ -34,6 +36,12 @@ class Heartbeat:
         self._last_beat = time.monotonic()
         self._total_beats += 1
         self._stall_alerted = False
+        sd_notify("WATCHDOG=1")
+
+    @staticmethod
+    def notify_ready() -> None:
+        """Signal systemd that the process finished startup and is ready."""
+        sd_notify("READY=1")
 
     def is_stalled(self) -> bool:
         """Check if the main loop appears stalled."""

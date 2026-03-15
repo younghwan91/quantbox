@@ -59,6 +59,13 @@ SignalValue = Literal[-1, 0, 1, 2]
 +2 = straddle (vol_straddle strategy: open both LONG and SHORT)
 """
 
+StraddlePairId = NewType("StraddlePairId", str)
+"""UUID string linking the LONG and SHORT legs of a straddle pair.
+
+Both legs of the same straddle share the same ``StraddlePairId``.
+``None`` for directional (non-straddle) positions.
+"""
+
 
 # ── TypedDict: symbol metadata (from exchange_info + leverage brackets) ───────
 
@@ -176,7 +183,7 @@ class PositionDict(TypedDict, total=False):
     """Signal timeframe label: ``'15m'``, ``'1h'``, ``'4h'``."""
 
     is_straddle: bool
-    """True if this is the SHORT leg of a vol_straddle pair."""
+    """True if this position is a leg of a vol_straddle pair (both LONG and SHORT legs are True)."""
 
     position_side: str | None
     """Hedge mode position side (``'LONG'`` / ``'SHORT'``).  None = one-way."""
