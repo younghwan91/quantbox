@@ -56,6 +56,10 @@ class CommandsMixin:
             CommandType.STOP: lambda: self._cmd_stop(),
             CommandType.PNL: lambda: self._cmd_pnl(),
             CommandType.BLACKLIST: lambda: self._cmd_blacklist(cmd.args),
+            CommandType.ADOPT: lambda: self._cmd_adopt(cmd.args.get("position_key", "") if cmd.args else ""),
+            CommandType.CLOSE_ORPHAN: lambda: self._cmd_close_orphan(
+                cmd.args.get("position_key", "") if cmd.args else ""
+            ),
         }
         handler = handlers.get(cmd.command)
         if handler is None:
@@ -82,6 +86,18 @@ class CommandsMixin:
         if self._drawdown_halt:
             status = "🛑 DD HALT"
 
+        # 스트래들 페어 통계
+        all_pos = self.strategy._positions
+        straddle_legs = [p for p in all_pos.values() if p.get("is_straddle")]
+        seen_pairs: set[str] = set()
+        n_pairs = 0
+        for p in straddle_legs:
+            pid = p.get("straddle_pair_id")
+            if pid and pid not in seen_pairs:
+                seen_pairs.add(pid)
+                n_pairs += 1
+        n_orphans = sum(1 for p in straddle_legs if p.get("straddle_orphan_since_cycle") is not None)
+
         lines = [
             "```",
             f"📊 QuantBox Status — {status}",
@@ -89,6 +105,7 @@ class CommandsMixin:
             f"Balance:    ${balance:,.2f}",
             f"Session PnL: ${total_pnl:+,.2f} ({n_trades} trades)",
             f"Positions:  {len(positions)}/{self.config.max_concurrent}",
+            f"Straddle:   {n_pairs}쌍 | 고아={n_orphans}",
             f"Cycle:      #{self._cycle_count}",
             f"{'─' * 40}",
         ]
@@ -255,5 +272,154 @@ class CommandsMixin:
         if not excludes:
             return "📭 Blacklist is empty"
         return f"🚫 Blacklist ({len(excludes)}): " + ", ".join(sorted(excludes))
+
+    def _cmd_adopt(self: "ScalperProtocol", position_key: str) -> str:
+        """!adopt <position_key> — Adopt an orphan exchange position into internal state.
+
+        Queries the exchange for the position, creates an internal state entry,
+        and alerts that brackets need to be placed on the next cycle.
+
+        Args:
+            position_key: Compound key like "SUIUSDT:LONG" or plain "SUIUSDT".
+        """
+        if not position_key:
+            return "❌ 사용법: `!adopt <포지션키>` (예: `!adopt SUIUSDT:LONG`)"
+
+        if self.paper_mode:
+            return "❌ Paper mode에서는 !adopt 사용 불가"
+
+        parts = position_key.split(":")
+        api_sym = parts[0]
+        pos_side = parts[1] if len(parts) == 2 and parts[1] in ("LONG", "SHORT") else None
+
+        try:
+            exchange_positions = self.client.futures_position_information(symbol=api_sym)
+        except Exception as e:
+            return f"❌ 거래소 조회 실패: {e}"
+
+        # Find the matching position
+        target_pos = None
+        for ep in exchange_positions:
+            amt = float(ep.get("positionAmt", 0))
+            if abs(amt) < 1e-8:
+                continue
+            ep_side = ep.get("positionSide", "BOTH")
+            if pos_side is None or ep_side == pos_side:
+                target_pos = ep
+                break
+
+        if target_pos is None:
+            return f"❌ [{position_key}] 거래소에 포지션 없음 (이미 청산됐거나 키 오류)"
+
+        amt = float(target_pos.get("positionAmt", 0))
+        entry_px = float(target_pos.get("entryPrice", 0) or 0)
+        ep_side = target_pos.get("positionSide", "BOTH")
+
+        if entry_px <= 0:
+            return f"❌ [{position_key}] entryPrice={entry_px} 유효하지 않음 — 수동 처리 필요"
+
+        notional = abs(amt) * entry_px
+        signal = 1 if (ep_side == "LONG" or amt > 0) else -1
+
+        # Check if already tracked (race condition guard)
+        if self.strategy.has_position(api_sym) or position_key in self.strategy.active_positions:
+            return f"⚠️ [{position_key}] 이미 내부 상태에 존재 — adopt 불필요"
+
+        # Adopt: open position in strategy state with exchange data
+        self.strategy.open_position(
+            symbol=api_sym,
+            signal=signal,
+            entry_price=entry_px,
+            notional=notional,
+            leverage=int(float(target_pos.get("leverage", 1))),
+            move_size=0.03,
+            position_side=ep_side if ep_side in ("LONG", "SHORT") else None,
+            strategy_type="adopted",
+        )
+
+        self._save_state()
+        logger.info(f"[{position_key}] Adopted orphan position: qty={abs(amt):.6f} entry={entry_px:.4f}")
+        self.discord.send(
+            content=(
+                f"✅ **[{position_key}] 고아 포지션 채택 완료** — "
+                f"qty={abs(amt):.6f}, entry={entry_px:.4f}, notional=${notional:.2f}\n"
+                f"⚠️ SL/TP 브라켓이 없습니다 — 다음 사이클에서 배치됩니다."
+            )
+        )
+        return f"✅ [{position_key}] 채택 완료. SL/TP는 다음 사이클에서 배치됩니다."
+
+    def _cmd_close_orphan(self: "ScalperProtocol", position_key: str) -> str:
+        """!close-orphan <position_key> — Market close an orphan exchange position.
+
+        Closes the position directly on the exchange without touching internal state.
+
+        Args:
+            position_key: Compound key like "SUIUSDT:LONG" or plain "SUIUSDT".
+        """
+        if not position_key:
+            return "❌ 사용법: `!close-orphan <포지션키>` (예: `!close-orphan SUIUSDT:LONG`)"
+
+        if self.paper_mode:
+            return "❌ Paper mode에서는 !close-orphan 사용 불가"
+
+        parts = position_key.split(":")
+        api_sym = parts[0]
+        pos_side = parts[1] if len(parts) == 2 and parts[1] in ("LONG", "SHORT") else None
+
+        try:
+            exchange_positions = self.client.futures_position_information(symbol=api_sym)
+        except Exception as e:
+            return f"❌ 거래소 조회 실패: {e}"
+
+        # Find the matching position
+        target_pos = None
+        for ep in exchange_positions:
+            amt = float(ep.get("positionAmt", 0))
+            if abs(amt) < 1e-8:
+                continue
+            ep_side = ep.get("positionSide", "BOTH")
+            if pos_side is None or ep_side == pos_side:
+                target_pos = ep
+                break
+
+        if target_pos is None:
+            return f"❌ [{position_key}] 거래소에 포지션 없음 (이미 청산됐거나 키 오류)"
+
+        amt = float(target_pos.get("positionAmt", 0))
+        ep_side = target_pos.get("positionSide", "BOTH")
+        close_side = "SELL" if (ep_side == "LONG" or amt > 0) else "BUY"
+
+        try:
+            order_kwargs: dict = dict(
+                symbol=api_sym,
+                side=close_side,
+                type="MARKET",
+                quantity=abs(amt),
+            )
+            if ep_side in ("LONG", "SHORT"):
+                order_kwargs["positionSide"] = ep_side
+            self.client.futures_create_order(**order_kwargs)
+            logger.info(f"[{position_key}] Orphan closed via !close-orphan: {close_side} qty={abs(amt):.6f}")
+            self.discord.send(
+                content=(f"✅ **[{position_key}] 고아 포지션 청산 완료** — {close_side} qty={abs(amt):.6f} MARKET 체결")
+            )
+            # Record in recon journal
+            try:
+                if self._recon_journal:
+                    from quantbox.execution.recon_journal import ReconEventType
+
+                    self._recon_journal.record(
+                        event_type=ReconEventType.REVERSE_GHOST_CLOSED,
+                        symbol=api_sym,
+                        action=f"manual close-orphan {close_side} qty={abs(amt):.6f}",
+                        result="success",
+                        details={"position_side": ep_side, "qty": abs(amt)},
+                    )
+            except Exception:
+                pass
+            return f"✅ [{position_key}] 고아 포지션 청산 완료"
+        except Exception as e:
+            logger.error(f"[{position_key}] !close-orphan FAILED: {e}")
+            return f"❌ [{position_key}] 청산 실패: {e}"
 
     # ==================== State Persistence ====================
