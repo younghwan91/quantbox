@@ -25,6 +25,8 @@ logger = logging.getLogger("Scalper")
 class ReconciliationMixin:
     """Mixin: Exchange reconciliation (sync server orders, detect ghosts)."""
 
+    _cycle_balance: float | None
+
     def _sync_server_orders(self: "ScalperProtocol") -> None:
         """Check if any server-side TP/SL orders filled between cycles.
 
@@ -471,6 +473,9 @@ class ReconciliationMixin:
         Detects ghost positions (closed on exchange but still in internal
         state) and quantity mismatches (ADL, manual intervention).
         """
+        # 사이클 시작 시 balance 캐시 초기화 — _get_cycle_balance()가 새 값을 1회 fetch
+        self._cycle_balance = None
+
         if self.paper_mode:
             return
 
@@ -811,8 +816,9 @@ class ReconciliationMixin:
                                 "reason": "reconciliation_close",
                                 "time": datetime.now(timezone.utc).isoformat(),
                                 "entry_time": None,
-                                "balance_before": None,
-                                "balance_after": None,
+                                "balance_before": self._get_cycle_balance(),
+                                "balance_after": self._get_cycle_balance(),
+                                "straddle_pair_id": None,
                             }
                         )
                         logger.info(f"[{ex_key}] Reverse ghost journaled: PnL=${_upnl:+.2f}")
@@ -1009,8 +1015,9 @@ class ReconciliationMixin:
             "mfe_pct": pos.get("best_pnl", 0.0) * 100,
             "mae_pct": pos.get("worst_pnl", 0.0) * 100,
             "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before"),
-            "balance_after": None,
+            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
+            "balance_after": self._get_cycle_balance(),
+            "straddle_pair_id": pos.get("straddle_pair_id"),
         }
         self._trade_history.append(trade)
 
@@ -1110,8 +1117,8 @@ class ReconciliationMixin:
             "mfe_pct": pos.get("best_pnl", 0.0) * 100,
             "mae_pct": pos.get("worst_pnl", 0.0) * 100,
             "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before"),
-            "balance_after": None,  # updated after _save_state
+            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
+            "balance_after": self._get_cycle_balance(),
             "straddle_pair_id": pair_id,
         }
         self._trade_history.append(trade)
