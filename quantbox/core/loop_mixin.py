@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from quantbox.core.protocol import ScalperProtocol
 
 from quantbox.core.bot_utils import GIT_COMMIT
+from quantbox.core.sd_notify import sd_notify as _sd_notify
 from quantbox.core.settings import get_settings
 from quantbox.core.terminal_ui import (
     print_banner,
@@ -218,3 +219,4 @@ class LoopMixin:
             # Sleep 5s max for responsive bot commands
             sleep_secs = min(BOT_POLL_INTERVAL, remaining)
             time.sleep(sleep_secs)
+            _sd_notify("WATCHDOG=1")
