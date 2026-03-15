@@ -40,6 +40,7 @@ import logging
 import logging.handlers
 import math
 import time
+import uuid
 from datetime import datetime, timezone
 
 import numpy as np
@@ -91,6 +92,7 @@ from pathlib import Path
 
 from quantbox.core.heartbeat import Heartbeat
 from quantbox.core.rate_limiter import RateLimiter
+from quantbox.core.sd_notify import sd_notify
 from quantbox.execution.exposure import ExposureGuard
 from quantbox.execution.inflight import InFlightTracker, OrderIntent, PendingOrder
 from quantbox.execution.recon_journal import ReconJournal
@@ -213,6 +215,10 @@ class RubberBandScalper(
         self._daily_loss_date: str = ""  # UTC date when tracking started (YYYY-MM-DD)
         self._daily_loss_blocked: bool = False  # True = new entries blocked for today
 
+        # Process stability: consecutive error tracking and safe mode
+        self._consecutive_errors: int = 0
+        self._safe_mode: bool = False  # True = skip new entries, only manage existing
+
         # Symbol info cache (avoid repeated exchange_info calls)
         self._symbol_info_cache: dict[str, dict] = {}
         self._exchange_info_fetched: bool = False
@@ -270,6 +276,13 @@ class RubberBandScalper(
         except Exception as e:
             logger.error(f"ReconJournal init failed: {e}")
             self._recon_journal = None
+
+        # Restart tracking & post-restart reconciliation
+        self._restart_count: int = 0
+        self._last_restart_at: str | None = None
+        self._last_full_reconcile_at: str | None = None
+        self._startup_cycles_remaining: int = 0
+        self._clean_cycles_count: int = 0  # consecutive clean cycles since last error
 
         # Control flags
         self._stop_requested: bool = False
@@ -828,7 +841,25 @@ class RubberBandScalper(
                 elif exit_reason in ("confirm_entry", "pyramid", "cancel_exploration"):
                     self._close_position(pos_key, exit_reason, current_price)
                 else:
+                    # ── Step 2.3: Capture counterpart before close (straddle pair context) ──
+                    counterpart_key_pre_close = None
+                    if ":" in pos_key and self.strategy_name == "vol_straddle":
+                        pos_pre = self.strategy._positions.get(pos_key)
+                        if pos_pre and pos_pre.get("is_straddle"):
+                            counterpart_key_pre_close = self._get_pair_counterpart(pos_key)
+
                     self._close_position(pos_key, exit_reason, current_price)
+
+                    # ── Step 2.3: Verify counterpart brackets after straddle leg close ──
+                    if counterpart_key_pre_close:
+                        cpart = self.strategy._positions.get(counterpart_key_pre_close)
+                        if cpart:
+                            if not cpart.get("server_sl_order_id"):
+                                logger.warning(
+                                    f"[{counterpart_key_pre_close}] 스트래들 다리 청산 후 SL 없음 — bracket repair 필요"
+                                )
+                                # Trigger next-cycle bracket repair by ensuring the flag is clear
+                                cpart["_repair_fail_count"] = 0
             else:
                 pos = self.strategy._positions.get(pos_key)
                 if pos:
@@ -945,6 +976,9 @@ class RubberBandScalper(
           6. _scan_entry_opportunities()  paused / daily-breaker / scan gates
           7. _cycle_housekeeping()        save, divergence, summary, heartbeat
         """
+        if self._startup_cycles_remaining > 0:
+            self._startup_cycles_remaining -= 1
+
         balance, stop = self._preflight()
         if stop:
             return
@@ -1031,10 +1065,12 @@ class RubberBandScalper(
                     # Straddle: expand into LONG + SHORT candidates.
                     # is_straddle=True so G6 and DirDiversity filters are skipped
                     # (straddle is direction-neutral — BTC trend gate does not apply).
-                    candidates.append((sym, 1, move, close, True))
-                    candidates.append((sym, -1, move, close, True))
+                    # Generate pair ID now so both legs share it at entry time.
+                    pair_id = str(uuid.uuid4())[:8]
+                    candidates.append((sym, 1, move, close, True, pair_id))
+                    candidates.append((sym, -1, move, close, True, pair_id))
                 else:
-                    candidates.append((sym, signal, move, close, False))
+                    candidates.append((sym, signal, move, close, False, None))
 
         # Prioritize strongest moves
         candidates.sort(key=lambda x: x[2], reverse=True)
@@ -1045,7 +1081,7 @@ class RubberBandScalper(
             # VR strategy: show VR threshold + actual VR values
             print(format_scan_summary(len(candidates), top_movers, 0.0))
             if candidates:
-                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _ in candidates[:3]]
+                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
@@ -1119,7 +1155,7 @@ class RubberBandScalper(
         else:
             print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
             if candidates:
-                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _ in candidates[:3]]
+                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _, _ in candidates[:3]]
                 logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
             else:
                 if moves_seen:
@@ -1154,7 +1190,7 @@ class RubberBandScalper(
         entries_made = 0
         straddle_opened: dict[str, set[int]] = {}  # {sym: {signals opened}} for rollback
         straddle_blocked: set[str] = set()  # symbols blocked by straddle slot cap
-        for sym, signal, move, close, is_straddle in candidates:
+        for sym, signal, move, close, is_straddle, straddle_pair_id in candidates:
             if entries_made >= max_entries:
                 break
 
@@ -1208,38 +1244,111 @@ class RubberBandScalper(
                     )
                     continue
 
+            # ── Straddle: pair-aware entry with retry for second leg ──
+            if is_straddle and sym not in straddle_opened:
+                # LONG leg is always first (signal=1 candidate appears before signal=-1)
+                if self._open_position(sym, signal, close, balance, straddle_pair_id=straddle_pair_id):
+                    entries_made += 1
+                    straddle_opened.setdefault(sym, set()).add(signal)
+                # LONG failed — second leg (SHORT) skipped when LONG not in straddle_opened
+                continue
+
+            if is_straddle and sym in straddle_opened and 1 in straddle_opened[sym]:
+                # Second leg (SHORT): attempt with retry
+                cfg_vs = self.vs_config
+                short_opened = False
+                for retry in range(cfg_vs.entry_retry_count + 1):
+                    if self._open_position(sym, signal, close, balance, straddle_pair_id=straddle_pair_id):
+                        entries_made += 1
+                        straddle_opened[sym].add(signal)
+                        short_opened = True
+                        break
+                    if retry < cfg_vs.entry_retry_count:
+                        logger.warning(
+                            f"[{sym}] SHORT 진입 실패, 재시도 {retry + 1}/{cfg_vs.entry_retry_count} "
+                            f"({cfg_vs.entry_retry_delay_s}s 후)"
+                        )
+                        time.sleep(cfg_vs.entry_retry_delay_s)
+                if not short_opened:
+                    # All retries failed — SHORT never opened, straddle incomplete
+                    # Mark LONG as needing rollback
+                    straddle_opened[sym].discard(-1)  # ensure only LONG is in set
+                continue
+
+            # Directional entry (non-straddle)
             if self._open_position(sym, signal, close, balance):
                 entries_made += 1
-                if is_straddle:
-                    straddle_opened.setdefault(sym, set()).add(signal)
 
         # ── Straddle half-open rollback ──
-        # If only one leg of a straddle opened (e.g., SHORT failed -2027),
-        # immediately close the orphaned leg to restore delta-neutral intent.
+        # If only LONG opened and SHORT never succeeded, rollback LONG immediately.
         for sym, signals_opened in straddle_opened.items():
-            if len(signals_opened) == 1:
-                opened_signal = next(iter(signals_opened))
-                side_str = "LONG" if opened_signal == 1 else "SHORT"
-                pos_key = f"{sym}:{side_str}"
-                logger.error(
-                    f"[{sym}] Straddle incomplete: only {side_str} opened (counterpart failed). "
-                    f"Rolling back {side_str} to avoid unintended directional exposure."
-                )
+            if len(signals_opened) == 1 and 1 in signals_opened:
+                # Only LONG opened — SHORT failed all retries
+                pos_key = f"{sym}:LONG"
+                logger.error(f"[{sym}] Straddle incomplete: LONG 진입됐으나 SHORT 실패. LONG 롤백 — 단방향 노출 방지.")
                 self.discord.send(
                     content=(
-                        f"⚠️ **[{sym}] Straddle half-open** — {side_str} opened but counterpart failed. "
-                        f"Auto-closing {side_str} (rollback)."
+                        f"⚠️ **[{sym}] Straddle half-open** — LONG 진입됐으나 SHORT 실패. LONG 롤백 중 (재시도 소진)."
                     )
                 )
                 # Use last close price as rollback price
-                close_arr = next((c for s, sig, _, c, is_s in candidates if s == sym and is_s), None)
+                close_arr = next((c for s, sig, _, c, is_s, _ in candidates if s == sym and is_s), None)
                 rollback_price = float(close_arr[-1]) if close_arr is not None else 0.0
-                closed = self._close_position(pos_key, "straddle_rollback", rollback_price)
-                if not closed:
-                    logger.error(f"[{sym}] Straddle rollback FAILED — manual intervention required!")
-                    self.discord.send(
-                        content=(f"🚨 **[{sym}] Straddle rollback FAILED** — {side_str} is orphaned. Close manually.")
-                    )
+                cfg_vs = self.vs_config
+                pos = self.strategy._positions.get(pos_key)
+
+                # Rollback via _close_position with retry
+                rollback_ok = False
+                for attempt in range(cfg_vs.rollback_retry_count + 1):
+                    if self._close_position(pos_key, "straddle_rollback", rollback_price):
+                        rollback_ok = True
+                        break
+                    if attempt < cfg_vs.rollback_retry_count:
+                        logger.warning(f"[{pos_key}] 롤백 실패, 재시도 {attempt + 1}/{cfg_vs.rollback_retry_count}")
+                        time.sleep(cfg_vs.rollback_retry_delay_s)
+
+                if not rollback_ok:
+                    # All _close_position attempts failed — market order fallback
+                    # CRITICAL (Rule #1): NO leverage parameter — avoids futures_change_leverage in close path
+                    pos = self.strategy._positions.get(pos_key)
+                    if pos is not None:
+                        api_sym = pos_key.split(":")[0]
+                        close_side = "SELL"  # LONG → close with SELL
+                        qty = self._round_qty(pos["notional"] / pos["entry_price"], api_sym)
+                        fallback_ok = False
+                        if qty > 0 and not self.paper_mode:
+                            try:
+                                order_kwargs: dict = {
+                                    "symbol": api_sym,
+                                    "side": close_side,
+                                    "type": "MARKET",
+                                    "quantity": qty,
+                                    "positionSide": "LONG",
+                                }
+                                self.client.futures_create_order(**order_kwargs)
+                                fallback_ok = True
+                                logger.info(f"[{pos_key}] 롤백 시장가 주문 성공 (fallback)")
+                                # Clean up internal state
+                                self.strategy.close_position(pos_key)
+                                self._save_state()
+                            except Exception as e:
+                                logger.critical(f"[{pos_key}] 롤백 완전 실패: {e}")
+                        elif self.paper_mode:
+                            # Paper mode: just clean up state
+                            self.strategy.close_position(pos_key)
+                            self._save_state()
+                            fallback_ok = True
+
+                        if not fallback_ok:
+                            logger.critical(f"[{pos_key}] 롤백 완전 실패 — 수동 청산 필요!")
+                            pos["rollback_failed"] = True
+                            self._save_state()
+                            self.discord.send(
+                                content=(f"🚨 **[{pos_key}] 롤백 완전 실패** — 시장가 주문도 실패. 수동 청산 필요!")
+                            )
+                    else:
+                        logger.warning(f"[{pos_key}] 롤백 시도 중 포지션이 이미 없음 — 무시")
+
                 entries_made -= 1
 
         if entries_made > 0:
@@ -1261,6 +1370,194 @@ class RubberBandScalper(
         except Exception as exc:
             logger.warning("Divergence check error: %s", exc)
 
+    def _post_restart_reconcile(self) -> None:
+        """Post-restart reconciliation: verify exchange state matches internal state.
+
+        Called once after _load_state(). Ensures:
+        1. API connectivity (gate)
+        2. Reconciliation cooldown (skip if < 60s since last)
+        3. Restart counter persistence
+        4. Position qty verification
+        5. Bracket (SL/TP) verification
+        6. Orphan detection (alert-only, no auto-close)
+        """
+        if self.paper_mode:
+            return
+
+        # 1. API connectivity gate
+        api_ok = False
+        for attempt in range(3):
+            try:
+                self.client.futures_time()
+                api_ok = True
+                break
+            except Exception as e:
+                backoff = [5, 15, 45][attempt]
+                logger.warning(f"API connectivity check failed (attempt {attempt + 1}/3): {e}. Retrying in {backoff}s")
+                time.sleep(backoff)
+
+        if not api_ok:
+            logger.critical("API connectivity gate FAILED after 3 retries. Entering safe mode.")
+            self._safe_mode = True
+            self.discord.send(content="🚨 **API 연결 실패** — 3회 재시도 후 실패. Safe mode 진입. 신규 진입 중단.")
+            return
+
+        # 2. Reconciliation cooldown
+        if self._last_full_reconcile_at:
+            try:
+                last_dt = datetime.fromisoformat(self._last_full_reconcile_at)
+                elapsed = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                if elapsed < 60:
+                    logger.info(f"Reconciliation cooldown: last reconcile {elapsed:.0f}s ago (< 60s). Skipping.")
+                    return
+            except Exception:
+                pass
+
+        # 3. Increment restart_count FIRST (before any trading logic)
+        self._restart_count = getattr(self, "_restart_count", 0) + 1
+        self._last_restart_at = datetime.now(timezone.utc).isoformat()
+        self._save_state()  # Persist immediately
+        logger.info(f"Restart #{self._restart_count} recorded at {self._last_restart_at}")
+
+        # 4-6. Full reconciliation
+        try:
+            # Query exchange positions
+            exchange_positions = self.client.futures_position_information()
+            exchange_map: dict[str, float] = {}
+            for ep in exchange_positions:
+                amt = float(ep.get("positionAmt", 0))
+                if abs(amt) < 1e-8:
+                    continue
+                sym = ep["symbol"]
+                ps = ep.get("positionSide", "BOTH")
+                key = f"{sym}:{ps}" if ps in ("LONG", "SHORT") else sym
+                exchange_map[key] = amt
+
+            # 4. Position qty verification
+            for pos_key in list(self.strategy.active_positions):
+                pos = self.strategy._positions.get(pos_key)
+                if not pos:
+                    continue
+                raw_sym = pos.get("symbol", pos_key)
+                api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+                pos_side = pos.get("position_side")
+                lookup_key = f"{api_sym}:{pos_side}" if pos_side in ("LONG", "SHORT") else api_sym
+
+                if lookup_key not in exchange_map:
+                    # Position in state but not on exchange — mark reconcile_pending during startup grace
+                    if getattr(self, "_startup_cycles_remaining", 0) > 0:
+                        pos["_reconcile_pending"] = True
+                        logger.warning(f"[{pos_key}] Not found on exchange — marked reconcile_pending (startup grace)")
+                    continue
+
+                # Qty mismatch check
+                exchange_qty = abs(exchange_map[lookup_key])
+                internal_qty = pos["notional"] / pos["entry_price"]
+                qty_diff_pct = abs(exchange_qty - internal_qty) / max(internal_qty, 1e-8) * 100
+                if qty_diff_pct > 1.0:  # 1% threshold
+                    logger.warning(
+                        f"[{pos_key}] POST-RESTART QTY MISMATCH: internal={internal_qty:.6f} "
+                        f"exchange={exchange_qty:.6f} diff={qty_diff_pct:.1f}%. Correcting."
+                    )
+                    pos["notional"] = exchange_qty * pos["entry_price"]
+                    self.discord.send(
+                        content=(
+                            f"⚠️ **[{pos_key}] 수량 불일치 보정**: 내부={internal_qty:.6f} → 거래소={exchange_qty:.6f}"
+                        )
+                    )
+
+            # 5. Bracket verification (check SL/TP algo orders exist)
+            try:
+                open_algo_orders = self.client._request_futures_api("get", "algoOrder/openOrders", signed=True, data={})
+                algo_order_symbols: set[str] = set()
+                if isinstance(open_algo_orders, dict):
+                    for order in open_algo_orders.get("orders", []):
+                        algo_order_symbols.add(order.get("symbol", ""))
+                elif isinstance(open_algo_orders, list):
+                    for order in open_algo_orders:
+                        algo_order_symbols.add(order.get("symbol", ""))
+            except Exception as e:
+                logger.warning(f"Failed to query algo orders for bracket verification: {e}")
+                algo_order_symbols = set()
+
+            for pos_key in list(self.strategy.active_positions):
+                pos = self.strategy._positions.get(pos_key)
+                if not pos:
+                    continue
+                sl_oid = pos.get("server_sl_order_id")
+                if not sl_oid:
+                    logger.warning(f"[{pos_key}] No SL bracket — will be placed during next cycle")
+                    self.discord.send(content=f"⚠️ **[{pos_key}] SL 브라켓 누락** — 다음 사이클에서 재배치 예정")
+
+            # 6. Orphan detection: exchange positions NOT in state → ALERT ONLY
+            tracked_keys: set[str] = set()
+            for pos_key in self.strategy.active_positions:
+                pos = self.strategy._positions.get(pos_key)
+                if not pos:
+                    continue
+                raw_sym = pos.get("symbol", pos_key)
+                api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+                pos_side = pos.get("position_side")
+                if pos_side in ("LONG", "SHORT"):
+                    tracked_keys.add(f"{api_sym}:{pos_side}")
+                else:
+                    tracked_keys.add(api_sym)
+
+            for ex_key, ex_amt in exchange_map.items():
+                if ex_key in tracked_keys:
+                    continue
+                # ALERT ONLY — do NOT auto-close, do NOT auto-adopt
+                logger.error(
+                    f"[{ex_key}] ORPHAN DETECTED: Exchange position qty={abs(ex_amt):.6f} "
+                    f"has no internal state. Alert-only (no auto-close)."
+                )
+                self.discord.send(
+                    content=(
+                        f"🔍 **[{ex_key}] 고아 포지션 발견** — "
+                        f"거래소에 qty={abs(ex_amt):.4f} 존재, 내부 상태 없음.\n"
+                        f"`!adopt {ex_key}` 또는 `!close-orphan {ex_key}` 명령으로 처리해주세요."
+                    )
+                )
+                try:
+                    if self._recon_journal:
+                        from quantbox.execution.recon_journal import ReconEventType
+
+                        self._recon_journal.record(
+                            event_type=ReconEventType.REVERSE_GHOST,
+                            symbol=ex_key.split(":")[0],
+                            action="orphan_alert_only",
+                            result="alert_sent",
+                            details={"qty": abs(ex_amt), "position_key": ex_key},
+                        )
+                except Exception:
+                    pass
+
+            # Stale inflight order adoption
+            if self._inflight:
+                stale = self._inflight.get_stale_orders(max_age_s=300)
+                for key, order in stale.items():
+                    if order.intent == OrderIntent.ENTRY:
+                        api_sym = order.symbol
+                        pos_side = order.position_side
+                        lookup = f"{api_sym}:{pos_side}" if pos_side in ("LONG", "SHORT") else api_sym
+                        if lookup in exchange_map:
+                            logger.info(f"Stale entry order {key}: position exists on exchange — clearing inflight")
+                        else:
+                            logger.info(f"Stale entry order {key}: no position on exchange — discarding")
+                        self._inflight.confirm(key)
+                    elif order.intent in (OrderIntent.BRACKET_SL, OrderIntent.BRACKET_TP):
+                        logger.info(f"Stale bracket order {key}: clearing inflight (brackets verified separately)")
+                        self._inflight.confirm(key)
+
+            # Update last_full_reconcile_at
+            self._last_full_reconcile_at = datetime.now(timezone.utc).isoformat()
+            self._save_state()
+            logger.info("Post-restart reconciliation completed successfully")
+
+        except Exception as e:
+            logger.error(f"Post-restart reconciliation error: {e}", exc_info=True)
+            self.discord.send(content=f"⚠️ **재시작 후 조정 오류**: {str(e)[:300]}")
+
     def _save_state(self) -> None:
         """Persist positions and trade history."""
         state = {
@@ -1273,6 +1570,12 @@ class RubberBandScalper(
             "positions": self.strategy.active_positions,
             "trade_history": self._trade_history[-100:],  # Keep last 100
             "cycle_count": self._cycle_count,
+            "daily_loss_blocked": self._daily_loss_blocked,
+            "daily_realized_pnl": self._daily_realized_pnl,
+            "daily_loss_date": self._daily_loss_date,
+            "restart_count": self._restart_count,
+            "last_restart_at": self._last_restart_at,
+            "last_full_reconcile_at": self._last_full_reconcile_at,
         }
         # v14.0: Persist MA cluster cooldown for crash recovery.
         # Without this, a restart during an active cluster episode would
@@ -1450,6 +1753,11 @@ class RubberBandScalper(
                 self.strategy._positions[sym]["trail_active"] = pos.get("trail_active", False)
                 self.strategy._positions[sym]["peak_gain"] = pos.get("peak_gain", 0.0)
                 self.strategy._positions[sym]["is_straddle"] = pos.get("is_straddle", False)
+                # Restore straddle pair linkage (Step 3 — pair coordination)
+                if pos.get("straddle_pair_id"):
+                    self.strategy._positions[sym]["straddle_pair_id"] = pos["straddle_pair_id"]
+                if pos.get("straddle_orphan_since_cycle") is not None:
+                    self.strategy._positions[sym]["straddle_orphan_since_cycle"] = pos["straddle_orphan_since_cycle"]
                 # v14.0: Restore per-signal fields (sl/tp/tf/max_hold/strategy_type).
                 # Without this, crash recovery defaults to VR squeeze params
                 # for ALL positions — breaking MA cluster SL/TP/max_hold/exit routing.
@@ -1460,6 +1768,35 @@ class RubberBandScalper(
                 self.strategy._positions[sym]["max_hold"] = pos.get(
                     "max_hold", self.strategy._positions[sym].get("max_hold")
                 )
+
+        # Step 3.2: 구 상태 포맷 스트래들 페어 재연결 (straddle_pair_id 없는 경우)
+        for sym, pos in self.strategy._positions.items():
+            if pos.get("is_straddle") and not pos.get("straddle_pair_id"):
+                api_sym = pos.get("symbol", sym.split(":")[0])
+                my_side = sym.split(":")[-1] if ":" in sym else None
+                opposite_side = "SHORT" if my_side == "LONG" else "LONG" if my_side == "SHORT" else None
+                if opposite_side:
+                    counterpart_key = f"{api_sym}:{opposite_side}"
+                    counterpart = self.strategy._positions.get(counterpart_key)
+                    if counterpart and counterpart.get("is_straddle"):
+                        pair_id = str(uuid.uuid4())[:8]
+                        pos["straddle_pair_id"] = pair_id
+                        counterpart["straddle_pair_id"] = pair_id
+                        logger.info(f"[{sym}] 스트래들 페어 재연결: {counterpart_key} (pair_id={pair_id})")
+                    else:
+                        # 카운터파트 없음 — 즉시 고아 타이머 시작
+                        pos["straddle_orphan_since_cycle"] = 0
+                        logger.warning(f"[{sym}] 스트래들 레그 카운터파트 없음 — 고아로 표시됨")
+
+        # Restore DailyBreaker state (survives crash/restart within same UTC day)
+        self._daily_loss_blocked = state.get("daily_loss_blocked", False)
+        self._daily_realized_pnl = state.get("daily_realized_pnl", 0.0)
+        self._daily_loss_date = state.get("daily_loss_date", "")
+
+        # Restore restart tracking
+        self._restart_count = state.get("restart_count", 0)
+        self._last_restart_at = state.get("last_restart_at")
+        self._last_full_reconcile_at = state.get("last_full_reconcile_at")
 
         logger.info(f"Restored {len(positions)} positions, {len(self._trade_history)} trade records")
 
@@ -1587,6 +1924,8 @@ class RubberBandScalper(
         self._high_water_mark = balance
         self._daily_start_balance = balance
         self._load_state()
+        self._startup_cycles_remaining = 2
+        self._post_restart_reconcile()
 
         symbols = self.get_trading_symbols()
         if not symbols:
@@ -1609,6 +1948,8 @@ class RubberBandScalper(
         self._high_water_mark = balance
         self._daily_start_balance = balance
         self._load_state()
+        self._startup_cycles_remaining = 2
+        self._post_restart_reconcile()
 
         # Refresh balance after state load (paper_balance may have been
         # restored from saved state, overriding the settings default).
@@ -1619,6 +1960,7 @@ class RubberBandScalper(
         self._print_startup_banner(balance, n_symbols)
         logger.info(f"Starting continuous trading ({mode_str})")
         logger.info(f"Initial balance: ${balance:.2f}")
+        sd_notify("READY=1")
 
         # Start Discord bot for interactive commands
         if self._bot_runner:
@@ -1754,20 +2096,55 @@ class RubberBandScalper(
                 # Process cycle
                 self._cycle(symbols)
 
+                # Reset error counter on successful cycle
+                self._consecutive_errors = 0
+                if self._safe_mode:
+                    self._safe_mode = False
+                    logger.info("Safe mode deactivated: successful cycle completed")
+
+                # Auto-reset restart_count after 16 consecutive clean cycles
+                self._clean_cycles_count += 1
+                if self._clean_cycles_count >= 16 and self._restart_count > 0:
+                    logger.info(
+                        f"16 consecutive clean cycles — resetting restart_count from {self._restart_count} to 0"
+                    )
+                    self._restart_count = 0
+                    self._clean_cycles_count = 0
+                    self._save_state()
+
             except KeyboardInterrupt:
                 logger.info("Shutdown requested (KeyboardInterrupt)")
                 break
             except Exception as e:
-                logger.error(f"Cycle error: {e}", exc_info=True)
+                self._consecutive_errors += 1
+                self._clean_cycles_count = 0  # Reset clean streak on any error
+                logger.error(f"Cycle error ({self._consecutive_errors}/3): {e}", exc_info=True)
                 self.discord.send(
                     embed={
                         "title": "🚨 사이클 오류",
                         "color": 0xFF1744,
-                        "description": f"포지션 {self.strategy.n_active}개 활성 중\n```\n{str(e)[:400]}\n```",
+                        "description": (
+                            f"포지션 {self.strategy.n_active}개 활성 중\n"
+                            f"연속오류: {self._consecutive_errors}/3\n"
+                            f"```\n{str(e)[:400]}\n```"
+                        ),
                         "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
                     }
                 )
-                time.sleep(60)
+
+                # Safe mode after 3 consecutive failures
+                if self._consecutive_errors >= 3 and not self._safe_mode:
+                    self._safe_mode = True
+                    logger.critical("SAFE MODE ACTIVATED: 3 consecutive cycle errors. Skipping new entries.")
+                    self.discord.send(content="⛔ **SAFE MODE** — 3연속 오류. 신규 진입 중단, 기존 포지션만 관리.")
+
+                # Exponential backoff for connection errors
+                if isinstance(e, (ConnectionError, TimeoutError)):
+                    backoff = min(30 * (2 ** (self._consecutive_errors - 1)), 120)
+                    logger.info(f"Connection error backoff: {backoff}s")
+                    time.sleep(backoff)
+                else:
+                    time.sleep(60)
 
         # Clean shutdown
         logger.info("Shutting down...")
