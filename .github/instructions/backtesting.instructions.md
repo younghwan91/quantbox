@@ -142,11 +142,19 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 
 | 버전 | 포함 전략 | 유니버스 | 기간 | N | PF | Calmar | DD | 비고 |
 |------|---------|---------|------|---|----|--------|----|-----|
-| **v14.5.0 (프로덕션)** | D_mom8+MA | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% | canonical |
-| r73 3전략 trail | **D+S+MA** | **60 syms** | 5.67yr | 9,773 | 2.002 | 1695.6 | 40.5% | s_trail_dist=0.002 기준 |
-| **r76 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,775** | **2.484** | **9882** | **37.1%** | **trail canonical (s_trail_dist=0.001)** |
-| **r77 S_d8 단독** | **S_d8** | **60 syms** | **6yr** | **7,730** | **9.603** | **20,601** | **3.5%** | **룩어헤드 검증 완료 ✅** |
-| r84 G_4TF (현행) | **S_d8** | **60 syms** | **6yr** | **6,290** | **10.23** | **10,175** | **2.6%** | max_concurrent=5 (슬롯 패리티) |
+| **v14.5.0 (프로덕션)** | D_mom8+MA | **60 syms** | 6yr | **6,207** | **1.563** | **57.9** | 60.5% | canonical (non-trailing sim, 영향 없음) |
+| r73 3전략 trail | **D+S+MA** | **60 syms** | 5.67yr | 9,773 | 2.002 | 1695.6 | 40.5% | ⚠️ SL-first 재실행 필요 |
+| **r76 3전략 trail** | **D+S+MA** | **60 syms** | **5.67yr** | **9,775** | **2.484** | **9882** | **37.1%** | ⚠️ SL-first 재실행 필요 |
+| **r77 S_d8 단독** | **S_d8** | **60 syms** | **6yr** | **7,730** | **9.603** | **20,601** | **3.5%** | ⚠️ SL-first 재실행 필요 |
+| r84 G_4TF (현행) | **S_d8** | **60 syms** | **6yr** | **6,290** | **10.23** | **10,175** | **2.6%** | ⚠️ SL-first 재실행 필요 |
+
+> ⚠️ **Trail-before-SL bias fix (v14.25.0+):**
+> `sim_straddle_trailing()` 및 `sim_directional_trailing()`에서 trail-before-SL 순서 바이어스 수정.
+> 라이브에서 server SL은 intra-bar(즉시) 발동, client trail은 bar close 발동 → SL이 항상 우선.
+> 수정 전: 같은 바에서 SL+trail 동시 충족 시 trail 우선 → PF ~1.8× 과대추정 (straddle).
+> 수정 후: SL 먼저 체크. H5 조사에서 확인: PF 9.32→5.25 (-43.7%), 99/8691 거래 영향.
+> 위 표의 trailing 기반 수치(r73/r76/r77/r84)는 재실행 후 업데이트 필요.
+> v14.5.0 (non-trailing sim)은 영향 없음.
 
 > **r76 trail = 현재 프로덕션 기준 수치 (v14.21.0+).** r73은 이전 기준.
 > **r77 S_d8 감사 결과 (2026-03-14):**
@@ -352,6 +360,7 @@ for param_value in param_grid:
 | 2026-03-11 | Universe 불일치 (r55/r56/r57) | 63sym 백테스트 vs 60sym 라이브 | `exclude_symbols`는 스테이블코인만 제외, 상장폐지 포함 | 반드시 `cfg.symbol_whitelist` 사용 |
 | 2026-03-11 | _offset 미적용 (r58 이전) | 단축 히스토리 심볼 슬롯 충돌 오류 | 신규 심볼 bar 0 ≠ 기존 심볼 bar 0 (시간 불일치) | 신규 심볼은 `data_15m[sym]["_offset"]` 적용 필수 |
 | 2026-03-15 | STRD 슬롯 패리티 오류 (r78) | N 18.6% 과대추정 | `portfolio_sim(max=10)` → 10 straddle 허용, 라이브는 max 5 | STRD 단독: `portfolio_sim(max_concurrent=5)` |
+| 2026-03-16 | Trail-before-SL bias (H5) | PF ~1.8× 과대추정, big loss 0건 | trail이 SL보다 먼저 체크 → 같은 바에서 SL 대신 trail exit | SL 먼저 체크 (server SL은 intra-bar, trail은 bar close) |
 
 파라미터 민감도 분석: `research/active/r66_r70/r67_sensitivity.py` 및 `docs/backtest_results/202603/` 참조.
 
