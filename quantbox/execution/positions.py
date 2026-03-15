@@ -31,12 +31,27 @@ logger = logging.getLogger("Scalper")
 class PositionMixin:
     """Mixin: Position lifecycle (open, partial close, close, pyramid)."""
 
+    def _get_pair_counterpart(self: "ScalperProtocol", pos_key: str) -> str | None:
+        """Find the counterpart position key for a straddle pair.
+
+        Scans _positions for the position sharing the same straddle_pair_id.
+        Returns None if no counterpart found or position is not a straddle.
+        """
+        pair_id = self.strategy._positions.get(pos_key, {}).get("straddle_pair_id")
+        if not pair_id:
+            return None
+        for key, pos in self.strategy._positions.items():
+            if key != pos_key and pos.get("straddle_pair_id") == pair_id:
+                return key
+        return None
+
     def _open_position(
         self: "ScalperProtocol",
         symbol: "ApiSymbol",
         signal: "SignalValue",
         close_prices: np.ndarray,
         balance: float,
+        straddle_pair_id: str | None = None,
     ) -> bool:
         """Open a new position.
 
@@ -45,6 +60,8 @@ class PositionMixin:
             signal: +1 (long) or -1 (short).
             close_prices: Recent close prices.
             balance: Current balance.
+            straddle_pair_id: UUID linking LONG+SHORT legs of same straddle pair.
+                Both legs receive the same ID. None for directional positions.
 
         Returns:
             True if position was opened.
@@ -437,6 +454,7 @@ class PositionMixin:
                 max_hold=max_hold,
                 position_side=pos_side,
                 is_straddle=is_straddle,
+                straddle_pair_id=straddle_pair_id,
                 strategy_type=strategy_type,
                 balance_before=balance_before,
             )
@@ -1020,6 +1038,13 @@ class PositionMixin:
         if pos is None:
             return False
 
+        # pair_close_requested guard: skip duplicate close requests.
+        # Set by coordination when requesting close of a counterpart leg.
+        # Only skip if we are NOT already in the middle of executing the close.
+        if pos.get("pair_close_requested") and pos.get("_pair_close_executing"):
+            logger.info(f"[{symbol}] pair_close_requested already executing — skipping duplicate close")
+            return False
+
         # Extract Binance symbol from compound key
         api_symbol = pos.get("symbol", symbol.split(":")[0])
 
@@ -1318,6 +1343,7 @@ class PositionMixin:
             "entry_time": pos.get("opened_at"),
             "balance_before": pos.get("balance_before") or self.get_balance(),
             "balance_after": self.get_balance(),
+            "straddle_pair_id": pos.get("straddle_pair_id"),
         }
         self._trade_history.append(trade)
         self._journal.record(trade)

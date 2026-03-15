@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 import logging
 import time
+from datetime import datetime, timezone
 
 from binance.exceptions import BinanceAPIException
 
@@ -313,7 +314,7 @@ class BracketMixin:
             logger.warning(f"[{symbol}] Server TP failed — will rely on client-side TP check.")
         return algo_id
 
-    def _cancel_server_order(self: "ScalperProtocol", symbol: str, order_id: str, label: str = "order") -> None:
+    def _cancel_server_order(self: "ScalperProtocol", symbol: str, order_id: str, label: str = "order") -> bool:
         """Cancel a server-side algo order (stop-loss or take-profit).
 
         Uses Binance Algo Order API (DELETE /fapi/v1/algoOrder).
@@ -324,9 +325,13 @@ class BracketMixin:
             symbol: Trading symbol.
             order_id: The algoId to cancel.
             label: Description for logging (e.g. 'stop-loss', 'take-profit').
+
+        Returns:
+            True on successful cancel or benign errors (already cancelled/filled/expired).
+            False on unexpected API failures.
         """
         if self.paper_mode or not order_id or order_id.startswith("paper_"):
-            return
+            return True
 
         try:
             resp = self.client._request_futures_api(
@@ -336,23 +341,42 @@ class BracketMixin:
                 data={"algoId": int(order_id)},
             )
             logger.info(f"[{symbol}] Server {label} cancelled: algoId={order_id} resp={resp}")
+            return True
         except BinanceAPIException as e:
             err_str = str(e)
-            if "Unknown" in err_str or "-2011" in err_str or "-25029" in err_str:
+            # -2011: Unknown order, -25029: algo order not found, -4000: invalid order id
+            # -20012: order already closed — all are benign (order is already gone)
+            if (
+                "Unknown" in err_str
+                or "-2011" in err_str
+                or "-25029" in err_str
+                or "-4000" in err_str
+                or "-20012" in err_str
+            ):
                 # Already cancelled, filled, or expired — OK
                 logger.debug(f"[{symbol}] Server {label} already gone: algoId={order_id} ({e})")
-            else:
-                logger.warning(f"[{symbol}] Failed to cancel server {label}: algoId={order_id} error={e}")
+                return True
+            logger.warning(f"[{symbol}] Failed to cancel server {label}: algoId={order_id} error={e}")
+            return False
         except Exception as e:
             logger.warning(f"[{symbol}] Unexpected error cancelling server {label}: algoId={order_id} error={e}")
+            return False
 
-    def _cancel_server_stop_loss(self: "ScalperProtocol", symbol: str, order_id: str) -> None:
-        """Cancel the server-side stop-loss."""
-        self._cancel_server_order(symbol, order_id, "stop-loss")
+    def _cancel_server_stop_loss(self: "ScalperProtocol", symbol: str, order_id: str) -> bool:
+        """Cancel the server-side stop-loss.
 
-    def _cancel_server_take_profit(self: "ScalperProtocol", symbol: str, order_id: str) -> None:
-        """Cancel the server-side take-profit."""
-        self._cancel_server_order(symbol, order_id, "take-profit")
+        Returns:
+            True on success or benign error, False on unexpected failure.
+        """
+        return self._cancel_server_order(symbol, order_id, "stop-loss")
+
+    def _cancel_server_take_profit(self: "ScalperProtocol", symbol: str, order_id: str) -> bool:
+        """Cancel the server-side take-profit.
+
+        Returns:
+            True on success or benign error, False on unexpected failure.
+        """
+        return self._cancel_server_order(symbol, order_id, "take-profit")
 
     def _lookup_actual_fill(
         self: "ScalperProtocol",
@@ -688,3 +712,102 @@ class BracketMixin:
             )
         else:
             logger.warning(f"[{symbol}] Trail SL ratchet FAILED — old SL preserved")
+
+    def _verify_algo_order_active(self: "ScalperProtocol", algo_id: str, symbol: str) -> str | None:
+        """Verify an algo order is still active on Binance.
+
+        Args:
+            algo_id: The algoId to query.
+            symbol: Trading symbol (for logging).
+
+        Returns:
+            "WORKING" if active, "EXPIRED"/"CANCELLED" if dead, None on query failure.
+        """
+        if self.paper_mode:
+            return "WORKING"
+        try:
+            resp = self.client._request_futures_api(
+                "get",
+                "algoOrder",
+                signed=True,
+                data={"algoId": int(algo_id)},
+            )
+            # Response may vary — handle both dict and list
+            if isinstance(resp, dict):
+                return resp.get("algoStatus") or resp.get("status")
+            return None
+        except Exception as e:
+            logger.warning(f"[{symbol}] Algo order status query failed for {algo_id}: {e}")
+            return None
+
+    def _check_bracket_staleness(self: "ScalperProtocol") -> None:
+        """Check if any SL algo orders have expired or been cancelled.
+
+        Called each cycle from _sync_server_orders(). Detects externally cancelled
+        or expired SL orders so they can be re-placed by normal bracket repair logic.
+        """
+        if self.paper_mode:
+            return
+        for sym in list(self.strategy.active_positions):
+            pos = self.strategy._positions.get(sym)
+            if not pos:
+                continue
+            sl_oid = pos.get("server_sl_order_id")
+            if not sl_oid or str(sl_oid).startswith("paper_"):
+                continue
+            api_sym = pos.get("symbol", sym.split(":")[0])
+            if ":" in api_sym:
+                api_sym = api_sym.split(":")[0]
+            status = self._verify_algo_order_active(str(sl_oid), api_sym)
+            if status in ("EXPIRED", "CANCELLED", "USER_CANCELLED"):
+                logger.warning(f"[{sym}] SL algo order {sl_oid} is {status} — re-placing bracket")
+                pos["server_sl_order_id"] = None
+                # Bracket will be re-placed by the normal bracket repair logic
+                self.discord.send(content=f"⚠️ **[{sym}] SL 브라켓 {status}** — 재배치 예정")
+                pos["bracket_sl_verified_at"] = datetime.now(timezone.utc).isoformat()
+            elif status == "WORKING":
+                pos["bracket_sl_verified_at"] = datetime.now(timezone.utc).isoformat()
+
+    def _verify_ratchet(self: "ScalperProtocol", sym: str, pos: dict, expected_price: float) -> bool:
+        """Verify a ratchet SL update was accepted by Binance.
+
+        On failure: keeps old SL active + alerts. Does NOT force-close.
+        Force-close ONLY if no SL exists at all.
+
+        Args:
+            sym: Compound position key.
+            pos: Position dict.
+            expected_price: The trigger price of the newly placed ratchet SL.
+
+        Returns:
+            True if verified OK, False if verification failed or no SL at all.
+        """
+        sl_oid = pos.get("server_sl_order_id")
+        if not sl_oid:
+            # No SL at all — this IS the unprotected case
+            logger.critical(f"[{sym}] NO SL EXISTS after ratchet — force-closing position")
+            self.discord.send(content=f"🚨 **[{sym}] SL 없음** — 강제 청산")
+            return False
+
+        api_sym = pos.get("symbol", sym.split(":")[0])
+        if ":" in api_sym:
+            api_sym = api_sym.split(":")[0]
+        status = self._verify_algo_order_active(str(sl_oid), api_sym)
+        if status != "WORKING":
+            # Ratchet failed — keep old SL, alert
+            logger.warning(f"[{sym}] Ratchet verification failed: SL {sl_oid} status={status}. Keeping old SL.")
+            self.discord.send(content=f"⚠️ **[{sym}] 래칫 검증 실패** — 기존 SL 유지, status={status}")
+            return False
+
+        # Log ratchet history
+        pos.setdefault("_ratchet_history", [])
+        pos["_ratchet_history"].append(
+            {
+                "price": expected_price,
+                "time": datetime.now(timezone.utc).isoformat(),
+                "verified": True,
+            }
+        )
+        pos["last_ratchet_price"] = expected_price
+        pos["last_ratchet_at"] = datetime.now(timezone.utc).isoformat()
+        return True
