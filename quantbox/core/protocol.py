@@ -96,6 +96,9 @@ class ScalperProtocol(Protocol):
     # ── Trade journal (optional) ──────────────────────────────────────────
     _journal: Any
 
+    # ── Recon journal (optional) ────────────────────────────────────────
+    _recon_journal: Any
+
     # ── Exchange notional cache (set by _reconcile_positions each cycle) ──
     _cached_exchange_notionals: dict[str, float]
 
@@ -212,6 +215,10 @@ class ScalperProtocol(Protocol):
         ...
 
     # ── Methods: position lifecycle ───────────────────────────────────────
+    def _get_pair_counterpart(self, pos_key: str) -> str | None:
+        """Find counterpart position key for a straddle pair."""
+        ...
+
     def _close_position(self, symbol: str, reason: str, current_price: float) -> bool:
         """Close position by key (may be compound 'SYMBOL:SIDE'); return success flag."""
         ...
@@ -258,6 +265,14 @@ class ScalperProtocol(Protocol):
 
     def _handle_command(self, cmd: Any) -> str:
         """Dispatch a BotCommand to the appropriate handler."""
+        ...
+
+    def _cmd_adopt(self, position_key: str) -> str:
+        """Adopt an orphan exchange position into internal state."""
+        ...
+
+    def _cmd_close_orphan(self, position_key: str) -> str:
+        """Market close an orphan exchange position."""
         ...
 
     def _cmd_status(self) -> str: ...

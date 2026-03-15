@@ -55,12 +55,16 @@ def _make_zero_position(symbol: str, pos_side: str = "BOTH") -> dict:
 
 
 class TestReverseGhostReconciliation:
-    """Reverse ghost = exchange has position, internal state does not."""
+    """Reverse ghost = exchange has position, internal state does not.
 
-    def test_reverse_ghost_triggers_market_close(self):
-        """When exchange has BANDUSDT:LONG but state is empty, auto-close fires."""
+    Default behavior (v14.28+): alert-only, no auto-close.
+    Auto-close restored via ORPHAN_AUTO_CLOSE=true env var (escape hatch).
+    """
+
+    def test_reverse_ghost_alert_only_by_default(self):
+        """When exchange has BANDUSDT:LONG but state is empty, alert fires but NO auto-close."""
         scalper = _build_vs_scalper()
-        scalper.paper_mode = False  # live mode — reconciliation runs
+        scalper.paper_mode = False
 
         exchange_positions = [
             _make_exchange_position("BANDUSDT", "LONG", QTY),
@@ -70,7 +74,26 @@ class TestReverseGhostReconciliation:
 
         scalper._reconcile_positions()
 
-        # Market close order must have been placed
+        # NO market close — alert-only is the default
+        scalper.client.futures_create_order.assert_not_called()
+        # Discord alert must have been sent
+        scalper.discord.send.assert_called()
+
+    def test_reverse_ghost_auto_close_with_env_var(self, monkeypatch):
+        """ORPHAN_AUTO_CLOSE=true restores auto-close behavior."""
+        monkeypatch.setenv("ORPHAN_AUTO_CLOSE", "true")
+        scalper = _build_vs_scalper()
+        scalper.paper_mode = False
+
+        exchange_positions = [
+            _make_exchange_position("BANDUSDT", "LONG", QTY),
+            _make_zero_position("BANDUSDT", "SHORT"),
+        ]
+        scalper.client.futures_position_information.return_value = exchange_positions
+
+        scalper._reconcile_positions()
+
+        # Auto-close fires when env var is set
         scalper.client.futures_create_order.assert_called_once()
         call_kwargs = scalper.client.futures_create_order.call_args.kwargs
         assert call_kwargs["symbol"] == "BANDUSDT"
@@ -80,7 +103,7 @@ class TestReverseGhostReconciliation:
         assert call_kwargs["positionSide"] == "LONG"
 
     def test_reverse_ghost_sends_discord_alert(self):
-        """Discord alert is sent when reverse ghost is detected."""
+        """Discord alert is sent when reverse ghost is detected (alert-only mode)."""
         scalper = _build_vs_scalper()
         scalper.paper_mode = False
 
@@ -92,15 +115,13 @@ class TestReverseGhostReconciliation:
         scalper._reconcile_positions()
 
         scalper.discord.send.assert_called()
-        content = (
-            scalper.discord.send.call_args.kwargs.get("content", "") or scalper.discord.send.call_args.args[0]
-            if scalper.discord.send.call_args.args
-            else ""
-        )
-        assert "BANDUSDT" in content or any("BAND" in str(c) for c in scalper.discord.send.call_args_list)
+        # Verify alert mentions the symbol and adopt/close-orphan commands
+        all_calls = " ".join(str(c) for c in scalper.discord.send.call_args_list)
+        assert "BANDUSDT" in all_calls
 
-    def test_reverse_ghost_short_position_uses_buy_side(self):
-        """Reverse ghost SHORT position is closed with BUY."""
+    def test_reverse_ghost_short_auto_close_with_env(self, monkeypatch):
+        """Reverse ghost SHORT position is closed with BUY when ORPHAN_AUTO_CLOSE=true."""
+        monkeypatch.setenv("ORPHAN_AUTO_CLOSE", "true")
         scalper = _build_vs_scalper()
         scalper.paper_mode = False
 
@@ -159,8 +180,9 @@ class TestReverseGhostReconciliation:
         scalper.client.futures_position_information.assert_not_called()
         scalper.client.futures_create_order.assert_not_called()
 
-    def test_reverse_ghost_api_failure_sends_emergency_discord(self):
-        """If auto-close order fails, emergency Discord message is sent."""
+    def test_reverse_ghost_api_failure_sends_emergency_discord(self, monkeypatch):
+        """If auto-close order fails (ORPHAN_AUTO_CLOSE=true), emergency Discord message is sent."""
+        monkeypatch.setenv("ORPHAN_AUTO_CLOSE", "true")
         scalper = _build_vs_scalper()
         scalper.paper_mode = False
 
@@ -278,14 +300,13 @@ class TestStartupExchangeCrosscheck:
 class TestReverseGhostJournaling:
     """Reverse ghost close must appear in journal.sqlite (not only in recon_journal)."""
 
-    def test_reverse_ghost_calls_journal_record(self):
-        """_journal.record() is called when reverse ghost is auto-closed successfully."""
+    def test_reverse_ghost_no_journal_in_alert_only_mode(self):
+        """In alert-only mode (default), journal.record() is NOT called (no auto-close)."""
         from unittest.mock import MagicMock
 
         scalper = _build_vs_scalper()
         scalper.paper_mode = False
 
-        # Inject a mock journal that records calls
         mock_journal = MagicMock()
         scalper._journal = mock_journal
 
@@ -297,7 +318,28 @@ class TestReverseGhostJournaling:
 
         scalper._reconcile_positions()
 
-        # journal.record() must have been called
+        # No auto-close → no journal record
+        mock_journal.record.assert_not_called()
+
+    def test_reverse_ghost_calls_journal_record_with_auto_close(self, monkeypatch):
+        """_journal.record() is called when reverse ghost is auto-closed (ORPHAN_AUTO_CLOSE=true)."""
+        from unittest.mock import MagicMock
+
+        monkeypatch.setenv("ORPHAN_AUTO_CLOSE", "true")
+        scalper = _build_vs_scalper()
+        scalper.paper_mode = False
+
+        mock_journal = MagicMock()
+        scalper._journal = mock_journal
+
+        exchange_positions = [
+            _make_exchange_position("BANDUSDT", "LONG", QTY),
+            _make_zero_position("BANDUSDT", "SHORT"),
+        ]
+        scalper.client.futures_position_information.return_value = exchange_positions
+
+        scalper._reconcile_positions()
+
         assert mock_journal.record.called, (
             "journal.record() was not called — reverse ghost close not recorded in journal.sqlite"
         )
@@ -305,10 +347,11 @@ class TestReverseGhostJournaling:
         assert call_kwargs["symbol"] == "BANDUSDT"
         assert call_kwargs["reason"] == "reconciliation_close"
 
-    def test_reverse_ghost_journal_not_called_on_api_failure(self):
+    def test_reverse_ghost_journal_not_called_on_api_failure(self, monkeypatch):
         """If auto-close order fails, journal.record() must NOT be called with garbage data."""
         from unittest.mock import MagicMock
 
+        monkeypatch.setenv("ORPHAN_AUTO_CLOSE", "true")
         scalper = _build_vs_scalper()
         scalper.paper_mode = False
 

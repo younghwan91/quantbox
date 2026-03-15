@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from quantbox.core.protocol import ScalperProtocol
 
 import logging
+import os
+import time
 from datetime import datetime, timezone
 
 from quantbox.execution.recon_journal import ReconEventType
@@ -45,6 +47,31 @@ class ReconciliationMixin:
             raw_sym = pos.get("symbol", sym)
             api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
 
+            # ── Step 2.1: Re-attempt counterpart SL cancel if flagged from previous cycle ──
+            if pos.get("counterpart_sl_cancel_failed") and pos.get("is_straddle"):
+                counterpart_key = self._get_pair_counterpart(sym)
+                if counterpart_key:
+                    counterpart = self.strategy._positions.get(counterpart_key)
+                    if counterpart:
+                        retry_sl_oid = counterpart.get("server_sl_order_id")
+                        retry_api_sym = counterpart_key.split(":")[0]
+                        if retry_sl_oid:
+                            cfg_vs = getattr(self, "vs_config", None)
+                            retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
+                            retry_delay = cfg_vs.sl_cancel_retry_delay_s if cfg_vs else 1.0
+                            for attempt in range(retry_count + 1):
+                                if self._cancel_server_stop_loss(retry_api_sym, retry_sl_oid):
+                                    logger.info(f"[{sym}] 카운터파트 SL 재시도 취소 성공: {counterpart_key}")
+                                    pos["counterpart_sl_cancel_failed"] = False
+                                    break
+                                if attempt < retry_count:
+                                    time.sleep(retry_delay)
+                            else:
+                                logger.warning(f"[{sym}] 카운터파트 SL 재시도도 실패: {counterpart_key}")
+                else:
+                    # Counterpart no longer exists — clear the flag
+                    pos["counterpart_sl_cancel_failed"] = False
+
             tp_oid = pos.get("server_tp_order_id")
             sl_oid = pos.get("server_sl_order_id")
             logger.debug(
@@ -76,9 +103,55 @@ class ReconciliationMixin:
                         continue
 
                     logger.info(f"[{sym}] Server TP TRIGGERED intra-bar: fill=${fill_price:.4f} qty={fill_qty:.6f}")
-                    # Cancel the counterpart SL
+                    # Cancel the counterpart SL (own leg's SL, with retry for straddle pairs)
                     if sl_oid:
-                        self._cancel_server_stop_loss(api_sym, sl_oid)
+                        cfg_vs = getattr(self, "vs_config", None)
+                        if cfg_vs is not None and pos.get("is_straddle"):
+                            sl_cancelled = False
+                            for attempt in range(cfg_vs.sl_cancel_retry_count + 1):
+                                if self._cancel_server_stop_loss(api_sym, sl_oid):
+                                    sl_cancelled = True
+                                    break
+                                if attempt < cfg_vs.sl_cancel_retry_count:
+                                    time.sleep(cfg_vs.sl_cancel_retry_delay_s)
+                            if not sl_cancelled:
+                                logger.warning(f"[{sym}] 자체 SL 취소 실패 ({cfg_vs.sl_cancel_retry_count + 1}회 시도)")
+                        else:
+                            self._cancel_server_stop_loss(api_sym, sl_oid)
+
+                    # ── Step 2.1: Straddle counterpart SL cancel with retry ──
+                    counterpart_key = self._get_pair_counterpart(sym) if pos.get("is_straddle") else None
+                    if counterpart_key:
+                        counterpart = self.strategy._positions.get(counterpart_key)
+                        if counterpart:
+                            counterpart_sl_oid = counterpart.get("server_sl_order_id")
+                            counterpart_api_sym = counterpart_key.split(":")[0]
+                            if counterpart_sl_oid:
+                                cfg_vs = getattr(self, "vs_config", None)
+                                retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
+                                retry_delay = cfg_vs.sl_cancel_retry_delay_s if cfg_vs else 1.0
+                                counterpart_cancelled = False
+                                for attempt in range(retry_count + 1):
+                                    if self._cancel_server_stop_loss(counterpart_api_sym, counterpart_sl_oid):
+                                        counterpart_cancelled = True
+                                        break
+                                    if attempt < retry_count:
+                                        time.sleep(retry_delay)
+                                if counterpart_cancelled:
+                                    logger.info(
+                                        f"[{sym}] 카운터파트 SL 취소 성공: {counterpart_key} algoId={counterpart_sl_oid}"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"[{sym}] 카운터파트 SL 취소 실패 ({retry_count + 1}회 시도): {counterpart_key}"
+                                    )
+                                    counterpart["counterpart_sl_cancel_failed"] = True
+                                    self.discord.send(
+                                        content=(
+                                            f"⚠️ **[{counterpart_key}] 카운터파트 SL 취소 실패** — "
+                                            f"다음 사이클에서 재시도"
+                                        )
+                                    )
                     # ── ReconJournal: record server TP fill ──
                     try:
                         _rj = getattr(self, "_recon_journal", None)
@@ -112,9 +185,43 @@ class ReconciliationMixin:
                     fill_price = float(filled["avgPrice"])
                     fill_qty = float(filled["executedQty"])
                     logger.info(f"[{sym}] Server SL TRIGGERED intra-bar: fill=${fill_price:.4f} qty={fill_qty:.6f}")
-                    # Cancel the counterpart TP
+                    # Cancel the counterpart TP (own leg's TP)
                     if tp_oid:
                         self._cancel_server_take_profit(api_sym, tp_oid)
+
+                    # ── Step 2.1: Straddle counterpart SL cancel with retry ──
+                    counterpart_key = self._get_pair_counterpart(sym) if pos.get("is_straddle") else None
+                    if counterpart_key:
+                        counterpart = self.strategy._positions.get(counterpart_key)
+                        if counterpart:
+                            counterpart_sl_oid = counterpart.get("server_sl_order_id")
+                            counterpart_api_sym = counterpart_key.split(":")[0]
+                            if counterpart_sl_oid:
+                                cfg_vs = getattr(self, "vs_config", None)
+                                retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
+                                retry_delay = cfg_vs.sl_cancel_retry_delay_s if cfg_vs else 1.0
+                                counterpart_cancelled = False
+                                for attempt in range(retry_count + 1):
+                                    if self._cancel_server_stop_loss(counterpart_api_sym, counterpart_sl_oid):
+                                        counterpart_cancelled = True
+                                        break
+                                    if attempt < retry_count:
+                                        time.sleep(retry_delay)
+                                if counterpart_cancelled:
+                                    logger.info(
+                                        f"[{sym}] 카운터파트 SL 취소 성공: {counterpart_key} algoId={counterpart_sl_oid}"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"[{sym}] 카운터파트 SL 취소 실패 ({retry_count + 1}회 시도): {counterpart_key}"
+                                    )
+                                    counterpart["counterpart_sl_cancel_failed"] = True
+                                    self.discord.send(
+                                        content=(
+                                            f"⚠️ **[{counterpart_key}] 카운터파트 SL 취소 실패** — "
+                                            f"다음 사이클에서 재시도"
+                                        )
+                                    )
                     # ── ReconJournal: record server SL fill ──
                     try:
                         _rj = getattr(self, "_recon_journal", None)
@@ -614,14 +721,46 @@ class ReconciliationMixin:
             else:
                 tracked_keys.add(api_sym)
 
+        # ORPHAN_AUTO_CLOSE=true 환경변수로 구버전(자동청산) 동작 복원 가능 (탈출구).
+        # 기본값은 alert-only — 운영자가 !adopt 또는 !close-orphan 명령으로 처리.
+        _auto_close_enabled = os.getenv("ORPHAN_AUTO_CLOSE", "").lower() == "true"
+
         for ex_key, ex_amt in exchange_map.items():
             if ex_key in tracked_keys:
                 continue
             # Reverse ghost: exchange has a position with no internal state.
-            # This means no SL/TP protection. Auto-close immediately.
             parts = ex_key.split(":")
             api_sym = parts[0]
             pos_side_str = parts[1] if len(parts) == 2 else None
+
+            if not _auto_close_enabled:
+                # Alert-only — operator must decide via !adopt or !close-orphan
+                logger.error(
+                    f"[{ex_key}] REVERSE GHOST: Position on exchange has no internal "
+                    f"state (no SL/TP protection). ALERT ONLY — use !adopt or !close-orphan."
+                )
+                self.discord.send(
+                    content=(
+                        f"🔍 **[{ex_key}] 고아 포지션 감지** — "
+                        f"거래소에 보호 없는 포지션 존재 (qty={abs(ex_amt):.4f}).\n"
+                        f"`!adopt {ex_key}` 또는 `!close-orphan {ex_key}` 명령으로 처리해주세요."
+                    )
+                )
+                try:
+                    _rj = getattr(self, "_recon_journal", None)
+                    if _rj is not None:
+                        _rj.record(
+                            event_type=ReconEventType.REVERSE_GHOST,
+                            symbol=api_sym,
+                            action="orphan_alert_only (no auto-close)",
+                            result="alert_sent",
+                            details={"position_side": pos_side_str, "qty": abs(ex_amt)},
+                        )
+                except Exception:
+                    pass
+                continue
+
+            # ORPHAN_AUTO_CLOSE=true: original auto-close behavior (escape hatch)
             close_side = "SELL" if pos_side_str == "LONG" else "BUY"
             logger.error(
                 f"[{ex_key}] REVERSE GHOST: Position on exchange has no internal "
@@ -713,6 +852,57 @@ class ReconciliationMixin:
                         )
                 except Exception:
                     pass
+
+        # ── Phase 3: Straddle pair integrity check ──
+        # NOTE: 이 스트래들 고아 자동-청산 (VS_ORPHAN_AUTO_CLOSE_CYCLES)은 위의
+        # ORPHAN_AUTO_CLOSE (거래소-전용 reverse ghost 자동청산)와 별개입니다.
+        # 여기서는 내부 상태에서 카운터파트가 사라진 경우만 처리합니다.
+        _cfg_vs = getattr(self, "vs_config", None)
+        for sym in list(self.strategy.active_positions):
+            pos = self.strategy._positions.get(sym)
+            if not pos or not pos.get("is_straddle") or not pos.get("straddle_pair_id"):
+                continue
+
+            counterpart_key = self._get_pair_counterpart(sym)
+            if counterpart_key is not None:
+                # 페어 온전함 — 고아 추적 초기화
+                pos.pop("straddle_orphan_since_cycle", None)
+                continue
+
+            # 카운터파트 없음 — 고아 상태
+            if pos.get("straddle_orphan_since_cycle") is None:
+                pos["straddle_orphan_since_cycle"] = self._cycle_count
+                grace = _cfg_vs.orphan_auto_close_cycles if _cfg_vs else 4
+                logger.warning(f"[{sym}] 스트래들 레그 고아 감지 — 카운터파트 없음. {grace}사이클 후 자동 청산 예정.")
+                self.discord.send(
+                    content=(f"🔍 **[{sym}] 스트래들 고아 감지** — 카운터파트 부재. {grace}사이클 후 자동 청산 예정.")
+                )
+
+            orphan_grace = _cfg_vs.orphan_auto_close_cycles if _cfg_vs else 4
+            orphan_cycles = self._cycle_count - pos["straddle_orphan_since_cycle"]
+            if orphan_cycles >= orphan_grace:
+                logger.warning(f"[{sym}] 고아 스트래들 레그 자동 청산 — {orphan_cycles}사이클 동안 헤지 없음.")
+                self.discord.send(
+                    content=(
+                        f"⚠️ **[{sym}] 고아 스트래들 자동 청산** — {orphan_cycles}사이클 동안 헤지 없음. 자동 청산 실행."
+                    )
+                )
+                # 현재 포지션의 마크 가격 추정 (entry_price 사용)
+                raw_sym = pos.get("symbol", sym)
+                api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+                close_price = pos.get("entry_price", 0.0)
+                try:
+                    _book = self.client.futures_orderbook_ticker(symbol=api_sym)
+                    close_price = float(_book["bidPrice"] if pos["signal"] == 1 else _book["askPrice"])
+                except Exception:
+                    pass
+                closed = self._close_position(sym, "straddle_orphan_auto_close", close_price)
+                if not closed:
+                    logger.error(f"[{sym}] 고아 스트래들 자동 청산 실패 — 수동 개입 필요!")
+            else:
+                # 유예 기간 중 — SL 브라켓 확인
+                if not pos.get("server_sl_order_id"):
+                    logger.warning(f"[{sym}] 고아 스트래들 레그에 SL 브라켓 없음 — bracket repair 필요")
 
     def _handle_server_partial_tp_fill(
         self: "ScalperProtocol",
@@ -865,6 +1055,13 @@ class ReconciliationMixin:
 
         Removes the position from internal tracking and logs the PnL.
         """
+        # ── Step 2.2: Straddle pair context before position is removed ──
+        pair_id = None
+        counterpart_key_before: str | None = None
+        if self.strategy._positions.get(symbol, {}).get("is_straddle"):
+            counterpart_key_before = self._get_pair_counterpart(symbol)
+            pair_id = self.strategy._positions.get(symbol, {}).get("straddle_pair_id")
+
         pos = self.strategy.close_position(symbol)
         if not pos:
             return
@@ -909,6 +1106,7 @@ class ReconciliationMixin:
             "entry_time": pos.get("opened_at"),
             "balance_before": pos.get("balance_before"),
             "balance_after": None,  # updated after _save_state
+            "straddle_pair_id": pair_id,
         }
         self._trade_history.append(trade)
 
@@ -925,6 +1123,32 @@ class ReconciliationMixin:
         # a ghost position on restart (position gone on exchange but
         # still in our state file).
         self._save_state()
+
+        # ── Step 2.2: Straddle pair context logging ──
+        if pair_id:
+            if counterpart_key_before:
+                # Counterpart still open — pair half-closed
+                counterpart_pos = self.strategy._positions.get(counterpart_key_before)
+                if counterpart_pos:
+                    # Verify counterpart brackets are intact after this leg's close
+                    counterpart_has_sl = bool(counterpart_pos.get("server_sl_order_id"))
+                    counterpart_has_tp = bool(counterpart_pos.get("server_tp_order_id"))
+                    if not counterpart_has_sl:
+                        logger.warning(
+                            f"[{symbol}] 스트래들 반-청산 후 카운터파트 SL 없음: "
+                            f"{counterpart_key_before} — bracket repair 필요"
+                        )
+                    logger.info(
+                        f"[{symbol}] 스트래들 페어 반-청산 (pair_id={pair_id}): "
+                        f"이 다리 PnL={net_pnl:+.2f}$, "
+                        f"카운터파트 {counterpart_key_before} 아직 오픈 "
+                        f"(SL={'OK' if counterpart_has_sl else '없음'} "
+                        f"TP={'OK' if counterpart_has_tp else '없음'})"
+                    )
+                else:
+                    logger.info(f"[{symbol}] 스트래들 페어 완전 청산 (pair_id={pair_id}): 양 다리 모두 청산됨")
+            else:
+                logger.info(f"[{symbol}] 스트래들 페어 완전 청산 (pair_id={pair_id}): 양 다리 모두 청산됨")
 
         emoji = "🎯" if reason == "server_tp" else "🛑"
         logger.info(
