@@ -465,39 +465,44 @@ def sim_directional_trailing(
 
         for j in range(i + 1, end):
             if d == 1:
-                cur_gain = (high[j] - entry) / entry
-                # Update peak
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-
-                # Check trailing stop first (if active)
-                if trailing_active:
-                    trail_level = entry * (1.0 + peak_gain - trail_distance)
-                    if low[j] <= trail_level:
-                        # Trailing stop hit
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-
-                # Check hard TP
-                if high[j] >= entry * (1.0 + tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-
-                # Check initial SL (only before trailing activates)
-                if not trailing_active and low[j] <= entry * (1.0 - sl):
+                # SL checked FIRST (server SL fires intra-bar,
+                # trail fires at bar close; SL always has priority)
+                if low[j] <= entry * (1.0 - sl):
                     trade_pnl = -sl
                     eb = j
                     break
 
-                # Activate trailing
+                cur_gain = (high[j] - entry) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
                 if not trailing_active and peak_gain >= trail_activate:
                     trailing_active = True
+
+                if trailing_active:
+                    trail_level = entry * (1.0 + peak_gain - trail_distance)
+                    if low[j] <= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+
+                if high[j] >= entry * (1.0 + tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
             else:
+                # SHORT — SL checked FIRST (same rationale)
+                if high[j] >= entry * (1.0 + sl):
+                    trade_pnl = -sl
+                    eb = j
+                    break
+
                 cur_gain = (entry - low[j]) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
+
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
 
                 if trailing_active:
                     trail_level = entry * (1.0 - peak_gain + trail_distance)
@@ -506,21 +511,10 @@ def sim_directional_trailing(
                         eb = j
                         break
 
-                if high[j] >= entry * (1.0 + tp) and d == -1:
-                    # Nonsense for short — check SL
-                    pass
-                if low[j] <= entry * (1.0 - tp) and d == -1:
+                if low[j] <= entry * (1.0 - tp):
                     trade_pnl = tp
                     eb = j
                     break
-
-                if not trailing_active and high[j] >= entry * (1.0 + sl):
-                    trade_pnl = -sl
-                    eb = j
-                    break
-
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
         else:
             if d == 1:
                 trade_pnl = (close[eb] - entry) / entry
@@ -585,51 +579,46 @@ def sim_straddle_trailing(
         eb = i
         end = min(i + 1 + max_hold, n)
         for j in range(i + 1, end):
-            # Long leg
+            # Long leg — SL checked FIRST (server SL fires intra-bar,
+            # trail fires at bar close; SL always has priority)
             if la:
-                l_gain = (high[j] - entry) / entry
-                if l_gain > l_peak:
-                    l_peak = l_gain
-
-                if not l_trailing and l_peak >= trail_activate:
-                    l_trailing = True
-
-                if l_trailing:
-                    trail_lvl = entry * (1.0 + l_peak - trail_distance)
-                    if low[j] <= trail_lvl:
-                        le = max(l_peak - trail_distance, -sl)
-                        la = False
-                else:
-                    if low[j] <= entry * (1.0 - sl):
-                        le = -sl
-                        la = False
-
-                if la and high[j] >= entry * (1.0 + tp):
-                    le = tp
+                if low[j] <= entry * (1.0 - sl):
+                    le = -sl
                     la = False
-
-            # Short leg
-            if sa:
-                s_gain = (entry - low[j]) / entry
-                if s_gain > s_peak:
-                    s_peak = s_gain
-
-                if not s_trailing and s_peak >= trail_activate:
-                    s_trailing = True
-
-                if s_trailing:
-                    trail_lvl = entry * (1.0 - s_peak + trail_distance)
-                    if high[j] >= trail_lvl:
-                        se = max(s_peak - trail_distance, -sl)
-                        sa = False
                 else:
-                    if high[j] >= entry * (1.0 + sl):
-                        se = -sl
-                        sa = False
+                    l_gain = (high[j] - entry) / entry
+                    if l_gain > l_peak:
+                        l_peak = l_gain
+                    if not l_trailing and l_peak >= trail_activate:
+                        l_trailing = True
+                    if l_trailing:
+                        trail_lvl = entry * (1.0 + l_peak - trail_distance)
+                        if low[j] <= trail_lvl:
+                            le = max(l_peak - trail_distance, -sl)
+                            la = False
+                    if la and high[j] >= entry * (1.0 + tp):
+                        le = tp
+                        la = False
 
-                if sa and low[j] <= entry * (1.0 - tp):
-                    se = tp
+            # Short leg — SL checked FIRST (same rationale)
+            if sa:
+                if high[j] >= entry * (1.0 + sl):
+                    se = -sl
                     sa = False
+                else:
+                    s_gain = (entry - low[j]) / entry
+                    if s_gain > s_peak:
+                        s_peak = s_gain
+                    if not s_trailing and s_peak >= trail_activate:
+                        s_trailing = True
+                    if s_trailing:
+                        trail_lvl = entry * (1.0 - s_peak + trail_distance)
+                        if high[j] >= trail_lvl:
+                            se = max(s_peak - trail_distance, -sl)
+                            sa = False
+                    if sa and low[j] <= entry * (1.0 - tp):
+                        se = tp
+                        sa = False
 
             if not la and not sa:
                 eb = j
