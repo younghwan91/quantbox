@@ -153,8 +153,8 @@ class ScalperProtocol(Protocol):
         """Place server-side algo (STOP_MARKET / TAKE_PROFIT_MARKET) order."""
         ...
 
-    def _cancel_server_order(self, symbol: str, order_id: str, label: str = "order") -> None:
-        """Cancel a server-side algo order by ID."""
+    def _cancel_server_order(self, symbol: str, order_id: str, label: str = "order") -> bool:
+        """Cancel a server-side algo order by ID. Returns True on success or benign error."""
         ...
 
     def _lookup_actual_fill(self, symbol: str, expected_qty: str, order_type: str) -> dict[str, Any] | None:
@@ -187,12 +187,24 @@ class ScalperProtocol(Protocol):
         """Place server-side TP algo order; return algo order ID or None."""
         ...
 
-    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> None:
-        """Cancel a server-side SL algo order."""
+    def _cancel_server_stop_loss(self, symbol: str, order_id: str) -> bool:
+        """Cancel a server-side SL algo order. Returns True on success or benign error."""
         ...
 
-    def _cancel_server_take_profit(self, symbol: str, order_id: str) -> None:
-        """Cancel a server-side TP algo order."""
+    def _cancel_server_take_profit(self, symbol: str, order_id: str) -> bool:
+        """Cancel a server-side TP algo order. Returns True on success or benign error."""
+        ...
+
+    def _verify_algo_order_active(self, algo_id: str, symbol: str) -> str | None:
+        """Verify an algo order is still active. Returns status string or None."""
+        ...
+
+    def _check_bracket_staleness(self) -> None:
+        """Check if any SL algo orders have expired or been cancelled."""
+        ...
+
+    def _verify_ratchet(self, sym: str, pos: dict, expected_price: float) -> bool:
+        """Verify a ratchet SL update was accepted. Returns True if OK."""
         ...
 
     def _check_order_filled(self, symbol: str, order_id: str) -> dict[str, Any] | None:
