@@ -1001,6 +1001,7 @@ class VolStraddleStrategy:
             "tf": tf,
             "max_hold": max_hold,
             "is_straddle": kwargs.get("is_straddle", False),
+            "straddle_pair_id": kwargs.get("straddle_pair_id", None),
             "strategy_type": kwargs.get("strategy_type", meta.get("strategy_type", "vr_squeeze")),
             # Balance at open time (for trade record accuracy)
             "balance_before": kwargs.get("balance_before"),
