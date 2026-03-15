@@ -284,6 +284,9 @@ class RubberBandScalper(
         self._startup_cycles_remaining: int = 0
         self._clean_cycles_count: int = 0  # consecutive clean cycles since last error
 
+        # Per-cycle balance cache — reset at start of each reconciliation cycle
+        self._cycle_balance: float | None = None
+
         # Control flags
         self._stop_requested: bool = False
         self._paused: bool = False
@@ -350,6 +353,12 @@ class RubberBandScalper(
             return self._last_known_balance
         logger.critical("Balance fetch failed and no fallback available — new entries will be blocked")
         return 0.0
+
+    def _get_cycle_balance(self) -> float:
+        """사이클당 1회 balance API 호출 캐시 — 중복 API 호출 방지."""
+        if self._cycle_balance is None:
+            self._cycle_balance = self.get_balance()
+        return self._cycle_balance
 
     def _check_risk_limits(self, balance: float) -> bool:
         """Check session drawdown limit.
@@ -1768,6 +1777,15 @@ class RubberBandScalper(
                 self.strategy._positions[sym]["max_hold"] = pos.get(
                     "max_hold", self.strategy._positions[sym].get("max_hold")
                 )
+
+        # balance_before backfill: 이전 버전에서 balance_before 없이 저장된 포지션 복구
+        _backfill_balance: float | None = None
+        for sym, pos in self.strategy._positions.items():
+            if pos.get("balance_before") is None:
+                if _backfill_balance is None:
+                    _backfill_balance = self.get_balance()
+                pos["balance_before"] = _backfill_balance
+                logger.info(f"[{sym}] balance_before backfilled: ${_backfill_balance:,.2f}")
 
         # Step 3.2: 구 상태 포맷 스트래들 페어 재연결 (straddle_pair_id 없는 경우)
         for sym, pos in self.strategy._positions.items():

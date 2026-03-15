@@ -402,3 +402,96 @@ class TestHealthMonitorPairCheck:
         check_straddle_pairs(state)
         out = capsys.readouterr().out
         assert "[OK]" in out
+
+
+# ─── Survivor vs True Orphan (server fill flag) ───────────────────────────────
+
+
+class TestSurvivorVsTrueOrphan:
+    def _exchange_long_only(self):
+        return [
+            {"symbol": "TESTUSDT", "positionSide": "LONG", "positionAmt": "1000", "entryPrice": "1.0"},
+        ]
+
+    def test_server_sl_hit_counterpart_survives(self):
+        """SHORT server_sl 청산 후 LONG에 counterpart_legitimately_closed=True → Phase 3 auto-close 안 함."""
+        scalper = _build_live_scalper()
+        pair_id = "surv01"
+        # LONG already has the flag set (as _record_server_fill would have set it)
+        scalper.strategy._positions = {
+            "TESTUSDT:LONG": _straddle_pos("TESTUSDT", 1, pair_id, counterpart_legitimately_closed=True),
+        }
+        scalper._cycle_count = 100
+
+        scalper.client.futures_position_information = MagicMock(return_value=self._exchange_long_only())
+        scalper._close_position = MagicMock(return_value=True)
+
+        scalper._reconcile_positions()
+
+        scalper._close_position.assert_not_called()
+        pos = scalper.strategy._positions.get("TESTUSDT:LONG")
+        assert pos is not None
+        assert pos.get("straddle_orphan_since_cycle") is None
+
+    def test_server_tp_hit_counterpart_survives(self):
+        """TP 청산도 동일하게 survivor 처리 — orphan 타이머 시작 안 함."""
+        scalper = _build_live_scalper()
+        pair_id = "surv02"
+        scalper.strategy._positions = {
+            "TESTUSDT:LONG": _straddle_pos("TESTUSDT", 1, pair_id, counterpart_legitimately_closed=True),
+        }
+        scalper._cycle_count = 50
+
+        scalper.client.futures_position_information = MagicMock(return_value=self._exchange_long_only())
+        scalper._close_position = MagicMock(return_value=True)
+
+        scalper._reconcile_positions()
+
+        scalper._close_position.assert_not_called()
+        assert scalper.strategy._positions["TESTUSDT:LONG"].get("straddle_orphan_since_cycle") is None
+
+    def test_rollback_failed_is_true_orphan(self):
+        """counterpart_legitimately_closed 없는 고아 → 정상적으로 orphan tracking 시작."""
+        cfg = VolStraddleConfig(orphan_auto_close_cycles=20)
+        scalper = _build_live_scalper(vs_config=cfg)
+        pair_id = "surv03"
+        scalper.strategy._positions = {
+            "TESTUSDT:LONG": _straddle_pos("TESTUSDT", 1, pair_id),
+        }
+        scalper._cycle_count = 7
+
+        scalper.client.futures_position_information = MagicMock(return_value=self._exchange_long_only())
+        scalper._close_position = MagicMock(return_value=True)
+
+        scalper._reconcile_positions()
+
+        pos = scalper.strategy._positions.get("TESTUSDT:LONG")
+        assert pos is not None
+        assert pos.get("straddle_orphan_since_cycle") == 7
+        scalper._close_position.assert_not_called()  # within grace
+
+    def test_legitimate_flag_set_by_record_server_fill(self):
+        """_record_server_fill() 호출 시 counterpart에 counterpart_legitimately_closed=True 설정됨."""
+        scalper = _build_live_scalper()
+        pair_id = "surv04"
+        long_pos = _straddle_pos("TESTUSDT", 1, pair_id)
+        short_pos = _straddle_pos("TESTUSDT", -1, pair_id)
+        scalper.strategy._positions = {
+            "TESTUSDT:LONG": long_pos,
+            "TESTUSDT:SHORT": short_pos,
+        }
+
+        # Minimal mocks for _record_server_fill
+        scalper.client.futures_cancel_order = MagicMock()
+        scalper._cancel_server_stop_loss = MagicMock()
+        scalper._cancel_server_take_profit = MagicMock()
+        scalper._save_state = MagicMock()
+        scalper._journal = None
+
+        # Simulate SHORT being filled by server SL
+        scalper._record_server_fill("TESTUSDT:SHORT", 1.0, 100.0, "server_sl")
+
+        # LONG should now have the flag
+        long_remaining = scalper.strategy._positions.get("TESTUSDT:LONG")
+        assert long_remaining is not None
+        assert long_remaining.get("counterpart_legitimately_closed") is True
