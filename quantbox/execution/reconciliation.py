@@ -250,10 +250,10 @@ class ReconciliationMixin:
                     sl_oid = None
                     logger.warning(f"[{sym}] Server SL was externally cancelled — cleared for bracket repair")
 
-            # ── r90: Check TRAILING_STOP_MARKET order (regular API, not algo) ──
+            # ── r90: Check TRAILING_STOP_MARKET order (Algo API, same as SL/TP) ──
             trail_oid = pos.get("server_trail_order_id")
             if trail_oid and not str(trail_oid).startswith("paper_"):
-                trail_status = self._check_trail_order_status(api_sym, int(trail_oid))
+                trail_status = self._check_trail_order_status(api_sym, str(trail_oid))
                 if trail_status and trail_status.get("status") == "FILLED":
                     fill_price = float(trail_status.get("avgPrice", 0))
                     fill_qty = float(trail_status.get("executedQty", 0))
