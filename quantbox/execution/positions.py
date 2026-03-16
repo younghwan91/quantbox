@@ -415,7 +415,7 @@ class PositionMixin:
                 logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — bracket repair next cycle")
                 sl_order_id = None
 
-            # Server-side trailing stop via regular API (POST /fapi/v1/order)
+            # Server-side trailing stop via Algo API
             trail_order_id: str | None = None
             if self.vs_config.trail_server_native:
                 cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
@@ -433,7 +433,7 @@ class PositionMixin:
                 logger.info(
                     f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
                     f"(algoId={sl_order_id}) TRAIL={trail_status} "
-                    f"(orderId={trail_order_id}) callbackRate={cr}%"
+                    f"(algoId={trail_order_id}) callbackRate={cr}%"
                 )
             else:
                 # Legacy: full-qty TP (no partial — matches backtest SL/TP/max_hold exit)
@@ -1087,7 +1087,7 @@ class PositionMixin:
         if tp_oid:
             self._cancel_server_take_profit(api_symbol, tp_oid)
 
-        # r90: Cancel server-side trailing stop BEFORE closing (regular API)
+        # r90: Cancel server-side trailing stop BEFORE closing
         trail_oid = pos.get("server_trail_order_id")
         if trail_oid:
             self._cancel_trail_regular(api_symbol, str(trail_oid))

@@ -380,7 +380,8 @@ class BracketMixin:
 
     # ── Server-Side Trailing Stop (TRAILING_STOP_MARKET) ──────────────────
     # r90 migration: replaces dead client-side trail + ratchet with Binance's
-    # native tick-by-tick trailing stop. Uses regular futures API (not algo API).
+    # native tick-by-tick trailing stop. Uses Algo Order API with
+    # activationPrice = entry_price (already reached → no -2021 rejection).
 
     def _get_trail_params(
         self: "ScalperProtocol",
@@ -398,27 +399,27 @@ class BracketMixin:
         Returns:
             (callback_rate, activation_price, close_side) tuple.
             callback_rate: Binance callbackRate (0.1-5.0, percentage).
-            activation_price: Price at which Binance starts tracking peak.
+            activation_price: entry_price (starts trailing immediately).
             close_side: 'SELL' for LONG, 'BUY' for SHORT.
         """
         vs = self.vs_config
         if strategy_type == "straddle":
-            ta, td = vs.s_trail_activate, vs.s_trail_distance
+            td = vs.s_trail_distance
         elif strategy_type == "ma_cluster":
-            ta, td = vs.ma_cluster_trail_activate, vs.ma_cluster_trail_distance
+            td = vs.ma_cluster_trail_distance
         else:  # vr_squeeze, vr_directional, vr_straddle
-            ta, td = vs.d_trail_activate, vs.d_trail_distance
+            td = vs.d_trail_distance
 
         # trail_distance fraction → Binance callbackRate percentage
         # e.g. 0.001 (0.1%) → 0.1, clamped to [0.1, 5.0]
         callback_rate = max(0.1, min(5.0, td * 100))
 
-        if signal == 1:  # LONG
-            activation_price = entry_price * (1 + ta)
-            close_side = "SELL"
-        else:  # SHORT
-            activation_price = entry_price * (1 - ta)
-            close_side = "BUY"
+        # activationPrice = entry_price: trail starts tracking immediately.
+        # Binance Algo API rejects future prices with -2021. By using entry
+        # (already reached by definition), the order is always accepted.
+        # Server SL provides downside protection; trail provides tighter exit.
+        activation_price = entry_price
+        close_side = "SELL" if signal == 1 else "BUY"
 
         return callback_rate, activation_price, close_side
 
@@ -431,11 +432,11 @@ class BracketMixin:
         activation_price: float,
         position_side: str | None = None,
     ) -> str | None:
-        """[DEPRECATED] Place TRAILING_STOP_MARKET via Algo Order API.
+        """Place TRAILING_STOP_MARKET via Algo Order API (POST /fapi/v1/algoOrder).
 
-        Use _place_trail_regular() instead — the regular API (POST /fapi/v1/order)
-        accepts activationPrice as optional and doesn't cause -2021 rejection.
-        Kept for backward compatibility with tests only.
+        The regular futures API rejects TRAILING_STOP_MARKET with -4120.
+        Algo API is the only supported endpoint. With activationPrice = entry_price
+        (already reached), -2021 rejection is avoided.
         """
         if self.paper_mode:
             return f"paper_trail_{int(time.time() * 1000)}"
@@ -493,10 +494,7 @@ class BracketMixin:
         symbol: str,
         order_id: str,
     ) -> bool:
-        """[DEPRECATED] Cancel TRAILING_STOP_MARKET via Algo Order API.
-
-        Use _cancel_trail_regular() instead.
-        """
+        """Cancel TRAILING_STOP_MARKET via Algo Order API (DELETE /fapi/v1/algoOrder)."""
         return self._cancel_server_order(symbol, order_id, "trailing-stop")
 
     def _check_trail_order_status(
@@ -504,17 +502,13 @@ class BracketMixin:
         symbol: str,
         order_id: str,
     ) -> dict | None:
-        """[DEPRECATED] Check TRAILING_STOP_MARKET via Algo Order API.
-
-        Use _check_trail_regular() instead.
-        """
+        """Check TRAILING_STOP_MARKET via Algo Order API (GET /fapi/v1/algoOrder)."""
         return self._check_order_filled(symbol, order_id)
 
-    # ── Regular API Trailing Stop (POST /fapi/v1/order) ──────────────────
-    # The regular futures order API supports TRAILING_STOP_MARKET natively.
-    # Unlike the Algo API, activationPrice is OPTIONAL (defaults to latest
-    # price) and does NOT cause -2021 rejection for future activation prices.
-    # This eliminates the execution gap that made straddle unprofitable.
+    # ── Trail API Facade ────────────────────────────────────────────────
+    # These methods are called by positions.py / reconciliation.py.
+    # Internally they use the Algo Order API — the regular futures API
+    # rejects TRAILING_STOP_MARKET with -4120.
 
     def _place_trail_regular(
         self: "ScalperProtocol",
@@ -525,139 +519,49 @@ class BracketMixin:
         activation_price: float | None = None,
         position_side: str | None = None,
     ) -> str | None:
-        """Place TRAILING_STOP_MARKET via regular futures API (POST /fapi/v1/order).
+        """Place TRAILING_STOP_MARKET order.
 
-        The regular API accepts activationPrice as optional — if price hasn't
-        reached activation yet, Binance queues the order and starts trailing
-        once activationPrice is hit. No -2021 error.
-
-        Args:
-            symbol: Trading symbol (no colon).
-            side: 'SELL' for closing LONG, 'BUY' for closing SHORT.
-            quantity: Position quantity.
-            callback_rate: Binance callbackRate (0.1-5.0, where 1 = 1%).
-            activation_price: Price at which trailing starts. None = latest price.
-            position_side: 'LONG' or 'SHORT' for hedge mode; None for one-way.
+        Delegates to Algo Order API (``_place_trailing_stop_market``).
+        Despite the method name, the regular API (POST /fapi/v1/order) returns
+        -4120 for this order type — only the Algo API works.
 
         Returns:
-            orderId as string on success, None on failure.
+            algoId as string on success, None on failure.
         """
-        if self.paper_mode:
-            return f"paper_trail_{int(time.time() * 1000)}"
-
-        params: dict = {
-            "symbol": symbol,
-            "side": side,
-            "type": "TRAILING_STOP_MARKET",
-            "quantity": quantity,
-            "callbackRate": callback_rate,
-        }
-        if activation_price is not None:
-            params["activationPrice"] = activation_price
-        if position_side is not None:
-            params["positionSide"] = position_side
-        else:
-            params["reduceOnly"] = "true"
-
-        logger.debug(
-            f"[{symbol}] Trail order (regular API): side={side} qty={quantity:.6f} "
-            f"callbackRate={callback_rate}% activationPrice="
-            f"{'$' + f'{activation_price:.4f}' if activation_price else 'latest'}"
+        if activation_price is None:
+            activation_price = 0.0  # shouldn't happen — caller always provides
+        return self._place_trailing_stop_market(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            callback_rate=callback_rate,
+            activation_price=activation_price,
+            position_side=position_side,
         )
-
-        try:
-            resp = self.client.futures_create_order(**params)
-            order_id = str(resp["orderId"])
-            logger.info(
-                f"[{symbol}] SERVER TRAIL placed (regular API): "
-                f"{side} {quantity:.6f} callbackRate={callback_rate}% "
-                f"activationPrice="
-                f"{'$' + f'{activation_price:.4f}' if activation_price else 'latest'} "
-                f"(orderId={order_id})"
-            )
-            return order_id
-        except BinanceAPIException as e:
-            logger.error(f"[{symbol}] Trail regular API FAILED: {e}. params={params}")
-            return None
-        except Exception as e:
-            logger.error(f"[{symbol}] Trail regular API unexpected error: {e}. params={params}")
-            return None
 
     def _cancel_trail_regular(
         self: "ScalperProtocol",
         symbol: str,
         order_id: str,
     ) -> bool:
-        """Cancel a TRAILING_STOP_MARKET order via regular API (DELETE /fapi/v1/order).
+        """Cancel a TRAILING_STOP_MARKET order.
 
-        Returns True on success or benign error (already filled/cancelled).
+        Delegates to Algo Order API (``_cancel_trailing_stop_market``).
         """
-        if self.paper_mode or not order_id or order_id.startswith("paper_"):
-            return True
-
-        try:
-            self.client.futures_cancel_order(symbol=symbol, orderId=int(order_id))
-            logger.info(f"[{symbol}] Trail cancelled (regular API): orderId={order_id}")
-            return True
-        except BinanceAPIException as e:
-            err_str = str(e)
-            # -2011: Unknown order — already filled or cancelled
-            if "-2011" in err_str or "Unknown" in err_str:
-                logger.debug(f"[{symbol}] Trail already gone (regular API): orderId={order_id} ({e})")
-                return True
-            logger.warning(f"[{symbol}] Trail cancel failed (regular API): orderId={order_id} error={e}")
-            return False
-        except Exception as e:
-            logger.warning(f"[{symbol}] Trail cancel unexpected error: orderId={order_id} error={e}")
-            return False
+        return self._cancel_trailing_stop_market(symbol, order_id)
 
     def _check_trail_regular(
         self: "ScalperProtocol",
         symbol: str,
         order_id: str,
     ) -> dict | None:
-        """Check if a regular API TRAILING_STOP_MARKET order has been filled.
+        """Check TRAILING_STOP_MARKET order status.
 
-        Regular order status lifecycle: NEW → FILLED | CANCELED | EXPIRED.
-        Much simpler than algo status (no TRIGGERED→FINISHED chain).
-
-        Returns:
-            dict with status/avgPrice/executedQty if filled, None otherwise.
-            Returns {'status': 'CANCELED'} if externally cancelled.
+        Delegates to Algo Order API (``_check_trail_order_status``).
+        Algo order status lifecycle: NEW → WORKING → TRIGGERED → FINISHED.
+        Both TRIGGERED and FINISHED are treated as FILLED.
         """
-        if self.paper_mode or not order_id or order_id.startswith("paper_"):
-            return None
-
-        try:
-            resp = self.client.futures_get_order(symbol=symbol, orderId=int(order_id))
-            status = resp.get("status", "")
-
-            if status == "FILLED":
-                avg_price = resp.get("avgPrice", "0")
-                exec_qty = resp.get("executedQty", "0")
-                # Also try to get actual fill from account trades for precision
-                actual = self._lookup_actual_fill(symbol, exec_qty, "TRAILING_STOP_MARKET")
-                if actual:
-                    avg_price = str(actual["price"])
-                    exec_qty = str(actual["qty"])
-                return {
-                    "avgPrice": avg_price,
-                    "executedQty": exec_qty,
-                    "status": "FILLED",
-                }
-            elif status in ("CANCELED", "CANCELLED", "EXPIRED"):
-                return {"status": "CANCELED"}
-            # NEW = still active, not yet triggered
-            return None
-        except BinanceAPIException as e:
-            err_str = str(e)
-            if "-2013" in err_str or "does not exist" in err_str.lower():
-                return {"status": "CANCELED"}
-            logger.warning(f"[{symbol}] Trail status check failed (regular API): orderId={order_id} error={e}")
-            return None
-        except Exception as e:
-            logger.warning(f"[{symbol}] Trail status check unexpected error: orderId={order_id} error={e}")
-            return None
+        return self._check_trail_order_status(symbol, order_id)
 
     def _lookup_actual_fill(
         self: "ScalperProtocol",

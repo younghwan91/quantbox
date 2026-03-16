@@ -121,7 +121,7 @@ class ReconciliationMixin:
                         else:
                             self._cancel_server_stop_loss(api_sym, sl_oid)
 
-                    # Cancel orphaned trail (regular API) when TP fires
+                    # Cancel orphaned trail when TP fires
                     trail_oid_cross = pos.get("server_trail_order_id")
                     if trail_oid_cross:
                         self._cancel_trail_regular(api_sym, str(trail_oid_cross))
@@ -196,7 +196,7 @@ class ReconciliationMixin:
                     if tp_oid:
                         self._cancel_server_take_profit(api_sym, tp_oid)
 
-                    # Cancel orphaned trail (regular API) when SL fires
+                    # Cancel orphaned trail when SL fires
                     trail_oid_cross = pos.get("server_trail_order_id")
                     if trail_oid_cross:
                         self._cancel_trail_regular(api_sym, str(trail_oid_cross))
@@ -260,14 +260,14 @@ class ReconciliationMixin:
                     sl_oid = None
                     logger.warning(f"[{sym}] Server SL was externally cancelled — cleared for bracket repair")
 
-            # ── Check TRAILING_STOP_MARKET order (regular API) ──
+            # ── Check TRAILING_STOP_MARKET order (Algo API) ──
             trail_oid = pos.get("server_trail_order_id")
             if trail_oid and not str(trail_oid).startswith("paper_"):
                 trail_status = self._check_trail_regular(api_sym, str(trail_oid))
                 if trail_status and trail_status.get("status") == "FILLED":
                     fill_price = float(trail_status.get("avgPrice", 0))
                     fill_qty = float(trail_status.get("executedQty", 0))
-                    logger.info(f"[{sym}] Server TRAIL FILLED (regular API): fill=${fill_price:.4f} qty={fill_qty:.6f}")
+                    logger.info(f"[{sym}] Server TRAIL FILLED: fill=${fill_price:.4f} qty={fill_qty:.6f}")
                     # Cancel orphaned SL (algo API)
                     if sl_oid:
                         self._cancel_server_stop_loss(api_sym, sl_oid)
@@ -520,7 +520,7 @@ class ReconciliationMixin:
                         f"(algoId={tp_id})"
                     )
 
-            # ── Trail bracket repair (regular API) ──
+            # ── Trail bracket repair (Algo API) ──
             vs_cfg = getattr(self, "vs_config", None)
             if vs_cfg and getattr(vs_cfg, "trail_server_native", False):
                 trail_oid = pos.get("server_trail_order_id")

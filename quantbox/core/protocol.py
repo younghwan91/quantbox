@@ -242,15 +242,15 @@ class ScalperProtocol(Protocol):
         activation_price: float | None = None,
         position_side: str | None = None,
     ) -> str | None:
-        """Place TRAILING_STOP_MARKET via regular API (POST /fapi/v1/order). Returns orderId or None."""
+        """Place TRAILING_STOP_MARKET. Delegates to Algo API. Returns algoId or None."""
         ...
 
     def _cancel_trail_regular(self, symbol: str, order_id: str) -> bool:
-        """Cancel a regular API trail order. Returns True on success or benign error."""
+        """Cancel a trail order. Delegates to Algo API. Returns True on success."""
         ...
 
     def _check_trail_regular(self, symbol: str, order_id: str) -> dict[str, Any] | None:
-        """Check if regular API trail order filled. Returns status dict or None."""
+        """Check trail order status. Delegates to Algo API. Returns status dict or None."""
         ...
 
     def _verify_algo_order_active(self, algo_id: str, symbol: str) -> str | None:
