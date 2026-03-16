@@ -378,6 +378,165 @@ class BracketMixin:
         """
         return self._cancel_server_order(symbol, order_id, "take-profit")
 
+    # ── Server-Side Trailing Stop (TRAILING_STOP_MARKET) ──────────────────
+    # r90 migration: replaces dead client-side trail + ratchet with Binance's
+    # native tick-by-tick trailing stop. Uses regular futures API (not algo API).
+
+    def _get_trail_params(
+        self: "ScalperProtocol",
+        strategy_type: str,
+        signal: int,
+        entry_price: float,
+    ) -> tuple[float, float, str]:
+        """Calculate TRAILING_STOP_MARKET parameters from config.
+
+        Args:
+            strategy_type: 'straddle', 'ma_cluster', or 'vr_squeeze'/'vr_*'.
+            signal: +1 (LONG) or -1 (SHORT).
+            entry_price: Position entry price.
+
+        Returns:
+            (callback_rate, activation_price, close_side) tuple.
+            callback_rate: Binance callbackRate (0.1-5.0, percentage).
+            activation_price: Price at which Binance starts tracking peak.
+            close_side: 'SELL' for LONG, 'BUY' for SHORT.
+        """
+        vs = self.vs_config
+        if strategy_type == "straddle":
+            ta, td = vs.s_trail_activate, vs.s_trail_distance
+        elif strategy_type == "ma_cluster":
+            ta, td = vs.ma_cluster_trail_activate, vs.ma_cluster_trail_distance
+        else:  # vr_squeeze, vr_directional, vr_straddle
+            ta, td = vs.d_trail_activate, vs.d_trail_distance
+
+        # trail_distance fraction → Binance callbackRate percentage
+        # e.g. 0.001 (0.1%) → 0.1, clamped to [0.1, 5.0]
+        callback_rate = max(0.1, min(5.0, td * 100))
+
+        if signal == 1:  # LONG
+            activation_price = entry_price * (1 + ta)
+            close_side = "SELL"
+        else:  # SHORT
+            activation_price = entry_price * (1 - ta)
+            close_side = "BUY"
+
+        return callback_rate, activation_price, close_side
+
+    def _place_trailing_stop_market(
+        self: "ScalperProtocol",
+        symbol: str,
+        side: str,
+        quantity: float,
+        callback_rate: float,
+        activation_price: float,
+        position_side: str | None = None,
+    ) -> int | None:
+        """Place a TRAILING_STOP_MARKET order via regular futures API.
+
+        Binance monitors price tick-by-tick after activationPrice is reached,
+        and fires a MARKET order when price drops callbackRate% from peak.
+        This matches the IDEAL sim model (no bar-close execution gap).
+
+        Uses POST /fapi/v1/order (regular API), NOT the algo API.
+        Returns orderId (integer) on success, None on failure.
+        """
+        if self.paper_mode:
+            return int(time.time() * 1000)
+
+        params: dict = {
+            "symbol": symbol,
+            "side": side,
+            "type": "TRAILING_STOP_MARKET",
+            "quantity": quantity,
+            "callbackRate": callback_rate,
+            "activationPrice": activation_price,
+        }
+        # Hedge Mode: positionSide is mutually exclusive with reduceOnly
+        if position_side is not None:
+            params["positionSide"] = position_side
+        else:
+            params["reduceOnly"] = "true"
+
+        logger.debug(
+            f"[{symbol}] Trail order request: side={side} qty={quantity:.6f} "
+            f"callbackRate={callback_rate}% activationPrice=${activation_price:.4f}"
+        )
+
+        try:
+            resp = self.client.futures_create_order(**params)
+            order_id = int(resp["orderId"])
+            logger.info(
+                f"[{symbol}] SERVER TRAIL placed: "
+                f"{side} {quantity:.6f} callbackRate={callback_rate}% "
+                f"activationPrice=${activation_price:.4f} (orderId={order_id})"
+            )
+            return order_id
+        except Exception as e:
+            err_str = str(e)
+            logger.error(f"[{symbol}] SERVER TRAIL FAILED: {e}. params={params}")
+            # -2021: Order would immediately trigger
+            if "-2021" in err_str:
+                logger.warning(f"[{symbol}] Trail WOULD_TRIGGER — activationPrice already reached")
+                return None
+            return None
+
+    def _cancel_trailing_stop_market(
+        self: "ScalperProtocol",
+        symbol: str,
+        order_id: int,
+    ) -> bool:
+        """Cancel a TRAILING_STOP_MARKET order via regular futures API.
+
+        Uses DELETE /fapi/v1/order (regular API), NOT the algo API.
+        Returns True on success or benign error (already filled/cancelled).
+        """
+        if self.paper_mode or not order_id:
+            return True
+
+        try:
+            self.client.futures_cancel_order(symbol=symbol, orderId=order_id)
+            logger.info(f"[{symbol}] Server trail cancelled: orderId={order_id}")
+            return True
+        except Exception as e:
+            err_str = str(e)
+            # -2011: Unknown order (already filled/cancelled) — benign
+            if "Unknown" in err_str or "-2011" in err_str:
+                logger.debug(f"[{symbol}] Server trail already gone: orderId={order_id} ({e})")
+                return True
+            logger.warning(f"[{symbol}] Failed to cancel server trail: orderId={order_id} error={e}")
+            return False
+
+    def _check_trail_order_status(
+        self: "ScalperProtocol",
+        symbol: str,
+        order_id: int,
+    ) -> dict | None:
+        """Check if a TRAILING_STOP_MARKET order has been filled.
+
+        Uses GET /fapi/v1/order (regular API), NOT the algo API.
+        Returns dict with status/avgPrice/executedQty if available, None on error.
+        """
+        if self.paper_mode or not order_id:
+            return None
+
+        try:
+            resp = self.client.futures_get_order(symbol=symbol, orderId=order_id)
+            status = resp.get("status", "")
+            logger.debug(f"[{symbol}] Trail order check: orderId={order_id} status={status}")
+            if status == "FILLED":
+                return {
+                    "status": "FILLED",
+                    "avgPrice": resp.get("avgPrice", "0"),
+                    "executedQty": resp.get("executedQty", "0"),
+                    "orderId": order_id,
+                }
+            if status in ("CANCELED", "CANCELLED", "EXPIRED", "REJECTED"):
+                return {"status": "CANCELLED", "orderId": order_id}
+            return {"status": status, "orderId": order_id}
+        except Exception as e:
+            logger.warning(f"[{symbol}] Trail order status check failed: orderId={order_id} error={e}")
+            return None
+
     def _lookup_actual_fill(
         self: "ScalperProtocol",
         symbol: str,
