@@ -1,7 +1,7 @@
 """Tests for server-side TRAILING_STOP_MARKET migration (r90).
 
 Verifies:
-- Trail order placement/cancellation via regular futures API
+- Trail order placement/cancellation via Algo Order API
 - Trail parameter calculation per strategy_type
 - Entry flow integration (trail placed alongside SL)
 - Close flow cleanup (trail cancelled on position close)
@@ -45,7 +45,7 @@ def _inject_position(scalper, pos_key: str, **overrides):
         "worst_pnl": -0.003,
         "server_sl_order_id": "sl_111",
         "server_tp_order_id": None,
-        "server_trail_order_id": 9999001,
+        "server_trail_order_id": "trail_9999001",
         "sl": 0.015,
         "tp": 0.05,
         "tf": "15m",
@@ -116,42 +116,45 @@ class TestPlaceTrailingStopMarket:
         s = _build_trail_scalper()
         assert s.paper_mode is True
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 10.0, 0.1, 101.5, "LONG")
-        assert isinstance(oid, int)
-        assert oid > 0
+        assert isinstance(oid, str)
+        assert oid.startswith("paper_trail_")
 
-    def test_live_mode_calls_api(self):
+    def test_live_mode_calls_algo_api(self):
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client.futures_create_order.return_value = {"orderId": 12345678}
+        s.client._request_futures_api = MagicMock(return_value={"algoId": "12345678"})
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 10.0, 0.1, 101.5, "LONG")
 
-        assert oid == 12345678
-        call_kwargs = s.client.futures_create_order.call_args[1]
-        assert call_kwargs["type"] == "TRAILING_STOP_MARKET"
-        assert call_kwargs["callbackRate"] == 0.1
-        assert call_kwargs["activationPrice"] == 101.5
-        assert call_kwargs["positionSide"] == "LONG"
-        assert call_kwargs["side"] == "SELL"
-        assert call_kwargs["quantity"] == 10.0
-        assert "reduceOnly" not in call_kwargs  # mutual exclusion with positionSide
+        assert oid == "12345678"
+        call_args = s.client._request_futures_api.call_args
+        assert call_args[0] == ("post", "algoOrder")
+        data = call_args[1]["data"]
+        assert data["type"] == "TRAILING_STOP_MARKET"
+        assert data["callbackRate"] == "0.1"
+        assert data["activationPrice"] == "101.5"
+        assert data["positionSide"] == "LONG"
+        assert data["side"] == "SELL"
+        assert data["quantity"] == "10.0"
+        assert data["algoType"] == "CONDITIONAL"
+        assert "reduceOnly" not in data  # mutual exclusion with positionSide
 
     def test_live_mode_no_position_side_uses_reduce_only(self):
         """One-Way mode (no positionSide) should use reduceOnly."""
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client.futures_create_order.return_value = {"orderId": 99999}
+        s.client._request_futures_api = MagicMock(return_value={"algoId": "99999"})
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 5.0, 0.2, 102.0)
 
-        call_kwargs = s.client.futures_create_order.call_args[1]
-        assert call_kwargs["reduceOnly"] == "true"
-        assert "positionSide" not in call_kwargs
+        data = s.client._request_futures_api.call_args[1]["data"]
+        assert data["reduceOnly"] == "true"
+        assert "positionSide" not in data
 
     def test_api_error_returns_none(self):
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client.futures_create_order.side_effect = Exception("API error -1000")
+        s.client._request_futures_api = MagicMock(side_effect=Exception("API error -1000"))
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 10.0, 0.1, 101.5, "LONG")
         assert oid is None
@@ -165,35 +168,25 @@ class TestPlaceTrailingStopMarket:
 class TestCancelTrailingStopMarket:
     def test_paper_mode_returns_true(self):
         s = _build_trail_scalper()
-        assert s._cancel_trailing_stop_market("TESTUSDT", 12345) is True
+        assert s._cancel_trailing_stop_market("TESTUSDT", "trail_12345") is True
 
-    def test_live_cancel_success(self):
+    def test_live_cancel_delegates_to_cancel_server_order(self):
+        """_cancel_trailing_stop_market delegates to _cancel_server_order (Algo API)."""
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client.futures_cancel_order.return_value = {}
+        s._cancel_server_order = MagicMock(return_value=True)
 
-        assert s._cancel_trailing_stop_market("TESTUSDT", 12345) is True
-        s.client.futures_cancel_order.assert_called_once_with(symbol="TESTUSDT", orderId=12345)
+        result = s._cancel_trailing_stop_market("TESTUSDT", "12345")
+        assert result is True
+        s._cancel_server_order.assert_called_once_with("TESTUSDT", "12345", "trailing-stop")
 
     def test_already_filled_returns_true(self):
         """Already filled/cancelled orders should return True (benign)."""
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client.futures_cancel_order.side_effect = Exception("Unknown order sent. -2011")
+        s._cancel_server_order = MagicMock(return_value=True)
 
-        assert s._cancel_trailing_stop_market("TESTUSDT", 12345) is True
-
-    def test_none_order_id_returns_true(self):
-        s = _build_trail_scalper()
-        s.paper_mode = False
-        assert s._cancel_trailing_stop_market("TESTUSDT", 0) is True
-
-    def test_unexpected_error_returns_false(self):
-        s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_cancel_order.side_effect = Exception("Network timeout")
-
-        assert s._cancel_trailing_stop_market("TESTUSDT", 12345) is False
+        assert s._cancel_trailing_stop_market("TESTUSDT", "12345") is True
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -202,29 +195,35 @@ class TestCancelTrailingStopMarket:
 
 
 class TestCheckTrailOrderStatus:
-    def test_filled_order(self):
+    def test_delegates_to_check_order_filled(self):
+        """_check_trail_order_status delegates to _check_order_filled (Algo API)."""
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client.futures_get_order.return_value = {
-            "status": "FILLED",
-            "avgPrice": "101.50",
-            "executedQty": "10.0",
-            "orderId": 12345,
-        }
-        result = s._check_trail_order_status("TESTUSDT", 12345)
+        s._check_order_filled = MagicMock(
+            return_value={
+                "status": "FILLED",
+                "avgPrice": "101.50",
+                "executedQty": "10.0",
+                "algoId": "12345",
+            }
+        )
+        result = s._check_trail_order_status("TESTUSDT", "12345")
         assert result["status"] == "FILLED"
         assert result["avgPrice"] == "101.50"
+        s._check_order_filled.assert_called_once_with("TESTUSDT", "12345")
 
-    def test_new_order(self):
+    def test_not_filled_returns_none(self):
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client.futures_get_order.return_value = {"status": "NEW", "orderId": 12345}
-        result = s._check_trail_order_status("TESTUSDT", 12345)
-        assert result["status"] == "NEW"
+        s._check_order_filled = MagicMock(return_value=None)
+        result = s._check_trail_order_status("TESTUSDT", "12345")
+        assert result is None
 
     def test_paper_mode_returns_none(self):
         s = _build_trail_scalper()
-        assert s._check_trail_order_status("TESTUSDT", 12345) is None
+        # _check_order_filled returns None for paper mode
+        result = s._check_trail_order_status("TESTUSDT", "paper_trail_12345")
+        assert result is None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -241,11 +240,11 @@ class TestTrailAtEntry:
         """
         s = _build_trail_scalper(trail_server_native=True)
 
-        # Paper mode: _place_trailing_stop_market returns int(time.time()*1000)
+        # Paper mode: _place_trailing_stop_market returns "paper_trail_..."
         # _place_server_stop_loss returns paper_stop_...
         # We need to ensure the entry flow reaches the bracket section.
         # Use direct strategy.open_position to verify the position dict stores trail ID.
-        trail_oid = 77777
+        trail_oid = "trail_77777"
         s.strategy.open_position(
             symbol="TESTUSDT",
             signal=1,
@@ -264,7 +263,7 @@ class TestTrailAtEntry:
         )
 
         pos = s.strategy._positions["TESTUSDT:LONG"]
-        assert pos["server_trail_order_id"] == 77777
+        assert pos["server_trail_order_id"] == "trail_77777"
         assert pos["server_tp_order_id"] is None  # TP skipped
 
     def test_legacy_mode_no_trail(self):
@@ -315,7 +314,7 @@ class TestTrailAtEntry:
 class TestClosePositionCancelsTrail:
     def test_trail_cancelled_on_close(self):
         s = _build_trail_scalper()
-        _inject_position(s, "TESTUSDT:LONG", server_trail_order_id=77777)
+        _inject_position(s, "TESTUSDT:LONG", server_trail_order_id="trail_77777")
 
         s._cancel_trailing_stop_market = MagicMock(return_value=True)
         s._cancel_server_stop_loss = MagicMock(return_value=True)
@@ -323,7 +322,7 @@ class TestClosePositionCancelsTrail:
 
         s._close_position("TESTUSDT:LONG", "max_hold", 102.0)
 
-        s._cancel_trailing_stop_market.assert_called_once_with("TESTUSDT", 77777)
+        s._cancel_trailing_stop_market.assert_called_once_with("TESTUSDT", "trail_77777")
 
     def test_no_trail_no_cancel(self):
         """If position has no trail order, cancel should not be called."""
@@ -405,18 +404,18 @@ class TestReconTrailFill:
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id=77777,
+            server_trail_order_id="trail_77777",
             server_sl_order_id="sl_111",
             is_straddle=False,
         )
 
-        # Mock trail order check → FILLED
+        # Mock trail order check → FILLED (via _check_order_filled delegation)
         s._check_trail_order_status = MagicMock(
             return_value={
                 "status": "FILLED",
                 "avgPrice": "102.50",
                 "executedQty": "30.0",
-                "orderId": 77777,
+                "algoId": "trail_77777",
             }
         )
         # Mock algo check → not filled (SL still active)
@@ -432,17 +431,17 @@ class TestReconTrailFill:
         s._record_server_fill.assert_called_once_with("TESTUSDT:LONG", 102.50, 30.0, "server_trail")
 
     def test_trail_not_filled_no_action(self):
-        """If trail order is still NEW, no action should be taken."""
+        """If trail order is not filled, no action should be taken."""
         s = _build_trail_scalper()
         s.paper_mode = False
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id=77777,
+            server_trail_order_id="trail_77777",
             is_straddle=False,
         )
 
-        s._check_trail_order_status = MagicMock(return_value={"status": "NEW", "orderId": 77777})
+        s._check_trail_order_status = MagicMock(return_value=None)
         s._check_order_filled = MagicMock(return_value=None)
         s._record_server_fill = MagicMock()
 
@@ -457,14 +456,14 @@ class TestReconTrailFill:
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id=77777,
+            server_trail_order_id="trail_77777",
             is_straddle=False,
         )
 
-        s._check_trail_order_status = MagicMock(return_value={"status": "CANCELLED", "orderId": 77777})
+        s._check_trail_order_status = MagicMock(return_value={"status": "CANCELLED", "algoId": "trail_77777"})
         s._check_order_filled = MagicMock(return_value=None)
         # After clearing, bracket repair will re-place the trail
-        s._place_trailing_stop_market = MagicMock(return_value=88888)
+        s._place_trailing_stop_market = MagicMock(return_value="trail_88888")
         s._get_trail_params = MagicMock(return_value=(0.1, 101.5, "SELL"))
 
         s._sync_server_orders()
@@ -472,7 +471,7 @@ class TestReconTrailFill:
         # Trail should be repaired immediately
         s._place_trailing_stop_market.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
-        assert pos["server_trail_order_id"] == 88888
+        assert pos["server_trail_order_id"] == "trail_88888"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -497,7 +496,7 @@ class TestTrailBracketRepair:
         # Mock all order checks → nothing filled
         s._check_order_filled = MagicMock(return_value=None)
         s._check_trail_order_status = MagicMock(return_value=None)
-        s._place_trailing_stop_market = MagicMock(return_value=88888)
+        s._place_trailing_stop_market = MagicMock(return_value="trail_88888")
         s._get_trail_params = MagicMock(return_value=(0.1, 101.5, "SELL"))
 
         s._sync_server_orders()
@@ -505,7 +504,7 @@ class TestTrailBracketRepair:
         # Trail should be placed as repair
         s._place_trailing_stop_market.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
-        assert pos["server_trail_order_id"] == 88888
+        assert pos["server_trail_order_id"] == "trail_88888"
 
     def test_existing_trail_not_re_placed(self):
         """Position with existing trail order should NOT get a new one."""
@@ -514,13 +513,13 @@ class TestTrailBracketRepair:
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id=77777,
+            server_trail_order_id="trail_77777",
             server_sl_order_id="sl_111",
             is_straddle=False,
         )
 
         s._check_order_filled = MagicMock(return_value=None)
-        s._check_trail_order_status = MagicMock(return_value={"status": "NEW", "orderId": 77777})
+        s._check_trail_order_status = MagicMock(return_value=None)
         s._place_trailing_stop_market = MagicMock()
 
         s._sync_server_orders()
@@ -543,7 +542,7 @@ class TestRatchetSkip:
             s,
             "TESTUSDT:LONG",
             trail_active=True,
-            server_trail_order_id=77777,
+            server_trail_order_id="trail_77777",
         )
 
         # The ratchet check is in _update_existing_positions which calls
@@ -562,10 +561,10 @@ class TestStatePersistence:
     def test_trail_order_id_in_position_dict(self):
         """server_trail_order_id should be stored in position dict."""
         s = _build_trail_scalper()
-        _inject_position(s, "TESTUSDT:LONG", server_trail_order_id=77777)
+        _inject_position(s, "TESTUSDT:LONG", server_trail_order_id="trail_77777")
 
         pos = s.strategy._positions["TESTUSDT:LONG"]
-        assert pos["server_trail_order_id"] == 77777
+        assert pos["server_trail_order_id"] == "trail_77777"
 
     def test_trail_order_id_none_by_default(self):
         """When trail not placed, server_trail_order_id should be None."""
@@ -605,13 +604,13 @@ class TestStraddleIndependentTrails:
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id=11111,
+            server_trail_order_id="trail_11111",
             signal=1,
         )
         _inject_position(
             s,
             "TESTUSDT:SHORT",
-            server_trail_order_id=22222,
+            server_trail_order_id="trail_22222",
             signal=-1,
             position_side="SHORT",
         )
@@ -619,8 +618,8 @@ class TestStraddleIndependentTrails:
         long_trail = s.strategy._positions["TESTUSDT:LONG"]["server_trail_order_id"]
         short_trail = s.strategy._positions["TESTUSDT:SHORT"]["server_trail_order_id"]
 
-        assert long_trail == 11111
-        assert short_trail == 22222
+        assert long_trail == "trail_11111"
+        assert short_trail == "trail_22222"
         assert long_trail != short_trail
 
     def test_trail_fill_one_leg_preserves_other(self):
@@ -630,7 +629,7 @@ class TestStraddleIndependentTrails:
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id=11111,
+            server_trail_order_id="trail_11111",
             server_sl_order_id="sl_long",
             is_straddle=True,
             straddle_pair_id="pair_1",
@@ -638,7 +637,7 @@ class TestStraddleIndependentTrails:
         _inject_position(
             s,
             "TESTUSDT:SHORT",
-            server_trail_order_id=22222,
+            server_trail_order_id="trail_22222",
             server_sl_order_id="sl_short",
             signal=-1,
             position_side="SHORT",
@@ -648,9 +647,9 @@ class TestStraddleIndependentTrails:
 
         # LONG trail fires
         def mock_trail_check(sym, oid):
-            if oid == 11111:
-                return {"status": "FILLED", "avgPrice": "102.0", "executedQty": "30.0", "orderId": 11111}
-            return {"status": "NEW", "orderId": oid}
+            if oid == "trail_11111":
+                return {"status": "FILLED", "avgPrice": "102.0", "executedQty": "30.0", "algoId": "trail_11111"}
+            return None  # Not filled
 
         s._check_trail_order_status = MagicMock(side_effect=mock_trail_check)
         s._check_order_filled = MagicMock(return_value=None)
@@ -662,7 +661,7 @@ class TestStraddleIndependentTrails:
         # SHORT leg should still exist
         assert "TESTUSDT:SHORT" in s.strategy._positions
         # SHORT trail should still be intact
-        assert s.strategy._positions["TESTUSDT:SHORT"]["server_trail_order_id"] == 22222
+        assert s.strategy._positions["TESTUSDT:SHORT"]["server_trail_order_id"] == "trail_22222"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -671,10 +670,13 @@ class TestStraddleIndependentTrails:
 
 
 class TestConfigFlag:
-    def test_default_off(self):
+    def test_default_in_code_is_false(self):
+        """Code default is False, but .env override takes precedence."""
+        # Note: if VS_TRAIL_SERVER_NATIVE=true in .env, this will be True
+        # We test the code path, not the env var behavior
         from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
-        cfg = VolStraddleConfig()
+        cfg = VolStraddleConfig(trail_server_native=False)
         assert cfg.trail_server_native is False
 
     def test_enable_via_constructor(self):

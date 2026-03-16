@@ -416,7 +416,7 @@ class PositionMixin:
                 sl_order_id = None
 
             # Server-side trailing stop (r90 migration)
-            trail_order_id: int | None = None
+            trail_order_id: str | None = None
             if self.vs_config.trail_server_native:
                 cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
                 trail_order_id = self._place_trailing_stop_market(
@@ -433,7 +433,7 @@ class PositionMixin:
                 logger.info(
                     f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
                     f"(algoId={sl_order_id}) TRAIL={trail_status} "
-                    f"(orderId={trail_order_id}) callbackRate={cr}%"
+                    f"(algoId={trail_order_id}) callbackRate={cr}%"
                 )
             else:
                 # Legacy: full-qty TP (no partial — matches backtest SL/TP/max_hold exit)
