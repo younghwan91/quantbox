@@ -168,6 +168,50 @@ class TestExternallyCancelledOrders:
         assert pos["server_sl_order_id"] == "sl_repaired"
         scalper._save_state.assert_called()
 
+    def test_canceled_american_spelling_detected(self):
+        """Binance Algo API returns 'CANCELED' (1 L) — must still be detected."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            "algoStatus": "CANCELED",
+            "orderType": "STOP",
+        }
+        result = scalper._check_order_filled("BTCUSDT", "99999")
+        assert result is not None
+        assert result["status"] == "CANCELLED"
+
+    def test_canceled_american_sl_triggers_bracket_repair(self):
+        """Binance returns CANCELED (1 L) for SL → ID cleared → repair places new SL."""
+        scalper = _make_scalper(paper=False)
+        scalper._save_state = MagicMock()
+
+        scalper.strategy.open_position(
+            symbol="ETHUSDT",
+            signal=-1,
+            entry_price=3000.0,
+            notional=300.0,
+            leverage=3,
+            move_size=0.03,
+            server_sl_order_id="5005",
+            server_tp_order_id="6006",
+        )
+
+        def mock_algo_api(method, path, signed=True, data=None):
+            if method == "get":
+                algo_id = data.get("algoId") if data else None
+                if algo_id == 6006:
+                    return {"algoStatus": "NEW", "orderType": "TAKE_PROFIT"}
+                if algo_id == 5005:
+                    return {"algoStatus": "CANCELED", "orderType": "STOP"}
+                return {"algoStatus": "NEW"}
+            return {"algoId": "sl_repaired_us"}
+
+        scalper.client._request_futures_api = MagicMock(side_effect=mock_algo_api)
+        scalper._sync_server_orders()
+
+        pos = scalper.strategy._positions["ETHUSDT"]
+        assert pos["server_sl_order_id"] == "sl_repaired_us"
+        scalper._save_state.assert_called()
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Bug #4 — Runner bracket repair uses BE stop (0.0001)
