@@ -148,4 +148,5 @@ fix(config): SL 파라미터 조정 (ref: r48 DD halt 분석)
 | #5 | 2026-03-08 | Hedge Mode close는 `reduce_only=False` → leverage guard는 **`if not reduce_only and leverage > 1:`** |
 | #6 | 2026-03-13 | **config 파라미터는 반드시 `VolStraddleConfig()`에서 직접 읽어야 함.** `d_trail_activate`는 r69에서 0.005→0.010으로 변경됨. skills 문서/research 스크립트에 하드코딩 또는 이전 값 사용 시 결과 전부 무효 |
 | #7 | 2026-03-17 | Binance Algo API `algoStatus`는 **`"CANCELED"`** (미국식 1-L) 반환. 코드에서 `"CANCELLED"` (영국식 2-L)만 체크하면 취소된 SL이 state에 잔류 → bracket repair 불가 → **SL 미보호 포지션** |
+| #8 | 2026-03-17 | `TRAILING_STOP_MARKET`은 **Algo API 전용** (regular API → `-4120`). `activationPrice=entry_price`로 설정해야 `-2021` 방지. 바이낸스 공식 문서가 부정확 — **실제 API 응답이 source of truth** |
 | #8 | 2026-03-17 | TRAILING_STOP_MARKET은 **Regular API** (`POST /fapi/v1/order`) 사용 필수. Algo API (`/fapi/v1/algoOrder`)는 activationPrice 필수 → `-2021` reject. Regular API는 activationPrice optional → 주문 접수 후 대기. `_place_trail_regular()` / `_cancel_trail_regular()` / `_check_trail_regular()` 사용. 구 algo 메서드(`_place_trailing_stop_market` 등) deprecated |
