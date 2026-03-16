@@ -849,13 +849,23 @@ class VolStraddleStrategy:
             trail_stop_gain = peak_gain - trail_distance
             if worst_gain <= trail_stop_gain:
                 exit_pnl = max(trail_stop_gain, -sl_pct)
-                logger.info(
-                    f"[{symbol}] TRAIL HIT: worst={worst_gain * 100:+.3f}% "
-                    f"≤ trail_stop={trail_stop_gain * 100:+.3f}% "
-                    f"(peak={peak_gain * 100:+.3f}% - dist={trail_distance * 100:.1f}%) "
-                    f"bars={pos['bars_held']} exit_pnl≈{exit_pnl * 100:+.3f}%"
-                )
-                return "trailing_stop"
+                if self.config.trail_server_native:
+                    # Server handles trail — Binance fires TRAILING_STOP_MARKET.
+                    # Log for monitoring but don't trigger client-side close.
+                    logger.debug(
+                        f"[{symbol}] Server trail should fire: "
+                        f"worst={worst_gain * 100:+.3f}% "
+                        f"≤ trail_stop={trail_stop_gain * 100:+.3f}% "
+                        f"(peak={peak_gain * 100:+.3f}%)"
+                    )
+                else:
+                    logger.info(
+                        f"[{symbol}] TRAIL HIT: worst={worst_gain * 100:+.3f}% "
+                        f"≤ trail_stop={trail_stop_gain * 100:+.3f}% "
+                        f"(peak={peak_gain * 100:+.3f}% - dist={trail_distance * 100:.1f}%) "
+                        f"bars={pos['bars_held']} exit_pnl≈{exit_pnl * 100:+.3f}%"
+                    )
+                    return "trailing_stop"
 
         # SL check (only when trailing is NOT active — same as backtest)
         # B3 guard: sl_pct=0 would exit at ANY loss — skip if not configured
@@ -1013,6 +1023,7 @@ class VolStraddleStrategy:
             # Server bracket IDs
             "server_sl_order_id": server_sl_order_id,
             "server_tp_order_id": server_tp_order_id,
+            "server_trail_order_id": kwargs.get("server_trail_order_id"),
             # Compatibility fields (used by scalper internals)
             "entry_stop_mult": entry_stop_mult or sl,
             "partial_closed": False,

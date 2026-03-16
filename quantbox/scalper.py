@@ -881,11 +881,13 @@ class RubberBandScalper(
                     if pos.get("partial_closed") and self.config.breakeven_after_partial and not self.paper_mode:
                         self._ratchet_runner_sl(pos_key, pos)
                     # r65: Ratchet server SL to trail_stop_gain (bar-close gap fix)
+                    # r90: Skip ratchet when Binance handles trail natively
                     if (
                         pos.get("trail_active")
                         and not self.paper_mode
                         and self.strategy_name == "vol_straddle"
                         and getattr(self.vs_config, "trail_server_ratchet_enabled", True)
+                        and not getattr(self.vs_config, "trail_server_native", False)
                     ):
                         self._ratchet_trail_sl(pos_key, pos)
 
@@ -1739,6 +1741,7 @@ class RubberBandScalper(
                 max_hold=pos.get("max_hold"),
                 strategy_type=_healed_strategy_type(pos),
                 is_straddle=pos.get("is_straddle", False),
+                server_trail_order_id=pos.get("server_trail_order_id"),
             )
             # Restore bars_held and PBT runner state
             if sym in self.strategy._positions:
