@@ -159,13 +159,13 @@ def _tick(
 @pytest.fixture
 def strategy() -> VolStraddleStrategy:
     """Fresh strategy with default config + hedge mode."""
-    cfg = VolStraddleConfig()
+    cfg = VolStraddleConfig(trail_server_native=False)
     return VolStraddleStrategy(cfg)
 
 
 @pytest.fixture
 def cfg() -> VolStraddleConfig:
-    return VolStraddleConfig()
+    return VolStraddleConfig(trail_server_native=False)
 
 
 # ══════════════════════════════════════════════════════════

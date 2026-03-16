@@ -61,7 +61,7 @@ def _load_real_4h(symbol: str = "1000PEPEUSDT", days: int = 1095) -> dict:
 @pytest.fixture
 def cfg() -> VolStraddleConfig:
     """A1-D50 default config."""
-    return VolStraddleConfig()
+    return VolStraddleConfig(trail_server_native=False)
 
 
 @pytest.fixture

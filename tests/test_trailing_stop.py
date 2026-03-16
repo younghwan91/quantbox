@@ -23,6 +23,7 @@ def cfg() -> VolStraddleConfig:
         d_trail_distance=0.003,  # trail 0.3% behind peak
         s_sl=0.015,  # straddle SL
         s_tp=0.05,  # straddle TP (unchanged)
+        trail_server_native=False,  # test client-side trail logic
     )
 
 
