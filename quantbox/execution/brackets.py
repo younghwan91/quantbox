@@ -479,11 +479,16 @@ class BracketMixin:
             return algo_id
         except Exception as e:
             err_str = str(e)
-            logger.error(f"[{symbol}] SERVER TRAIL FAILED: {e}. params={params}")
-            # -2021: Order would immediately trigger
+            # -2021: Order would immediately trigger — mark price is too far
+            # from activationPrice for Binance to accept the order.
+            # Return sentinel so caller can suppress retry spam.
             if "-2021" in err_str:
-                logger.warning(f"[{symbol}] Trail WOULD_TRIGGER — activationPrice already reached")
-                return None
+                logger.info(
+                    f"[{symbol}] Trail WOULD_TRIGGER — mark too far from "
+                    f"activationPrice=${activation_price:.6f} (callbackRate={callback_rate}%)"
+                )
+                return "WOULD_TRIGGER"
+            logger.error(f"[{symbol}] SERVER TRAIL FAILED: {e}. params={params}")
             return None
 
     def _cancel_trailing_stop_market(
