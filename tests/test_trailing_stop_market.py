@@ -72,28 +72,28 @@ class TestGetTrailParams:
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
         assert cr == pytest.approx(0.1)  # 0.001 * 100
-        assert ap == pytest.approx(101.5)  # 100 * 1.015
+        assert ap == pytest.approx(100.0)  # entry_price (no activation buffer)
         assert cs == "SELL"
 
     def test_straddle_short(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", -1, 100.0)
         assert cr == pytest.approx(0.1)
-        assert ap == pytest.approx(98.5)  # 100 * 0.985
+        assert ap == pytest.approx(100.0)  # entry_price
         assert cs == "BUY"
 
     def test_vr_squeeze_long(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("vr_squeeze", 1, 200.0)
         assert cr == pytest.approx(0.2)  # 0.002 * 100
-        assert ap == pytest.approx(202.0)  # 200 * 1.010
+        assert ap == pytest.approx(200.0)  # entry_price
         assert cs == "SELL"
 
     def test_ma_cluster_short(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("ma_cluster", -1, 50.0)
         assert cr == pytest.approx(0.3)  # 0.003 * 100
-        assert ap == pytest.approx(49.0)  # 50 * 0.980
+        assert ap == pytest.approx(50.0)  # entry_price
         assert cs == "BUY"
 
     def test_callback_rate_clamp_min(self):
@@ -302,7 +302,7 @@ class TestTrailAtEntry:
         # We verify by checking the trail params calculation works correctly.
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
         assert cr == pytest.approx(0.1)
-        assert ap == pytest.approx(101.5)
+        assert ap == pytest.approx(100.0)  # activation = entry_price
         assert cs == "SELL"
 
 
@@ -687,12 +687,12 @@ class TestConfigFlag:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Regular API Trail Tests (POST /fapi/v1/order)
+# Trail Facade Tests (delegates to Algo API)
 # ══════════════════════════════════════════════════════════════════════════
 
 
 class TestPlaceTrailRegular:
-    """Test _place_trail_regular (regular futures API)."""
+    """Test _place_trail_regular delegates to _place_trailing_stop_market (Algo API)."""
 
     def test_paper_mode_returns_mock_id(self):
         s = _build_trail_scalper()
@@ -701,62 +701,41 @@ class TestPlaceTrailRegular:
         assert isinstance(oid, str)
         assert oid.startswith("paper_trail_")
 
-    def test_live_mode_calls_futures_create_order(self):
+    def test_delegates_to_algo_api(self):
         s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_create_order = MagicMock(return_value={"orderId": 12345678})
+        s._place_trailing_stop_market = MagicMock(return_value="4000000123456")
 
         oid = s._place_trail_regular("TESTUSDT", "SELL", 10.0, 0.2, 101.5, "LONG")
 
-        assert oid == "12345678"
-        call_kwargs = s.client.futures_create_order.call_args[1]
-        assert call_kwargs["symbol"] == "TESTUSDT"
-        assert call_kwargs["side"] == "SELL"
-        assert call_kwargs["type"] == "TRAILING_STOP_MARKET"
-        assert call_kwargs["quantity"] == 10.0
-        assert call_kwargs["callbackRate"] == 0.2
-        assert call_kwargs["activationPrice"] == 101.5
-        assert call_kwargs["positionSide"] == "LONG"
-        assert "reduceOnly" not in call_kwargs
+        assert oid == "4000000123456"
+        s._place_trailing_stop_market.assert_called_once_with(
+            symbol="TESTUSDT",
+            side="SELL",
+            quantity=10.0,
+            callback_rate=0.2,
+            activation_price=101.5,
+            position_side="LONG",
+        )
 
-    def test_no_position_side_uses_reduce_only(self):
+    def test_none_activation_passes_zero(self):
         s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_create_order = MagicMock(return_value={"orderId": 99999})
-
-        s._place_trail_regular("TESTUSDT", "SELL", 5.0, 0.1)
-
-        call_kwargs = s.client.futures_create_order.call_args[1]
-        assert call_kwargs["reduceOnly"] == "true"
-        assert "positionSide" not in call_kwargs
-
-    def test_activation_price_optional(self):
-        """When activation_price is None, it should not be in params."""
-        s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_create_order = MagicMock(return_value={"orderId": 11111})
+        s._place_trailing_stop_market = MagicMock(return_value="4000000999")
 
         s._place_trail_regular("TESTUSDT", "BUY", 5.0, 0.3, position_side="SHORT")
 
-        call_kwargs = s.client.futures_create_order.call_args[1]
-        assert "activationPrice" not in call_kwargs
+        call_kwargs = s._place_trailing_stop_market.call_args[1]
+        assert call_kwargs["activation_price"] == 0.0  # None → 0.0 fallback
 
-    def test_api_error_returns_none(self):
-        from binance.exceptions import BinanceAPIException
-        import json
-
+    def test_algo_failure_returns_none(self):
         s = _build_trail_scalper()
-        s.paper_mode = False
-        resp_text = json.dumps({"code": -1000, "msg": "Internal error."})
-        resp_obj = type("R", (), {"status_code": 400, "text": resp_text})()
-        s.client.futures_create_order = MagicMock(side_effect=BinanceAPIException(resp_obj, 400, resp_text))
+        s._place_trailing_stop_market = MagicMock(return_value=None)
 
         oid = s._place_trail_regular("TESTUSDT", "SELL", 10.0, 0.2, 101.5, "LONG")
         assert oid is None
 
 
 class TestCancelTrailRegular:
-    """Test _cancel_trail_regular (regular futures API)."""
+    """Test _cancel_trail_regular delegates to _cancel_trailing_stop_market (Algo API)."""
 
     def test_paper_mode_returns_true(self):
         s = _build_trail_scalper()
@@ -768,47 +747,20 @@ class TestCancelTrailRegular:
 
     def test_none_order_id_returns_true(self):
         s = _build_trail_scalper()
+        s._cancel_trailing_stop_market = MagicMock(return_value=True)
         assert s._cancel_trail_regular("TESTUSDT", None) is True
 
-    def test_live_cancel_calls_futures_cancel_order(self):
+    def test_delegates_to_algo_cancel(self):
         s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_cancel_order = MagicMock(return_value={"orderId": 12345})
+        s._cancel_trailing_stop_market = MagicMock(return_value=True)
 
-        result = s._cancel_trail_regular("TESTUSDT", "12345")
+        result = s._cancel_trail_regular("TESTUSDT", "4000000123")
         assert result is True
-        s.client.futures_cancel_order.assert_called_once_with(symbol="TESTUSDT", orderId=12345)
-
-    def test_already_filled_returns_true(self):
-        """Already filled order returns -2011 — should be benign."""
-        from binance.exceptions import BinanceAPIException
-        import json
-
-        s = _build_trail_scalper()
-        s.paper_mode = False
-        resp_text = json.dumps({"code": -2011, "msg": "Unknown order sent."})
-        resp_obj = type("R", (), {"status_code": 400, "text": resp_text})()
-        s.client.futures_cancel_order = MagicMock(side_effect=BinanceAPIException(resp_obj, 400, resp_text))
-
-        result = s._cancel_trail_regular("TESTUSDT", "12345")
-        assert result is True
-
-    def test_real_error_returns_false(self):
-        from binance.exceptions import BinanceAPIException
-        import json
-
-        s = _build_trail_scalper()
-        s.paper_mode = False
-        resp_text = json.dumps({"code": -1022, "msg": "Invalid signature."})
-        resp_obj = type("R", (), {"status_code": 400, "text": resp_text})()
-        s.client.futures_cancel_order = MagicMock(side_effect=BinanceAPIException(resp_obj, 400, resp_text))
-
-        result = s._cancel_trail_regular("TESTUSDT", "12345")
-        assert result is False
+        s._cancel_trailing_stop_market.assert_called_once_with("TESTUSDT", "4000000123")
 
 
 class TestCheckTrailRegular:
-    """Test _check_trail_regular (regular futures API)."""
+    """Test _check_trail_regular delegates to _check_trail_order_status (Algo API)."""
 
     def test_paper_mode_returns_none(self):
         s = _build_trail_scalper()
@@ -816,64 +768,32 @@ class TestCheckTrailRegular:
 
     def test_filled_returns_data(self):
         s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_get_order = MagicMock(
+        s._check_trail_order_status = MagicMock(
             return_value={
                 "status": "FILLED",
                 "avgPrice": "102.50",
                 "executedQty": "30.0",
-                "orderId": 77777,
             }
         )
-        s._lookup_actual_fill = MagicMock(return_value=None)
 
-        result = s._check_trail_regular("TESTUSDT", "77777")
+        result = s._check_trail_regular("TESTUSDT", "4000000777")
         assert result is not None
         assert result["status"] == "FILLED"
-        assert result["avgPrice"] == "102.50"
-        assert result["executedQty"] == "30.0"
 
-    def test_new_returns_none(self):
-        """NEW status means still active / not triggered yet."""
+    def test_none_returns_none(self):
         s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_get_order = MagicMock(return_value={"status": "NEW", "orderId": 77777})
+        s._check_trail_order_status = MagicMock(return_value=None)
 
-        result = s._check_trail_regular("TESTUSDT", "77777")
+        result = s._check_trail_regular("TESTUSDT", "4000000777")
         assert result is None
 
-    def test_canceled_returns_canceled_status(self):
+    def test_canceled_returns_canceled(self):
         s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_get_order = MagicMock(return_value={"status": "CANCELED", "orderId": 77777})
+        s._check_trail_order_status = MagicMock(return_value={"status": "CANCELLED"})
 
-        result = s._check_trail_regular("TESTUSDT", "77777")
+        result = s._check_trail_regular("TESTUSDT", "4000000777")
         assert result is not None
-        assert result["status"] == "CANCELED"
-
-    def test_expired_returns_canceled_status(self):
-        s = _build_trail_scalper()
-        s.paper_mode = False
-        s.client.futures_get_order = MagicMock(return_value={"status": "EXPIRED", "orderId": 77777})
-
-        result = s._check_trail_regular("TESTUSDT", "77777")
-        assert result is not None
-        assert result["status"] == "CANCELED"
-
-    def test_order_not_found_returns_canceled(self):
-        """-2013: Order does not exist → treat as cancelled."""
-        from binance.exceptions import BinanceAPIException
-        import json
-
-        s = _build_trail_scalper()
-        s.paper_mode = False
-        resp_text = json.dumps({"code": -2013, "msg": "Order does not exist."})
-        resp_obj = type("R", (), {"status_code": 400, "text": resp_text})()
-        s.client.futures_get_order = MagicMock(side_effect=BinanceAPIException(resp_obj, 400, resp_text))
-
-        result = s._check_trail_regular("TESTUSDT", "99999")
-        assert result is not None
-        assert result["status"] == "CANCELED"
+        assert result["status"] == "CANCELLED"
 
 
 class TestTrailCrossCancel:
