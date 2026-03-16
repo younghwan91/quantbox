@@ -515,27 +515,38 @@ class ReconciliationMixin:
             if vs_cfg and getattr(vs_cfg, "trail_server_native", False):
                 trail_oid = pos.get("server_trail_order_id")
                 if trail_oid is None:
-                    quantity = pos["notional"] / pos["entry_price"]
-                    quantity = self._round_qty(quantity, api_sym)
-                    if quantity > 0:
-                        signal = pos["signal"]
-                        entry_price = pos["entry_price"]
-                        strategy_type = pos.get("strategy_type", "vr_squeeze")
-                        cr, ap, cs = self._get_trail_params(strategy_type, signal, entry_price)
-                        new_trail = self._place_trailing_stop_market(
-                            symbol=api_sym,
-                            side=cs,
-                            quantity=quantity,
-                            callback_rate=cr,
-                            activation_price=ap,
-                            position_side=pos.get("position_side"),
-                        )
-                        if new_trail:
-                            pos["server_trail_order_id"] = new_trail
-                            logger.info(f"[{sym}] BRACKET REPAIR: Trail placed orderId={new_trail} callbackRate={cr}%")
-                            self._save_state()
-                        else:
-                            logger.warning(f"[{sym}] BRACKET REPAIR: Trail failed")
+                    # Cooldown: don't retry trail if recently got WOULD_TRIGGER.
+                    # Binance rejects when mark is far from activationPrice —
+                    # retrying every 60s just spams logs. Wait 15 min.
+                    wt_ts = pos.get("_trail_would_trigger_at", 0)
+                    if time.time() - wt_ts < 900:
+                        pass  # Still in cooldown — skip silently
+                    else:
+                        quantity = pos["notional"] / pos["entry_price"]
+                        quantity = self._round_qty(quantity, api_sym)
+                        if quantity > 0:
+                            signal = pos["signal"]
+                            entry_price = pos["entry_price"]
+                            strategy_type = pos.get("strategy_type", "vr_squeeze")
+                            cr, ap, cs = self._get_trail_params(strategy_type, signal, entry_price)
+                            new_trail = self._place_trailing_stop_market(
+                                symbol=api_sym,
+                                side=cs,
+                                quantity=quantity,
+                                callback_rate=cr,
+                                activation_price=ap,
+                                position_side=pos.get("position_side"),
+                            )
+                            if new_trail and new_trail != "WOULD_TRIGGER":
+                                pos["server_trail_order_id"] = new_trail
+                                pos.pop("_trail_would_trigger_at", None)
+                                logger.info(f"[{sym}] BRACKET REPAIR: Trail placed orderId={new_trail} callbackRate={cr}%")
+                                self._save_state()
+                            elif new_trail == "WOULD_TRIGGER":
+                                pos["_trail_would_trigger_at"] = time.time()
+                                logger.info(f"[{sym}] Trail deferred — price too far from activation (retry in 15m)")
+                            else:
+                                logger.warning(f"[{sym}] BRACKET REPAIR: Trail failed")
 
     def _reconcile_positions(self: "ScalperProtocol") -> None:
         """Reconcile internal position state with exchange reality.
