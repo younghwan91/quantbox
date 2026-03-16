@@ -167,6 +167,9 @@ print(f"[Phase 1 Baseline] N={baseline_m['N']}, PF={baseline_m['PF']:.3f}")
 > G_4TF가 8.1× 더 좋은 Calmar (슬롯 활용도 때문). 15m이 전체 N의 53.5% 기여.
 > **r85 2D trail sweep (2026-03-15):** act=0.015는 genuine peak (양방향 cliff 확인).
 > (act=0.015, dist=0.0005) IS Calmar=24,204 (+138%) — OOS 검증 전 변경 금지.
+> **r89 S_d8 실행 갭 확정 (2026-03-17):** IDEAL PF=5.44, BAR-CLOSE PF=0.715 (-86.9%).
+> 모든 연도 손실 (2020-2025). 라이브 32거래 PF=0.904 → bar-close와 일치.
+> **straddle_enabled=False (프로덕션).** server-side trailing 안정화 전 재활성화 금지.
 > **universe 변경 시 반드시 이 표와 아래 assert 값 업데이트.**
 
 > **v14.24.0 추가:** `sim_directional_trailing()` 및 `sim_straddle_trailing()`이 `research/active/r41_r45/r43_exit_improvement.py`에서 `quantbox/backtest/trade_sim.py`로 이전됨 (v14.24.0).  
@@ -238,30 +241,13 @@ L/N=3.0 VR CAGR: +X% (4.7년 복리)
 
 ## 5. 포지션 사이징 검증
 
-> ⚠️ **실전 교훈 (2026-03-05):** `n_active=0` 단일 진입만 테스트 → 2번째 슬롯에서 마진 부족 `-2019`.
+- `portfolio_sim(trades, max_concurrent=10)` — VR/MA 백테스트
+- `portfolio_sim(strd_trades, max_concurrent=5)` — **STRD 단독** (1 straddle=2 positions, r79)
+- **혼합(VR+STRD):** `portfolio_sim(trades, 10, straddle_syms=get_straddle_syms(strd_trades))` 필수
+- `straddle_syms` 없이 `max_concurrent=10`만 쓰면 N **18.6% 과대추정**
 
-**반드시:**
-- `portfolio_sim(trades, max_concurrent=10)` — VR/MA 단독 또는 혼합 백테스트
-- `portfolio_sim(trades, max_concurrent=5)` — **STRD(S_d8) 단독 백테스트** ← r79 발견
-  
-마진 공식: `balance / 10 × 30 (VR)` or `balance / 10 × 21 (MA)` ≤ available margin.
-
-> ⚠️ **STRD 슬롯 패리티 규칙 (r79 발견 → T1에서 코드 수정 완료, commit 3b43bb2):**
-> 1 straddle = 2 positions → `n_active += 2` → live에서 max 5 straddle 동시 가능.
-> 백테스트에서 `max_concurrent=10` + `straddle_syms` 미사용 시 N이 **18.6% 과대추정** (r79 확인).
->
-> **STRD 단독 백테스트:**
-> ```python
-> pnl = portfolio_sim(strd_trades, max_concurrent=5)
-> ```
->
-> **혼합(VR + STRD) 백테스트 — 반드시 `straddle_syms` 전달:**
-> ```python
-> from quantbox.backtest.trade_sim import get_straddle_syms
-> strd_syms = get_straddle_syms(strd_trades)
-> pnl = portfolio_sim(vr_trades + strd_trades, 10, straddle_syms=strd_syms)
-> ```
-> `straddle_syms` 없이 `max_concurrent=10`만 쓰면 straddle이 1슬롯으로 처리 → 수치 무효.
+> ⚠️ **S_d8 straddle은 bar-close 실행에서 PF=0.715 (r89 확인). Regular API TRAILING_STOP_MARKET으로 해결 → 재활성화됨.**
+> STRD 백테스트는 참고용으로만. 실거래 재활성화는 server-side trailing 안정화 후.
 
 ---
 
@@ -361,6 +347,9 @@ for param_value in param_grid:
 | 2026-03-11 | _offset 미적용 (r58 이전) | 단축 히스토리 심볼 슬롯 충돌 오류 | 신규 심볼 bar 0 ≠ 기존 심볼 bar 0 (시간 불일치) | 신규 심볼은 `data_15m[sym]["_offset"]` 적용 필수 |
 | 2026-03-15 | STRD 슬롯 패리티 오류 (r78) | N 18.6% 과대추정 | `portfolio_sim(max=10)` → 10 straddle 허용, 라이브는 max 5 | STRD 단독: `portfolio_sim(max_concurrent=5)` |
 | 2026-03-16 | Trail-before-SL bias (H5) | PF ~1.8× 과대추정, big loss 0건 | trail이 SL보다 먼저 체크 → 같은 바에서 SL 대신 trail exit | SL 먼저 체크 (server SL은 intra-bar, trail은 bar close) |
+| 2026-03-17 | CANCELED 스펠링 불일치 (Incident #7) | SL 미보호 포지션 | Binance `"CANCELED"` (US) vs 코드 `"CANCELLED"` (UK) | 두 스펠링 모두 체크 |
+| 2026-03-17 | S_d8 straddle 실행 갭 (r89) | IDEAL PF=5.44, bar-close PF=0.715 | trail exit 가격 정밀도에 전적으로 의존 | `straddle_enabled=False` — bar-close에서 불가능 |
+| 2026-03-17 | trail_server_native 위험 | client trail exit 억제 → exit 불가 | `=True`면 L852에서 return 안 함 + server trail -2021 실패 | `trail_server_native=False` 유지 |
 
 파라미터 민감도 분석: `research/active/r66_r70/r67_sensitivity.py` 및 `docs/backtest_results/202603/` 참조.
 

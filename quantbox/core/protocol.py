@@ -226,11 +226,31 @@ class ScalperProtocol(Protocol):
         ...
 
     def _cancel_trailing_stop_market(self, symbol: str, order_id: str) -> bool:
-        """Cancel a TRAILING_STOP_MARKET order. Returns True on success or benign error."""
+        """Cancel a TRAILING_STOP_MARKET order (algo API). Returns True on success or benign error."""
         ...
 
     def _check_trail_order_status(self, symbol: str, order_id: str) -> dict[str, Any] | None:
-        """Check if TRAILING_STOP_MARKET order has been filled. Returns status dict or None."""
+        """Check if TRAILING_STOP_MARKET order has been filled (algo API). Returns status dict or None."""
+        ...
+
+    def _place_trail_regular(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        callback_rate: float,
+        activation_price: float | None = None,
+        position_side: str | None = None,
+    ) -> str | None:
+        """Place TRAILING_STOP_MARKET via regular API (POST /fapi/v1/order). Returns orderId or None."""
+        ...
+
+    def _cancel_trail_regular(self, symbol: str, order_id: str) -> bool:
+        """Cancel a regular API trail order. Returns True on success or benign error."""
+        ...
+
+    def _check_trail_regular(self, symbol: str, order_id: str) -> dict[str, Any] | None:
+        """Check if regular API trail order filled. Returns status dict or None."""
         ...
 
     def _verify_algo_order_active(self, algo_id: str, symbol: str) -> str | None:

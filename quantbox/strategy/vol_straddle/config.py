@@ -80,9 +80,9 @@ class VolStraddleConfig(BaseSettings):
     # When True, places Binance TRAILING_STOP_MARKET at entry alongside SL.
     # Binance tracks peak tick-by-tick and fires MARKET when price drops
     # callbackRate% from peak after activationPrice. Matches IDEAL sim model.
-    # r90: client-side trail is dead code (19.3% ratchet success → PF 0.76).
-    # Server-side trail matches IDEAL model (PF 3.94). Default OFF for safe rollout.
-    trail_server_native: bool = False
+    # Server-side TRAILING_STOP_MARKET via regular API (POST /fapi/v1/order).
+    # Eliminates bar-close execution gap that made straddle unprofitable.
+    trail_server_native: bool = True
 
     # ── Direction ──
     momentum_period: int = 8  # Momentum lookback for D direction
