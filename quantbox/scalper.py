@@ -1479,7 +1479,7 @@ class RubberBandScalper(
 
             # 5. Bracket verification (check SL/TP algo orders exist)
             try:
-                open_algo_orders = self.client._request_futures_api("get", "algoOrder/openOrders", signed=True, data={})
+                open_algo_orders = self.client._request_futures_api("get", "openAlgoOrders", signed=True, data={})
                 algo_order_symbols: set[str] = set()
                 if isinstance(open_algo_orders, dict):
                     for order in open_algo_orders.get("orders", []):
