@@ -430,26 +430,27 @@ class BracketMixin:
         callback_rate: float,
         activation_price: float,
         position_side: str | None = None,
-    ) -> int | None:
-        """Place a TRAILING_STOP_MARKET order via regular futures API.
+    ) -> str | None:
+        """Place a TRAILING_STOP_MARKET order via Binance Algo Order API.
 
         Binance monitors price tick-by-tick after activationPrice is reached,
         and fires a MARKET order when price drops callbackRate% from peak.
         This matches the IDEAL sim model (no bar-close execution gap).
 
-        Uses POST /fapi/v1/order (regular API), NOT the algo API.
-        Returns orderId (integer) on success, None on failure.
+        Uses POST /fapi/v1/algoOrder (same as SL/TP), NOT the regular API.
+        Returns algoId (string) on success, None on failure.
         """
         if self.paper_mode:
-            return int(time.time() * 1000)
+            return f"paper_trail_{int(time.time() * 1000)}"
 
         params: dict = {
+            "algoType": "CONDITIONAL",
             "symbol": symbol,
             "side": side,
             "type": "TRAILING_STOP_MARKET",
-            "quantity": quantity,
-            "callbackRate": callback_rate,
-            "activationPrice": activation_price,
+            "quantity": str(quantity),
+            "callbackRate": str(callback_rate),
+            "activationPrice": str(activation_price),
         }
         # Hedge Mode: positionSide is mutually exclusive with reduceOnly
         if position_side is not None:
@@ -463,14 +464,19 @@ class BracketMixin:
         )
 
         try:
-            resp = self.client.futures_create_order(**params)
-            order_id = int(resp["orderId"])
-            logger.info(
-                f"[{symbol}] SERVER TRAIL placed: "
-                f"{side} {quantity:.6f} callbackRate={callback_rate}% "
-                f"activationPrice=${activation_price:.4f} (orderId={order_id})"
+            resp = self.client._request_futures_api(
+                "post",
+                "algoOrder",
+                signed=True,
+                data=params,
             )
-            return order_id
+            algo_id = str(resp["algoId"])
+            logger.info(
+                f"[{symbol}] SERVER TRAIL placed via Algo API: "
+                f"{side} {quantity:.6f} callbackRate={callback_rate}% "
+                f"activationPrice=${activation_price:.4f} (algoId={algo_id})"
+            )
+            return algo_id
         except Exception as e:
             err_str = str(e)
             logger.error(f"[{symbol}] SERVER TRAIL FAILED: {e}. params={params}")
@@ -483,59 +489,26 @@ class BracketMixin:
     def _cancel_trailing_stop_market(
         self: "ScalperProtocol",
         symbol: str,
-        order_id: int,
+        order_id: str,
     ) -> bool:
-        """Cancel a TRAILING_STOP_MARKET order via regular futures API.
+        """Cancel a TRAILING_STOP_MARKET order via Algo Order API.
 
-        Uses DELETE /fapi/v1/order (regular API), NOT the algo API.
+        Uses DELETE /fapi/v1/algoOrder (same as SL/TP).
         Returns True on success or benign error (already filled/cancelled).
         """
-        if self.paper_mode or not order_id:
-            return True
-
-        try:
-            self.client.futures_cancel_order(symbol=symbol, orderId=order_id)
-            logger.info(f"[{symbol}] Server trail cancelled: orderId={order_id}")
-            return True
-        except Exception as e:
-            err_str = str(e)
-            # -2011: Unknown order (already filled/cancelled) — benign
-            if "Unknown" in err_str or "-2011" in err_str:
-                logger.debug(f"[{symbol}] Server trail already gone: orderId={order_id} ({e})")
-                return True
-            logger.warning(f"[{symbol}] Failed to cancel server trail: orderId={order_id} error={e}")
-            return False
+        return self._cancel_server_order(symbol, order_id, "trailing-stop")
 
     def _check_trail_order_status(
         self: "ScalperProtocol",
         symbol: str,
-        order_id: int,
+        order_id: str,
     ) -> dict | None:
-        """Check if a TRAILING_STOP_MARKET order has been filled.
+        """Check if a TRAILING_STOP_MARKET algo order has been filled.
 
-        Uses GET /fapi/v1/order (regular API), NOT the algo API.
-        Returns dict with status/avgPrice/executedQty if available, None on error.
+        Uses the same _check_order_filled (GET /fapi/v1/algoOrder) as SL/TP.
+        Returns dict with status/avgPrice/executedQty if filled, None otherwise.
         """
-        if self.paper_mode or not order_id:
-            return None
-
-        try:
-            resp = self.client.futures_get_order(symbol=symbol, orderId=order_id)
-            status = resp.get("status", "")
-            logger.debug(f"[{symbol}] Trail order check: orderId={order_id} status={status}")
-            if status == "FILLED":
-                return {
-                    "status": "FILLED",
-                    "avgPrice": resp.get("avgPrice", "0"),
-                    "executedQty": resp.get("executedQty", "0"),
-                    "orderId": order_id,
-                }
-            if status in ("CANCELED", "CANCELLED", "EXPIRED", "REJECTED"):
-                return {"status": "CANCELLED", "orderId": order_id}
-            return {"status": status, "orderId": order_id}
-        except Exception as e:
-            logger.warning(f"[{symbol}] Trail order status check failed: orderId={order_id} error={e}")
-            return None
+        return self._check_order_filled(symbol, order_id)
 
     def _lookup_actual_fill(
         self: "ScalperProtocol",

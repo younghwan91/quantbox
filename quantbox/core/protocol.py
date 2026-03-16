@@ -221,15 +221,15 @@ class ScalperProtocol(Protocol):
         callback_rate: float,
         activation_price: float,
         position_side: str | None = None,
-    ) -> int | None:
-        """Place TRAILING_STOP_MARKET via regular futures API. Returns orderId or None."""
+    ) -> str | None:
+        """Place TRAILING_STOP_MARKET via Algo Order API. Returns algoId or None."""
         ...
 
-    def _cancel_trailing_stop_market(self, symbol: str, order_id: int) -> bool:
+    def _cancel_trailing_stop_market(self, symbol: str, order_id: str) -> bool:
         """Cancel a TRAILING_STOP_MARKET order. Returns True on success or benign error."""
         ...
 
-    def _check_trail_order_status(self, symbol: str, order_id: int) -> dict[str, Any] | None:
+    def _check_trail_order_status(self, symbol: str, order_id: str) -> dict[str, Any] | None:
         """Check if TRAILING_STOP_MARKET order has been filled. Returns status dict or None."""
         ...
 

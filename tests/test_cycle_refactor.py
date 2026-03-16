@@ -200,9 +200,11 @@ class TestCyclePositionManagement:
         s._close_position.assert_not_called()
 
     def test_trail_active_position_calls_ratchet(self):
-        """trail_active=True + paper_mode=False → _ratchet_trail_sl called."""
+        """trail_active=True + paper_mode=False + trail_server_native=False → _ratchet_trail_sl called."""
         s = _make_scalper()
         s.paper_mode = False
+        # Ensure server native is off so ratchet fires
+        s.vs_config.trail_server_native = False
         _inject_pos(s, "TESTUSDT:LONG", trail_active=True)
         s.strategy.update_position = MagicMock(return_value=None)
         s._ratchet_trail_sl = MagicMock()
