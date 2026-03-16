@@ -644,7 +644,7 @@ class BracketMixin:
             # Without this, a cancelled order keeps its algoId in our state,
             # _sync_server_orders skips bracket repair (oid is not None),
             # and the position silently loses server-side protection.
-            if algo_status in ("CANCELLED", "EXPIRED", "USER_CANCELLED"):
+            if algo_status in ("CANCELLED", "CANCELED", "EXPIRED", "USER_CANCELLED"):
                 logger.warning(f"[{symbol}] Algo order {algo_status}: algoId={order_id} — will trigger bracket repair")
                 return {"status": "CANCELLED", "algoId": order_id}
         except Exception as e:
@@ -891,7 +891,7 @@ class BracketMixin:
             if ":" in api_sym:
                 api_sym = api_sym.split(":")[0]
             status = self._verify_algo_order_active(str(sl_oid), api_sym)
-            if status in ("EXPIRED", "CANCELLED", "USER_CANCELLED"):
+            if status in ("EXPIRED", "CANCELLED", "CANCELED", "USER_CANCELLED"):
                 logger.warning(f"[{sym}] SL algo order {sl_oid} is {status} — re-placing bracket")
                 pos["server_sl_order_id"] = None
                 # Bracket will be re-placed by the normal bracket repair logic
