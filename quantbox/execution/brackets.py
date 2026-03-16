@@ -431,14 +431,11 @@ class BracketMixin:
         activation_price: float,
         position_side: str | None = None,
     ) -> str | None:
-        """Place a TRAILING_STOP_MARKET order via Binance Algo Order API.
+        """[DEPRECATED] Place TRAILING_STOP_MARKET via Algo Order API.
 
-        Binance monitors price tick-by-tick after activationPrice is reached,
-        and fires a MARKET order when price drops callbackRate% from peak.
-        This matches the IDEAL sim model (no bar-close execution gap).
-
-        Uses POST /fapi/v1/algoOrder (same as SL/TP), NOT the regular API.
-        Returns algoId (string) on success, None on failure.
+        Use _place_trail_regular() instead — the regular API (POST /fapi/v1/order)
+        accepts activationPrice as optional and doesn't cause -2021 rejection.
+        Kept for backward compatibility with tests only.
         """
         if self.paper_mode:
             return f"paper_trail_{int(time.time() * 1000)}"
@@ -496,10 +493,9 @@ class BracketMixin:
         symbol: str,
         order_id: str,
     ) -> bool:
-        """Cancel a TRAILING_STOP_MARKET order via Algo Order API.
+        """[DEPRECATED] Cancel TRAILING_STOP_MARKET via Algo Order API.
 
-        Uses DELETE /fapi/v1/algoOrder (same as SL/TP).
-        Returns True on success or benign error (already filled/cancelled).
+        Use _cancel_trail_regular() instead.
         """
         return self._cancel_server_order(symbol, order_id, "trailing-stop")
 
@@ -508,12 +504,160 @@ class BracketMixin:
         symbol: str,
         order_id: str,
     ) -> dict | None:
-        """Check if a TRAILING_STOP_MARKET algo order has been filled.
+        """[DEPRECATED] Check TRAILING_STOP_MARKET via Algo Order API.
 
-        Uses the same _check_order_filled (GET /fapi/v1/algoOrder) as SL/TP.
-        Returns dict with status/avgPrice/executedQty if filled, None otherwise.
+        Use _check_trail_regular() instead.
         """
         return self._check_order_filled(symbol, order_id)
+
+    # ── Regular API Trailing Stop (POST /fapi/v1/order) ──────────────────
+    # The regular futures order API supports TRAILING_STOP_MARKET natively.
+    # Unlike the Algo API, activationPrice is OPTIONAL (defaults to latest
+    # price) and does NOT cause -2021 rejection for future activation prices.
+    # This eliminates the execution gap that made straddle unprofitable.
+
+    def _place_trail_regular(
+        self: "ScalperProtocol",
+        symbol: str,
+        side: str,
+        quantity: float,
+        callback_rate: float,
+        activation_price: float | None = None,
+        position_side: str | None = None,
+    ) -> str | None:
+        """Place TRAILING_STOP_MARKET via regular futures API (POST /fapi/v1/order).
+
+        The regular API accepts activationPrice as optional — if price hasn't
+        reached activation yet, Binance queues the order and starts trailing
+        once activationPrice is hit. No -2021 error.
+
+        Args:
+            symbol: Trading symbol (no colon).
+            side: 'SELL' for closing LONG, 'BUY' for closing SHORT.
+            quantity: Position quantity.
+            callback_rate: Binance callbackRate (0.1-5.0, where 1 = 1%).
+            activation_price: Price at which trailing starts. None = latest price.
+            position_side: 'LONG' or 'SHORT' for hedge mode; None for one-way.
+
+        Returns:
+            orderId as string on success, None on failure.
+        """
+        if self.paper_mode:
+            return f"paper_trail_{int(time.time() * 1000)}"
+
+        params: dict = {
+            "symbol": symbol,
+            "side": side,
+            "type": "TRAILING_STOP_MARKET",
+            "quantity": quantity,
+            "callbackRate": callback_rate,
+        }
+        if activation_price is not None:
+            params["activationPrice"] = activation_price
+        if position_side is not None:
+            params["positionSide"] = position_side
+        else:
+            params["reduceOnly"] = "true"
+
+        logger.debug(
+            f"[{symbol}] Trail order (regular API): side={side} qty={quantity:.6f} "
+            f"callbackRate={callback_rate}% activationPrice="
+            f"{'$' + f'{activation_price:.4f}' if activation_price else 'latest'}"
+        )
+
+        try:
+            resp = self.client.futures_create_order(**params)
+            order_id = str(resp["orderId"])
+            logger.info(
+                f"[{symbol}] SERVER TRAIL placed (regular API): "
+                f"{side} {quantity:.6f} callbackRate={callback_rate}% "
+                f"activationPrice="
+                f"{'$' + f'{activation_price:.4f}' if activation_price else 'latest'} "
+                f"(orderId={order_id})"
+            )
+            return order_id
+        except BinanceAPIException as e:
+            logger.error(f"[{symbol}] Trail regular API FAILED: {e}. params={params}")
+            return None
+        except Exception as e:
+            logger.error(f"[{symbol}] Trail regular API unexpected error: {e}. params={params}")
+            return None
+
+    def _cancel_trail_regular(
+        self: "ScalperProtocol",
+        symbol: str,
+        order_id: str,
+    ) -> bool:
+        """Cancel a TRAILING_STOP_MARKET order via regular API (DELETE /fapi/v1/order).
+
+        Returns True on success or benign error (already filled/cancelled).
+        """
+        if self.paper_mode or not order_id or order_id.startswith("paper_"):
+            return True
+
+        try:
+            self.client.futures_cancel_order(symbol=symbol, orderId=int(order_id))
+            logger.info(f"[{symbol}] Trail cancelled (regular API): orderId={order_id}")
+            return True
+        except BinanceAPIException as e:
+            err_str = str(e)
+            # -2011: Unknown order — already filled or cancelled
+            if "-2011" in err_str or "Unknown" in err_str:
+                logger.debug(f"[{symbol}] Trail already gone (regular API): orderId={order_id} ({e})")
+                return True
+            logger.warning(f"[{symbol}] Trail cancel failed (regular API): orderId={order_id} error={e}")
+            return False
+        except Exception as e:
+            logger.warning(f"[{symbol}] Trail cancel unexpected error: orderId={order_id} error={e}")
+            return False
+
+    def _check_trail_regular(
+        self: "ScalperProtocol",
+        symbol: str,
+        order_id: str,
+    ) -> dict | None:
+        """Check if a regular API TRAILING_STOP_MARKET order has been filled.
+
+        Regular order status lifecycle: NEW → FILLED | CANCELED | EXPIRED.
+        Much simpler than algo status (no TRIGGERED→FINISHED chain).
+
+        Returns:
+            dict with status/avgPrice/executedQty if filled, None otherwise.
+            Returns {'status': 'CANCELED'} if externally cancelled.
+        """
+        if self.paper_mode or not order_id or order_id.startswith("paper_"):
+            return None
+
+        try:
+            resp = self.client.futures_get_order(symbol=symbol, orderId=int(order_id))
+            status = resp.get("status", "")
+
+            if status == "FILLED":
+                avg_price = resp.get("avgPrice", "0")
+                exec_qty = resp.get("executedQty", "0")
+                # Also try to get actual fill from account trades for precision
+                actual = self._lookup_actual_fill(symbol, exec_qty, "TRAILING_STOP_MARKET")
+                if actual:
+                    avg_price = str(actual["price"])
+                    exec_qty = str(actual["qty"])
+                return {
+                    "avgPrice": avg_price,
+                    "executedQty": exec_qty,
+                    "status": "FILLED",
+                }
+            elif status in ("CANCELED", "CANCELLED", "EXPIRED"):
+                return {"status": "CANCELED"}
+            # NEW = still active, not yet triggered
+            return None
+        except BinanceAPIException as e:
+            err_str = str(e)
+            if "-2013" in err_str or "does not exist" in err_str.lower():
+                return {"status": "CANCELED"}
+            logger.warning(f"[{symbol}] Trail status check failed (regular API): orderId={order_id} error={e}")
+            return None
+        except Exception as e:
+            logger.warning(f"[{symbol}] Trail status check unexpected error: orderId={order_id} error={e}")
+            return None
 
     def _lookup_actual_fill(
         self: "ScalperProtocol",

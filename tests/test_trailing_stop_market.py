@@ -316,26 +316,26 @@ class TestClosePositionCancelsTrail:
         s = _build_trail_scalper()
         _inject_position(s, "TESTUSDT:LONG", server_trail_order_id="trail_77777")
 
-        s._cancel_trailing_stop_market = MagicMock(return_value=True)
+        s._cancel_trail_regular = MagicMock(return_value=True)
         s._cancel_server_stop_loss = MagicMock(return_value=True)
         s._cancel_server_take_profit = MagicMock(return_value=True)
 
         s._close_position("TESTUSDT:LONG", "max_hold", 102.0)
 
-        s._cancel_trailing_stop_market.assert_called_once_with("TESTUSDT", "trail_77777")
+        s._cancel_trail_regular.assert_called_once_with("TESTUSDT", "trail_77777")
 
     def test_no_trail_no_cancel(self):
         """If position has no trail order, cancel should not be called."""
         s = _build_trail_scalper()
         _inject_position(s, "TESTUSDT:LONG", server_trail_order_id=None)
 
-        s._cancel_trailing_stop_market = MagicMock()
+        s._cancel_trail_regular = MagicMock()
         s._cancel_server_stop_loss = MagicMock(return_value=True)
         s._cancel_server_take_profit = MagicMock(return_value=True)
 
         s._close_position("TESTUSDT:LONG", "max_hold", 102.0)
 
-        s._cancel_trailing_stop_market.assert_not_called()
+        s._cancel_trail_regular.assert_not_called()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -404,18 +404,18 @@ class TestReconTrailFill:
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id="trail_77777",
+            server_trail_order_id="77777",
             server_sl_order_id="sl_111",
             is_straddle=False,
         )
 
-        # Mock trail order check → FILLED (via _check_order_filled delegation)
-        s._check_trail_order_status = MagicMock(
+        # Mock trail order check → FILLED (regular API)
+        s._check_trail_regular = MagicMock(
             return_value={
                 "status": "FILLED",
                 "avgPrice": "102.50",
                 "executedQty": "30.0",
-                "algoId": "trail_77777",
+                "orderId": 77777,
             }
         )
         # Mock algo check → not filled (SL still active)
@@ -437,11 +437,11 @@ class TestReconTrailFill:
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id="trail_77777",
+            server_trail_order_id="77777",
             is_straddle=False,
         )
 
-        s._check_trail_order_status = MagicMock(return_value=None)
+        s._check_trail_regular = MagicMock(return_value=None)
         s._check_order_filled = MagicMock(return_value=None)
         s._record_server_fill = MagicMock()
 
@@ -456,22 +456,22 @@ class TestReconTrailFill:
         _inject_position(
             s,
             "TESTUSDT:LONG",
-            server_trail_order_id="trail_77777",
+            server_trail_order_id="77777",
             is_straddle=False,
         )
 
-        s._check_trail_order_status = MagicMock(return_value={"status": "CANCELLED", "algoId": "trail_77777"})
+        s._check_trail_regular = MagicMock(return_value={"status": "CANCELED", "orderId": 77777})
         s._check_order_filled = MagicMock(return_value=None)
         # After clearing, bracket repair will re-place the trail
-        s._place_trailing_stop_market = MagicMock(return_value="trail_88888")
+        s._place_trail_regular = MagicMock(return_value="88888")
         s._get_trail_params = MagicMock(return_value=(0.1, 101.5, "SELL"))
 
         s._sync_server_orders()
 
         # Trail should be repaired immediately
-        s._place_trailing_stop_market.assert_called_once()
+        s._place_trail_regular.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
-        assert pos["server_trail_order_id"] == "trail_88888"
+        assert pos["server_trail_order_id"] == "88888"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -495,16 +495,16 @@ class TestTrailBracketRepair:
 
         # Mock all order checks → nothing filled
         s._check_order_filled = MagicMock(return_value=None)
-        s._check_trail_order_status = MagicMock(return_value=None)
-        s._place_trailing_stop_market = MagicMock(return_value="trail_88888")
+        s._check_trail_regular = MagicMock(return_value=None)
+        s._place_trail_regular = MagicMock(return_value="88888")
         s._get_trail_params = MagicMock(return_value=(0.1, 101.5, "SELL"))
 
         s._sync_server_orders()
 
         # Trail should be placed as repair
-        s._place_trailing_stop_market.assert_called_once()
+        s._place_trail_regular.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
-        assert pos["server_trail_order_id"] == "trail_88888"
+        assert pos["server_trail_order_id"] == "88888"
 
     def test_existing_trail_not_re_placed(self):
         """Position with existing trail order should NOT get a new one."""
@@ -519,12 +519,12 @@ class TestTrailBracketRepair:
         )
 
         s._check_order_filled = MagicMock(return_value=None)
-        s._check_trail_order_status = MagicMock(return_value=None)
-        s._place_trailing_stop_market = MagicMock()
+        s._check_trail_regular = MagicMock(return_value=None)
+        s._place_trail_regular = MagicMock()
 
         s._sync_server_orders()
 
-        s._place_trailing_stop_market.assert_not_called()
+        s._place_trail_regular.assert_not_called()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -648,10 +648,10 @@ class TestStraddleIndependentTrails:
         # LONG trail fires
         def mock_trail_check(sym, oid):
             if oid == "trail_11111":
-                return {"status": "FILLED", "avgPrice": "102.0", "executedQty": "30.0", "algoId": "trail_11111"}
+                return {"status": "FILLED", "avgPrice": "102.0", "executedQty": "30.0", "orderId": 11111}
             return None  # Not filled
 
-        s._check_trail_order_status = MagicMock(side_effect=mock_trail_check)
+        s._check_trail_regular = MagicMock(side_effect=mock_trail_check)
         s._check_order_filled = MagicMock(return_value=None)
         s._cancel_server_stop_loss = MagicMock(return_value=True)
         s._record_server_fill = MagicMock()
@@ -684,3 +684,284 @@ class TestConfigFlag:
 
         cfg = VolStraddleConfig(trail_server_native=True)
         assert cfg.trail_server_native is True
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Regular API Trail Tests (POST /fapi/v1/order)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestPlaceTrailRegular:
+    """Test _place_trail_regular (regular futures API)."""
+
+    def test_paper_mode_returns_mock_id(self):
+        s = _build_trail_scalper()
+        assert s.paper_mode is True
+        oid = s._place_trail_regular("TESTUSDT", "SELL", 10.0, 0.2, 101.5, "LONG")
+        assert isinstance(oid, str)
+        assert oid.startswith("paper_trail_")
+
+    def test_live_mode_calls_futures_create_order(self):
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        s.client.futures_create_order = MagicMock(return_value={"orderId": 12345678})
+
+        oid = s._place_trail_regular("TESTUSDT", "SELL", 10.0, 0.2, 101.5, "LONG")
+
+        assert oid == "12345678"
+        call_kwargs = s.client.futures_create_order.call_args[1]
+        assert call_kwargs["symbol"] == "TESTUSDT"
+        assert call_kwargs["side"] == "SELL"
+        assert call_kwargs["type"] == "TRAILING_STOP_MARKET"
+        assert call_kwargs["quantity"] == 10.0
+        assert call_kwargs["callbackRate"] == 0.2
+        assert call_kwargs["activationPrice"] == 101.5
+        assert call_kwargs["positionSide"] == "LONG"
+        assert "reduceOnly" not in call_kwargs
+
+    def test_no_position_side_uses_reduce_only(self):
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        s.client.futures_create_order = MagicMock(return_value={"orderId": 99999})
+
+        s._place_trail_regular("TESTUSDT", "SELL", 5.0, 0.1)
+
+        call_kwargs = s.client.futures_create_order.call_args[1]
+        assert call_kwargs["reduceOnly"] == "true"
+        assert "positionSide" not in call_kwargs
+
+    def test_activation_price_optional(self):
+        """When activation_price is None, it should not be in params."""
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        s.client.futures_create_order = MagicMock(return_value={"orderId": 11111})
+
+        s._place_trail_regular("TESTUSDT", "BUY", 5.0, 0.3, position_side="SHORT")
+
+        call_kwargs = s.client.futures_create_order.call_args[1]
+        assert "activationPrice" not in call_kwargs
+
+    def test_api_error_returns_none(self):
+        from binance.exceptions import BinanceAPIException
+        import json
+
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        resp_text = json.dumps({"code": -1000, "msg": "Internal error."})
+        resp_obj = type("R", (), {"status_code": 400, "text": resp_text})()
+        s.client.futures_create_order = MagicMock(side_effect=BinanceAPIException(resp_obj, 400, resp_text))
+
+        oid = s._place_trail_regular("TESTUSDT", "SELL", 10.0, 0.2, 101.5, "LONG")
+        assert oid is None
+
+
+class TestCancelTrailRegular:
+    """Test _cancel_trail_regular (regular futures API)."""
+
+    def test_paper_mode_returns_true(self):
+        s = _build_trail_scalper()
+        assert s._cancel_trail_regular("TESTUSDT", "12345") is True
+
+    def test_paper_prefix_returns_true(self):
+        s = _build_trail_scalper()
+        assert s._cancel_trail_regular("TESTUSDT", "paper_trail_12345") is True
+
+    def test_none_order_id_returns_true(self):
+        s = _build_trail_scalper()
+        assert s._cancel_trail_regular("TESTUSDT", None) is True
+
+    def test_live_cancel_calls_futures_cancel_order(self):
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        s.client.futures_cancel_order = MagicMock(return_value={"orderId": 12345})
+
+        result = s._cancel_trail_regular("TESTUSDT", "12345")
+        assert result is True
+        s.client.futures_cancel_order.assert_called_once_with(symbol="TESTUSDT", orderId=12345)
+
+    def test_already_filled_returns_true(self):
+        """Already filled order returns -2011 — should be benign."""
+        from binance.exceptions import BinanceAPIException
+        import json
+
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        resp_text = json.dumps({"code": -2011, "msg": "Unknown order sent."})
+        resp_obj = type("R", (), {"status_code": 400, "text": resp_text})()
+        s.client.futures_cancel_order = MagicMock(side_effect=BinanceAPIException(resp_obj, 400, resp_text))
+
+        result = s._cancel_trail_regular("TESTUSDT", "12345")
+        assert result is True
+
+    def test_real_error_returns_false(self):
+        from binance.exceptions import BinanceAPIException
+        import json
+
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        resp_text = json.dumps({"code": -1022, "msg": "Invalid signature."})
+        resp_obj = type("R", (), {"status_code": 400, "text": resp_text})()
+        s.client.futures_cancel_order = MagicMock(side_effect=BinanceAPIException(resp_obj, 400, resp_text))
+
+        result = s._cancel_trail_regular("TESTUSDT", "12345")
+        assert result is False
+
+
+class TestCheckTrailRegular:
+    """Test _check_trail_regular (regular futures API)."""
+
+    def test_paper_mode_returns_none(self):
+        s = _build_trail_scalper()
+        assert s._check_trail_regular("TESTUSDT", "paper_trail_123") is None
+
+    def test_filled_returns_data(self):
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        s.client.futures_get_order = MagicMock(
+            return_value={
+                "status": "FILLED",
+                "avgPrice": "102.50",
+                "executedQty": "30.0",
+                "orderId": 77777,
+            }
+        )
+        s._lookup_actual_fill = MagicMock(return_value=None)
+
+        result = s._check_trail_regular("TESTUSDT", "77777")
+        assert result is not None
+        assert result["status"] == "FILLED"
+        assert result["avgPrice"] == "102.50"
+        assert result["executedQty"] == "30.0"
+
+    def test_new_returns_none(self):
+        """NEW status means still active / not triggered yet."""
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        s.client.futures_get_order = MagicMock(return_value={"status": "NEW", "orderId": 77777})
+
+        result = s._check_trail_regular("TESTUSDT", "77777")
+        assert result is None
+
+    def test_canceled_returns_canceled_status(self):
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        s.client.futures_get_order = MagicMock(return_value={"status": "CANCELED", "orderId": 77777})
+
+        result = s._check_trail_regular("TESTUSDT", "77777")
+        assert result is not None
+        assert result["status"] == "CANCELED"
+
+    def test_expired_returns_canceled_status(self):
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        s.client.futures_get_order = MagicMock(return_value={"status": "EXPIRED", "orderId": 77777})
+
+        result = s._check_trail_regular("TESTUSDT", "77777")
+        assert result is not None
+        assert result["status"] == "CANCELED"
+
+    def test_order_not_found_returns_canceled(self):
+        """-2013: Order does not exist → treat as cancelled."""
+        from binance.exceptions import BinanceAPIException
+        import json
+
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        resp_text = json.dumps({"code": -2013, "msg": "Order does not exist."})
+        resp_obj = type("R", (), {"status_code": 400, "text": resp_text})()
+        s.client.futures_get_order = MagicMock(side_effect=BinanceAPIException(resp_obj, 400, resp_text))
+
+        result = s._check_trail_regular("TESTUSDT", "99999")
+        assert result is not None
+        assert result["status"] == "CANCELED"
+
+
+class TestTrailCrossCancel:
+    """Test cross-cancel logic: when SL fires → trail cancelled, when trail fires → SL+TP cancelled."""
+
+    def test_sl_fires_cancels_trail(self):
+        """When server SL fills, the trail order should also be cancelled."""
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id="77777",
+            server_sl_order_id="sl_111",
+            server_tp_order_id="tp_222",
+            is_straddle=False,
+        )
+
+        # SL fires
+        s._check_order_filled = MagicMock(
+            return_value={
+                "status": "FILLED",
+                "avgPrice": "99.0",
+                "executedQty": "30.0",
+            }
+        )
+        s._check_trail_regular = MagicMock(return_value=None)
+        s._cancel_trail_regular = MagicMock(return_value=True)
+        s._cancel_server_take_profit = MagicMock(return_value=True)
+        s._record_server_fill = MagicMock()
+
+        s._sync_server_orders()
+
+        # Trail should be cancelled when SL fires
+        s._cancel_trail_regular.assert_called_with("TESTUSDT", "77777")
+
+    def test_trail_fires_cancels_sl_and_tp(self):
+        """When trail fills, both SL and TP should be cancelled."""
+        s = _build_trail_scalper()
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id="77777",
+            server_sl_order_id="sl_111",
+            server_tp_order_id="tp_222",
+            is_straddle=False,
+        )
+
+        # SL/TP not filled
+        s._check_order_filled = MagicMock(return_value=None)
+        # Trail fires
+        s._check_trail_regular = MagicMock(
+            return_value={
+                "status": "FILLED",
+                "avgPrice": "103.0",
+                "executedQty": "30.0",
+            }
+        )
+        s._cancel_server_stop_loss = MagicMock(return_value=True)
+        s._cancel_server_take_profit = MagicMock(return_value=True)
+        s._record_server_fill = MagicMock()
+
+        s._sync_server_orders()
+
+        # Both SL and TP should be cancelled
+        s._cancel_server_stop_loss.assert_called_with("TESTUSDT", "sl_111")
+        s._cancel_server_take_profit.assert_called_with("TESTUSDT", "tp_222")
+        s._record_server_fill.assert_called_once_with("TESTUSDT:LONG", 103.0, 30.0, "server_trail")
+
+
+class TestCallbackRateBounds:
+    """Test callbackRate edge values from _get_trail_params."""
+
+    def test_straddle_at_minimum_0_1(self):
+        """s_trail_distance=0.001 → callbackRate=0.1 (Binance minimum)."""
+        s = _build_trail_scalper()
+        cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
+        assert cr == pytest.approx(0.1, abs=0.01)  # 0.001 * 100 = 0.1
+
+    def test_vr_squeeze_callback_rate(self):
+        """d_trail_distance=0.002 → callbackRate=0.2."""
+        s = _build_trail_scalper()
+        cr, ap, cs = s._get_trail_params("vr_squeeze", 1, 100.0)
+        assert cr == pytest.approx(0.2, abs=0.01)
+
+    def test_ma_cluster_callback_rate(self):
+        """ma_trail_distance=0.003 → callbackRate=0.3."""
+        s = _build_trail_scalper()
+        cr, ap, cs = s._get_trail_params("ma_cluster", 1, 100.0)
+        assert cr == pytest.approx(0.3, abs=0.01)

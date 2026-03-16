@@ -34,6 +34,8 @@ print(f'base_leverage={cfg.base_leverage} max_concurrent={cfg.max_concurrent}')
 print(f'L/N = {cfg.base_leverage / cfg.max_concurrent:.2f}')
 print(f'hedge_mode={cfg.hedge_mode}')
 print(f'dynamic_capital_enabled={cfg.dynamic_capital_enabled}')
+print(f'trail_server_native={cfg.trail_server_native}')
+print(f'straddle_enabled={cfg.straddle_enabled}')
 "
 ```
 
@@ -43,6 +45,8 @@ print(f'dynamic_capital_enabled={cfg.dynamic_capital_enabled}')
 - `base_leverage=30.0`, `max_concurrent=10` → L/N=3.0
 - `s_squeeze_dur=3`, `s_vr_threshold=0.57`
 - `hedge_mode=True`, `dynamic_capital_enabled=False`
+- `trail_server_native=True` (Regular API TRAILING_STOP_MARKET)
+- `straddle_enabled=True`
 
 > ⚠️ `.env` 값이 `config.py` 기본값보다 항상 우선. 반드시 `.env`도 함께 확인.
 
