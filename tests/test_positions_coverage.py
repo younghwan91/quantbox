@@ -476,7 +476,7 @@ class TestBracketPlacement:
 
     def test_sl_and_tp_placed_after_open(self):
         """Both SL and TP server orders placed on successful open."""
-        scalper = _make_vs_scalper()
+        scalper = _make_vs_scalper(vs_config=VolStraddleConfig(trail_server_native=False))
         _mock_open(scalper, sl_id="sl_111", tp_id="tp_222")
         _set_signal_meta(scalper)
         result = _open(scalper)
@@ -490,7 +490,7 @@ class TestBracketPlacement:
 
     def test_sl_would_trigger_stored_as_none(self):
         """SL WOULD_TRIGGER → stored as None (bracket repair handles it next cycle)."""
-        scalper = _make_vs_scalper()
+        scalper = _make_vs_scalper(vs_config=VolStraddleConfig(trail_server_native=False))
         _mock_open(scalper, sl_id="WOULD_TRIGGER", tp_id="tp_222")
         _set_signal_meta(scalper)
         _open(scalper)

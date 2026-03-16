@@ -76,6 +76,14 @@ class VolStraddleConfig(BaseSettings):
     # r82: strd_max=8 → Calmar +67% vs strd_max=6. VR 2슬롯 보험 유지.
     hedge_mode: bool = True  # Binance Hedge Mode (dualSidePosition=true)
 
+    # ── Server-Side Trailing Stop (r90 migration) ──
+    # When True, places Binance TRAILING_STOP_MARKET at entry alongside SL.
+    # Binance tracks peak tick-by-tick and fires MARKET when price drops
+    # callbackRate% from peak after activationPrice. Matches IDEAL sim model.
+    # Server-side TRAILING_STOP_MARKET via regular API (POST /fapi/v1/order).
+    # Eliminates bar-close execution gap that made straddle unprofitable.
+    trail_server_native: bool = True
+
     # ── Direction ──
     momentum_period: int = 8  # Momentum lookback for D direction
 

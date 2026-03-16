@@ -378,6 +378,191 @@ class BracketMixin:
         """
         return self._cancel_server_order(symbol, order_id, "take-profit")
 
+    # ── Server-Side Trailing Stop (TRAILING_STOP_MARKET) ──────────────────
+    # r90 migration: replaces dead client-side trail + ratchet with Binance's
+    # native tick-by-tick trailing stop. Uses Algo Order API with
+    # activationPrice = entry_price (already reached → no -2021 rejection).
+
+    def _get_trail_params(
+        self: "ScalperProtocol",
+        strategy_type: str,
+        signal: int,
+        entry_price: float,
+    ) -> tuple[float, float, str]:
+        """Calculate TRAILING_STOP_MARKET parameters from config.
+
+        Args:
+            strategy_type: 'straddle', 'ma_cluster', or 'vr_squeeze'/'vr_*'.
+            signal: +1 (LONG) or -1 (SHORT).
+            entry_price: Position entry price.
+
+        Returns:
+            (callback_rate, activation_price, close_side) tuple.
+            callback_rate: Binance callbackRate (0.1-5.0, percentage).
+            activation_price: entry_price (starts trailing immediately).
+            close_side: 'SELL' for LONG, 'BUY' for SHORT.
+        """
+        vs = self.vs_config
+        if strategy_type == "straddle":
+            td = vs.s_trail_distance
+        elif strategy_type == "ma_cluster":
+            td = vs.ma_cluster_trail_distance
+        else:  # vr_squeeze, vr_directional, vr_straddle
+            td = vs.d_trail_distance
+
+        # trail_distance fraction → Binance callbackRate percentage
+        # e.g. 0.001 (0.1%) → 0.1, clamped to [0.1, 5.0]
+        callback_rate = max(0.1, min(5.0, td * 100))
+
+        # activationPrice = entry_price: trail starts tracking immediately.
+        # Binance Algo API rejects future prices with -2021. By using entry
+        # (already reached by definition), the order is always accepted.
+        # Server SL provides downside protection; trail provides tighter exit.
+        activation_price = entry_price
+        close_side = "SELL" if signal == 1 else "BUY"
+
+        return callback_rate, activation_price, close_side
+
+    def _place_trailing_stop_market(
+        self: "ScalperProtocol",
+        symbol: str,
+        side: str,
+        quantity: float,
+        callback_rate: float,
+        activation_price: float,
+        position_side: str | None = None,
+    ) -> str | None:
+        """Place TRAILING_STOP_MARKET via Algo Order API (POST /fapi/v1/algoOrder).
+
+        The regular futures API rejects TRAILING_STOP_MARKET with -4120.
+        Algo API is the only supported endpoint. With activationPrice = entry_price
+        (already reached), -2021 rejection is avoided.
+        """
+        if self.paper_mode:
+            return f"paper_trail_{int(time.time() * 1000)}"
+
+        params: dict = {
+            "algoType": "CONDITIONAL",
+            "symbol": symbol,
+            "side": side,
+            "type": "TRAILING_STOP_MARKET",
+            "quantity": str(quantity),
+            "callbackRate": str(callback_rate),
+            "activationPrice": str(activation_price),
+        }
+        # Hedge Mode: positionSide is mutually exclusive with reduceOnly
+        if position_side is not None:
+            params["positionSide"] = position_side
+        else:
+            params["reduceOnly"] = "true"
+
+        logger.debug(
+            f"[{symbol}] Trail order request: side={side} qty={quantity:.6f} "
+            f"callbackRate={callback_rate}% activationPrice=${activation_price:.4f}"
+        )
+
+        try:
+            resp = self.client._request_futures_api(
+                "post",
+                "algoOrder",
+                signed=True,
+                data=params,
+            )
+            algo_id = str(resp["algoId"])
+            logger.info(
+                f"[{symbol}] SERVER TRAIL placed via Algo API: "
+                f"{side} {quantity:.6f} callbackRate={callback_rate}% "
+                f"activationPrice=${activation_price:.4f} (algoId={algo_id})"
+            )
+            return algo_id
+        except Exception as e:
+            err_str = str(e)
+            # -2021: Order would immediately trigger — mark price is too far
+            # from activationPrice for Binance to accept the order.
+            # Return sentinel so caller can suppress retry spam.
+            if "-2021" in err_str:
+                logger.info(
+                    f"[{symbol}] Trail WOULD_TRIGGER — mark too far from "
+                    f"activationPrice=${activation_price:.6f} (callbackRate={callback_rate}%)"
+                )
+                return "WOULD_TRIGGER"
+            logger.error(f"[{symbol}] SERVER TRAIL FAILED: {e}. params={params}")
+            return None
+
+    def _cancel_trailing_stop_market(
+        self: "ScalperProtocol",
+        symbol: str,
+        order_id: str,
+    ) -> bool:
+        """Cancel TRAILING_STOP_MARKET via Algo Order API (DELETE /fapi/v1/algoOrder)."""
+        return self._cancel_server_order(symbol, order_id, "trailing-stop")
+
+    def _check_trail_order_status(
+        self: "ScalperProtocol",
+        symbol: str,
+        order_id: str,
+    ) -> dict | None:
+        """Check TRAILING_STOP_MARKET via Algo Order API (GET /fapi/v1/algoOrder)."""
+        return self._check_order_filled(symbol, order_id)
+
+    # ── Trail API Facade ────────────────────────────────────────────────
+    # These methods are called by positions.py / reconciliation.py.
+    # Internally they use the Algo Order API — the regular futures API
+    # rejects TRAILING_STOP_MARKET with -4120.
+
+    def _place_trail_regular(
+        self: "ScalperProtocol",
+        symbol: str,
+        side: str,
+        quantity: float,
+        callback_rate: float,
+        activation_price: float | None = None,
+        position_side: str | None = None,
+    ) -> str | None:
+        """Place TRAILING_STOP_MARKET order.
+
+        Delegates to Algo Order API (``_place_trailing_stop_market``).
+        Despite the method name, the regular API (POST /fapi/v1/order) returns
+        -4120 for this order type — only the Algo API works.
+
+        Returns:
+            algoId as string on success, None on failure.
+        """
+        if activation_price is None:
+            activation_price = 0.0  # shouldn't happen — caller always provides
+        return self._place_trailing_stop_market(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            callback_rate=callback_rate,
+            activation_price=activation_price,
+            position_side=position_side,
+        )
+
+    def _cancel_trail_regular(
+        self: "ScalperProtocol",
+        symbol: str,
+        order_id: str,
+    ) -> bool:
+        """Cancel a TRAILING_STOP_MARKET order.
+
+        Delegates to Algo Order API (``_cancel_trailing_stop_market``).
+        """
+        return self._cancel_trailing_stop_market(symbol, order_id)
+
+    def _check_trail_regular(
+        self: "ScalperProtocol",
+        symbol: str,
+        order_id: str,
+    ) -> dict | None:
+        """Check TRAILING_STOP_MARKET order status.
+
+        Delegates to Algo Order API (``_check_trail_order_status``).
+        Algo order status lifecycle: NEW → WORKING → TRIGGERED → FINISHED.
+        Both TRIGGERED and FINISHED are treated as FILLED.
+        """
+        return self._check_trail_order_status(symbol, order_id)
+
     def _lookup_actual_fill(
         self: "ScalperProtocol",
         symbol: str,
@@ -512,7 +697,7 @@ class BracketMixin:
             # Without this, a cancelled order keeps its algoId in our state,
             # _sync_server_orders skips bracket repair (oid is not None),
             # and the position silently loses server-side protection.
-            if algo_status in ("CANCELLED", "EXPIRED", "USER_CANCELLED"):
+            if algo_status in ("CANCELLED", "CANCELED", "EXPIRED", "USER_CANCELLED"):
                 logger.warning(f"[{symbol}] Algo order {algo_status}: algoId={order_id} — will trigger bracket repair")
                 return {"status": "CANCELLED", "algoId": order_id}
         except Exception as e:
@@ -759,7 +944,7 @@ class BracketMixin:
             if ":" in api_sym:
                 api_sym = api_sym.split(":")[0]
             status = self._verify_algo_order_active(str(sl_oid), api_sym)
-            if status in ("EXPIRED", "CANCELLED", "USER_CANCELLED"):
+            if status in ("EXPIRED", "CANCELLED", "CANCELED", "USER_CANCELLED"):
                 logger.warning(f"[{sym}] SL algo order {sl_oid} is {status} — re-placing bracket")
                 pos["server_sl_order_id"] = None
                 # Bracket will be re-placed by the normal bracket repair logic

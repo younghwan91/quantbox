@@ -189,15 +189,55 @@ APIError(code=-1111): Precision is over the maximum defined for this asset.
 
 **버그 패턴:** `_check_order_filled()`가 `TRIGGERED`만 체크, `FINISHED` 미처리
 ```
-# Binance 조건부 주문 상태 전이
 WORKING → TRIGGERED (순간) → FINISHED (최종 체결)
 ```
+`_check_order_filled()` (brackets.py L564)에서 TRIGGERED + FINISHED 둘 다 체결 처리.
 
-**코드 확인:**
-```bash
-grep -n "TRIGGERED\|FINISHED\|algoStatus" quantbox/execution/brackets.py | head -10
-# 두 상태 모두 체결로 처리해야 함
+### Algo Order 취소 상태: `"CANCELED"` (US) vs `"CANCELLED"` (UK) ← Incident #7 (2026-03-17)
+
+**증상:** SL이 Binance에서 취소됐으나 state에 stale ID 잔류 → bracket repair가 "이미 SL 있음"으로 판단 → SL 미재배치 → **포지션 SL 미보호**
+
+**원인:** Binance Algo API는 `algoStatus: "CANCELED"` (미국식 1-L) 반환. 코드는 `"CANCELLED"` (영국식 2-L)만 체크.
+
+**수정 (v14.25.1, commit 8403c72):**
+```python
+# brackets.py L647, L894 — 두 곳 모두 수정
+if status in ("CANCELLED", "CANCELED", "EXPIRED"):
 ```
+
+**진단:** SL이 없는 포지션이 발견되면:
+```bash
+grep "CANCELED\|CANCELLED\|bracket repair" $LOG | tail -10
+```
+
+### Incident #8: TRAILING_STOP_MARKET API 선택 (2026-03-17)
+
+**증상:** Algo API (`POST /fapi/v1/algoOrder`)의 TRAILING_STOP_MARKET은 `activationPrice` 필수.
+mark price가 activationPrice에 도달하지 않으면 `-2021: Order would immediately trigger` reject.
+straddle 진입 시 trail 배치 불가 → 포지션이 SL까지 하락 → PF=0.715 (r89).
+
+**수정:** **Regular API** (`POST /fapi/v1/order`) 사용. `activationPrice`가 **optional** (기본값=현재가).
+미도달 가격이어도 Binance가 주문 접수 후 대기. -2021 reject 없음.
+
+**현재 메서드:**
+- `_place_trail_regular()` → `futures_create_order(type='TRAILING_STOP_MARKET', callbackRate=..., activationPrice=...)`
+- `_cancel_trail_regular()` → `futures_cancel_order(orderId=...)`
+- `_check_trail_regular()` → `futures_get_order(orderId=...)` → status: NEW/FILLED/CANCELED
+
+**deprecated:** `_place_trailing_stop_market`, `_cancel_trailing_stop_market`, `_check_trail_order_status` (algo API)
+
+**callbackRate 범위:** 0.1-5.0 (1=1%). `s_trail_distance=0.001` → `callbackRate=0.1` (최솟값).
+
+**cross-cancel:** SL 체결 시 trail 취소 (regular), trail 체결 시 SL+TP 취소 (algo).
+
+### S_d8 Straddle 실행 갭 (2026-03-17, r89)
+
+**발견:** S_d8 straddle의 전체 수익이 trail exit 가격 정밀도에 의존.
+- IDEAL (trail_stop 가격에 정확히 exit): PF=5.44, WR=58.5%
+- BAR-CLOSE (현실적 bar close 가격에 exit): **PF=0.715**, WR=32.7%, MaxDD=99.9%
+- 갭: **-86.9%** — 모든 연도 손실 (2020-2025)
+- **해결:** Regular API TRAILING_STOP_MARKET이 tick-by-tick 추적 → IDEAL에 근접 예상
+- **straddle 재활성화됨** (`VS_STRADDLE_ENABLED=true`, `VS_TRAIL_SERVER_NATIVE=true`)
 
 ---
 
@@ -209,6 +249,7 @@ grep "BRACKET REPAIR FAILED" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle
 ```
 - 1회: 일시적 API 오류 (무시)
 - 매 사이클 반복: state 파일 `symbol` 필드 점검 → -1022 원인
+- **SL이 Binance에서 취소(`CANCELED`)됐으나 state에 잔류 → 신규 SL 배치 불가 (Incident #7)**
 
 ### 2.2 포지션 ghost 감지
 ```bash
@@ -282,6 +323,8 @@ cp data/state/scalper_state_backup_YYYYMMDD_HHMMSS.json data/state/scalper_state
 6. **데이터 기간:** 강세장만 백테스트 → 실제와 다른 시장 환경
 7. **D_trail 파라미터 소스 오염 (r53 인시던트, 2026-03-08):** `backtest_v14_3_0.py`의 `D_TRAIL_ACTIVATE=0.02/D_TRAIL_DISTANCE=0.003` import 절대 금지. 항상 `cfg = VolStraddleConfig()`에서 직접 읽어야 함. **r69 이후 프로덕션 값은 `0.010/0.002`** (r47~r68: 0.005/0.002). 구버전 파일에서 import 시 D_mom8 결과가 조용히 틀림.
 8. **Trail bar-close 실행 갭:** Trail ratchet 구현 완료 (commit `e473e4d`, v14.5+). MFE >> |PnL| + trailing_stop 청산이면 ratchet 이전 포지션. 신규 포지션은 자동 해결.
+9. **Straddle 실행 갭 (r89, 2026-03-17):** S_d8 bar-close PF=0.715 vs IDEAL PF=5.44. 전략의 수익이 전적으로 trail exit 가격 정밀도에 의존. **straddle_enabled=False (프로덕션).**
+10. **TRAILING_STOP_MARKET API (2026-03-17):** Algo API(`/fapi/v1/algoOrder`) → `-2021` reject. **Regular API**(`/fapi/v1/order`) 사용 필수. `_place_trail_regular()` / `_cancel_trail_regular()` / `_check_trail_regular()`. deprecated: `_place_trailing_stop_market` 등.
 
 ---
 
@@ -316,148 +359,37 @@ python -m pytest tests/ -x -q
 
 ---
 
-## 7. Scalper 함수 시그니처 & 테스트 패턴 (이 세션에서 반복 실수 방지용)
+## 7. Scalper 핵심 참조
 
-### 7.2 Compound Key vs API Symbol
-
-```
-pos_key  → "TESTUSDT:LONG"  (strategy._positions dict key, hedge mode)
-api_sym  → "TESTUSDT"       (Binance API에 전달하는 순수 심볼)
-pos['symbol'] → "TESTUSDT"  (pos dict 안 symbol 필드 — 절대 ':' 포함 금지)
-
-# 올바른 추출
-api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
-```
-
-### 7.3 Rubberband vs VolStraddle Code Path
-
-| 코드 경로 | RubberBand | VolStraddle |
-|----------|-----------|-------------|
-| `_cycle` L525-527 | ✅ (rubberband-specific) | ❌ skip |
-| `strategy.on_bar()` signal | -1/0/1 | -1/0/1/2 (straddle=2) |
-| position key format | `"TESTUSDT"` (no colon) | `"TESTUSDT:LONG"` / `"TESTUSDT:SHORT"` |
-| `_place_order` position_side | `None` (One-Way) | `"LONG"` / `"SHORT"` (Hedge) |
-| `_scan_entries` 4h download | only if `vs_config.ma_cluster_enabled` | always (vol_straddle) |
-
-### 7.4 conftest.py 공유 Fixture 사용법
-
-```python
-from tests.conftest import _build_vs_scalper, _build_rb_scalper
-
-# VolStraddle scalper (paper mode, mocked client)
-scalper = _build_vs_scalper(balance=1000.0)
-
-# RubberBand scalper
-rb_scalper = _build_rb_scalper()  # rb_cfg= optional
-
-# 포지션 주입 (hedge mode, LONG)
-_inject_position(scalper, "TESTUSDT:LONG")
-# pos['symbol'] = "TESTUSDT" (자동으로 colon 없이 설정됨)
-```
-
-> ⚠️ `_build_vs_scalper`는 `pytest.fixture`가 아님 — 함수로 직접 호출.
-> `vs_scalper` fixture는 conftest.py에서 자동 주입되며, params 못 받음.
+- `pos_key` = `"TESTUSDT:LONG"` (hedge), `api_sym` = `"TESTUSDT"` (API용). `pos['symbol']`에 `:` 금지.
+- `_build_vs_scalper()` / `_build_rb_scalper()` (conftest.py) — fixture 아님, 직접 호출.
+- `_inject_position(scalper, "TESTUSDT:LONG")` — pos['symbol']은 자동 colon 제거.
+- RubberBand: one-way, signal -1/0/1. VolStraddle: hedge, signal -1/0/1/2 (straddle=2).
 
 ---
 
-## 8. 새 코드 경로 추가 시 Guard 상속 체크리스트
+## 8. 새 코드 경로 추가 시 Guard 체크리스트
 
-> **목적:** 새 기능(진입 전략, 사이징 로직, 청산 경로)을 추가할 때 기존 Guard들이
-> 새 경로에서도 동작하는지 확인. 이 체크를 건너뛰면 "기존 경로는 됐는데 새 경로에서 처음 에러" 패턴 반복.
+- [ ] **Symbol**: API에 `pos['symbol']` (`:` 없는 순수 심볼). `OrderPreflight` 자동 차단.
+- [ ] **Leverage guard**: `if not reduce_only and leverage > 1:` (Incident #1, #5)
+- [ ] **Notional cap**: `max_notional` 적용 경로 확인 (positions.py)
+- [ ] **주문 경로**: `_place_order()` 경유 필수 (Preflight 자동 적용)
+- [ ] **경계 테스트**: n_active>0, trail_active=True, hedge mode (Incident #3)
+- [ ] **Algo 상태**: TRIGGERED + FINISHED + CANCELED(US) + CANCELLED(UK) 모두 처리 (Incident #4, #7)
 
-**새 entry/exit/sizing 로직 추가 시 반드시 확인:**
-
-- [ ] **Symbol 형식**: API에 `pos['symbol']` 전달 (`:` 포함 안 된 순수 심볼). `pos_key` 직접 전달 금지
-  → 위반 시 -1022. `_place_order()` 진입 시 `OrderPreflight`가 자동 차단.
-
-- [ ] **레버리지 변경 guard**: `if not reduce_only and leverage > 1:` 조건 있는가?
-  → 위반 시 -2028 (Incident #1, #5). close/partial-close 경로에서 절대 leverage 변경 금지.
-
-- [ ] **Notional 상한**: `max_notional` 캡 적용 경로를 지나는가? (`positions.py` 내부)
-  → 위반 시 -2027 (ENJ/ICX Incident). CW-Tier, leverage_override 모두 cap 이후 적용됨.
-
-- [ ] **주문 경로**: `_place_order()` 경유하는가?
-  → 모든 진입/청산은 `_place_order()`를 통해야 `OrderPreflight`가 자동 적용됨.
-
-- [ ] **경계 상태 테스트 포함**: n_active>0, trail_active=True, hedge mode, reduce_only=False
-  → n_active=0만 테스트하면 실거래에서 슬롯 2+에서 에러 (Incident #3).
-
-- [ ] **Binance 상태 전이 처리**: TRIGGERED + FINISHED 둘 다 체결로 처리
-  → TRIGGERED만 처리하면 FINISHED 상태에서 ghost 발생 (Incident #4).
-
-**새 코드 경로 추가 후 반드시 실행:**
-```bash
-python -m pytest tests/ -x -q  # 전체 (1586+ tests)
-```
+새 경로 추가 후: `python -m pytest tests/ -x -q`
 
 ---
 
-## 8. 핵심 트레이딩 로직 안전장치 (Audit 2026-03-XX)
+## 9. 핵심 안전장치 요약 (Audit 2026-03)
 
-7개 버그를 코드 감사로 발견 후 수정. 수정 후 19개 테스트 추가 (`tests/test_critical_path_guards.py`).
+| ID | 위치 | 가드 내용 |
+|----|------|-----------|
+| F2 | reconciliation.py | SHORT force-close → `askPrice` (LONG → `bidPrice`) |
+| A2 | scalper.py | HWM ≤ 0 → balance로 리셋 |
+| C1 | brackets.py | `stop_mult < 0` → `return None` |
+| D1 | brackets.py | `target_retrace ≤ 0` or `move_size × target_retrace ≥ 1.0` → `return None` |
+| B3 | strategy.py | `sl_pct > 0` 확인 후 SL 체크 (0이면 즉시 청산 버그) |
+| F3 | reconciliation.py | bracket repair `qty ≤ 0` → skip (극소 notional) |
 
-### 8.1 F2: SHORT force-close 가격 (`reconciliation.py`)
-
-WOULD_TRIGGER 발동 시 force-close 가격:
-- LONG → `bidPrice` (매수자가 지불할 가격 = 매도에 유리)
-- SHORT → `askPrice` (매도자가 받을 가격 = 매수에 유리)
-
-```python
-# 수정 후 (~L173 reconciliation.py)
-_fc_price = float(_book["bidPrice"] if signal == 1 else _book["askPrice"])
-```
-
-**진단:** SHORT force-close 후 PnL이 예상보다 나쁘면 (bid로 매수하면 ask보다 불리) L173 확인.
-
-### 8.2 A2: HWM 음수/0 복원 (`scalper.py`)
-
-state 파일 오염 시 HWM=-999 같은 값 복원 가능 → `(hwm - balance) / hwm` ZeroDivisionError.
-
-```python
-# _load_state() 내 positions 복원 후
-if self._high_water_mark <= 0:
-    self._high_water_mark = balance
-if self._initial_balance <= 0:
-    self._initial_balance = balance
-```
-
-### 8.3 C1: stop_mult 음수 가드 (`brackets.py`)
-
-```python
-if stop_mult < 0:
-    return None  # SL이 entry 반대방향에 배치될 것임
-```
-
-### 8.4 D1: target_retrace 가드 (`brackets.py`)
-
-```python
-if target_retrace <= 0:
-    return None  # TP 방향 역전
-if move_size * target_retrace >= 1.0:
-    return None  # SHORT에서 trigger_price ≤ 0
-# target_retrace=1.5 (RubberBand 기본값) + move_size=0.03 → total=0.045 < 1.0 → 허용
-```
-
-### 8.5 B3: sl_pct=0 가드 (`strategy.py`)
-
-```python
-# 수정 전: if not trail_active and worst_gain <= -sl_pct
-# 수정 후:
-if not trail_active and sl_pct > 0 and worst_gain <= -sl_pct:
-```
-
-`sl_pct=0` (config 오염) 시 ANY loss에서 SL exit → 가드 없으면 즉시 청산.
-
-### 8.6 F3: bracket repair qty=0 가드 (`reconciliation.py`)
-
-극소 notional 포지션은 qty rounding 후 0이 됨 → API reject → repair loop 무한 실패.
-
-```python
-quantity = self._round_qty(quantity, api_sym)
-if quantity <= 0:
-    logger.error(...)
-    self.discord.send(...)
-    continue  # skip repair
-```
-
----
+19개 테스트: `tests/test_critical_path_guards.py`
