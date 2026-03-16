@@ -204,6 +204,35 @@ class ScalperProtocol(Protocol):
         """Cancel a server-side TP algo order. Returns True on success or benign error."""
         ...
 
+    def _get_trail_params(
+        self,
+        strategy_type: str,
+        signal: int,
+        entry_price: float,
+    ) -> tuple[float, float, str]:
+        """Calculate TRAILING_STOP_MARKET params. Returns (callbackRate, activationPrice, closeSide)."""
+        ...
+
+    def _place_trailing_stop_market(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        callback_rate: float,
+        activation_price: float,
+        position_side: str | None = None,
+    ) -> int | None:
+        """Place TRAILING_STOP_MARKET via regular futures API. Returns orderId or None."""
+        ...
+
+    def _cancel_trailing_stop_market(self, symbol: str, order_id: int) -> bool:
+        """Cancel a TRAILING_STOP_MARKET order. Returns True on success or benign error."""
+        ...
+
+    def _check_trail_order_status(self, symbol: str, order_id: int) -> dict[str, Any] | None:
+        """Check if TRAILING_STOP_MARKET order has been filled. Returns status dict or None."""
+        ...
+
     def _verify_algo_order_active(self, algo_id: str, symbol: str) -> str | None:
         """Verify an algo order is still active. Returns status string or None."""
         ...
