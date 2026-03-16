@@ -204,6 +204,55 @@ class ScalperProtocol(Protocol):
         """Cancel a server-side TP algo order. Returns True on success or benign error."""
         ...
 
+    def _get_trail_params(
+        self,
+        strategy_type: str,
+        signal: int,
+        entry_price: float,
+    ) -> tuple[float, float, str]:
+        """Calculate TRAILING_STOP_MARKET params. Returns (callbackRate, activationPrice, closeSide)."""
+        ...
+
+    def _place_trailing_stop_market(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        callback_rate: float,
+        activation_price: float,
+        position_side: str | None = None,
+    ) -> str | None:
+        """Place TRAILING_STOP_MARKET via Algo Order API. Returns algoId or None."""
+        ...
+
+    def _cancel_trailing_stop_market(self, symbol: str, order_id: str) -> bool:
+        """Cancel a TRAILING_STOP_MARKET order (algo API). Returns True on success or benign error."""
+        ...
+
+    def _check_trail_order_status(self, symbol: str, order_id: str) -> dict[str, Any] | None:
+        """Check if TRAILING_STOP_MARKET order has been filled (algo API). Returns status dict or None."""
+        ...
+
+    def _place_trail_regular(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        callback_rate: float,
+        activation_price: float | None = None,
+        position_side: str | None = None,
+    ) -> str | None:
+        """Place TRAILING_STOP_MARKET. Delegates to Algo API. Returns algoId or None."""
+        ...
+
+    def _cancel_trail_regular(self, symbol: str, order_id: str) -> bool:
+        """Cancel a trail order. Delegates to Algo API. Returns True on success."""
+        ...
+
+    def _check_trail_regular(self, symbol: str, order_id: str) -> dict[str, Any] | None:
+        """Check trail order status. Delegates to Algo API. Returns status dict or None."""
+        ...
+
     def _verify_algo_order_active(self, algo_id: str, symbol: str) -> str | None:
         """Verify an algo order is still active. Returns status string or None."""
         ...

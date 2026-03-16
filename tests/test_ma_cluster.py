@@ -655,8 +655,9 @@ class TestStrategyIntegration:
         """MA cluster uses trailing stop (trail_activate=2%, trail_distance=0.3%, r75).
 
         Below trail_activate: no trail. Above: trail activates and fires on retrace.
+        Uses trail_server_native=False to test client-side trail exit.
         """
-        strategy = self._make_strategy()
+        strategy = self._make_strategy(trail_server_native=False)
         cfg = strategy.config
 
         strategy.open_position(
@@ -789,7 +790,7 @@ class TestStrategyIntegration:
 
         trail_activate=4%, trail_distance=0.5%.
         """
-        strategy = self._make_strategy()
+        strategy = self._make_strategy(trail_server_native=False)
 
         strategy.open_position(
             symbol="ETHUSDT",

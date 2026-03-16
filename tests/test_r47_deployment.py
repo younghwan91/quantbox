@@ -87,13 +87,13 @@ def _tick(strategy, pos_key, close, *, high=None, low=None):
 
 @pytest.fixture
 def strategy():
-    cfg = VolStraddleConfig()
+    cfg = VolStraddleConfig(trail_server_native=False)
     return VolStraddleStrategy(config=cfg)
 
 
 @pytest.fixture
 def cfg():
-    return VolStraddleConfig()
+    return VolStraddleConfig(trail_server_native=False)
 
 
 # ══════════════════════════════════════════════════════════

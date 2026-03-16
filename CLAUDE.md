@@ -101,6 +101,15 @@ Atomic JSON persistence via `core/scalper_state.py`: tmpfile → `os.replace()`.
 | #4 | `_check_order_filled()` handles both TRIGGERED and FINISHED |
 | #5 | Hedge Mode close uses `reduce_only=False` + leverage guard: `if not reduce_only and leverage > 1:` |
 | #6 | Config params always read from `VolStraddleConfig()`, never hardcoded |
+| #7 | `CANCELED` (US spelling, 1 L) — Binance Algo API uses American spelling, check both |
+| #8 | TRAILING_STOP_MARKET: Algo API only (`-4120` on regular API). `activationPrice=entry_price` to avoid `-2021` |
+
+## API Testing Policy
+
+**API 변경 시 반드시 실제 소액 주문으로 검증.** Mock 테스트만으로 커밋 금지.
+- 테스트 심볼: DOGEUSDT (50 DOGE ≈ $5)
+- 주문 → 체결 확인 → 취소/청산까지 full lifecycle
+- 문서/라이브러리 소스보다 실제 API 응답이 source of truth (Binance 문서가 부정확한 사례 확인됨)
 
 ## Code Quality
 
