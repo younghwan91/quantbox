@@ -121,6 +121,11 @@ class ReconciliationMixin:
                         else:
                             self._cancel_server_stop_loss(api_sym, sl_oid)
 
+                    # Cancel orphaned trail (regular API) when TP fires
+                    trail_oid_cross = pos.get("server_trail_order_id")
+                    if trail_oid_cross:
+                        self._cancel_trail_regular(api_sym, str(trail_oid_cross))
+
                     # ── Step 2.1: Straddle counterpart SL cancel with retry ──
                     counterpart_key = self._get_pair_counterpart(sym) if pos.get("is_straddle") else None
                     if counterpart_key:
@@ -191,6 +196,11 @@ class ReconciliationMixin:
                     if tp_oid:
                         self._cancel_server_take_profit(api_sym, tp_oid)
 
+                    # Cancel orphaned trail (regular API) when SL fires
+                    trail_oid_cross = pos.get("server_trail_order_id")
+                    if trail_oid_cross:
+                        self._cancel_trail_regular(api_sym, str(trail_oid_cross))
+
                     # ── Step 2.1: Straddle counterpart SL cancel with retry ──
                     counterpart_key = self._get_pair_counterpart(sym) if pos.get("is_straddle") else None
                     if counterpart_key:
@@ -250,18 +260,18 @@ class ReconciliationMixin:
                     sl_oid = None
                     logger.warning(f"[{sym}] Server SL was externally cancelled — cleared for bracket repair")
 
-            # ── r90: Check TRAILING_STOP_MARKET order (Algo API, same as SL/TP) ──
+            # ── Check TRAILING_STOP_MARKET order (regular API) ──
             trail_oid = pos.get("server_trail_order_id")
             if trail_oid and not str(trail_oid).startswith("paper_"):
-                trail_status = self._check_trail_order_status(api_sym, str(trail_oid))
+                trail_status = self._check_trail_regular(api_sym, str(trail_oid))
                 if trail_status and trail_status.get("status") == "FILLED":
                     fill_price = float(trail_status.get("avgPrice", 0))
                     fill_qty = float(trail_status.get("executedQty", 0))
-                    logger.info(f"[{sym}] Server TRAIL TRIGGERED: fill=${fill_price:.4f} qty={fill_qty:.6f}")
-                    # Cancel orphaned SL
+                    logger.info(f"[{sym}] Server TRAIL FILLED (regular API): fill=${fill_price:.4f} qty={fill_qty:.6f}")
+                    # Cancel orphaned SL (algo API)
                     if sl_oid:
                         self._cancel_server_stop_loss(api_sym, sl_oid)
-                    # Cancel orphaned TP (if any)
+                    # Cancel orphaned TP (algo API, if any)
                     if tp_oid:
                         self._cancel_server_take_profit(api_sym, tp_oid)
                     # Straddle counterpart SL cancel
@@ -279,7 +289,7 @@ class ReconciliationMixin:
                         _rj = getattr(self, "_recon_journal", None)
                         if _rj is not None:
                             _rj.record(
-                                event_type=ReconEventType.SERVER_SL_FILL,  # reuse SL event type
+                                event_type=ReconEventType.SERVER_SL_FILL,
                                 symbol=api_sym,
                                 action=f"Trail filled @ ${fill_price:.4f}",
                                 result="success",
@@ -289,7 +299,7 @@ class ReconciliationMixin:
                         pass
                     self._record_server_fill(sym, fill_price, fill_qty, "server_trail")
                     continue
-                elif trail_status and trail_status.get("status") == "CANCELLED":
+                elif trail_status and trail_status.get("status") == "CANCELED":
                     pos["server_trail_order_id"] = None
                     trail_oid = None
                     logger.warning(f"[{sym}] Server trail was externally cancelled — cleared for repair")
@@ -510,43 +520,32 @@ class ReconciliationMixin:
                         f"(algoId={tp_id})"
                     )
 
-            # ── r90: Trail bracket repair ──
+            # ── Trail bracket repair (regular API) ──
             vs_cfg = getattr(self, "vs_config", None)
             if vs_cfg and getattr(vs_cfg, "trail_server_native", False):
                 trail_oid = pos.get("server_trail_order_id")
                 if trail_oid is None:
-                    # Cooldown: don't retry trail if recently got WOULD_TRIGGER.
-                    # Binance rejects when mark is far from activationPrice —
-                    # retrying every 60s just spams logs. Wait 15 min.
-                    wt_ts = pos.get("_trail_would_trigger_at", 0)
-                    if time.time() - wt_ts < 900:
-                        pass  # Still in cooldown — skip silently
-                    else:
-                        quantity = pos["notional"] / pos["entry_price"]
-                        quantity = self._round_qty(quantity, api_sym)
-                        if quantity > 0:
-                            signal = pos["signal"]
-                            entry_price = pos["entry_price"]
-                            strategy_type = pos.get("strategy_type", "vr_squeeze")
-                            cr, ap, cs = self._get_trail_params(strategy_type, signal, entry_price)
-                            new_trail = self._place_trailing_stop_market(
-                                symbol=api_sym,
-                                side=cs,
-                                quantity=quantity,
-                                callback_rate=cr,
-                                activation_price=ap,
-                                position_side=pos.get("position_side"),
-                            )
-                            if new_trail and new_trail != "WOULD_TRIGGER":
-                                pos["server_trail_order_id"] = new_trail
-                                pos.pop("_trail_would_trigger_at", None)
-                                logger.info(f"[{sym}] BRACKET REPAIR: Trail placed orderId={new_trail} callbackRate={cr}%")
-                                self._save_state()
-                            elif new_trail == "WOULD_TRIGGER":
-                                pos["_trail_would_trigger_at"] = time.time()
-                                logger.info(f"[{sym}] Trail deferred — price too far from activation (retry in 15m)")
-                            else:
-                                logger.warning(f"[{sym}] BRACKET REPAIR: Trail failed")
+                    quantity = pos["notional"] / pos["entry_price"]
+                    quantity = self._round_qty(quantity, api_sym)
+                    if quantity > 0:
+                        signal = pos["signal"]
+                        entry_price = pos["entry_price"]
+                        strategy_type = pos.get("strategy_type", "vr_squeeze")
+                        cr, ap, cs = self._get_trail_params(strategy_type, signal, entry_price)
+                        new_trail = self._place_trail_regular(
+                            symbol=api_sym,
+                            side=cs,
+                            quantity=quantity,
+                            callback_rate=cr,
+                            activation_price=ap,
+                            position_side=pos.get("position_side"),
+                        )
+                        if new_trail:
+                            pos["server_trail_order_id"] = new_trail
+                            logger.info(f"[{sym}] BRACKET REPAIR: Trail placed orderId={new_trail} callbackRate={cr}%")
+                            self._save_state()
+                        else:
+                            logger.warning(f"[{sym}] BRACKET REPAIR: Trail failed")
 
     def _reconcile_positions(self: "ScalperProtocol") -> None:
         """Reconcile internal position state with exchange reality.
