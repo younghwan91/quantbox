@@ -749,7 +749,10 @@ class RubberBandScalper(
 
         btc_close_4h = None
         if self.strategy_name == "vol_straddle":
-            pass  # VolStraddle doesn't use BTC as filter
+            # r92: Download BTC 4h data for MA cluster 4h BTC gate.
+            # Gate prevents MA cluster LONGs during multi-day BTC downtrends.
+            if self.vs_config and self.vs_config.ma_cluster_btc_gate_enabled:
+                btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
         elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
             btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
 
@@ -1057,6 +1060,26 @@ class RubberBandScalper(
                     self.strategy.update_htf_data(sym, close_4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
+
+            # r92: MA cluster 4h BTC gate — block MA cluster LONGs during BTC downtrends.
+            # Applied immediately after on_bar so blocked signals never reach candidates.
+            if (
+                signal == 1
+                and self.strategy_name == "vol_straddle"
+                and self.vs_config
+                and self.vs_config.ma_cluster_btc_gate_enabled
+                and getattr(self.strategy, "_last_signal_source", {}).get(sym) == "ma_cluster"
+                and btc_close_4h is not None
+                and len(btc_close_4h) >= self.vs_config.ma_cluster_btc_ma_period_4h
+            ):
+                period = self.vs_config.ma_cluster_btc_ma_period_4h
+                btc_4h_ma = float(np.mean(btc_close_4h[-period:]))
+                btc_4h_cur = float(btc_close_4h[-1])
+                if btc_4h_cur < btc_4h_ma:
+                    logger.info(
+                        f"[{sym}] MA 4h gate LONG suppressed: BTC 4h ${btc_4h_cur:.1f} < MA{period} ${btc_4h_ma:.1f}"
+                    )
+                    signal = 0
 
             # v12.0: Collect full diagnostic context (read-only, after on_bar)
             if hasattr(self.strategy, "diagnose_bar"):

@@ -522,7 +522,7 @@ class TestCheckMaCluster:
 class TestMaClusterConfig:
     def test_defaults(self):
         cfg = VolStraddleConfig()
-        assert cfg.ma_cluster_enabled is False  # Disabled: live PF=0.309
+        assert cfg.ma_cluster_enabled is True  # r92 gate PASS: re-enabled 2026-03-18
         assert cfg.ma_cluster_pct == 0.02  # r75: 3%→2%
         assert cfg.ma_cluster_min_duration == 6  # r75: 8→6
         assert cfg.ma_cluster_max_duration == 24

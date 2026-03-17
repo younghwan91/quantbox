@@ -104,6 +104,11 @@ class VolStraddleStrategy:
         #   'cooldown', 'no_breakout', 'momentum_fail', 'fired'
         self._ma_cluster_state: dict[str, dict] = {}
 
+        # ── Signal source tracking (populated by on_bar for each symbol) ──
+        # Allows scalper to apply strategy-specific gates after on_bar returns.
+        # Values: 'vr_squeeze' | 'ma_cluster' | 'none'
+        self._last_signal_source: dict[str, str] = {}
+
     # ══════════════════════════════════════════════════════════════════
     #  Signal Generation
     # ══════════════════════════════════════════════════════════════════
@@ -177,6 +182,7 @@ class VolStraddleStrategy:
                     "4h",
                 )
                 if sig_4h != 0:
+                    self._last_signal_source[symbol] = "vr_squeeze"
                     return sig_4h
 
         # 1h: resampled from 15m (completed bars only)
@@ -188,6 +194,7 @@ class VolStraddleStrategy:
                 if len(c1h) >= cfg.warmup_1h + 1:
                     sig_1h = self._check_tf_signal(c1h, h1h, l1h, "1h")
                     if sig_1h != 0:
+                        self._last_signal_source[symbol] = "vr_squeeze"
                         return sig_1h
 
         # 30m: resampled from 15m (completed bars only) — r57 A0
@@ -197,12 +204,14 @@ class VolStraddleStrategy:
                 if len(c30) >= cfg.warmup_30m + 1:
                     sig_30m = self._check_tf_signal(c30, h30, l30, "30m")
                     if sig_30m != 0:
+                        self._last_signal_source[symbol] = "vr_squeeze"
                         return sig_30m
 
         # 15m: direct from downloaded data
         if cfg.enable_15m:
             sig_15m = self._check_tf_signal(c15, h15, l15, "15m")
             if sig_15m != 0:
+                self._last_signal_source[symbol] = "vr_squeeze"
                 return sig_15m
 
         # ── MA Cluster Squeeze (R44d V17, 4h-only) ──
@@ -218,8 +227,10 @@ class VolStraddleStrategy:
                     symbol,
                 )
                 if sig_ma != 0:
+                    self._last_signal_source[symbol] = "ma_cluster"
                     return sig_ma
 
+        self._last_signal_source[symbol] = "none"
         return 0
 
     def _check_tf_signal(
