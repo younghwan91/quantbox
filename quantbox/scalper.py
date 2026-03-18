@@ -893,6 +893,45 @@ class RubberBandScalper(
                         and not getattr(self.vs_config, "trail_server_native", False)
                     ):
                         self._ratchet_trail_sl(pos_key, pos)
+                    # Deferred server trail: place when trail_activate% is reached.
+                    # Binance Algo API overrides future activationPrice with current mark
+                    # price — placing trail at entry fires on callbackRate% pullback
+                    # immediately, ignoring trail_activate. Fix: defer until trail_active=True
+                    # so activationPrice = current mark ≈ entry*(1+trail_activate).
+                    if (
+                        pos.get("trail_active")
+                        and not pos.get("server_trail_order_id")
+                        and not self.paper_mode
+                        and self.strategy_name == "vol_straddle"
+                        and getattr(self.vs_config, "trail_server_native", False)
+                    ):
+                        api_sym = pos_key.split(":")[0]
+                        strategy_type = pos.get("strategy_type", "vr_squeeze")
+                        signal = pos.get("signal", 1)
+                        entry_price = pos.get("entry_price", current_price)
+                        pos_side = pos.get("position_side")
+                        notional = pos.get("notional", 0.0)
+                        qty = notional / entry_price if entry_price > 0 else 0.0
+                        if qty > 0:
+                            cr, _, cs = self._get_trail_params(strategy_type, signal, entry_price)
+                            trail_id = self._place_trail_regular(
+                                symbol=api_sym,
+                                side=cs,
+                                quantity=qty,
+                                callback_rate=cr,
+                                activation_price=current_price,
+                                position_side=pos_side,
+                            )
+                            if trail_id:
+                                pos["server_trail_order_id"] = trail_id
+                                logger.info(
+                                    f"[{pos_key}] Deferred server trail PLACED: "
+                                    f"algoId={trail_id} callbackRate={cr}% "
+                                    f"activationPrice=${current_price:.4f} "
+                                    f"(peak={pos.get('peak_gain', 0) * 100:+.2f}%)"
+                                )
+                            else:
+                                logger.warning(f"[{pos_key}] Deferred server trail FAILED to place")
 
     def _scan_entry_opportunities(
         self,
