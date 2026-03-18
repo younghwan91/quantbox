@@ -749,7 +749,10 @@ class RubberBandScalper(
 
         btc_close_4h = None
         if self.strategy_name == "vol_straddle":
-            pass  # VolStraddle doesn't use BTC as filter
+            # r92: Download BTC 4h data for MA cluster 4h BTC gate.
+            # Gate prevents MA cluster LONGs during multi-day BTC downtrends.
+            if self.vs_config and self.vs_config.ma_cluster_btc_gate_enabled:
+                btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
         elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
             btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
 
@@ -890,6 +893,45 @@ class RubberBandScalper(
                         and not getattr(self.vs_config, "trail_server_native", False)
                     ):
                         self._ratchet_trail_sl(pos_key, pos)
+                    # Deferred server trail: place when trail_activate% is reached.
+                    # Binance Algo API overrides future activationPrice with current mark
+                    # price — placing trail at entry fires on callbackRate% pullback
+                    # immediately, ignoring trail_activate. Fix: defer until trail_active=True
+                    # so activationPrice = current mark ≈ entry*(1+trail_activate).
+                    if (
+                        pos.get("trail_active")
+                        and not pos.get("server_trail_order_id")
+                        and not self.paper_mode
+                        and self.strategy_name == "vol_straddle"
+                        and getattr(self.vs_config, "trail_server_native", False)
+                    ):
+                        api_sym = pos_key.split(":")[0]
+                        strategy_type = pos.get("strategy_type", "vr_squeeze")
+                        signal = pos.get("signal", 1)
+                        entry_price = pos.get("entry_price", current_price)
+                        pos_side = pos.get("position_side")
+                        notional = pos.get("notional", 0.0)
+                        qty = notional / entry_price if entry_price > 0 else 0.0
+                        if qty > 0:
+                            cr, _, cs = self._get_trail_params(strategy_type, signal, entry_price)
+                            trail_id = self._place_trail_regular(
+                                symbol=api_sym,
+                                side=cs,
+                                quantity=qty,
+                                callback_rate=cr,
+                                activation_price=current_price,
+                                position_side=pos_side,
+                            )
+                            if trail_id:
+                                pos["server_trail_order_id"] = trail_id
+                                logger.info(
+                                    f"[{pos_key}] Deferred server trail PLACED: "
+                                    f"algoId={trail_id} callbackRate={cr}% "
+                                    f"activationPrice=${current_price:.4f} "
+                                    f"(peak={pos.get('peak_gain', 0) * 100:+.2f}%)"
+                                )
+                            else:
+                                logger.warning(f"[{pos_key}] Deferred server trail FAILED to place")
 
     def _scan_entry_opportunities(
         self,
@@ -1057,6 +1099,26 @@ class RubberBandScalper(
                     self.strategy.update_htf_data(sym, close_4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
+
+            # r92: MA cluster 4h BTC gate — block MA cluster LONGs during BTC downtrends.
+            # Applied immediately after on_bar so blocked signals never reach candidates.
+            if (
+                signal == 1
+                and self.strategy_name == "vol_straddle"
+                and self.vs_config
+                and self.vs_config.ma_cluster_btc_gate_enabled
+                and getattr(self.strategy, "_last_signal_source", {}).get(sym) == "ma_cluster"
+                and btc_close_4h is not None
+                and len(btc_close_4h) >= self.vs_config.ma_cluster_btc_ma_period_4h
+            ):
+                period = self.vs_config.ma_cluster_btc_ma_period_4h
+                btc_4h_ma = float(np.mean(btc_close_4h[-period:]))
+                btc_4h_cur = float(btc_close_4h[-1])
+                if btc_4h_cur < btc_4h_ma:
+                    logger.info(
+                        f"[{sym}] MA 4h gate LONG suppressed: BTC 4h ${btc_4h_cur:.1f} < MA{period} ${btc_4h_ma:.1f}"
+                    )
+                    signal = 0
 
             # v12.0: Collect full diagnostic context (read-only, after on_bar)
             if hasattr(self.strategy, "diagnose_bar"):

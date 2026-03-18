@@ -131,6 +131,7 @@ When modifying these files, always check the paired files:
 | `scalper.py` trading logic | `trade_sim.py` parity |
 | `core/scalper_state.py` | `scalper.py`, `conftest.py`, state-related tests |
 | Any new module | `README.md` structure, `__init__.py`, test file, `agents.md` |
+| `.github/instructions/` or `AGENTS.md` | `.github/skills/` cross-references for staleness |
 
 ## Git Flow
 
@@ -157,3 +158,48 @@ Location: `docs/backtest_results/YYYYMM/` only. Naming: `{YYYYMMDD}_{commit_shor
 | Medium | New filters, notification changes | Execute + verify tests |
 | High | Signal/exit/cost/sizing logic | User confirmation + parity verification required |
 | Forbidden | Remove safety guards, use mock data, break parity | Never execute |
+
+## Project Skills (GitHub Copilot CLI & Claude Code)
+
+Project-specific skills live in `.github/skills/*/SKILL.md` (Copilot CLI-compatible format).
+
+**Loading in Copilot CLI**: Skills auto-load based on semantic matching in description field. Use `/skills reload` if manually added.
+
+**Loading in Claude Code**: Reference a skill with `cat .github/skills/<skill-name>/SKILL.md` in your prompt, or Claude will suggest it automatically.
+
+### Current Priority Skills (5)
+
+1. **quantbox-incident-rules** (116 lines)
+   - Unified checklist for all 8 incident-driven rules
+   - Use: Before every production commit
+   - Triggers: `leverage`, `reduce_only`, `CANCELED`, `rule #1-#8`, `SL missing`, `-2028`, `-1022`
+
+2. **quantbox-trade-event-sim** (122 lines)
+   - Decision tree for canonical backtest engine (TradeEventSim vs VectorizedBacktest)
+   - Use: When selecting backtest engine or considering reimplementation
+   - Triggers: `trade sim`, `collect_trades`, `canonical`, `straddle backtest`, `reimplement`
+
+3. **quantbox-backtest-parity** (177 lines)
+   - Multi-TF parity diff workflow for debugging backtest vs live divergence
+   - Use: When backtest results > 5% differ from live
+   - Triggers: `parity`, `backtest divergence`, `live mismatch`, `lookahead`
+
+4. **quantbox-signal-development** (231 lines)
+   - 4-phase signal development workflow: data → engine selection → validation → backtest
+   - Use: When creating new signals or debugging signal output
+   - Triggers: `signal development`, `numba`, `signal generation`, `data download`, `backtest baseline`
+
+5. **quantbox-reconciliation-ghost** (240 lines)
+   - Ghost position detection flowchart and recovery workflow
+   - Use: When positions exist in state but not on exchange, or vice versa
+   - Triggers: `ghost detection`, `reconciliation`, `orphan`, `counterpart SL`, `reverse ghost`, `exchange sync`
+
+### Phase 2 Deferred (Existing coverage in `.instructions.md`)
+
+- quantbox-state-persistence (90% covered by debugging.instructions.md Section 3)
+- quantbox-position-sizing (100% covered by position_sizing.instructions.md)
+- quantbox-bracket-orders (85% covered by debugging.instructions.md Section 2.1)
+- quantbox-hedge-mode (80% covered by debugging.instructions.md Section 1)
+- quantbox-live-ops (100% covered by live_trading.instructions.md)
+
+Add Phase 2 skills when: (a) agent misses guidance in that domain, AND (b) existing `.instructions.md` coverage is demonstrably insufficient.

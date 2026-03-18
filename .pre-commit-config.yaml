@@ -40,3 +40,11 @@ repos:
         files: ^research/.*\.py$
         pass_filenames: true
         stages: [pre-commit]
+
+      - id: incident-rules-guard
+        name: incident rules guard
+        entry: uv run python scripts/check_incident_rules.py
+        language: system
+        files: ^quantbox/.*\.py$
+        pass_filenames: true
+        stages: [pre-commit]
