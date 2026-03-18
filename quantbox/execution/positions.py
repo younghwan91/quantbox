@@ -415,25 +415,20 @@ class PositionMixin:
                 logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — bracket repair next cycle")
                 sl_order_id = None
 
-            # Server-side trailing stop via Algo API
+            # Server-side trailing stop: deferred placement (not at entry).
+            # Binance Algo API silently overrides future activationPrice with current
+            # mark price — setting activationPrice=entry at entry would fire the trail
+            # on the first callbackRate% pullback, ignoring trail_activate entirely.
+            # Fix: place trail only after trail_activate% is reached (deferred in scalper.py).
             trail_order_id: str | None = None
             if self.vs_config.trail_server_native:
-                cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
-                trail_order_id = self._place_trail_regular(
-                    symbol=symbol,
-                    side=cs,
-                    quantity=fill_qty,
-                    callback_rate=cr,
-                    activation_price=ap,
-                    position_side=pos_side,
-                )
-                # No TP needed — trail handles profit-taking
+                # No trail at entry. Trail is placed deferred in scalper._manage_open_positions
+                # when trail_active=True (peak_gain >= trail_activate).
+                # No TP needed either — trail handles profit-taking once active.
                 tp_order_id = None
-                trail_status = "OK" if trail_order_id else "FAILED"
                 logger.info(
                     f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                    f"(algoId={sl_order_id}) TRAIL={trail_status} "
-                    f"(algoId={trail_order_id}) callbackRate={cr}%"
+                    f"(algoId={sl_order_id}) TRAIL=deferred (places when trail_activate% reached)"
                 )
             else:
                 # Legacy: full-qty TP (no partial — matches backtest SL/TP/max_hold exit)
