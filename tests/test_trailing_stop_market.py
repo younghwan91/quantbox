@@ -233,10 +233,11 @@ class TestCheckTrailOrderStatus:
 
 class TestTrailAtEntry:
     def test_trail_placed_at_entry_tp_skipped(self):
-        """When trail_server_native=True, trail is placed and TP is skipped.
+        """strategy.open_position() stores the trail ID and None TP correctly.
 
-        Tests the bracket placement section of _open_position (positions.py L394-460)
-        by verifying the position dict after entry.
+        Tests state storage (strategy layer) — not positions.py placement logic.
+        After the deferred-trail fix, positions.py passes server_trail_order_id=None;
+        this test verifies the strategy layer faithfully stores whatever is passed.
         """
         s = _build_trail_scalper(trail_server_native=True)
 
@@ -885,3 +886,117 @@ class TestCallbackRateBounds:
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("ma_cluster", 1, 100.0)
         assert cr == pytest.approx(0.3, abs=0.01)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# T18: Deferred server trail placement (CRVUSDT incident 2026-03-18)
+# Binance Algo API silently overrides future activationPrice with current
+# mark price — placing trail at entry fires on first callbackRate% pullback.
+# Fix: defer trail placement until trail_active=True (peak_gain >= trail_activate%).
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestDeferredTrailPlacement:
+    """Deferred server trail: placed only when trail_active=True, not at entry."""
+
+    def _make_klines(self, close_val: float = 102.0):
+        import numpy as np
+
+        n = 200
+        close = np.full(n, close_val)
+        high = close * 1.005
+        low = close * 0.995
+        vol = np.ones(n) * 1000
+        tb = np.ones(n) * 500
+        return close, high, low, vol, tb
+
+    def test_trail_placed_when_trail_active(self):
+        """When trail_active=True and server_trail_order_id=None, trail is placed."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            server_trail_order_id=None,
+            strategy_type="ma_cluster",
+            peak_gain=0.025,
+        )
+
+        s.download_klines = MagicMock(return_value=self._make_klines(102.0))
+        s.strategy.update_position = MagicMock(return_value=None)  # HOLD
+        s._place_trail_regular = MagicMock(return_value="deferred_trail_999")
+
+        s._manage_active_positions()
+
+        s._place_trail_regular.assert_called_once()
+        call_kwargs = s._place_trail_regular.call_args
+        # activation_price must be current_price (close[-1]), not entry_price
+        assert call_kwargs.kwargs.get("activation_price") == pytest.approx(102.0)
+        pos = s.strategy._positions["TESTUSDT:LONG"]
+        assert pos["server_trail_order_id"] == "deferred_trail_999"
+
+    def test_trail_not_placed_when_trail_inactive(self):
+        """When trail_active=False, deferred trail is NOT placed."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=False,
+            server_trail_order_id=None,
+            strategy_type="ma_cluster",
+            peak_gain=0.005,  # below trail_activate=0.02
+        )
+
+        s.download_klines = MagicMock(return_value=self._make_klines(101.0))
+        s.strategy.update_position = MagicMock(return_value=None)
+        s._place_trail_regular = MagicMock(return_value="should_not_be_called")
+
+        s._manage_active_positions()
+
+        s._place_trail_regular.assert_not_called()
+        pos = s.strategy._positions["TESTUSDT:LONG"]
+        assert pos["server_trail_order_id"] is None
+
+    def test_trail_not_placed_when_already_set(self):
+        """When server_trail_order_id already exists, no new trail placed."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            server_trail_order_id="existing_trail_111",
+            strategy_type="ma_cluster",
+            peak_gain=0.03,
+        )
+
+        s.download_klines = MagicMock(return_value=self._make_klines(103.0))
+        s.strategy.update_position = MagicMock(return_value=None)
+        s._place_trail_regular = MagicMock()
+
+        s._manage_active_positions()
+
+        s._place_trail_regular.assert_not_called()
+
+    def test_trail_not_placed_in_paper_mode(self):
+        """Deferred trail skipped in paper mode."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = True
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            server_trail_order_id=None,
+            strategy_type="ma_cluster",
+            peak_gain=0.025,
+        )
+
+        s.download_klines = MagicMock(return_value=self._make_klines(102.0))
+        s.strategy.update_position = MagicMock(return_value=None)
+        s._place_trail_regular = MagicMock()
+
+        s._manage_active_positions()
+
+        s._place_trail_regular.assert_not_called()

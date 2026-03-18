@@ -289,7 +289,7 @@ class VolStraddleConfig(BaseSettings):
     # ── MA Cluster Squeeze (R44d V17, 4h-only) ──
     # Complementary strategy: 4 SMAs cluster → breakout.
     # Fires when VR squeeze is idle (93.7% non-overlapping).
-    ma_cluster_enabled: bool = False  # Disabled: live PF=0.309 (N=16), 96% of account losses
+    ma_cluster_enabled: bool = True  # r92 gate PASS: PF=2.749, MaxDD=17.7%, all 6yr profitable
     ma_cluster_pct: float = 0.02  # Max spread among 4 SMAs (r75: 3%→2%, tighter cluster)
     ma_cluster_min_duration: int = 6  # Min 4h bars in cluster (r75: 8→6, ≈24h)
     ma_cluster_max_duration: int = 24  # Max 4h bars in cluster (R45: zombie filter)
@@ -308,6 +308,11 @@ class VolStraddleConfig(BaseSettings):
     ma_cluster_sma_periods: list[int] = Field(
         default_factory=lambda: [20, 50, 100, 200],
     )
+    # r92: 4h BTC trend gate for MA cluster LONGs — prevents entries during multi-day BTC downtrends.
+    # Root cause of March 2026 live failure: G6 used 15m MA50 (12.5h), too short for 4h strategy.
+    # 4h MA50 = 50 bars × 4h = 200h ≈ 8.3 days — matches MA cluster's strategic timeframe.
+    ma_cluster_btc_gate_enabled: bool = True  # Block MA cluster LONGs when BTC below 4h MA50
+    ma_cluster_btc_ma_period_4h: int = 50  # 50 × 4h = 200h ≈ 8.3 days
 
     # ── Compatibility fields (used by scalper internals) ──
     # These map vol straddle concepts to the scalper's existing interface

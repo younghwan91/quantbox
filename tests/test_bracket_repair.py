@@ -212,6 +212,17 @@ class TestExternallyCancelledOrders:
         assert pos["server_sl_order_id"] == "sl_repaired_us"
         scalper._save_state.assert_called()
 
+    def test_error_state_triggers_bracket_repair(self):
+        """Binance algo ERROR state must be treated as cancelled → bracket repair."""
+        scalper = _make_scalper(paper=False)
+        scalper.client._request_futures_api.return_value = {
+            "algoStatus": "ERROR",
+            "orderType": "STOP",
+        }
+        result = scalper._check_order_filled("BTCUSDT", "88888")
+        assert result is not None
+        assert result["status"] == "CANCELLED"
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Bug #4 — Runner bracket repair uses BE stop (0.0001)
