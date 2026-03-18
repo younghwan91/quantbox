@@ -230,6 +230,34 @@ straddle 진입 시 trail 배치 불가 → 포지션이 SL까지 하락 → PF=
 
 **cross-cancel:** SL 체결 시 trail 취소 (regular), trail 체결 시 SL+TP 취소 (algo).
 
+### Incident #9: Deferred Server Trail — Immediate Callback Fire (2026-03-18)
+
+**증상:** CRVUSDT MA Cluster LONG, entry $0.2520, exit $0.2510, PnL=-0.40%. Trail이 entry 1분 후 바로 발동.
+
+**원인:** `_open_position()`에서 `activationPrice=entry_price`로 trail 즉시 배치.
+- Binance Algo API: `activationPrice` 미래 가격을 설정해도 **현재 mark price로 silently override**
+- 결과: trail이 즉시 활성화 → 첫 callbackRate%(MA=0.3%, VR=0.2%) 하락에 즉시 trail stop 발동
+- `trail_activate` 파라미터(MA=2%, VR=1%)가 완전히 무시됨
+
+**수정 (v14.26.0, b91642d):**
+- `positions.py`: `trail_server_native=True`일 때 entry에서 trail 배치 안 함 (`TRAIL=deferred` 로그)
+- `scalper.py`: `_manage_active_positions()` HOLD 브랜치에 deferred 블록 추가
+  - 조건: `trail_active=True AND server_trail_order_id=None AND not paper_mode AND trail_server_native=True`
+  - 배치: `activation_price=current_close` (이미 trail_activate% 도달 by definition)
+
+**MA cluster 실제 효과:** trail이 2% 수익 달성 전까지는 절대 발동 안 함 (기존: 0.3% 하락 즉시 발동)
+
+**진단 방법:**
+```bash
+# 신규 거래 로그에서 "TRAIL=deferred" 확인 (entry에서 trail 없음 = 정상)
+grep "TRAIL=" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
+# 기대 출력: Server bracket: SL=OK (algoId=...) TRAIL=deferred (places when trail_activate% reached)
+
+# trail이 deferred로 배치됐을 때 확인
+grep "Deferred server trail PLACED" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1)
+# 기대 출력: [SUIUSDT:LONG] Deferred server trail PLACED: algoId=... callbackRate=0.3% activationPrice=$...
+```
+
 ### S_d8 Straddle 실행 갭 (2026-03-17, r89)
 
 **발견:** S_d8 straddle의 전체 수익이 trail exit 가격 정밀도에 의존.
@@ -325,6 +353,7 @@ cp data/state/scalper_state_backup_YYYYMMDD_HHMMSS.json data/state/scalper_state
 8. **Trail bar-close 실행 갭:** Trail ratchet 구현 완료 (commit `e473e4d`, v14.5+). MFE >> |PnL| + trailing_stop 청산이면 ratchet 이전 포지션. 신규 포지션은 자동 해결.
 9. **Straddle 실행 갭 (r89, 2026-03-17):** S_d8 bar-close PF=0.715 vs IDEAL PF=5.44. 전략의 수익이 전적으로 trail exit 가격 정밀도에 의존. **straddle_enabled=False (프로덕션).**
 10. **TRAILING_STOP_MARKET API (2026-03-17):** Algo API(`/fapi/v1/algoOrder`) → `-2021` reject. **Regular API**(`/fapi/v1/order`) 사용 필수. `_place_trail_regular()` / `_cancel_trail_regular()` / `_check_trail_regular()`. deprecated: `_place_trailing_stop_market` 등.
+11. **Deferred server trail (Incident #9, 2026-03-18):** trail이 entry에서 즉시 발동하면 CRVUSDT처럼 0.4% 손실 후 종료됨. trail이 `callbackRate`% 하락에 즉시 반응하는지 확인. 로그에서 `TRAIL=deferred` 확인 필요. `trail_server_native=True` + deferred 배치 로직 확인.
 
 ---
 
