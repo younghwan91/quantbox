@@ -22,7 +22,7 @@ D_SL          = cfg.d_sl                              # 0.01 (1%)
 D_TRAIL_ACT   = cfg.d_trail_activate                  # 0.01 (1.0%)
 D_TRAIL_DIST  = cfg.d_trail_distance                  # 0.002 (0.2%)
 S_TRAIL_ACT   = cfg.s_trail_activate                  # 0.015 (1.5%)
-S_TRAIL_DIST  = cfg.s_trail_distance                  # 0.001 (0.1%, r76: was 0.002)
+S_TRAIL_DIST  = cfg.s_trail_distance                  # 0.002 (0.2%, r94: was 0.001, too tight)
 MA_TRAIL_ACT  = cfg.ma_cluster_trail_activate         # 0.02 (2%)
 MA_TRAIL_DIST = cfg.ma_cluster_trail_distance         # 0.003 (0.3%, r75: was 0.005)
 VR_LN         = cfg.base_leverage / cfg.max_concurrent  # 30/10=3.0
