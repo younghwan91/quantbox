@@ -451,7 +451,7 @@ class TestReconTrailFill:
         s._record_server_fill.assert_not_called()
 
     def test_trail_cancelled_clears_for_repair(self):
-        """Externally cancelled trail should be cleared and then repaired."""
+        """Externally cancelled trail should be cleared. If trail_active=True, repair."""
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
         _inject_position(
@@ -460,6 +460,8 @@ class TestReconTrailFill:
             server_trail_order_id="77777",
             is_straddle=False,
         )
+        # Trail repair only happens when trail_active=True
+        s.strategy._positions["TESTUSDT:LONG"]["trail_active"] = True
 
         s._check_trail_regular = MagicMock(return_value={"status": "CANCELED", "orderId": 77777})
         s._check_order_filled = MagicMock(return_value=None)
@@ -482,7 +484,7 @@ class TestReconTrailFill:
 
 class TestTrailBracketRepair:
     def test_missing_trail_repaired(self):
-        """Position with missing trail order should get one placed."""
+        """Position with missing trail order AND trail_active=True should get one placed."""
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
         _inject_position(
@@ -493,6 +495,8 @@ class TestTrailBracketRepair:
             strategy_type="straddle",
             is_straddle=False,
         )
+        # Trail repair only happens when trail_active=True
+        s.strategy._positions["TESTUSDT:LONG"]["trail_active"] = True
 
         # Mock all order checks → nothing filled
         s._check_order_filled = MagicMock(return_value=None)
@@ -506,6 +510,32 @@ class TestTrailBracketRepair:
         s._place_trail_regular.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
         assert pos["server_trail_order_id"] == "88888"
+
+    def test_missing_trail_not_repaired_if_inactive(self):
+        """Position with missing trail but trail_active=False should NOT get trail placed."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id=None,
+            server_sl_order_id="sl_111",
+            strategy_type="straddle",
+            is_straddle=False,
+        )
+        # trail_active defaults to False — should NOT repair
+
+        s._check_order_filled = MagicMock(return_value=None)
+        s._check_trail_regular = MagicMock(return_value=None)
+        s._place_trail_regular = MagicMock(return_value="88888")
+        s._get_trail_params = MagicMock(return_value=(0.1, 101.5, "SELL"))
+
+        s._sync_server_orders()
+
+        # Trail should NOT be placed — trail_active is False
+        s._place_trail_regular.assert_not_called()
+        pos = s.strategy._positions["TESTUSDT:LONG"]
+        assert pos["server_trail_order_id"] is None
 
     def test_existing_trail_not_re_placed(self):
         """Position with existing trail order should NOT get a new one."""

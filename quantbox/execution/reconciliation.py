@@ -521,10 +521,13 @@ class ReconciliationMixin:
                     )
 
             # ── Trail bracket repair (Algo API) ──
+            # Only repair trail if trail_active=True (peak reached trail_activate%).
+            # Placing trail before that fires on first 0.1% pullback from entry.
             vs_cfg = getattr(self, "vs_config", None)
             if vs_cfg and getattr(vs_cfg, "trail_server_native", False):
                 trail_oid = pos.get("server_trail_order_id")
-                if trail_oid is None:
+                trail_active = pos.get("trail_active", False)
+                if trail_oid is None and trail_active:
                     quantity = pos["notional"] / pos["entry_price"]
                     quantity = self._round_qty(quantity, api_sym)
                     if quantity > 0:
