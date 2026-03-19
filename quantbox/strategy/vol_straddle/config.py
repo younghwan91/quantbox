@@ -69,7 +69,7 @@ class VolStraddleConfig(BaseSettings):
     s_sl: float = 0.015  # 1.5% stop loss (per leg)
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
     s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg
-    s_trail_distance: float = 0.001  # r76: 0.1% behind peak (was 0.2%, PF 4.876→9.349)
+    s_trail_distance: float = 0.002  # r94: 0.2% behind peak (was 0.1%; too tight for real noise, bars=0 exits)
     straddle_enabled: bool = True  # S_d8 straddle mode enabled
     straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
     # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR.
