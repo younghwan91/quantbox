@@ -415,21 +415,34 @@ class PositionMixin:
                 logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — bracket repair next cycle")
                 sl_order_id = None
 
-            # Server-side trailing stop: deferred placement (not at entry).
-            # Binance Algo API silently overrides future activationPrice with current
-            # mark price — setting activationPrice=entry at entry would fire the trail
-            # on the first callbackRate% pullback, ignoring trail_activate entirely.
-            # Fix: place trail only after trail_activate% is reached (deferred in scalper.py).
+            # Server-side trailing stop: placed at entry with future activationPrice.
+            # Trail stays in NEW until price reaches trail_activate%, then activates.
+            # API accepts future activationPrice (verified via live test 2026-03-19).
             trail_order_id: str | None = None
             if self.vs_config.trail_server_native:
-                # No trail at entry. Trail is placed deferred in scalper._manage_open_positions
-                # when trail_active=True (peak_gain >= trail_activate).
-                # No TP needed either — trail handles profit-taking once active.
-                tp_order_id = None
-                logger.info(
-                    f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                    f"(algoId={sl_order_id}) TRAIL=deferred (places when trail_activate% reached)"
+                # Get trail params based on strategy type
+                cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
+                trail_order_id = self._place_trail_regular(
+                    symbol=symbol,
+                    side=cs,
+                    quantity=fill_qty,
+                    callback_rate=cr,
+                    activation_price=ap,
+                    position_side=pos_side,
                 )
+                if trail_order_id:
+                    logger.info(
+                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
+                        f"(algoId={sl_order_id}) TRAIL=OK (orderId={trail_order_id}, "
+                        f"activate=${ap:.4f}={cr}% callback)"
+                    )
+                else:
+                    logger.warning(
+                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
+                        f"(algoId={sl_order_id}) TRAIL=FAILED — deferred fallback"
+                    )
+                # No TP needed — trail handles profit-taking once active.
+                tp_order_id = None
             else:
                 # Legacy: full-qty TP (no partial — matches backtest SL/TP/max_hold exit)
                 tp_order_id = self._place_server_take_profit(

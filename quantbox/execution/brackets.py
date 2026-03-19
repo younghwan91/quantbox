@@ -399,26 +399,34 @@ class BracketMixin:
         Returns:
             (callback_rate, activation_price, close_side) tuple.
             callback_rate: Binance callbackRate (0.1-5.0, percentage).
-            activation_price: entry_price (starts trailing immediately).
+            activation_price: entry × (1 + trail_activate) for LONG,
+                              entry × (1 - trail_activate) for SHORT.
             close_side: 'SELL' for LONG, 'BUY' for SHORT.
         """
         vs = self.vs_config
         if strategy_type == "straddle":
             td = vs.s_trail_distance
+            ta = vs.s_trail_activate
         elif strategy_type == "ma_cluster":
             td = vs.ma_cluster_trail_distance
+            ta = vs.ma_cluster_trail_activate
         else:  # vr_squeeze, vr_directional, vr_straddle
             td = vs.d_trail_distance
+            ta = vs.d_trail_activate
 
         # trail_distance fraction → Binance callbackRate percentage
         # e.g. 0.001 (0.1%) → 0.1, clamped to [0.1, 5.0]
         callback_rate = max(0.1, min(5.0, td * 100))
 
-        # activationPrice = entry_price: trail starts tracking immediately.
-        # Binance Algo API rejects future prices with -2021. By using entry
-        # (already reached by definition), the order is always accepted.
-        # Server SL provides downside protection; trail provides tighter exit.
-        activation_price = entry_price
+        # activationPrice = entry × (1 ± trail_activate).
+        # Trail stays in NEW status until price reaches this level,
+        # then activates and starts tracking the peak.
+        # API accepts future prices (verified via live test 2026-03-19).
+        if signal == 1:  # LONG: activate when price goes UP
+            activation_price = entry_price * (1 + ta)
+        else:  # SHORT: activate when price goes DOWN
+            activation_price = entry_price * (1 - ta)
+
         close_side = "SELL" if signal == 1 else "BUY"
 
         return callback_rate, activation_price, close_side
