@@ -251,7 +251,7 @@ class VolStraddleConfig(BaseSettings):
             "NEOUSDT",
             "ONTUSDT",
             "QTUMUSDT",
-            "RLCUSDT",
+            # RLCUSDT removed: Binance notional limit prevents straddle (2026-03-19)
             "RSRUSDT",
             "RUNEUSDT",
             "SANDUSDT",

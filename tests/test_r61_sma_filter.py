@@ -291,7 +291,7 @@ class TestConfigParity:
         assert cfg.s_trail_distance == pytest.approx(0.001)  # r76: updated from 0.002
         assert cfg.d_trail_distance == pytest.approx(0.002)
         assert cfg.max_concurrent == 10
-        assert len(cfg.symbol_whitelist) == 60
+        assert len(cfg.symbol_whitelist) == 59  # 2026-03-19: RLCUSDT removed (notional limit)
 
     def test_ln_ratio(self):
         """L/N must be 3.0 for VR squeeze."""
