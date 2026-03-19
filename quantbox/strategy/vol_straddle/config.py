@@ -70,7 +70,9 @@ class VolStraddleConfig(BaseSettings):
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
     s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg
     s_trail_distance: float = 0.001  # r76: 0.1% behind peak (was 0.2%, PF 4.876→9.349)
-    straddle_enabled: bool = True  # S_d8 straddle mode enabled
+    # r90 finding: IDEAL sim PF=3.89 but RATCHET (realistic) PF=0.75. 19% ratchet success rate
+    # at 0.1% distance. Straddle unprofitable with bar-close execution. Disabled until fixed.
+    straddle_enabled: bool = False  # S_d8 disabled — r90 showed execution gap makes it lose money
     straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
     # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR.
     # r82: strd_max=8 → Calmar +67% vs strd_max=6. VR 2슬롯 보험 유지.

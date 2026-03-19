@@ -103,7 +103,8 @@ class TestConfig:
         assert cfg.round_trip_cost == pytest.approx(0.0008)
 
     def test_straddle_enabled(self, cfg):
-        assert cfg.straddle_enabled is True
+        # r90: straddle disabled — IDEAL PF=3.89 but RATCHET PF=0.75 (execution gap)
+        assert cfg.straddle_enabled is False
         assert cfg.hedge_mode is True
 
 
