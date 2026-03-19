@@ -520,7 +520,11 @@ class ReconciliationMixin:
                         f"(algoId={tp_id})"
                     )
 
-            # ── Trail bracket repair (Algo API) ──
+            # ── Trail bracket repair ──
+            # Trail is placed at entry with future activationPrice.
+            # If trail is missing (entry-time API failure, state corruption),
+            # repair it here. Uses _get_trail_params which calculates proper
+            # activationPrice based on entry_price and trail_activate.
             vs_cfg = getattr(self, "vs_config", None)
             if vs_cfg and getattr(vs_cfg, "trail_server_native", False):
                 trail_oid = pos.get("server_trail_order_id")
@@ -542,7 +546,10 @@ class ReconciliationMixin:
                         )
                         if new_trail:
                             pos["server_trail_order_id"] = new_trail
-                            logger.info(f"[{sym}] BRACKET REPAIR: Trail placed orderId={new_trail} callbackRate={cr}%")
+                            logger.info(
+                                f"[{sym}] BRACKET REPAIR: Trail placed orderId={new_trail} "
+                                f"callbackRate={cr}% activationPrice=${ap:.4f}"
+                            )
                             self._save_state()
                         else:
                             logger.warning(f"[{sym}] BRACKET REPAIR: Trail failed")
