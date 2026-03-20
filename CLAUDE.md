@@ -130,8 +130,8 @@ When modifying these files, always check the paired files:
 | `vol_straddle/config.py` | All backtest scripts, `.env` |
 | `scalper.py` trading logic | `trade_sim.py` parity |
 | `core/scalper_state.py` | `scalper.py`, `conftest.py`, state-related tests |
-| Any new module | `README.md` structure, `__init__.py`, test file, `agents.md` |
-| `.github/instructions/` or `AGENTS.md` | `.github/skills/` cross-references for staleness |
+| Any new module | `README.md` structure, `__init__.py`, test file, `AGENTS.md` |
+| `AGENTS.md` | `.github/skills/` cross-references for staleness |
 
 ## Git Flow
 
