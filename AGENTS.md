@@ -1,6 +1,6 @@
 # QuantBox Agent Instructions
 
-> 코드 사실(Facts) 레퍼런스. 원칙은 `copilot-instructions.md` 참조.  
+> 코드 사실(Facts) 레퍼런스. 원칙은 `CLAUDE.md` 참조.
 > **현재 프로덕션:** VolStraddle v14.24.0 + 5 신뢰성 모듈 (--strategy vol_straddle)
 
 ---
