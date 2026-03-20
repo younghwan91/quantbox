@@ -104,6 +104,11 @@ class VolStraddleStrategy:
         #   'cooldown', 'no_breakout', 'momentum_fail', 'fired'
         self._ma_cluster_state: dict[str, dict] = {}
 
+        # ── Straddle rollback cooldown (per-symbol cycle counter) ──
+        # After a half-open rollback, skip this symbol for N cycles
+        # to prevent the LONG-open → SHORT-fail → rollback loop.
+        self._straddle_rollback_cooldown: dict[str, int] = {}
+
         # ── Signal source tracking (populated by on_bar for each symbol) ──
         # Allows scalper to apply strategy-specific gates after on_bar returns.
         # Values: 'vr_squeeze' | 'ma_cluster' | 'none'
@@ -150,6 +155,15 @@ class VolStraddleStrategy:
         # In straddle mode, both legs open simultaneously from one signal,
         # so if ANY leg exists we skip (no incremental straddle adds).
         if self.has_position(symbol):
+            return 0
+
+        # Straddle rollback cooldown: skip symbol for N cycles after
+        # a half-open rollback to prevent LONG→SHORT-fail→rollback loop.
+        remaining = self._straddle_rollback_cooldown.get(symbol, 0)
+        if remaining > 0:
+            self._straddle_rollback_cooldown[symbol] = remaining - 1
+            if remaining == 1:
+                logger.info(f"[{symbol}] Straddle rollback cooldown expired")
             return 0
 
         high_15m = self._high_data.get(symbol)

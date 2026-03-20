@@ -338,6 +338,9 @@ class VolStraddleConfig(BaseSettings):
     orphan_auto_close_cycles: int = (
         4  # VS_ORPHAN_AUTO_CLOSE_CYCLES: cycles before orphaned leg auto-closes (~60min at 15m)
     )
+    straddle_rollback_cooldown_cycles: int = (
+        8  # VS_STRADDLE_ROLLBACK_COOLDOWN_CYCLES: skip symbol for N cycles after rollback (~2h at 15m)
+    )
 
     @model_validator(mode="after")
     def _validate_safety_constraints(self) -> "VolStraddleConfig":
