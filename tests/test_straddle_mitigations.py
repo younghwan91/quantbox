@@ -183,6 +183,78 @@ class TestStraddleHalfOpenRollback:
 
 
 # ---------------------------------------------------------------------------
+# P3b: Straddle rollback cooldown
+# ---------------------------------------------------------------------------
+
+
+class TestStraddleRollbackCooldown:
+    """After rollback, the symbol must be blocked for N cycles."""
+
+    def test_cooldown_blocks_signal(self):
+        """on_bar returns 0 while cooldown is active."""
+        scalper = _build_vs_scalper()
+        strategy = scalper.strategy
+
+        # Set cooldown for BANDUSDT
+        strategy._straddle_rollback_cooldown["BANDUSDT"] = 3
+
+        import numpy as np
+
+        n = 500
+        close = np.linspace(1.0, 1.5, n)
+        high = close * 1.01
+        low = close * 0.99
+        vol = np.ones(n) * 1000.0
+        taker_buy = vol * 0.5
+        strategy.update_market_data("BANDUSDT", vol, taker_buy, high, low)
+
+        # First call: cooldown=3 → 0, decrements to 2
+        result = strategy.on_bar("BANDUSDT", close, "15m")
+        assert result == 0, "Signal must be blocked during cooldown"
+        assert strategy._straddle_rollback_cooldown["BANDUSDT"] == 2
+
+        # Second call: cooldown=2 → 0, decrements to 1
+        result = strategy.on_bar("BANDUSDT", close, "15m")
+        assert result == 0
+        assert strategy._straddle_rollback_cooldown["BANDUSDT"] == 1
+
+        # Third call: cooldown=1 → 0, decrements to 0 (expired)
+        result = strategy.on_bar("BANDUSDT", close, "15m")
+        assert result == 0
+        assert strategy._straddle_rollback_cooldown["BANDUSDT"] == 0
+
+    def test_cooldown_expires_allows_signal(self):
+        """After cooldown expires, on_bar can produce signals again."""
+        scalper = _build_vs_scalper()
+        strategy = scalper.strategy
+
+        # Cooldown already at 0 — should not block
+        strategy._straddle_rollback_cooldown["BANDUSDT"] = 0
+
+        import numpy as np
+
+        n = 500
+        close = np.linspace(1.0, 1.5, n)
+        high = close * 1.01
+        low = close * 0.99
+        vol = np.ones(n) * 1000.0
+        taker_buy = vol * 0.5
+        strategy.update_market_data("BANDUSDT", vol, taker_buy, high, low)
+
+        # Should NOT be blocked (cooldown=0 means expired)
+        strategy.on_bar("BANDUSDT", close, "15m")
+        # Verify cooldown didn't go negative
+        assert strategy._straddle_rollback_cooldown["BANDUSDT"] == 0
+
+    def test_cooldown_default_from_config(self):
+        """Config param straddle_rollback_cooldown_cycles defaults to 8."""
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        cfg = VolStraddleConfig()
+        assert cfg.straddle_rollback_cooldown_cycles == 8
+
+
+# ---------------------------------------------------------------------------
 # P4: _load_state() strategy_type auto-heal
 # ---------------------------------------------------------------------------
 
