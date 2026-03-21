@@ -224,38 +224,35 @@ straddle 진입 시 trail 배치 불가 → 포지션이 SL까지 하락 → PF=
 - `_cancel_trail_regular()` → `futures_cancel_order(orderId=...)`
 - `_check_trail_regular()` → `futures_get_order(orderId=...)` → status: NEW/FILLED/CANCELED
 
-**deprecated:** `_place_trailing_stop_market`, `_cancel_trailing_stop_market`, `_check_trail_order_status` (algo API)
-
-**callbackRate 범위:** 0.1-5.0 (1=1%). `s_trail_distance=0.001` → `callbackRate=0.1` (최솟값).
+**callbackRate 범위:** 0.1-5.0 (1=1%). `s_trail_distance=0.005` → `callbackRate=0.5` (프로덕션). **0.1%는 tick noise에 즉시 발동 — 사용 금지** (r104b: 81% bias).
 
 **cross-cancel:** SL 체결 시 trail 취소 (regular), trail 체결 시 SL+TP 취소 (algo).
 
-### Incident #9: Deferred Server Trail — Immediate Callback Fire (2026-03-18)
+### Incident #9: Trail Immediate Fire — callbackRate Too Tight (2026-03-18 → 2026-03-21)
 
-**증상:** CRVUSDT MA Cluster LONG, entry $0.2520, exit $0.2510, PnL=-0.40%. Trail이 entry 1분 후 바로 발동.
+**증상:** CRVUSDT -0.40% (2026-03-18), EGLDUSDT -$32.81 in 30min (2026-03-21). Trail이 entry 1분 후 바로 발동.
 
-**원인:** `_open_position()`에서 `activationPrice=entry_price`로 trail 즉시 배치.
-- Binance Algo API: `activationPrice` 미래 가격을 설정해도 **현재 mark price로 silently override**
-- 결과: trail이 즉시 활성화 → 첫 callbackRate%(MA=0.3%, VR=0.2%) 하락에 즉시 trail stop 발동
-- `trail_activate` 파라미터(MA=2%, VR=1%)가 완전히 무시됨
+**원인:** `callbackRate=0.1%` (s_trail_distance=0.001)가 tick noise보다 좁음.
+- Binance Algo API: `activationPrice` 미래 가격 설정 정상 작동 (live 검증 2026-03-19, commit 3cb8865)
+- Trail은 `activationPrice` 도달 후 NEW→ACTIVE 전환, peak 추적 시작
+- **문제:** 활성화 후 0.1% pullback에 즉시 발동 — crypto에서 0.1%는 noise
+- r104b (1m vs 15m): 0.1% callbackRate에서 15m 백테스트 PF=2.12 vs 1m PF=0.40 (81% bias)
 
-**수정 (v14.26.0, b91642d):**
-- `positions.py`: `trail_server_native=True`일 때 entry에서 trail 배치 안 함 (`TRAIL=deferred` 로그)
-- `scalper.py`: `_manage_active_positions()` HOLD 브랜치에 deferred 블록 추가
-  - 조건: `trail_active=True AND server_trail_order_id=None AND not paper_mode AND trail_server_native=True`
-  - 배치: `activation_price=current_close` (이미 trail_activate% 도달 by definition)
+**⚠️ 주의:** `activationPrice`를 미래 가격으로 설정하는 것은 정상 동작함. "Binance가 무시한다"는 오해였음.
 
-**MA cluster 실제 효과:** trail이 2% 수익 달성 전까지는 절대 발동 안 함 (기존: 0.3% 하락 즉시 발동)
+**수정 (v14.35.0):**
+- `config.py`: `s_trail_distance` 0.001→0.005 (callbackRate 0.1%→0.5%, noise floor)
+- `positions.py`: entry에서 trail 배치 유지 (`activationPrice=entry×(1±trail_activate)`)
+- Binance가 tick-by-tick peak 추적 — 15m polling보다 우수
 
 **진단 방법:**
 ```bash
-# 신규 거래 로그에서 "TRAIL=deferred" 확인 (entry에서 trail 없음 = 정상)
-grep "TRAIL=" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
-# 기대 출력: Server bracket: SL=OK (algoId=...) TRAIL=deferred (places when trail_activate% reached)
+# 신규 거래 로그에서 trail 배치 확인
+grep "TRAIL=OK" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1) | head -5
+# 기대 출력: Server bracket: SL=OK (algoId=...) TRAIL=OK (orderId=..., activate=$XX.XX=0.5% callback)
 
-# trail이 deferred로 배치됐을 때 확인
-grep "Deferred server trail PLACED" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1)
-# 기대 출력: [SUIUSDT:LONG] Deferred server trail PLACED: algoId=... callbackRate=0.3% activationPrice=$...
+# trail 활성화 확인 (price가 activationPrice 도달 후)
+grep "Trail ACTIVATED" logs/bot/vol_straddle/$(ls -t logs/bot/vol_straddle/ | head -1)
 ```
 
 ### S_d8 Straddle 실행 갭 (2026-03-17, r89)
@@ -352,8 +349,8 @@ cp data/state/scalper_state_backup_YYYYMMDD_HHMMSS.json data/state/scalper_state
 7. **D_trail 파라미터 소스 오염 (r53 인시던트, 2026-03-08):** `backtest_v14_3_0.py`의 `D_TRAIL_ACTIVATE=0.02/D_TRAIL_DISTANCE=0.003` import 절대 금지. 항상 `cfg = VolStraddleConfig()`에서 직접 읽어야 함. **r69 이후 프로덕션 값은 `0.010/0.002`** (r47~r68: 0.005/0.002). 구버전 파일에서 import 시 D_mom8 결과가 조용히 틀림.
 8. **Trail bar-close 실행 갭:** Trail ratchet 구현 완료 (commit `e473e4d`, v14.5+). MFE >> |PnL| + trailing_stop 청산이면 ratchet 이전 포지션. 신규 포지션은 자동 해결.
 9. **Straddle 실행 갭 (r89, 2026-03-17):** S_d8 bar-close PF=0.715 vs IDEAL PF=5.44. 전략의 수익이 전적으로 trail exit 가격 정밀도에 의존. **straddle_enabled=False (프로덕션).**
-10. **TRAILING_STOP_MARKET API (2026-03-17):** Algo API(`/fapi/v1/algoOrder`) → `-2021` reject. **Regular API**(`/fapi/v1/order`) 사용 필수. `_place_trail_regular()` / `_cancel_trail_regular()` / `_check_trail_regular()`. deprecated: `_place_trailing_stop_market` 등.
-11. **Deferred server trail (Incident #9, 2026-03-18):** trail이 entry에서 즉시 발동하면 CRVUSDT처럼 0.4% 손실 후 종료됨. trail이 `callbackRate`% 하락에 즉시 반응하는지 확인. 로그에서 `TRAIL=deferred` 확인 필요. `trail_server_native=True` + deferred 배치 로직 확인.
+10. **TRAILING_STOP_MARKET API (2026-03-17):** Algo API(`/fapi/v1/algoOrder`) 전용 (`-4120` on regular API). `activationPrice=entry×(1±trail_activate)` 미래 가격 설정 가능 (Binance가 NEW 상태 유지 후 도달 시 활성화, live 검증 2026-03-19). `_place_trail_regular()` → Algo API delegate.
+11. **Trail callbackRate noise (Incident #9, v14.35.0):** `callbackRate=0.1%`는 crypto tick noise보다 좁아 활성화 직후 발동. r104b: 0.1%에서 1m/15m bias 81%. **`callbackRate≥0.5%` 필수** (s_trail_distance≥0.005). 로그에서 `TRAIL=OK` + `callback=0.5%` 확인.
 
 ---
 

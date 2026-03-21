@@ -584,7 +584,7 @@ grep -iE "rate.?limit|timeout|connection|retry|429|418" "$LIVE_LOG" | tail -10
 | Code | Severity | Meaning | Root Cause | Fix |
 |------|----------|---------|------------|-----|
 | `-1022` | CRITICAL | Invalid signature | Colon in symbol field (compound key leak) | Fix state: strip `:LONG`/`:SHORT` from `symbol` field |
-| `-2021` | HIGH | Order would trigger immediately | `activationPrice` wrong for trailing stop | Set `activationPrice=entry_price` |
+| `-2021` | HIGH | Order would trigger immediately | `activationPrice` below current mark price | Set `activationPrice=entry×(1±trail_activate)` — future price OK (Binance keeps in NEW). Ensure `callbackRate≥0.5%` |
 | `-2027` | MEDIUM | Notional too large | Position size × leverage exceeds limit | Reduce qty or check leverage calc |
 | `-2028` | HIGH | Insufficient margin | Leverage changed in close path (Rule #1) | Verify leverage guard |
 | `-4120` | HIGH | Order type not supported | Trailing stop on regular API | Must use Algo API endpoint |
