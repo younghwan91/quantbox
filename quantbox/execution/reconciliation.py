@@ -546,14 +546,14 @@ class ReconciliationMixin:
                     )
 
             # ── Trail bracket repair ──
-            # Trail is placed at entry with future activationPrice.
-            # If trail is missing (entry-time API failure, state corruption),
-            # repair it here. Uses _get_trail_params which calculates proper
-            # activationPrice based on entry_price and trail_activate.
+            # Trail is DEFERRED until trail_active=True (peak_gain >= trail_activate%).
+            # Binance Algo API ignores future activationPrice — placing before
+            # trail_active causes immediate fire on any callbackRate% pullback.
+            # Only place trail when position is already in profit.
             vs_cfg = getattr(self, "vs_config", None)
             if vs_cfg and getattr(vs_cfg, "trail_server_native", False):
                 trail_oid = pos.get("server_trail_order_id")
-                if trail_oid is None:
+                if trail_oid is None and pos.get("trail_active"):
                     quantity = pos["notional"] / pos["entry_price"]
                     quantity = self._round_qty(quantity, api_sym)
                     if quantity > 0:

@@ -456,7 +456,7 @@ class TestReconTrailFill:
         s._record_server_fill.assert_not_called()
 
     def test_trail_cancelled_clears_for_repair(self):
-        """Externally cancelled trail should be cleared and repaired."""
+        """Externally cancelled trail should be cleared and repaired if trail_active."""
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
         _inject_position(
@@ -465,7 +465,8 @@ class TestReconTrailFill:
             server_trail_order_id="77777",
             is_straddle=False,
         )
-        # No need to set trail_active — entry-time placement model repairs regardless
+        # Deferred trail: must be trail_active for repair to re-place
+        s.strategy._positions["TESTUSDT:LONG"]["trail_active"] = True
 
         s._check_trail_regular = MagicMock(return_value={"status": "CANCELED", "orderId": 77777})
         s._check_order_filled = MagicMock(return_value=None)
@@ -475,7 +476,7 @@ class TestReconTrailFill:
 
         s._sync_server_orders()
 
-        # Trail should be repaired immediately
+        # Trail should be repaired because trail_active=True
         s._place_trail_regular.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
         assert pos["server_trail_order_id"] == "88888"
@@ -488,7 +489,7 @@ class TestReconTrailFill:
 
 class TestTrailBracketRepair:
     def test_missing_trail_repaired(self):
-        """Position with missing trail order should get one placed (entry-time placement)."""
+        """Position with missing trail order should get one placed when trail_active."""
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
         _inject_position(
@@ -499,7 +500,8 @@ class TestTrailBracketRepair:
             strategy_type="straddle",
             is_straddle=False,
         )
-        # Trail is placed at entry, so no trail_active check needed for repair
+        # Deferred trail: must be trail_active for repair to place trail
+        s.strategy._positions["TESTUSDT:LONG"]["trail_active"] = True
 
         # Mock all order checks → nothing filled
         s._check_order_filled = MagicMock(return_value=None)
@@ -509,17 +511,17 @@ class TestTrailBracketRepair:
 
         s._sync_server_orders()
 
-        # Trail should be placed as repair
+        # Trail should be placed as repair because trail_active=True
         s._place_trail_regular.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
         assert pos["server_trail_order_id"] == "88888"
 
-    def test_missing_trail_repaired_even_if_inactive(self):
-        """Position with missing trail should get trail even if trail_active=False.
+    def test_missing_trail_not_repaired_when_inactive(self):
+        """Position with missing trail should NOT get trail if trail_active=False.
 
-        New logic: trail is placed at entry with future activationPrice.
-        If trail is missing (API failure at entry), bracket repair restores it
-        regardless of trail_active state.
+        Deferred trail: Binance Algo API ignores future activationPrice, so
+        trail must only be placed after peak_gain >= trail_activate%.
+        Before that, SL protects the position.
         """
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
@@ -531,7 +533,7 @@ class TestTrailBracketRepair:
             strategy_type="straddle",
             is_straddle=False,
         )
-        # trail_active is False, but trail should still be repaired
+        # trail_active is False — trail should NOT be placed
 
         s._check_order_filled = MagicMock(return_value=None)
         s._check_trail_regular = MagicMock(return_value=None)
@@ -540,10 +542,10 @@ class TestTrailBracketRepair:
 
         s._sync_server_orders()
 
-        # Trail SHOULD be placed — entry-time placement model
-        s._place_trail_regular.assert_called_once()
+        # Trail should NOT be placed — deferred until trail_active=True
+        s._place_trail_regular.assert_not_called()
         pos = s.strategy._positions["TESTUSDT:LONG"]
-        assert pos["server_trail_order_id"] == "88888"
+        assert pos["server_trail_order_id"] is None
 
     def test_existing_trail_not_re_placed(self):
         """Position with existing trail order should NOT get a new one."""
