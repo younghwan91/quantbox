@@ -91,17 +91,17 @@ def test_trail_active_places_stop():
     pos = _make_pos(trail_active=True, peak_gain=0.008, trail_sl_ratcheted=-999.0)
     s._ratchet_trail_sl("TESTUSDT:LONG", pos)
 
-    # d_trail_distance = 0.002 → trail_stop_gain = 0.008 - 0.002 = 0.006
-    # trigger = 100 × 1.006 = 100.60
+    # d_trail_distance = 0.005 → trail_stop_gain = 0.008 - 0.005 = 0.003
+    # trigger = 100 × 1.003 = 100.30
     s._place_algo_order.assert_called_once()
     call_kwargs = s._place_algo_order.call_args.kwargs
     assert call_kwargs["side"] == "SELL"
     assert call_kwargs["order_type"] == "STOP"
-    assert abs(call_kwargs["trigger_price"] - 100.60) < 0.01
+    assert abs(call_kwargs["trigger_price"] - 100.30) < 0.01
 
     s._cancel_server_stop_loss.assert_called_once_with("TESTUSDT", "sl_111")
     assert pos["server_sl_order_id"] == "new_sl_555"
-    assert abs(pos["_trail_sl_ratcheted"] - 0.006) < 1e-9
+    assert abs(pos["_trail_sl_ratcheted"] - 0.003) < 1e-9
     s._save_state.assert_called_once()
 
 
@@ -121,9 +121,9 @@ def test_ratchet_upward_only():
     s._place_algo_order = MagicMock(return_value="new_sl_777")
     s._ratchet_trail_sl("TESTUSDT:LONG", pos)
 
-    # trail_stop_gain = 0.012 - 0.002 = 0.010, improvement = 0.010 - 0.006 = 0.004 ≥ 0.001
+    # trail_stop_gain = 0.012 - 0.005 = 0.007, improvement = 0.007 - 0.006 = 0.001 ≥ 0.001
     s._place_algo_order.assert_called_once()
-    assert abs(pos["_trail_sl_ratcheted"] - 0.010) < 1e-9
+    assert abs(pos["_trail_sl_ratcheted"] - 0.007) < 1e-9
 
     # Now peak barely changes (tiny delta below 0.001 threshold)
     pos["peak_gain"] = 0.0125
@@ -131,7 +131,7 @@ def test_ratchet_upward_only():
     s._cancel_server_stop_loss.reset_mock()
     s._ratchet_trail_sl("TESTUSDT:LONG", pos)
 
-    # trail_stop_gain = 0.0105, improvement = 0.0005 < 0.001 → no API
+    # trail_stop_gain = 0.0075, improvement = 0.0005 < 0.001 → no API
     s._place_algo_order.assert_not_called()
 
 
@@ -168,11 +168,11 @@ def test_short_position_buy_stop():
     pos["position_side"] = "SHORT"
     s._ratchet_trail_sl("TESTUSDT:SHORT", pos)
 
-    # trail_stop_gain = 0.010 - 0.002 = 0.008
-    # trigger = 100 × (1 - 0.008) = 99.20
+    # trail_stop_gain = 0.010 - 0.005 = 0.005
+    # trigger = 100 × (1 - 0.005) = 99.50
     call_kwargs = s._place_algo_order.call_args.kwargs
     assert call_kwargs["side"] == "BUY"
-    assert abs(call_kwargs["trigger_price"] - 99.20) < 0.01
+    assert abs(call_kwargs["trigger_price"] - 99.50) < 0.01
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,19 +181,19 @@ def test_short_position_buy_stop():
 
 
 def test_ma_cluster_uses_correct_distance():
-    """MA cluster strategy uses ma_cluster_trail_distance (0.003, r75: was 0.005)."""
+    """MA cluster strategy uses ma_cluster_trail_distance (0.005, r106: rule #8)."""
     s = _make_scalper()
     _setup_mocks(s)
     s._place_algo_order = MagicMock(return_value="new_sl_ma")
 
-    # Peak = 0.020, trail_distance = 0.003 → trail_stop_gain = 0.017
+    # Peak = 0.020, trail_distance = 0.005 → trail_stop_gain = 0.015
     pos = _make_pos(trail_active=True, peak_gain=0.020, strategy_type="ma_cluster", trail_sl_ratcheted=-999.0)
     s._ratchet_trail_sl("TESTUSDT:LONG", pos)
 
-    # trigger = 100 × (1 + 0.017) = 101.70
+    # trigger = 100 × (1 + 0.015) = 101.50
     call_kwargs = s._place_algo_order.call_args.kwargs
-    assert abs(call_kwargs["trigger_price"] - 101.70) < 0.01
-    assert abs(pos["_trail_sl_ratcheted"] - 0.017) < 1e-9
+    assert abs(call_kwargs["trigger_price"] - 101.50) < 0.01
+    assert abs(pos["_trail_sl_ratcheted"] - 0.015) < 1e-9
 
 
 # ─────────────────────────────────────────────────────────────────────────────
