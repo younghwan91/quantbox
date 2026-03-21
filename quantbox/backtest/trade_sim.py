@@ -1182,3 +1182,329 @@ def precompute_all_vr(
                 key = f"vr_{sp}_{lp}"
                 if key not in d:
                     d[key] = compute_vr(c, h, lo, sp, lp)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  MA Cluster Trailing Stop — Canonical Sim (promoted from r75)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def sim_ma_cluster_trailing(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    sma20: np.ndarray,
+    sma50: np.ndarray,
+    sma100: np.ndarray,
+    sma200: np.ndarray,
+    momentum: np.ndarray,
+    cluster_pct: float,
+    min_duration: int,
+    max_duration: int,
+    min_momentum: float,
+    sl: float,
+    tp: float,
+    trail_activate: float,
+    trail_distance: float,
+    max_hold: int,
+    cost: float,
+    warmup: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """MA cluster squeeze with trailing stop exit (numba-accelerated).
+
+    Signal detection (inlined):
+      - All 4 SMAs must be within cluster_pct of each other (spread / close).
+      - Cluster must persist for [min_duration, max_duration] consecutive bars.
+      - Price must break out of the cluster zone on the entry bar.
+      - |momentum| >= min_momentum required for directional confirmation.
+      - direction = sign of momentum.
+
+    Exit logic (priority order — matches server execution reality):
+      1. SL checked FIRST, unconditionally, even after trailing activates.
+         Server SL fires intra-bar; trail fires at bar close. SL has priority.
+      2. Peak gain updated from intra-bar high/low.
+      3. Trailing activates once peak_gain >= trail_activate.
+      4. Trail exit: when price retraces trail_distance below the peak.
+      5. Hard TP cap: exit at tp (safety ceiling above the trail).
+      6. Max hold: exit at close[max_hold_bar].
+
+    NOTE: r75 had a bug — it checked trail FIRST and suppressed SL after
+    trail activated. This canonical version fixes that: SL is always checked
+    first, matching live behavior where server SL fires intra-bar.
+
+    Args:
+        close: 4h close price array.
+        high: 4h high price array.
+        low: 4h low price array.
+        sma20: Pre-computed SMA(20) on 4h bars.
+        sma50: Pre-computed SMA(50) on 4h bars.
+        sma100: Pre-computed SMA(100) on 4h bars.
+        sma200: Pre-computed SMA(200) on 4h bars.
+        momentum: Pre-computed momentum(8) on 4h bars.
+        cluster_pct: MA spread threshold (e.g. 0.02 = 2%).
+        min_duration: Minimum consecutive cluster bars before entry.
+        max_duration: Maximum cluster bars — zombie filter (0 = disabled).
+        min_momentum: Minimum |momentum| for direction confirmation.
+        sl: Stop-loss fraction (e.g. 0.02 = 2%).
+        tp: Hard TP cap fraction (e.g. 0.08 = 8%).
+        trail_activate: Peak gain to activate trailing (e.g. 0.04 = 4%).
+        trail_distance: Trail distance from peak (e.g. 0.005 = 0.5%).
+        max_hold: Maximum bars to hold (in 4h bar units).
+        cost: Round-trip transaction cost (e.g. 0.0008).
+        warmup: Skip first N bars (SMA warmup).
+
+    Returns:
+        (pnl, entry_bars, exit_bars) — each 1-D array of length N_trades.
+        Bar indices are in 4h bar units.
+    """
+    n = len(close)
+    cap = n // 4 + 1
+    pnl = np.empty(cap, dtype=np.float64)
+    ent = np.empty(cap, dtype=np.int64)
+    ext = np.empty(cap, dtype=np.int64)
+    cnt = 0
+    i = warmup
+    cluster_count = 0
+
+    while i < n - 1:
+        if np.isnan(sma200[i]):
+            cluster_count = 0
+            i += 1
+            continue
+
+        ma_max = max(sma20[i], max(sma50[i], max(sma100[i], sma200[i])))
+        ma_min = min(sma20[i], min(sma50[i], min(sma100[i], sma200[i])))
+        if close[i] <= 0.0:
+            i += 1
+            continue
+        spread = (ma_max - ma_min) / close[i]
+
+        if spread <= cluster_pct:
+            cluster_count += 1
+        else:
+            cluster_count = 0
+            i += 1
+            continue
+
+        # Min duration: cluster must have persisted
+        if cluster_count < min_duration:
+            i += 1
+            continue
+
+        # Max duration: zombie filter
+        if max_duration > 0 and cluster_count > max_duration:
+            i += 1
+            continue
+
+        # Breakout: price must be outside the cluster zone
+        if ma_min <= close[i] <= ma_max:
+            i += 1
+            continue
+
+        # Momentum direction confirmation
+        if abs(momentum[i]) < min_momentum:
+            i += 1
+            continue
+        d = 1 if momentum[i] > 0 else -1
+
+        entry = close[i]
+        end = min(i + 1 + max_hold, n)
+        eb = end - 1
+        trade_pnl = 0.0
+        trailing_active = False
+        peak_gain = 0.0
+
+        for j in range(i + 1, end):
+            if d == 1:
+                # SL checked FIRST (server SL fires intra-bar,
+                # trail fires at bar close; SL always has priority)
+                if low[j] <= entry * (1.0 - sl):
+                    trade_pnl = -sl
+                    eb = j
+                    break
+
+                cur_gain = (high[j] - entry) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+
+                if trailing_active:
+                    trail_level = entry * (1.0 + peak_gain - trail_distance)
+                    if low[j] <= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+
+                if high[j] >= entry * (1.0 + tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+            else:
+                # SHORT — SL checked FIRST (same rationale)
+                if high[j] >= entry * (1.0 + sl):
+                    trade_pnl = -sl
+                    eb = j
+                    break
+
+                cur_gain = (entry - low[j]) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+
+                if trailing_active:
+                    trail_level = entry * (1.0 - peak_gain + trail_distance)
+                    if high[j] >= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+
+                if low[j] <= entry * (1.0 - tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+        else:
+            # Max-hold exit at close
+            if d == 1:
+                trade_pnl = (close[eb] - entry) / entry
+            else:
+                trade_pnl = (entry - close[eb]) / entry
+
+        if cnt < cap:
+            pnl[cnt] = trade_pnl - cost
+            ent[cnt] = i
+            ext[cnt] = eb
+            cnt += 1
+
+        # One signal per cluster episode — reset after trade
+        cluster_count = 0
+        i = eb + 1
+
+    return pnl[:cnt], ent[:cnt], ext[:cnt]
+
+
+def collect_ma_cluster_trades(
+    data_15m: dict,
+    data_4h: dict | None = None,
+    *,
+    cluster_pct: float | None = None,
+    min_duration: int | None = None,
+    max_duration: int | None = None,
+    min_momentum: float | None = None,
+    sl: float | None = None,
+    tp: float | None = None,
+    trail_activate: float | None = None,
+    trail_distance: float | None = None,
+    max_hold: int | None = None,
+    cost: float = COST_DIRECTIONAL,
+) -> list[tuple[str, int, int, float]]:
+    """Collect MA cluster trailing trades for all whitelist symbols (4h only).
+
+    Precomputes SMA(20/50/100/200) and momentum(8) on 4h bars, then runs
+    ``sim_ma_cluster_trailing`` and converts bar indices to the 15m base
+    timeline used by ``portfolio_sim``.
+
+    Parameters default to ``VolStraddleConfig`` values (single source of truth).
+    Pass explicit values only for parameter sweeps.
+
+    Args:
+        data_15m: {symbol: {close, high, low, volume, _offset, ...}} — 15m bars.
+        data_4h: Pre-resampled 4h data dict.  If None, resampled from data_15m.
+        cluster_pct: MA spread threshold (default: cfg.ma_cluster_pct).
+        min_duration: Minimum cluster bars (default: cfg.ma_cluster_min_duration).
+        max_duration: Maximum cluster bars / zombie filter
+            (default: cfg.ma_cluster_max_duration).
+        min_momentum: Minimum |momentum| for entry (default: cfg.ma_cluster_min_momentum).
+        sl: Stop-loss fraction (default: cfg.ma_cluster_sl).
+        tp: Hard TP cap fraction (default: cfg.ma_cluster_tp).
+        trail_activate: Gain to activate trailing (default: cfg.ma_cluster_trail_activate).
+        trail_distance: Trail distance from peak (default: cfg.ma_cluster_trail_distance).
+        max_hold: Maximum bars to hold in 4h units (default: cfg.ma_cluster_max_hold_4h).
+        cost: Round-trip transaction cost (default: COST_DIRECTIONAL = 0.0008).
+
+    Returns:
+        List of (symbol, entry_15m_bar, exit_15m_bar, pnl) sorted by symbol.
+        Compatible with ``portfolio_sim()``.
+    """
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+    from quantbox.strategy.vol_straddle.signals import compute_momentum
+
+    cfg = VolStraddleConfig()
+
+    # Resolve params from config defaults
+    _cluster_pct = cluster_pct if cluster_pct is not None else cfg.ma_cluster_pct
+    _min_duration = min_duration if min_duration is not None else cfg.ma_cluster_min_duration
+    _max_duration = max_duration if max_duration is not None else cfg.ma_cluster_max_duration
+    _min_momentum = min_momentum if min_momentum is not None else cfg.ma_cluster_min_momentum
+    _sl = sl if sl is not None else cfg.ma_cluster_sl
+    _tp = tp if tp is not None else cfg.ma_cluster_tp
+    _trail_activate = trail_activate if trail_activate is not None else cfg.ma_cluster_trail_activate
+    _trail_distance = trail_distance if trail_distance is not None else cfg.ma_cluster_trail_distance
+    _max_hold = max_hold if max_hold is not None else cfg.ma_cluster_max_hold_4h
+
+    ratio = 16  # 4h = 16 × 15m bars
+
+    # Resample to 4h if not provided
+    if data_4h is None:
+        data_4h = build_resampled(data_15m, ratio)
+
+    # Precompute SMAs on 4h bars in-place (idempotent: skip if already present)
+    for sym, d4 in data_4h.items():
+        c = d4["close"]
+        n = len(c)
+        for period, key in ((20, "sma_20"), (50, "sma_50"), (100, "sma_100"), (200, "sma_200")):
+            if key not in d4:
+                out = np.full(n, np.nan)
+                if n >= period:
+                    s = float(np.sum(c[:period]))
+                    out[period - 1] = s / period
+                    for idx in range(period, n):
+                        s += c[idx] - c[idx - period]
+                        out[idx] = s / period
+                d4[key] = out
+        if "mom_8" not in d4:
+            d4["mom_8"] = compute_momentum(c, 8)
+
+    all_trades: list[tuple[str, int, int, float]] = []
+
+    for sym in sorted(data_15m.keys()):
+        d4 = data_4h.get(sym)
+        if d4 is None:
+            continue
+        if "sma_200" not in d4 or "mom_8" not in d4:
+            continue
+
+        offset = int(data_15m[sym].get("_offset", 0))
+
+        p, e, x = sim_ma_cluster_trailing(
+            d4["close"],
+            d4["high"],
+            d4["low"],
+            d4["sma_20"],
+            d4["sma_50"],
+            d4["sma_100"],
+            d4["sma_200"],
+            d4["mom_8"],
+            _cluster_pct,
+            _min_duration,
+            _max_duration,
+            _min_momentum,
+            _sl,
+            _tp,
+            _trail_activate,
+            _trail_distance,
+            _max_hold,
+            cost,
+            WARMUP_4h,
+        )
+
+        for k in range(len(p)):
+            entry_bar = int(e[k]) * ratio + offset
+            exit_bar = int(x[k]) * ratio + ratio - 1 + offset
+            all_trades.append((sym, entry_bar, exit_bar, float(p[k])))
+
+    return all_trades
