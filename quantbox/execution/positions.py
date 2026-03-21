@@ -437,18 +437,34 @@ class PositionMixin:
                 logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — bracket repair next cycle")
                 sl_order_id = None
 
-            # Server-side trailing stop: DEFERRED until trail_active=True.
-            # Binance Algo API ignores future activationPrice — placing at entry
-            # causes immediate fire on any callbackRate% pullback (EGLDUSDT 2026-03-21:
-            # 3 straddle pairs killed in 30min, -$32.81).
-            # The bracket repair loop (_update_trail_ratchet) places the trail when
-            # peak_gain >= trail_activate% and trail_active=True.
+            # Server-side trailing stop: placed at entry with future activationPrice.
+            # Binance keeps trail in NEW until price reaches activationPrice, then
+            # tracks peak tick-by-tick and fires on callbackRate% pullback.
+            # Verified via live test (commit 3cb8865, 2026-03-19).
+            # EGLDUSDT incident (2026-03-21) was caused by 0.1% callbackRate (noise),
+            # not by Binance ignoring activationPrice. Fixed by widening to 0.5%.
             trail_order_id: str | None = None
             if self.vs_config.trail_server_native:
-                logger.info(
-                    f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                    f"(algoId={sl_order_id}) TRAIL=DEFERRED (until trail_active)"
+                cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
+                trail_order_id = self._place_trail_regular(
+                    symbol=symbol,
+                    side=cs,
+                    quantity=fill_qty,
+                    callback_rate=cr,
+                    activation_price=ap,
+                    position_side=pos_side,
                 )
+                if trail_order_id:
+                    logger.info(
+                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
+                        f"(algoId={sl_order_id}) TRAIL=OK (orderId={trail_order_id}, "
+                        f"activate=${ap:.4f}={cr}% callback)"
+                    )
+                else:
+                    logger.warning(
+                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
+                        f"(algoId={sl_order_id}) TRAIL=FAILED — bracket repair will retry"
+                    )
                 # No TP needed — trail handles profit-taking once active.
                 tp_order_id = None
             else:
