@@ -465,13 +465,7 @@ def sim_directional_trailing(
 
         for j in range(i + 1, end):
             if d == 1:
-                # SL checked FIRST (server SL fires intra-bar,
-                # trail fires at bar close; SL always has priority)
-                if low[j] <= entry * (1.0 - sl):
-                    trade_pnl = -sl
-                    eb = j
-                    break
-
+                # Update peak gain from intra-bar high
                 cur_gain = (high[j] - entry) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
@@ -480,9 +474,20 @@ def sim_directional_trailing(
                     trailing_active = True
 
                 if trailing_active:
+                    # Trail level is always above SL once active (tighter stop).
+                    # On exchange, tighter stop fires first → check trail first.
+                    # G5 parity fix: previous code checked SL first even when
+                    # trail was active, exiting at -sl when exchange would exit
+                    # at the trail level (much better PnL).
                     trail_level = entry * (1.0 + peak_gain - trail_distance)
                     if low[j] <= trail_level:
                         trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    # No trail active — SL only
+                    if low[j] <= entry * (1.0 - sl):
+                        trade_pnl = -sl
                         eb = j
                         break
 
@@ -491,12 +496,7 @@ def sim_directional_trailing(
                     eb = j
                     break
             else:
-                # SHORT — SL checked FIRST (same rationale)
-                if high[j] >= entry * (1.0 + sl):
-                    trade_pnl = -sl
-                    eb = j
-                    break
-
+                # SHORT
                 cur_gain = (entry - low[j]) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
@@ -505,9 +505,16 @@ def sim_directional_trailing(
                     trailing_active = True
 
                 if trailing_active:
+                    # Trail level is always tighter than SL once active.
+                    # G5 parity fix: check trail first (exchange fires tighter stop).
                     trail_level = entry * (1.0 - peak_gain + trail_distance)
                     if high[j] >= trail_level:
                         trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if high[j] >= entry * (1.0 + sl):
+                        trade_pnl = -sl
                         eb = j
                         break
 
@@ -579,46 +586,45 @@ def sim_straddle_trailing(
         eb = i
         end = min(i + 1 + max_hold, n)
         for j in range(i + 1, end):
-            # Long leg — SL checked FIRST (server SL fires intra-bar,
-            # trail fires at bar close; SL always has priority)
+            # Long leg — G5 parity fix: trail first when active (tighter stop)
             if la:
-                if low[j] <= entry * (1.0 - sl):
-                    le = -sl
-                    la = False
-                else:
-                    l_gain = (high[j] - entry) / entry
-                    if l_gain > l_peak:
-                        l_peak = l_gain
-                    if not l_trailing and l_peak >= trail_activate:
-                        l_trailing = True
-                    if l_trailing:
-                        trail_lvl = entry * (1.0 + l_peak - trail_distance)
-                        if low[j] <= trail_lvl:
-                            le = max(l_peak - trail_distance, -sl)
-                            la = False
-                    if la and high[j] >= entry * (1.0 + tp):
-                        le = tp
+                l_gain = (high[j] - entry) / entry
+                if l_gain > l_peak:
+                    l_peak = l_gain
+                if not l_trailing and l_peak >= trail_activate:
+                    l_trailing = True
+                if l_trailing:
+                    trail_lvl = entry * (1.0 + l_peak - trail_distance)
+                    if low[j] <= trail_lvl:
+                        le = max(l_peak - trail_distance, -sl)
                         la = False
-
-            # Short leg — SL checked FIRST (same rationale)
-            if sa:
-                if high[j] >= entry * (1.0 + sl):
-                    se = -sl
-                    sa = False
                 else:
-                    s_gain = (entry - low[j]) / entry
-                    if s_gain > s_peak:
-                        s_peak = s_gain
-                    if not s_trailing and s_peak >= trail_activate:
-                        s_trailing = True
-                    if s_trailing:
-                        trail_lvl = entry * (1.0 - s_peak + trail_distance)
-                        if high[j] >= trail_lvl:
-                            se = max(s_peak - trail_distance, -sl)
-                            sa = False
-                    if sa and low[j] <= entry * (1.0 - tp):
-                        se = tp
+                    if low[j] <= entry * (1.0 - sl):
+                        le = -sl
+                        la = False
+                if la and high[j] >= entry * (1.0 + tp):
+                    le = tp
+                    la = False
+
+            # Short leg — G5 parity fix: trail first when active (tighter stop)
+            if sa:
+                s_gain = (entry - low[j]) / entry
+                if s_gain > s_peak:
+                    s_peak = s_gain
+                if not s_trailing and s_peak >= trail_activate:
+                    s_trailing = True
+                if s_trailing:
+                    trail_lvl = entry * (1.0 - s_peak + trail_distance)
+                    if high[j] >= trail_lvl:
+                        se = max(s_peak - trail_distance, -sl)
                         sa = False
+                else:
+                    if high[j] >= entry * (1.0 + sl):
+                        se = -sl
+                        sa = False
+                if sa and low[j] <= entry * (1.0 - tp):
+                    se = tp
+                    sa = False
 
             if not la and not sa:
                 eb = j
@@ -661,7 +667,8 @@ def collect_trades(
 
     Args:
         cfg: Strategy config dict with keys:
-            sp, lp, d_vr, s_vr, s_dur, d_sl, s_sl, tp.
+            sp, lp, d_vr, s_vr, s_dur, d_sl, s_sl, tp,
+            s_trail_activate, s_trail_distance.
             Build from VolStraddleConfig — do NOT hardcode values.
         data_15m: {symbol: {close, high, low, vr_X_Y, mom_8, ...}}.
         data_1h: Same structure, 1h resampled.
@@ -710,6 +717,22 @@ def collect_trades(
     s_vr = cfg["s_vr"]
     s_dur = cfg["s_dur"]
 
+    # G7 parity fix: straddle trailing params — optional for backward compat
+    # with research scripts. Falls back to VolStraddleConfig defaults.
+    if "s_trail_activate" in cfg:
+        s_trail_activate = cfg["s_trail_activate"]
+        s_trail_distance = cfg["s_trail_distance"]
+    else:
+        try:
+            from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _VSCfg
+
+            _vs = _VSCfg()
+            s_trail_activate = _vs.s_trail_activate
+            s_trail_distance = _vs.s_trail_distance
+        except Exception:
+            s_trail_activate = 0.030  # config default
+            s_trail_distance = 0.005  # config default (rule #8 floor)
+
     # Resolve TF group — default G_3TF for backward compat
     active_tfs = tf_group if tf_group is not None else G_3TF
 
@@ -745,7 +768,21 @@ def collect_trades(
 
                 if is_straddle:
                     sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
-                    p, e, x = sim_straddle_trades(c, h, lo, sig, sl, tp, mh, COST_STRADDLE)
+                    # G7 parity fix: use sim_straddle_trailing (with per-leg trailing)
+                    # instead of sim_straddle_trades (SL/TP only). Live straddle
+                    # uses TRAILING_STOP_MARKET — backtest must match.
+                    p, e, x = sim_straddle_trailing(
+                        c,
+                        h,
+                        lo,
+                        sig,
+                        sl,
+                        tp,
+                        mh,
+                        COST_STRADDLE,
+                        s_trail_activate,
+                        s_trail_distance,
+                    )
                 else:
                     sig = gen_vr_signal(vr, d_vr, warmup)
                     dire = make_direction_momentum(sig, d["mom_8"])
@@ -787,7 +824,19 @@ def collect_trades(
 
                 if is_straddle:
                     sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
-                    p, e, x = sim_straddle_trades(c, h, lo, sig, sl, tp, mh, COST_STRADDLE)
+                    # G7 parity fix: use sim_straddle_trailing (matching live behavior)
+                    p, e, x = sim_straddle_trailing(
+                        c,
+                        h,
+                        lo,
+                        sig,
+                        sl,
+                        tp,
+                        mh,
+                        COST_STRADDLE,
+                        s_trail_activate,
+                        s_trail_distance,
+                    )
                 else:
                     sig = gen_vr_signal(vr, d_vr, warmup)
                     dire = make_direction_momentum(sig, d["mom_8"])
@@ -1220,18 +1269,21 @@ def sim_ma_cluster_trailing(
       - |momentum| >= min_momentum required for directional confirmation.
       - direction = sign of momentum.
 
-    Exit logic (priority order — matches server execution reality):
-      1. SL checked FIRST, unconditionally, even after trailing activates.
-         Server SL fires intra-bar; trail fires at bar close. SL has priority.
-      2. Peak gain updated from intra-bar high/low.
-      3. Trailing activates once peak_gain >= trail_activate.
-      4. Trail exit: when price retraces trail_distance below the peak.
+    Exit logic (priority order — matches exchange execution reality):
+      1. Peak gain updated from intra-bar high/low.
+      2. Trailing activates once peak_gain >= trail_activate.
+      3. When trailing active: trail level is tighter than SL →
+         trail checked first (exchange fires tighter stop first).
+         SL is skipped since trail level is always above SL.
+      4. When trailing NOT active: SL checked normally.
       5. Hard TP cap: exit at tp (safety ceiling above the trail).
       6. Max hold: exit at close[max_hold_bar].
 
-    NOTE: r75 had a bug — it checked trail FIRST and suppressed SL after
-    trail activated. This canonical version fixes that: SL is always checked
-    first, matching live behavior where server SL fires intra-bar.
+    G5 parity fix (refactor/mega-v2): once trailing activates, trail level
+    is always tighter than the original SL. On the exchange, both are
+    independent server-side orders — the tighter one fires first. Previous
+    code checked SL first unconditionally, causing backtest to exit at -sl
+    when the exchange would exit at the trail level (much better PnL).
 
     Args:
         close: 4h close price array.
@@ -1317,13 +1369,7 @@ def sim_ma_cluster_trailing(
 
         for j in range(i + 1, end):
             if d == 1:
-                # SL checked FIRST (server SL fires intra-bar,
-                # trail fires at bar close; SL always has priority)
-                if low[j] <= entry * (1.0 - sl):
-                    trade_pnl = -sl
-                    eb = j
-                    break
-
+                # Update peak gain from intra-bar high
                 cur_gain = (high[j] - entry) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
@@ -1332,9 +1378,15 @@ def sim_ma_cluster_trailing(
                     trailing_active = True
 
                 if trailing_active:
+                    # G5 parity fix: trail first when active (tighter stop)
                     trail_level = entry * (1.0 + peak_gain - trail_distance)
                     if low[j] <= trail_level:
                         trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if low[j] <= entry * (1.0 - sl):
+                        trade_pnl = -sl
                         eb = j
                         break
 
@@ -1343,12 +1395,7 @@ def sim_ma_cluster_trailing(
                     eb = j
                     break
             else:
-                # SHORT — SL checked FIRST (same rationale)
-                if high[j] >= entry * (1.0 + sl):
-                    trade_pnl = -sl
-                    eb = j
-                    break
-
+                # SHORT
                 cur_gain = (entry - low[j]) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
@@ -1357,9 +1404,15 @@ def sim_ma_cluster_trailing(
                     trailing_active = True
 
                 if trailing_active:
+                    # G5 parity fix: trail first when active (tighter stop)
                     trail_level = entry * (1.0 - peak_gain + trail_distance)
                     if high[j] >= trail_level:
                         trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if high[j] >= entry * (1.0 + sl):
+                        trade_pnl = -sl
                         eb = j
                         break
 
