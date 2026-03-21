@@ -19,7 +19,10 @@ from pathlib import Path
 
 logger = logging.getLogger("Scalper")
 
-STATE_DIR = Path("data/state")
+# Resolve to absolute path from project root to prevent working-directory footgun.
+# If STATE_DATA_DIR env var is set, use it; otherwise resolve relative to this file's project root.
+_project_root = Path(__file__).resolve().parents[2]  # quantbox/core/scalper_state.py → project root
+STATE_DIR = Path(os.environ.get("STATE_DATA_DIR", str(_project_root / "data" / "state")))
 STATE_FILE = STATE_DIR / "scalper_state.json"
 PAPER_STATE_FILE = STATE_DIR / "scalper_state_paper.json"
 
