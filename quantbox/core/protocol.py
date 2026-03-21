@@ -36,27 +36,38 @@ import numpy as np
 if TYPE_CHECKING:
     from datetime import datetime as _datetime
 
+    from binance.client import Client as BinanceClient
+
+    from quantbox.core.trade_journal import TradeJournal
+    from quantbox.execution.recon_journal import ReconJournal
+    from quantbox.notifications.bot import DiscordBotRunner
+    from quantbox.notifications.discord import DiscordNotifier
+    from quantbox.strategy.protocol import TradingStrategy
+    from quantbox.strategy.rubberband.config import RubberBandConfig
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
 
 class ScalperProtocol(Protocol):
     """Structural type for the fully-composed RubberBandScalper class.
 
     Every attribute and method here corresponds to something defined in one
-    of the Mixin classes or in ``scalper.py`` itself.  This is intentionally
-    permissive (``Any`` for complex types) — the goal is to resolve
-    ``attr-defined`` errors, not to achieve full parametric typing.
+    of the Mixin classes or in ``scalper.py`` itself.
+
+    Phase 2.1 (refactor/mega-v2): eliminated ``Any`` types — all attributes
+    now have concrete type annotations via TYPE_CHECKING imports.
     """
 
     # ── Core state ────────────────────────────────────────────────────────
-    client: Any
+    client: BinanceClient
     """binance.client.Client instance."""
 
-    config: Any
+    config: RubberBandConfig | VolStraddleConfig
     """Active strategy config (RubberBandConfig or VolStraddleConfig)."""
 
-    vs_config: Any
-    """VolStraddleConfig — present when strategy_name == 'vol_straddle'."""
+    vs_config: VolStraddleConfig
+    """VolStraddleConfig — always set in __init__ (even for rubberband, as fallback config)."""
 
-    strategy: Any
+    strategy: TradingStrategy
     """Strategy instance (RubberBandStrategy or VolStraddleStrategy)."""
 
     strategy_name: str
@@ -65,7 +76,7 @@ class ScalperProtocol(Protocol):
     paper_mode: bool
     """True = paper trading (no real orders placed)."""
 
-    discord: Any
+    discord: DiscordNotifier
     """DiscordNotifier instance."""
 
     # ── Balance / capital tracking ────────────────────────────────────────
@@ -83,21 +94,21 @@ class ScalperProtocol(Protocol):
     _cycle_count: int
 
     # ── Bot runner (Discord command listener) ─────────────────────────────
-    _bot_runner: Any
+    _bot_runner: DiscordBotRunner | None
 
     # ── Internal config cache ─────────────────────────────────────────────
-    _cfg: Any
+    _cfg: RubberBandConfig | VolStraddleConfig
     """Cached config shorthand used in loop_mixin."""
 
     # ── Symbol info cache (DataMixin) ─────────────────────────────────────
-    _symbol_info_cache: dict[str, Any]
+    _symbol_info_cache: dict[str, dict[str, Any]]
     _exchange_info_fetched: bool
 
-    # ── Trade journal (optional) ──────────────────────────────────────────
-    _journal: Any
+    # ── Trade journal ────────────────────────────────────────────────────
+    _journal: TradeJournal
 
-    # ── Recon journal (optional) ────────────────────────────────────────
-    _recon_journal: Any
+    # ── Recon journal (None when disabled) ────────────────────────────────
+    _recon_journal: ReconJournal | None
 
     # ── Exchange notional cache (set by _reconcile_positions each cycle) ──
     _cached_exchange_notionals: dict[str, float]
