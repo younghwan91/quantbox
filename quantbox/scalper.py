@@ -64,11 +64,7 @@ from quantbox.notifications.bot import (
     DiscordBotRunner,
 )
 from quantbox.notifications.discord import DiscordNotifier
-from quantbox.strategy.rubberband import (
-    RubberBandConfig,
-    RubberBandStrategy,
-    compute_atr_pct,
-)
+from quantbox.strategy.rubberband import compute_atr_pct
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
 from quantbox.core.commands import CommandsMixin
@@ -144,20 +140,19 @@ class RubberBandScalper(
 
     Attributes:
         paper_mode: If True, simulates orders without touching the exchange.
-        config: RubberBandConfig with strategy parameters.
-        strategy: Stateful RubberBandStrategy instance.
+        config: Strategy config (VolStraddleConfig for production).
+        strategy: Stateful strategy instance implementing TradingStrategy.
     """
 
     def __init__(
         self,
         paper_mode: bool = False,
-        config: RubberBandConfig | None = None,
+        config=None,
         strategy_name: str = "rubberband",
         vs_config: VolStraddleConfig | None = None,
         journal_db_path: str | None = None,
     ):
         self.paper_mode = paper_mode
-        self.config = config or RubberBandConfig()
         self.strategy_name = strategy_name
 
         _valid_strategies = {"rubberband", "vol_straddle"}
@@ -167,8 +162,15 @@ class RubberBandScalper(
         self.strategy: TradingStrategy
         if strategy_name == "vol_straddle":
             self.vs_config = vs_config or VolStraddleConfig()
+            self.config = self.vs_config
             self.strategy = VolStraddleStrategy(self.vs_config)
         else:
+            # DEPRECATED: RubberBand strategy — kept for test backward compat
+            from quantbox.strategy.rubberband import RubberBandConfig, RubberBandStrategy
+
+            self.config = config if config is not None else RubberBandConfig()
+            # trail_server_native=False: rubberband doesn't use server-side trailing stops
+            self.vs_config = vs_config or VolStraddleConfig(trail_server_native=False)
             self.strategy = RubberBandStrategy(self.config)
 
         # Binance client
@@ -2354,30 +2356,20 @@ def main():
     )
     parser.add_argument(
         "--strategy",
-        choices=["rubberband", "vol_straddle"],
+        choices=["vol_straddle"],
         default="vol_straddle",
-        help="Trading strategy: vol_straddle (default, production) or rubberband",
+        help="Trading strategy: vol_straddle (default, production)",
     )
     args = parser.parse_args()
 
     setup_logging(strategy_name=args.strategy, paper_mode=args.paper, git_commit=GIT_COMMIT)
 
-    # Build config from RubberBandConfig defaults (config.py is SSoT) + CLI overrides
-    config = RubberBandConfig()
-    if args.lookback is not None:
-        config.lookback = args.lookback
-    if args.threshold is not None:
-        config.threshold = args.threshold
-    if args.max_slots is not None:
-        config.max_concurrent = args.max_slots
+    vs_config = VolStraddleConfig(**({"max_concurrent": args.max_slots} if args.max_slots is not None else {}))
 
     scalper = RubberBandScalper(
         paper_mode=args.paper,
-        config=config,
         strategy_name=args.strategy,
-        vs_config=VolStraddleConfig(**({"max_concurrent": args.max_slots} if args.max_slots is not None else {}))
-        if args.strategy == "vol_straddle"
-        else None,
+        vs_config=vs_config,
     )
 
     if args.once:
