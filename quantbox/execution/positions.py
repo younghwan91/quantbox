@@ -344,10 +344,28 @@ class PositionMixin:
                 ex_positions = self.client.futures_position_information(symbol=symbol)
                 # hedge_mode: pos_side='LONG'/'SHORT'; one-way mode: pos_side=None → 'BOTH'
                 wanted_side = pos_side or "BOTH"
-                already_open = any(
-                    p.get("positionSide") == wanted_side and abs(float(p.get("positionAmt", 0))) > 0
-                    for p in ex_positions
-                )
+                # Dust tolerance: ignore residual qty below min_notional ($5).
+                # Partial trail fills can leave tiny dust that permanently blocks
+                # the symbol slot if treated as a real position.
+                info = self.get_symbol_info(symbol)
+                dust_threshold = info.get("min_notional", 5.0)
+                already_open = False
+                for p in ex_positions:
+                    if p.get("positionSide") != wanted_side:
+                        continue
+                    amt = abs(float(p.get("positionAmt", 0)))
+                    if amt <= 0:
+                        continue
+                    entry_px = float(p.get("entryPrice", 0))
+                    notional = amt * entry_px if entry_px > 0 else amt
+                    if notional < dust_threshold:
+                        logger.info(
+                            f"[{symbol}] Exchange dedup: ignoring dust "
+                            f"({amt} qty, ${notional:.2f} < ${dust_threshold:.2f} min_notional)"
+                        )
+                        continue
+                    already_open = True
+                    break
                 if already_open:
                     logger.warning(
                         f"[{symbol}] Exchange dedup: {wanted_side} already open "
