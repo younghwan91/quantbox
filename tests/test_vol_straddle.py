@@ -88,8 +88,8 @@ class TestConfig:
     def test_sl_tp(self, cfg):
         assert cfg.d_sl == 0.01  # 1% SL
         assert cfg.d_tp == 0.20  # r68: raised to 0.20 — dead parameter, trail always exits first
-        assert cfg.d_trail_activate == 0.010  # r69: 0.005→0.010 (OOS +38%/+23%/+40% in 2023/2024/2025)
-        assert cfg.d_trail_distance == 0.002  # r47: 0.2% behind peak
+        assert cfg.d_trail_activate == 0.040  # r69→current: 0.010→0.040
+        assert cfg.d_trail_distance == 0.005  # r106: 0.5% behind peak (rule #8)
 
     def test_momentum_period(self, cfg):
         assert cfg.momentum_period == 8
@@ -424,7 +424,7 @@ class TestPositionManagement:
         assert result == "stop_loss"
 
     def test_take_profit_exit(self, strategy):
-        """r69: LONG $100, trail activates at +1.0%, fires on 0.2% retrace."""
+        """r106: LONG $100, trail activates at +4.0%, fires on 0.5% retrace."""
         sym = "ETHUSDT"
         strategy.open_position(
             sym,
@@ -439,30 +439,32 @@ class TestPositionManagement:
             max_hold=192,
         )
 
-        # Below trail activation threshold (0.7% gain < 1.0%) → hold
+        # Below trail activation threshold (1.0% gain < 4.0%) → hold
         result = strategy.update_position(
             sym,
-            100.7,
-            current_high=100.7,
-            current_low=100.65,
+            101.0,
+            current_high=101.0,
+            current_low=100.95,
         )
         assert result is None
 
-        # Trail activates (1.2% gain), tight range → hold
+        # Trail activates (4.2% gain), tight range → hold
+        # trail_stop_gain = 4.2% - 0.5% = 3.7%, trail_level = 103.70
         result = strategy.update_position(
             sym,
-            101.2,
-            current_high=101.2,
-            current_low=101.15,
+            104.2,
+            current_high=104.2,
+            current_low=104.15,
         )
         assert result is None
 
-        # Retraces >0.2% from peak → trailing_stop
+        # Retraces >0.5% from peak → trailing_stop
+        # low=103.6 < 103.70 → trail fires
         result = strategy.update_position(
             sym,
-            100.9,
-            current_high=101.2,
-            current_low=100.9,
+            103.7,
+            current_high=104.2,
+            current_low=103.6,
         )
         assert result == "trailing_stop"
 
@@ -491,7 +493,7 @@ class TestPositionManagement:
         assert result == "stop_loss"
 
     def test_short_tp_exit(self, strategy):
-        """r69: SHORT $100, trail activates at +1.0%, fires on 0.2% retrace."""
+        """r106: SHORT $100, trail activates at +4.0%, fires on 0.5% retrace."""
         sym = "BTCUSDT"
         strategy.open_position(
             sym,
@@ -506,23 +508,24 @@ class TestPositionManagement:
             max_hold=192,
         )
 
-        # Trail activates (1.2% gain), tight bar → hold
-        # SHORT: best_gain = (entry - low) / entry = (100-98.8)/100 = 1.2%
+        # Trail activates (4.2% gain), tight bar → hold
+        # SHORT: best_gain = (entry - low) / entry = (100-95.8)/100 = 4.2%
+        # trail_stop_gain = 4.2% - 0.5% = 3.7%, trail_level = 100*(1-0.037) = 96.30
         result = strategy.update_position(
             sym,
-            98.8,
-            current_high=98.85,
-            current_low=98.8,
+            95.8,
+            current_high=95.85,
+            current_low=95.8,
         )
         assert result is None
 
-        # Retraces >0.2% from peak → trailing_stop
-        # peak_gain=1.2%, trail_stop=1.0%, worst_gain=(100-99.2)/100=0.8% < 1.0% → fires
+        # Retraces >0.5% from peak → trailing_stop
+        # high=96.35 > 96.30 → trail fires
         result = strategy.update_position(
             sym,
-            99.2,
-            current_high=99.2,
-            current_low=99.15,
+            96.2,
+            current_high=96.35,
+            current_low=96.15,
         )
         assert result == "trailing_stop"
 

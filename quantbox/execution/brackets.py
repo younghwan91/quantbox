@@ -415,8 +415,8 @@ class BracketMixin:
             ta = vs.d_trail_activate
 
         # trail_distance fraction → Binance callbackRate percentage
-        # e.g. 0.001 (0.1%) → 0.1, clamped to [0.1, 5.0]
-        callback_rate = max(0.1, min(5.0, td * 100))
+        # e.g. 0.005 (0.5%) → 0.5, clamped to [0.5, 5.0] (rule #8: callbackRate >= 0.5%)
+        callback_rate = max(0.5, min(5.0, td * 100))
 
         # activationPrice = entry × (1 ± trail_activate).
         # Trail stays in NEW status until price reaches this level,

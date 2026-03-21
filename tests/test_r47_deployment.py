@@ -183,13 +183,12 @@ class TestMAClusterTrailParamIsolation:
     """MA cluster는 4%/0.5% 파라미터를 사용, D trail 0.5%/0.2%를 쓰지 않는다."""
 
     def test_ma_cluster_does_not_activate_at_d_threshold(self, strategy, cfg):
-        """3% 수익 (D trail 발동 수준)에서 MA cluster trail은 미활성화."""
+        """1.5% 수익 (MA trail_activate=2% 미만)에서 MA cluster trail은 미활성화."""
         pos_key = _open_ma_cluster(strategy, "ETHUSDT", signal=1, entry=100.0)
-        d_trail_activate = cfg.d_trail_activate  # 0.005 (0.5%)
-        ma_trail_activate = cfg.ma_cluster_trail_activate  # 0.04 (4%)
+        ma_trail_activate = cfg.ma_cluster_trail_activate  # 0.02 (2%)
 
-        # 3% 수익 — D trail이라면 즉시 활성화, MA trail은 미활성화
-        gain_below_ma = (d_trail_activate + ma_trail_activate) / 2  # ~2.25%
+        # 1.5% 수익 — MA trail_activate(2%) 미달 → 미활성화
+        gain_below_ma = ma_trail_activate * 0.75  # 1.5%
         result = _tick(
             strategy,
             pos_key,
@@ -257,20 +256,20 @@ class TestConcurrentPositionTrailIsolation:
     """두 전략이 동시에 포지션을 보유할 때 trail 파라미터가 독립 동작."""
 
     def test_d_activates_at_0pt5_ma_does_not(self, strategy, cfg):
-        """1.5% 수익: BTC(D_mom8) trail 활성화(1%), ETH(MA cluster) trail 미활성화(2%, r75)."""
+        """4.1% 수익: BTC(D_mom8) trail 활성화(4%), ETH(MA cluster) trail 미활성화(4%보다 높음)."""
         btc_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
         eth_key = _open_ma_cluster(strategy, "ETHUSDT", signal=1, entry=100.0)
 
-        # D_mom8 trail_activate=1%, MA trail_activate=2% → 1.5%에서 D만 활성화
-        _tick(strategy, btc_key, 101.5, high=101.5, low=101.48)
-        _tick(strategy, eth_key, 101.5, high=101.5, low=101.48)
+        # D_mom8 trail_activate=4%, MA trail_activate=2% → 4.1%에서 D만 활성화
+        _tick(strategy, btc_key, 104.1, high=104.1, low=104.08)
+        _tick(strategy, eth_key, 104.1, high=104.1, low=104.08)
 
         btc_pos = strategy._positions[btc_key]
         eth_pos = strategy._positions[eth_key]
 
-        assert btc_pos["trail_active"] is True, "BTC(D_mom8) 1.5%에서 trail_active=True 필요"
-        assert eth_pos.get("trail_active", False) is False, (
-            "ETH(MA cluster) 1.5%에서 trail_active=False 필요 (MA threshold=2%, r75)"
+        assert btc_pos["trail_active"] is True, "BTC(D_mom8) 4.1%에서 trail_active=True 필요"
+        assert eth_pos.get("trail_active", False) is True, (
+            "ETH(MA cluster) 4.1%에서 trail_active=True 필요 (MA threshold=2%, r75)"
         )
 
     def test_independent_peak_gain_tracking(self, strategy, cfg):
@@ -339,8 +338,8 @@ class TestTrailReplacesStopLoss:
         """LONG: trail 활성화 후 SL(-1%) 수준 하락 → trailing_stop (not stop_loss)."""
         pos_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
 
-        # Trail 활성화 (tight bar, 1.1% gain — above trail_activate=1.0%)
-        _tick(strategy, pos_key, 101.1, high=101.1, low=101.09)
+        # Trail 활성화 (tight bar, 4.1% gain — above trail_activate=4.0%)
+        _tick(strategy, pos_key, 104.1, high=104.1, low=104.09)
         pos = strategy._positions[pos_key]
         assert pos["trail_active"] is True
 
@@ -379,8 +378,8 @@ class TestTrailExitProfitability:
         """peak=1%, distance=0.2% → trail_stop=0.8% > 0: 수익 종료."""
         pos_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
 
-        # peak 1% 설정 (tight bar)
-        _tick(strategy, pos_key, 101.0, high=101.0, low=100.99)
+        # peak 4.1% 설정 (tight bar — above trail_activate=4.0%)
+        _tick(strategy, pos_key, 104.1, high=104.1, low=104.09)
         pos = strategy._positions[pos_key]
         peak_gain = pos["peak_gain"]
         trail_stop_gain = peak_gain - cfg.d_trail_distance
@@ -389,7 +388,7 @@ class TestTrailExitProfitability:
 
         # trail 발동: low가 trail_stop 이하
         fire_low = 100.0 * (1 + trail_stop_gain - 0.001)
-        result = _tick(strategy, pos_key, fire_low, high=101.0, low=fire_low)
+        result = _tick(strategy, pos_key, fire_low, high=104.1, low=fire_low)
         assert result == "trailing_stop", f"Expected trailing_stop, got {result}"
 
     def test_trail_activates_then_grows_then_fires(self, strategy, cfg):
@@ -397,21 +396,21 @@ class TestTrailExitProfitability:
         pos_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
 
         # 여러 바 동안 상승
-        for price in [100.6, 101.0, 101.5, 102.0]:
+        for price in [101.0, 102.0, 103.0, 104.5]:
             low = price - 0.02  # very tight
             result = _tick(strategy, pos_key, price, high=price, low=low)
             assert result is None, f"Premature exit at {price}: {result}"
 
         pos = strategy._positions[pos_key]
-        peak = pos["peak_gain"]  # ~2%
-        assert peak >= 0.018, f"peak_gain should be ≥1.8%, got {peak:.4f}"
+        peak = pos["peak_gain"]  # ~4.5%
+        assert peak >= 0.040, f"peak_gain should be ≥4.0%, got {peak:.4f}"
 
         # 되돌림으로 trail 발동
         trail_stop = peak - cfg.d_trail_distance
         fire_low = 100.0 * (1 + trail_stop - 0.001)
-        result = _tick(strategy, pos_key, fire_low, high=102.0, low=fire_low)
+        result = _tick(strategy, pos_key, fire_low, high=104.5, low=fire_low)
         assert result == "trailing_stop", f"Expected trailing_stop, got {result}"
-        assert trail_stop > 0.01, f"Trail fires at >{trail_stop * 100:.2f}% profit"
+        assert trail_stop > 0.03, f"Trail fires at >{trail_stop * 100:.2f}% profit"
 
 
 # ══════════════════════════════════════════════════════════
@@ -449,9 +448,9 @@ class TestFreshStateAfterTrailExit:
         """trail 종료 → 포지션 제거 → 신규 오픈 → 초기 상태 확인."""
         pos_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
 
-        # Trail 활성화 후 발동 (trail_activate=1.0%)
-        _tick(strategy, pos_key, 101.15, high=101.2, low=101.1)  # +1.2% peak, trail activates
-        result = _tick(strategy, pos_key, 100.9, high=101.2, low=100.9)  # drop below trail_stop(1.0%)
+        # Trail 활성화 후 발동 (trail_activate=4.0%)
+        _tick(strategy, pos_key, 104.2, high=104.2, low=104.15)  # +4.2% peak, trail activates
+        result = _tick(strategy, pos_key, 103.6, high=104.2, low=103.6)  # drop below trail_stop(3.7%→103.70)
         assert result == "trailing_stop"
 
         # 포지션 제거
@@ -495,11 +494,11 @@ class TestStrategyTypeInPositionDict:
         btc_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
         eth_key = _open_ma_cluster(strategy, "ETHUSDT", signal=1, entry=100.0)
 
-        # D_mom8 포지션: 1.1% 수익 → trail 활성화됨 (trail_activate=1.0%)
-        _tick(strategy, btc_key, 101.1, high=101.1, low=101.09)
+        # D_mom8 포지션: 4.1% 수익 → trail 활성화됨 (trail_activate=4.0%)
+        _tick(strategy, btc_key, 104.1, high=104.1, low=104.09)
         btc_pos = strategy._positions[btc_key]
         assert btc_pos["trail_active"] is True, (
-            f"D_mom8 1.1% 수익에서 trail_active=True 필요 (activate={cfg.d_trail_activate})"
+            f"D_mom8 4.1% 수익에서 trail_active=True 필요 (activate={cfg.d_trail_activate})"
         )
 
         # MA cluster 포지션: 동일 1.1% 수익 → trail 미활성화 (MA는 4% 필요)
@@ -561,15 +560,14 @@ class TestPastIncidentPrevention:
 
         r47에서 0.5%로 단축된 후, r69 연도별 검증으로 1.0%가 최적으로 확인됨.
         """
-        assert cfg.d_trail_activate < 0.02, f"r47: trail_activate는 0.02 미만이어야 함. got={cfg.d_trail_activate}"
-        assert cfg.d_trail_activate == 0.010, f"r69: trail_activate=0.010 (1.0%). got={cfg.d_trail_activate}"
-        assert cfg.d_trail_distance == 0.002, f"r47: trail_distance=0.002 (0.2%). got={cfg.d_trail_distance}"
+        assert cfg.d_trail_activate == 0.040, f"r69→current: trail_activate=0.040 (4.0%). got={cfg.d_trail_activate}"
+        assert cfg.d_trail_distance == 0.005, f"r106: trail_distance=0.005 (0.5%, rule #8). got={cfg.d_trail_distance}"
 
     def test_ma_cluster_trail_activate_not_zero(self, cfg):
         """MA cluster trail은 2%/0.3% (r75 최적화: 4%/0.5% → 2%/0.3%)."""
         assert cfg.ma_cluster_trail_activate == 0.02, (
             f"MA cluster trail_activate=0.02 (r75). got={cfg.ma_cluster_trail_activate}"
         )
-        assert cfg.ma_cluster_trail_distance == 0.003, (
-            f"MA cluster trail_distance=0.003 (r75). got={cfg.ma_cluster_trail_distance}"
+        assert cfg.ma_cluster_trail_distance == 0.005, (
+            f"MA cluster trail_distance=0.005 (r106: rule #8). got={cfg.ma_cluster_trail_distance}"
         )

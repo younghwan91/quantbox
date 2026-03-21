@@ -72,42 +72,44 @@ class TestGetTrailParams:
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100
-        # activationPrice = entry × (1 + trail_activate) = 100 × 1.015 = 101.5
-        assert ap == pytest.approx(101.5)
+        # activationPrice = entry × (1 + trail_activate) = 100 × 1.030 = 103.0
+        assert ap == pytest.approx(103.0)
         assert cs == "SELL"
 
     def test_straddle_short(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", -1, 100.0)
         assert cr == pytest.approx(0.5)
-        # activationPrice = entry × (1 - trail_activate) = 100 × 0.985 = 98.5
-        assert ap == pytest.approx(98.5)
+        # activationPrice = entry × (1 - trail_activate) = 100 × 0.970 = 97.0
+        assert ap == pytest.approx(97.0)
         assert cs == "BUY"
 
     def test_vr_squeeze_long(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("vr_squeeze", 1, 200.0)
-        assert cr == pytest.approx(0.2)  # 0.002 * 100
-        # activationPrice = entry × (1 + trail_activate) = 200 × 1.01 = 202
-        assert ap == pytest.approx(202.0)
+        assert cr == pytest.approx(0.5)  # 0.005 * 100 (r106: rule #8 floor)
+        # activationPrice = entry × (1 + trail_activate) = 200 × 1.040 = 208
+        assert ap == pytest.approx(208.0)
         assert cs == "SELL"
 
     def test_ma_cluster_short(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("ma_cluster", -1, 50.0)
-        assert cr == pytest.approx(0.3)  # 0.003 * 100
+        assert cr == pytest.approx(0.5)  # 0.005 * 100 (r106: rule #8 floor)
         # activationPrice = entry × (1 - trail_activate) = 50 × 0.98 = 49
         assert ap == pytest.approx(49.0)
         assert cs == "BUY"
 
     def test_callback_rate_clamp_min(self):
-        """callbackRate must be at least 0.1 (Binance minimum)."""
+        """callbackRate floor is 0.5 (rule #8: callbackRate >= 0.5%)."""
         from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
-        cfg = VolStraddleConfig(trail_server_native=True, s_trail_distance=0.0005)
+        cfg = VolStraddleConfig(trail_server_native=True)
+        # Bypass validator to simulate a sub-floor value reaching brackets.py clamp
+        object.__setattr__(cfg, "s_trail_distance", 0.001)
         s = _build_vs_scalper(vs_config=cfg)
         cr, _, _ = s._get_trail_params("straddle", 1, 100.0)
-        assert cr == 0.1  # 0.0005 * 100 = 0.05 → clamped to 0.1
+        assert cr == 0.5  # 0.001 * 100 = 0.1 → clamped to 0.5 (rule #8)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -307,8 +309,8 @@ class TestTrailAtEntry:
         # We verify by checking the trail params calculation works correctly.
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
         assert cr == pytest.approx(0.5)
-        # activationPrice = entry × (1 + trail_activate) = 100 × 1.015 = 101.5
-        assert ap == pytest.approx(101.5)
+        # activationPrice = entry × (1 + trail_activate) = 100 × 1.030 = 103.0
+        assert ap == pytest.approx(103.0)
         assert cs == "SELL"
 
 
@@ -944,16 +946,16 @@ class TestCallbackRateBounds:
         assert cr == pytest.approx(0.5, abs=0.01)  # 0.005 * 100 = 0.5
 
     def test_vr_squeeze_callback_rate(self):
-        """d_trail_distance=0.002 → callbackRate=0.2."""
+        """d_trail_distance=0.005 → callbackRate=0.5 (r106: rule #8 floor)."""
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("vr_squeeze", 1, 100.0)
-        assert cr == pytest.approx(0.2, abs=0.01)
+        assert cr == pytest.approx(0.5, abs=0.01)
 
     def test_ma_cluster_callback_rate(self):
-        """ma_trail_distance=0.003 → callbackRate=0.3."""
+        """ma_trail_distance=0.005 → callbackRate=0.5 (r106: rule #8 floor)."""
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("ma_cluster", 1, 100.0)
-        assert cr == pytest.approx(0.3, abs=0.01)
+        assert cr == pytest.approx(0.5, abs=0.01)
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -15,12 +15,12 @@ from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy
 
 @pytest.fixture
 def cfg() -> VolStraddleConfig:
-    """Default config with R43 trailing stop params."""
+    """Default config with trailing stop params (r106: rule #8 floor applied)."""
     return VolStraddleConfig(
         d_sl=0.01,  # 1%
         d_tp=0.12,  # 12% hard ceiling
         d_trail_activate=0.02,  # activate after +2%
-        d_trail_distance=0.003,  # trail 0.3% behind peak
+        d_trail_distance=0.005,  # r106: 0.5% behind peak (rule #8: callbackRate >= 0.5%)
         s_sl=0.015,  # straddle SL
         s_tp=0.05,  # straddle TP (unchanged)
         trail_server_native=False,  # test client-side trail logic
@@ -82,7 +82,7 @@ class TestTrailingStopActivation:
         """Trail activates when peak gain >= 2%."""
         _open_long(strat)
         # Price rises 2.5% — above 2% activate threshold
-        # Low must stay above trail_stop (2.5%-0.3%=2.2% → $102.2)
+        # Low must stay above trail_stop (2.5%-0.5%=2.0% → $102.0)
         result = strat.update_position("BTCUSDT", 102.5, current_high=102.5, current_low=102.3)
         assert result is None
         pos = strat._positions["BTCUSDT"]
@@ -93,7 +93,7 @@ class TestTrailingStopActivation:
         """Trail activates for short position too."""
         _open_short(strat)
         # Price drops 2.5%, high stays above trail stop
-        # peak_gain=2.5%, trail_stop=2.2%, trail_level=100*(1-0.025+0.003)=97.8
+        # peak_gain=2.5%, trail_stop=2.0%, trail_level=100*(1-0.025+0.005)=97.8
         # high must be < 97.8 to NOT trigger trail
         result = strat.update_position("BTCUSDT", 97.5, current_high=97.7, current_low=97.5)
         assert result is None
@@ -105,29 +105,29 @@ class TestTrailingStopExit:
     """Trail fires when price retraces trail_distance from peak."""
 
     def test_trail_exit_long(self, strat: VolStraddleStrategy):
-        """Long: peak at +3%, retrace 0.3% from peak → trail hit."""
+        """Long: peak at +3%, retrace 0.5% from peak → trail hit."""
         _open_long(strat, entry=100.0)
         # Bar 1: push to +3% peak, low above trail stop
-        # trail_stop_gain = 3% - 0.3% = 2.7%  → trail_level = $102.7
+        # trail_stop_gain = 3% - 0.5% = 2.5%  → trail_level = $102.5
         strat.update_position("BTCUSDT", 103.0, current_high=103.0, current_low=102.8)
         assert strat._positions["BTCUSDT"]["trail_active"] is True
 
         # Bar 2: retrace — low touches trail stop
-        # low = 102.6 < 102.7 → trail hit
-        result = strat.update_position("BTCUSDT", 102.8, current_high=102.9, current_low=102.6)
+        # low = 102.4 < 102.5 → trail hit
+        result = strat.update_position("BTCUSDT", 102.6, current_high=102.9, current_low=102.4)
         assert result == "trailing_stop"
 
     def test_trail_exit_short(self, strat: VolStraddleStrategy):
-        """Short: peak at +3%, retrace 0.3% from peak → trail hit."""
+        """Short: peak at +3%, retrace 0.5% from peak → trail hit."""
         _open_short(strat, entry=100.0)
         # Bar 1: push to +3% peak (price drops), high below trail stop
-        # trail_stop_gain = 2.7%, trail_level = 100*(1-0.03+0.003) = 97.3
+        # trail_stop_gain = 2.5%, trail_level = 100*(1-0.03+0.005) = 97.5
         strat.update_position("BTCUSDT", 97.0, current_high=97.2, current_low=97.0)
         assert strat._positions["BTCUSDT"]["trail_active"] is True
 
         # Bar 2: retrace — high touches trail
-        # high = 97.4 > 97.3 → trail hit
-        result = strat.update_position("BTCUSDT", 97.2, current_high=97.4, current_low=97.0)
+        # high = 97.6 > 97.5 → trail hit
+        result = strat.update_position("BTCUSDT", 97.2, current_high=97.6, current_low=97.0)
         assert result == "trailing_stop"
 
     def test_no_trail_exit_when_still_above(self, strat: VolStraddleStrategy):
@@ -159,8 +159,8 @@ class TestSLBeforeTrail:
 
         # Now a bar with low at original SL level (-1%).
         # Trail fires as 'trailing_stop', not 'stop_loss'.
-        # trail_stop_gain = 3% - 0.3% = 2.7%
-        # worst_gain = (99.0 - 100) / 100 = -1% < 2.7% → trail fires
+        # trail_stop_gain = 3% - 0.5% = 2.5%
+        # worst_gain = (99.0 - 100) / 100 = -1% < 2.5% → trail fires
         result = strat.update_position("BTCUSDT", 99.0, current_high=100.0, current_low=99.0)
         assert result == "trailing_stop"
 
@@ -177,8 +177,8 @@ class TestHardTP:
         # Bar 2: +8%
         strat.update_position("BTCUSDT", 108.0, current_high=108.0, current_low=107.5)
         # Bar 3: +12% — hard TP fires
-        # peak_gain=12%, trail_stop=11.7%, trail_level=111.7
-        # low=111.8 > 111.7 → trail does NOT fire → hard TP fires
+        # peak_gain=12%, trail_stop=11.5%, trail_level=111.5
+        # low=111.8 > 111.5 → trail does NOT fire → hard TP fires
         result = strat.update_position("BTCUSDT", 112.0, current_high=112.0, current_low=111.8)
         assert result == "target"
 
@@ -187,23 +187,23 @@ class TestStraddleUnchanged:
     """Straddle legs use simple SL/TP exit (no trail)."""
 
     def test_straddle_trail_activates(self, strat: VolStraddleStrategy):
-        """Straddle trailing stop activates at s_trail_activate (1.5%)."""
+        """Straddle trailing stop activates at s_trail_activate (3.0%)."""
         _open_long(strat, symbol="ETHUSDT", entry=100.0, is_straddle=True)
-        result = strat.update_position("ETHUSDT", 101.6, current_high=101.6, current_low=101.5)
+        result = strat.update_position("ETHUSDT", 103.1, current_high=103.1, current_low=103.05)
         pos = strat._positions["ETHUSDT"]
         assert pos["trail_active"] is True
         assert result is None  # activated but not yet hit
 
     def test_straddle_trail_hits(self, strat: VolStraddleStrategy):
-        """Straddle trail exit: gain reaches 1.5%, then retraces past trail_distance."""
+        """Straddle trail exit: gain reaches 3.0%, then retraces past trail_distance."""
         _open_long(strat, symbol="ETHUSDT", entry=100.0, is_straddle=True)
-        # Push to +2% to activate and set peak
-        strat.update_position("ETHUSDT", 102.0, current_high=102.0, current_low=101.8)
+        # Push to +3.5% to activate and set peak
+        strat.update_position("ETHUSDT", 103.5, current_high=103.5, current_low=103.3)
         pos = strat._positions["ETHUSDT"]
         assert pos["trail_active"] is True
-        assert pos["peak_gain"] == pytest.approx(0.02, abs=1e-4)
-        # Trail stop = peak(2%) - dist(0.5%) = 1.5% → retrace to 1.4% triggers
-        result = strat.update_position("ETHUSDT", 101.3, current_high=101.9, current_low=101.4)
+        assert pos["peak_gain"] == pytest.approx(0.035, abs=1e-4)
+        # Trail stop = peak(3.5%) - dist(0.5%) = 3.0% → retrace to 2.9% triggers
+        result = strat.update_position("ETHUSDT", 102.8, current_high=103.4, current_low=102.9)
         assert result == "trailing_stop"
 
     def test_straddle_no_trail_before_activate(self, strat: VolStraddleStrategy):
@@ -232,7 +232,7 @@ class TestStraddleUnchanged:
     def test_straddle_uses_s_trail_params(self, strat: VolStraddleStrategy):
         """Straddle uses s_trail_activate/s_trail_distance, not d_trail params."""
         cfg = strat.config
-        assert cfg.s_trail_activate == pytest.approx(0.015)
+        assert cfg.s_trail_activate == pytest.approx(0.030)
         assert cfg.s_trail_distance == pytest.approx(0.005)  # r104b: 0.5% noise floor (was 0.001)
         # Ensure they differ from D_mom8 params
         assert cfg.s_trail_activate != cfg.d_trail_activate
@@ -276,8 +276,8 @@ class TestConfigDefaults:
     def test_default_config(self):
         cfg = VolStraddleConfig()
         assert cfg.d_tp == 0.20  # r68: raised from 0.12 — dead parameter, now explicit safety cap
-        assert cfg.d_trail_activate == 0.010  # r69: 0.005→0.010 (OOS +38%/+23%/+40% in 2023/2024/2025)
-        assert cfg.d_trail_distance == 0.002  # r47: was 0.003
+        assert cfg.d_trail_activate == 0.040  # r69→current: 0.010→0.040
+        assert cfg.d_trail_distance == 0.005  # r106: 0.5% (rule #8)
         assert cfg.d_sl == 0.01
         # Straddle unchanged
         assert cfg.s_tp == 0.05
