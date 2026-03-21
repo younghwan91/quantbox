@@ -194,7 +194,7 @@ MA Cluster:                  leverage = 21x → Notional = 잔고/10 × 21  (L/N
 
 ---
 
-## TradingStrategy Protocol (v14.24.0)
+## TradingStrategy Protocol (v14.35.0)
 
 **개념:** 모든 거래 전략이 준수하는 타입 안전 인터페이스. `@runtime_checkable` Protocol.  
 **위치:** `quantbox/strategy/protocol.py`  
@@ -234,6 +234,6 @@ def process_strategy(strategy: TradingStrategy) -> None:
 
 | 전략 | 클래스 | Protocol 준수 |
 |------|--------|--------------|
-| VR Squeeze (D_mom8 + S_d8) | `VolStraddleStrategy` | ✅ v14.24.0 |
-| MA Cluster | `VolStraddleStrategy` | ✅ v14.24.0 |
-| RubberBand (레거시) | `RubberBandStrategy` | ✅ v14.24.0 |
+| VR Squeeze (D_mom8 + S_d8) | `VolStraddleStrategy` | ✅ v14.35.0 |
+| MA Cluster | `VolStraddleStrategy` | ✅ v14.35.0 |
+| RubberBand (레거시) | `RubberBandStrategy` | ✅ v14.35.0 |
