@@ -64,7 +64,6 @@ from quantbox.notifications.bot import (
     DiscordBotRunner,
 )
 from quantbox.notifications.discord import DiscordNotifier
-from quantbox.strategy.rubberband import compute_atr_pct
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
 from quantbox.core.commands import CommandsMixin
@@ -238,12 +237,11 @@ class RubberBandScalper(
         self._journal = TradeJournal(db_path=_db_path, session=_session_str)
 
         # Live-Backtest divergence monitor
-        _vs_cfg = self.vs_config if strategy_name == "vol_straddle" else None
         self._divergence_monitor = DivergenceMonitor(
-            min_trades=_vs_cfg.divergence_min_trades if _vs_cfg else 30,
-            pf_threshold=_vs_cfg.divergence_pf_threshold if _vs_cfg else 0.80,
-            wr_gap_pp=_vs_cfg.divergence_wr_gap_pp if _vs_cfg else 10.0,
-            cooldown_hours=_vs_cfg.divergence_cooldown_hours if _vs_cfg else 24.0,
+            min_trades=self.vs_config.divergence_min_trades,
+            pf_threshold=self.vs_config.divergence_pf_threshold,
+            wr_gap_pp=self.vs_config.divergence_wr_gap_pp,
+            cooldown_hours=self.vs_config.divergence_cooldown_hours,
         )
 
         # ── Reliability modules (Phase 3) ──
@@ -260,7 +258,7 @@ class RubberBandScalper(
             self._heartbeat = None
 
         try:
-            _max_mult = self.vs_config.max_exposure_multiplier if strategy_name == "vol_straddle" else 35.0
+            _max_mult = self.vs_config.max_exposure_multiplier
             self._exposure_guard = ExposureGuard(max_multiplier=_max_mult)
         except Exception as e:
             logger.error(f"ExposureGuard init failed: {e}")
@@ -295,38 +293,22 @@ class RubberBandScalper(
 
         mode_str = "PAPER" if paper_mode else "LIVE"
         logger.info(f"RubberBandScalper initialized ({mode_str}) strategy={strategy_name}")
-        if strategy_name == "vol_straddle":
-            vs = self.vs_config
-            logger.info(
-                f"Config: VR({vs.vr_short}/{vs.vr_long}) "
-                f"D_threshold={vs.d_vr_threshold}, "
-                f"SL={vs.d_sl * 100:.1f}%, TP={vs.d_tp * 100:.1f}%, "
-                f"TF={'15m' if vs.enable_15m else ''}"
-                f"{'|1h' if vs.enable_1h else ''}"
-                f"{'|4h' if vs.enable_4h else ''}"
-            )
-        else:
-            _sl_str = (
-                f"ATR×{self.config.atr_stop_mult}[{self.config.atr_stop_floor * 100:.1f}%-{self.config.atr_stop_cap * 100:.0f}%]"
-                if self.config.atr_stop_enabled
-                else f"{self.config.stop_mult}×move"
-            )
-            logger.info(
-                f"Config: lookback={self.config.lookback}, "
-                f"threshold={self.config.threshold}, "
-                f"target={self.config.target_retrace}, "
-                f"stop={_sl_str}, "
-                f"max_hold={self.config.max_hold}"
-            )
+        vs = self.vs_config
+        logger.info(
+            f"Config: VR({vs.vr_short}/{vs.vr_long}) "
+            f"D_threshold={vs.d_vr_threshold}, "
+            f"SL={vs.d_sl * 100:.1f}%, TP={vs.d_tp * 100:.1f}%, "
+            f"TF={'15m' if vs.enable_15m else ''}"
+            f"{'|1h' if vs.enable_1h else ''}"
+            f"{'|4h' if vs.enable_4h else ''}"
+        )
 
     # ==================== Balance & Risk ====================
 
     @property
     def _cfg(self):
-        """Active strategy config for shared fields."""
-        if self.strategy_name == "vol_straddle":
-            return self.vs_config
-        return self.config
+        """Active strategy config."""
+        return self.vs_config
 
     def get_balance(self) -> float:
         """Get current USDT balance.
@@ -750,12 +732,9 @@ class RubberBandScalper(
         btc_close = self.download_klines("BTCUSDT", 200)
 
         btc_close_4h = None
-        if self.strategy_name == "vol_straddle":
-            # r92: Download BTC 4h data for MA cluster 4h BTC gate.
-            # Gate prevents MA cluster LONGs during multi-day BTC downtrends.
-            if self.vs_config and self.vs_config.ma_cluster_btc_gate_enabled:
-                btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
-        elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
+        # r92: Download BTC 4h data for MA cluster 4h BTC gate.
+        # Gate prevents MA cluster LONGs during multi-day BTC downtrends.
+        if self.vs_config and self.vs_config.ma_cluster_btc_gate_enabled:
             btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
 
         # v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
@@ -811,14 +790,7 @@ class RubberBandScalper(
 
             # v12.3.2: Compute FRESH ATR for PBT runner trailing
             # VolStraddle uses R43 trailing stop (client-side, no ATR needed).
-            if self.strategy_name == "vol_straddle":
-                current_atr = 0.02
-            elif self.config.atr_period > 0 and len(close) >= self.config.atr_period:
-                atr_arr = compute_atr_pct(high, low, close, self.config.atr_period)
-                atr_val = float(atr_arr[-1])
-                current_atr = atr_val if not np.isnan(atr_val) else 0.02
-            else:
-                current_atr = 0.02
+            current_atr = 0.02
 
             exit_reason = self.strategy.update_position(
                 pos_key,
@@ -830,7 +802,7 @@ class RubberBandScalper(
             if exit_reason:
                 logger.info(f"  [{pos_key}] Exit signal: {exit_reason} @ ${current_price:.4f}")
                 # Straddle leg tracking: log which leg exits first
-                if ":" in pos_key and self.strategy_name == "vol_straddle":
+                if ":" in pos_key:
                     api_sym, side = pos_key.split(":", 1)
                     other_side = "SHORT" if side == "LONG" else "LONG"
                     other_key = f"{api_sym}:{other_side}"
@@ -857,7 +829,7 @@ class RubberBandScalper(
                 else:
                     # ── Step 2.3: Capture counterpart before close (straddle pair context) ──
                     counterpart_key_pre_close = None
-                    if ":" in pos_key and self.strategy_name == "vol_straddle":
+                    if ":" in pos_key:
                         pos_pre = self.strategy._positions.get(pos_key)
                         if pos_pre and pos_pre.get("is_straddle"):
                             counterpart_key_pre_close = self._get_pair_counterpart(pos_key)
@@ -890,7 +862,6 @@ class RubberBandScalper(
                     if (
                         pos.get("trail_active")
                         and not self.paper_mode
-                        and self.strategy_name == "vol_straddle"
                         and getattr(self.vs_config, "trail_server_ratchet_enabled", True)
                         and not getattr(self.vs_config, "trail_server_native", False)
                     ):
@@ -903,7 +874,6 @@ class RubberBandScalper(
                         pos.get("trail_active")
                         and not pos.get("server_trail_order_id")
                         and not self.paper_mode
-                        and self.strategy_name == "vol_straddle"
                         and getattr(self.vs_config, "trail_server_native", False)
                     ):
                         api_sym = pos_key.split(":")[0]
@@ -951,7 +921,7 @@ class RubberBandScalper(
             return
 
         # ── G7: Daily Loss Circuit Breaker ──
-        if self.strategy_name == "vol_straddle" and self.vs_config.daily_loss_limit_pct > 0:
+        if self.vs_config.daily_loss_limit_pct > 0:
             today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             if self._daily_loss_date != today_utc:
                 # New UTC day — reset counter
@@ -1074,7 +1044,7 @@ class RubberBandScalper(
             # v9.0: Download full klines (close + high + low + volume + taker)
             # VolStraddle needs 500 bars: 15m warmup=200 needs ≥201 bars,
             # 1h resampling needs ≥4×(warmup_1h+1)=204 bars. 500 covers both.
-            n_bars = 500 if self.strategy_name == "vol_straddle" else 200
+            n_bars = 500
             result = self.download_klines(sym, n_bars, full=True)
             if result is None:
                 continue
@@ -1086,18 +1056,13 @@ class RubberBandScalper(
             self.strategy.update_market_data(sym, volume, taker_buy, high, low)
 
             # v7.0: Download 4h data for MTF confirmation
-            if self.strategy_name == "vol_straddle":
-                # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
-                # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
-                n_bars_4h = 300 if (self.vs_config and self.vs_config.ma_cluster_enabled) else 100
-                result_4h = self.download_klines(sym, n_bars_4h, interval="4h", full=True)
-                if result_4h is not None:
-                    c4h, h4h, l4h, _, _ = result_4h
-                    self.strategy.update_htf_data(sym, c4h, h4h, l4h)
-            elif self.config.mtf_confirmation_enabled or self.config.htf_independent_enabled:
-                close_4h = self.download_klines(sym, 100, interval="4h")
-                if close_4h is not None:
-                    self.strategy.update_htf_data(sym, close_4h)
+            # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
+            # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
+            n_bars_4h = 300 if (self.vs_config and self.vs_config.ma_cluster_enabled) else 100
+            result_4h = self.download_klines(sym, n_bars_4h, interval="4h", full=True)
+            if result_4h is not None:
+                c4h, h4h, l4h, _, _ = result_4h
+                self.strategy.update_htf_data(sym, c4h, h4h, l4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
 
@@ -1105,7 +1070,6 @@ class RubberBandScalper(
             # Applied immediately after on_bar so blocked signals never reach candidates.
             if (
                 signal == 1
-                and self.strategy_name == "vol_straddle"
                 and self.vs_config
                 and self.vs_config.ma_cluster_btc_gate_enabled
                 and getattr(self.strategy, "_last_signal_source", {}).get(sym) == "ma_cluster"
@@ -1151,92 +1115,79 @@ class RubberBandScalper(
 
         # ── Diagnostic: log scan summary every cycle ──
         top_movers = sorted(moves_seen, key=lambda x: x[1], reverse=True)[:3]
-        if self.strategy_name == "vol_straddle":
-            # VR strategy: show VR threshold + actual VR values
-            print(format_scan_summary(len(candidates), top_movers, 0.0))
-            if candidates:
-                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _, _ in candidates[:3]]
-                logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
-            else:
-                if moves_seen:
-                    # Show top 3 moves with VR for all TFs
-                    top3_with_vr = []
-                    for s, m in top_movers:
-                        vr_all = self.strategy.get_vr_all_tf(s)
-                        vr_str = f"15m={vr_all['15m']:.2f}/1h={vr_all['1h']:.2f}/4h={vr_all['4h']:.2f}"
-                        top3_with_vr.append(f"{s}({m * 100:.2f}%, {vr_str})")
-                    logger.info(
-                        f"No candidates — top moves: {', '.join(top3_with_vr)} "
-                        f"(threshold VR<{self.vs_config.d_vr_threshold} any TF)"
-                    )
-
-                    # Count symbols near squeeze thresholds for strategy health
-                    near_d = 0  # VR < d_threshold + 0.05
-                    near_s = 0  # VR < s_threshold + 0.05
-                    in_squeeze = 0  # VR < d_threshold
-                    global_min_vr = 999.0
-                    closest_sym = ""
-                    for s, _ in moves_seen:
-                        vr_all = self.strategy.get_vr_all_tf(s)
-                        min_vr = min(vr_all.values())
-                        if min_vr < global_min_vr:
-                            global_min_vr = min_vr
-                            closest_sym = s
-                        if min_vr < self.vs_config.d_vr_threshold:
-                            in_squeeze += 1
-                        elif min_vr < self.vs_config.d_vr_threshold + 0.05:
-                            near_d += 1
-                        if min_vr < self.vs_config.s_vr_threshold + 0.05:
-                            near_s += 1
-                    logger.info(
-                        f"Squeeze monitor: {in_squeeze} in squeeze, "
-                        f"{near_d} near D threshold, {near_s} near S threshold "
-                        f"(of {len(moves_seen)} symbols) "
-                        f"min_vr={global_min_vr:.3f} ({closest_sym})"
-                    )
-
-                    # ── MA Cluster monitor (parallel to VR Squeeze monitor) ──
-                    if (
-                        self.vs_config
-                        and self.vs_config.ma_cluster_enabled
-                        and hasattr(self.strategy, "_ma_cluster_state")
-                        and self.strategy._ma_cluster_state
-                    ):
-                        _mcs = self.strategy._ma_cluster_state
-                        _in_cluster = {s: d for s, d in _mcs.items() if d["duration"] > 0}
-                        _zombie = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("zombie"))
-                        _mom_fail = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("momentum_fail"))
-                        _cooldown = sum(1 for d in _in_cluster.values() if d["rejection"] == "cooldown")
-                        _pre_dur = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("pre_duration"))
-                        _no_break = sum(1 for d in _in_cluster.values() if d["rejection"] == "no_breakout")
-                        _fired = sum(1 for d in _in_cluster.values() if d["rejection"] == "fired")
-                        _top3 = sorted(
-                            _in_cluster.items(),
-                            key=lambda x: x[1]["duration"],
-                            reverse=True,
-                        )[:3]
-                        _top3_str = ", ".join(
-                            f"{s}({d['duration']}bars,sp={d['spread']:.1f}%,{d['rejection']})" for s, d in _top3
-                        )
-                        logger.info(
-                            f"MA Cluster monitor: {len(_in_cluster)} in cluster "
-                            f"(zombie={_zombie}, mom_fail={_mom_fail}, "
-                            f"cooldown={_cooldown}, pre_dur={_pre_dur}, "
-                            f"no_break={_no_break}, fired={_fired}) "
-                            f"(of {len(_mcs)} scanned) "
-                            f"— top: {_top3_str or 'none'}"
-                        )
+        # VR strategy: show VR threshold + actual VR values
+        print(format_scan_summary(len(candidates), top_movers, 0.0))
+        if candidates:
+            cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _, _ in candidates[:3]]
+            logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
         else:
-            print(format_scan_summary(len(candidates), top_movers, self.config.threshold))
-            if candidates:
-                cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _, _ in candidates[:3]]
-                logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
-            else:
-                if moves_seen:
-                    top3 = [f"{s}({m * 100:.2f}%)" for s, m in top_movers]
+            if moves_seen:
+                # Show top 3 moves with VR for all TFs
+                top3_with_vr = []
+                for s, m in top_movers:
+                    vr_all = self.strategy.get_vr_all_tf(s)
+                    vr_str = f"15m={vr_all['15m']:.2f}/1h={vr_all['1h']:.2f}/4h={vr_all['4h']:.2f}"
+                    top3_with_vr.append(f"{s}({m * 100:.2f}%, {vr_str})")
+                logger.info(
+                    f"No candidates — top moves: {', '.join(top3_with_vr)} "
+                    f"(threshold VR<{self.vs_config.d_vr_threshold} any TF)"
+                )
+
+                # Count symbols near squeeze thresholds for strategy health
+                near_d = 0  # VR < d_threshold + 0.05
+                near_s = 0  # VR < s_threshold + 0.05
+                in_squeeze = 0  # VR < d_threshold
+                global_min_vr = 999.0
+                closest_sym = ""
+                for s, _ in moves_seen:
+                    vr_all = self.strategy.get_vr_all_tf(s)
+                    min_vr = min(vr_all.values())
+                    if min_vr < global_min_vr:
+                        global_min_vr = min_vr
+                        closest_sym = s
+                    if min_vr < self.vs_config.d_vr_threshold:
+                        in_squeeze += 1
+                    elif min_vr < self.vs_config.d_vr_threshold + 0.05:
+                        near_d += 1
+                    if min_vr < self.vs_config.s_vr_threshold + 0.05:
+                        near_s += 1
+                logger.info(
+                    f"Squeeze monitor: {in_squeeze} in squeeze, "
+                    f"{near_d} near D threshold, {near_s} near S threshold "
+                    f"(of {len(moves_seen)} symbols) "
+                    f"min_vr={global_min_vr:.3f} ({closest_sym})"
+                )
+
+                # ── MA Cluster monitor (parallel to VR Squeeze monitor) ──
+                if (
+                    self.vs_config
+                    and self.vs_config.ma_cluster_enabled
+                    and hasattr(self.strategy, "_ma_cluster_state")
+                    and self.strategy._ma_cluster_state
+                ):
+                    _mcs = self.strategy._ma_cluster_state
+                    _in_cluster = {s: d for s, d in _mcs.items() if d["duration"] > 0}
+                    _zombie = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("zombie"))
+                    _mom_fail = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("momentum_fail"))
+                    _cooldown = sum(1 for d in _in_cluster.values() if d["rejection"] == "cooldown")
+                    _pre_dur = sum(1 for d in _in_cluster.values() if d["rejection"].startswith("pre_duration"))
+                    _no_break = sum(1 for d in _in_cluster.values() if d["rejection"] == "no_breakout")
+                    _fired = sum(1 for d in _in_cluster.values() if d["rejection"] == "fired")
+                    _top3 = sorted(
+                        _in_cluster.items(),
+                        key=lambda x: x[1]["duration"],
+                        reverse=True,
+                    )[:3]
+                    _top3_str = ", ".join(
+                        f"{s}({d['duration']}bars,sp={d['spread']:.1f}%,{d['rejection']})" for s, d in _top3
+                    )
                     logger.info(
-                        f"No candidates — top moves: {', '.join(top3)} "
-                        f"(base >{self.config.threshold * 100:.1f}%, adaptive per-symbol)"
+                        f"MA Cluster monitor: {len(_in_cluster)} in cluster "
+                        f"(zombie={_zombie}, mom_fail={_mom_fail}, "
+                        f"cooldown={_cooldown}, pre_dur={_pre_dur}, "
+                        f"no_break={_no_break}, fired={_fired}) "
+                        f"(of {len(_mcs)} scanned) "
+                        f"— top: {_top3_str or 'none'}"
                     )
 
         # v12.0: Write structured diagnostics to JSONL
@@ -1247,8 +1198,7 @@ class RubberBandScalper(
         # ── G6: BTC Trend Gate — compute once, apply to all LONG candidates ──
         btc_ma = None
         if (
-            self.strategy_name == "vol_straddle"
-            and self.vs_config.btc_long_filter_enabled
+            self.vs_config.btc_long_filter_enabled
             and btc_close is not None
             and len(btc_close) >= self.vs_config.btc_long_ma_period
         ):
@@ -1689,9 +1639,9 @@ class RubberBandScalper(
         # v14.0: Persist MA cluster cooldown for crash recovery.
         # Without this, a restart during an active cluster episode would
         # re-fire a duplicate signal on the same cluster.
-        if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_ma_cluster_cooldown"):
+        if hasattr(self.strategy, "_ma_cluster_cooldown"):
             state["ma_cluster_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._ma_cluster_cooldown.items()}
-        if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_straddle_rollback_cooldown"):
+        if hasattr(self.strategy, "_straddle_rollback_cooldown"):
             active = {s: v for s, v in self.strategy._straddle_rollback_cooldown.items() if v > 0}
             if active:
                 state["straddle_rollback_cooldown"] = active
@@ -1924,7 +1874,7 @@ class RubberBandScalper(
         logger.info(f"Restored {len(positions)} positions, {len(self._trade_history)} trade records")
 
         # v14.0: Restore MA cluster cooldown state
-        if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_ma_cluster_cooldown"):
+        if hasattr(self.strategy, "_ma_cluster_cooldown"):
             cooldown_data = state.get("ma_cluster_cooldown", {})
             for sym, val in cooldown_data.items():
                 arr: np.ndarray = np.zeros(1, dtype=np.int64)
@@ -1934,7 +1884,7 @@ class RubberBandScalper(
                 logger.info(f"Restored MA cluster cooldown for {len(cooldown_data)} symbols")
 
         # v15.0: Restore straddle rollback cooldown
-        if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_straddle_rollback_cooldown"):
+        if hasattr(self.strategy, "_straddle_rollback_cooldown"):
             rb_cooldown = state.get("straddle_rollback_cooldown", {})
             for sym, val in rb_cooldown.items():
                 self.strategy._straddle_rollback_cooldown[sym] = val
@@ -2009,7 +1959,7 @@ class RubberBandScalper(
         if self.paper_mode:
             return
 
-        want_hedge = self.strategy_name == "vol_straddle" and self.vs_config.hedge_mode
+        want_hedge = self.vs_config.hedge_mode
 
         try:
             resp = self.client.futures_get_position_mode()
@@ -2102,91 +2052,46 @@ class RubberBandScalper(
         commit_str = f"`{GIT_COMMIT['short']}`" if GIT_COMMIT["short"] else "unknown"
         n_recovered = self.strategy.n_active
 
-        if self.strategy_name == "vol_straddle":
-            vc = self.vs_config
-            self.discord.send(
-                embed={
-                    "title": "🚀 QuantBox VolStraddle 시작",
-                    "color": 0x2979FF,
-                    "description": ("VolStraddle D_mom8 (A1-D50) 초기화 완료.\n`!help`로 명령어 확인."),
-                    "fields": [
-                        {"name": "모드", "value": f"**{mode_str}**", "inline": True},
-                        {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
-                        {"name": "슬롯", "value": f"{n_recovered}/{vc.max_concurrent}", "inline": True},
-                        {
-                            "name": "── 전략 설정 ──",
-                            "value": (
-                                f"VR({vc.vr_short}/{vc.vr_long}) < {vc.d_vr_threshold:.2f}\n"
-                                f"TP={vc.d_tp * 100:.0f}% | SL={vc.d_sl * 100:.0f}% | "
-                                f"Mom={vc.momentum_period}bar"
-                            ),
-                            "inline": False,
-                        },
-                        {
-                            "name": "TF",
-                            "value": (
-                                f"{'15m ' if vc.enable_15m else ''}"
-                                f"{'1h ' if vc.enable_1h else ''}"
-                                f"{'4h' if vc.enable_4h else ''}"
-                            ).strip(),
-                            "inline": True,
-                        },
-                        {"name": "레버리지", "value": f"{vc.base_leverage}x", "inline": True},
-                        {
-                            "name": "CW-Tier",
-                            "value": (f"{'ON' if vc.cw_enabled else 'OFF'} (min={vc.min_conviction_score})"),
-                            "inline": True,
-                        },
-                        {"name": "유니버스", "value": f"{n_symbols}종목", "inline": True},
-                        {"name": "커밋", "value": commit_str, "inline": True},
-                    ],
-                    "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
-                }
-            )
-        else:
-            eff_lev = self.config.base_leverage * self.config.mtf_leverage_mult
-            _mtf_str = f"ON (SMA {self.config.mtf_sma_period})" if self.config.mtf_confirmation_enabled else "OFF"
-            _adaptive_str = (
-                f"적응형 {self.config.atr_multiplier}x "
-                f"(floor {self.config.threshold_floor * 100:.1f}%, cap {self.config.threshold_cap * 100:.1f}%)"
-                if self.config.atr_period > 0
-                else f"고정 {self.config.threshold * 100:.1f}%"
-            )
-            self.discord.send(
-                embed={
-                    "title": "🚀 QuantBox 스캘퍼 시작",
-                    "color": 0x2979FF,
-                    "description": ("러버밴드 평균회귀 스캘퍼 초기화 완료.\n`!help`로 명령어 확인."),
-                    "fields": [
-                        {"name": "모드", "value": f"**{mode_str}**", "inline": True},
-                        {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
-                        {"name": "슬롯", "value": f"{n_recovered}/{self.config.max_concurrent}", "inline": True},
-                        {
-                            "name": "── 전략 설정 ──",
-                            "value": (
-                                f"진입: {_adaptive_str}\n"
-                                f"TP={self.config.target_retrace} | "
-                                f"SL={'ATR×' + str(self.config.atr_stop_mult) + '[' + str(round(self.config.atr_stop_floor * 100, 1)) + '%-' + str(round(self.config.atr_stop_cap * 100)) + '%]' if self.config.atr_stop_enabled else str(self.config.stop_mult) + '×move'} | "
-                                f"MaxHold={self.config.max_hold}바"
-                            ),
-                            "inline": False,
-                        },
-                        {"name": "MTF", "value": _mtf_str, "inline": True},
-                        {
-                            "name": "레버리지",
-                            "value": (
-                                f"Base {self.config.base_leverage}x × "
-                                f"MTF {self.config.mtf_leverage_mult}x = "
-                                f"{eff_lev:.1f}x"
-                            ),
-                            "inline": True,
-                        },
-                        {"name": "유니버스", "value": f"{n_symbols}종목", "inline": True},
-                        {"name": "커밋", "value": commit_str, "inline": True},
-                    ],
-                    "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
-                }
-            )
+        vc = self.vs_config
+        self.discord.send(
+            embed={
+                "title": "🚀 QuantBox VolStraddle 시작",
+                "color": 0x2979FF,
+                "description": ("VolStraddle D_mom8 (A1-D50) 초기화 완료.\n`!help`로 명령어 확인."),
+                "fields": [
+                    {"name": "모드", "value": f"**{mode_str}**", "inline": True},
+                    {"name": "잔고", "value": f"${balance:,.2f}", "inline": True},
+                    {"name": "슬롯", "value": f"{n_recovered}/{vc.max_concurrent}", "inline": True},
+                    {
+                        "name": "── 전략 설정 ──",
+                        "value": (
+                            f"VR({vc.vr_short}/{vc.vr_long}) < {vc.d_vr_threshold:.2f}\n"
+                            f"TP={vc.d_tp * 100:.0f}% | SL={vc.d_sl * 100:.0f}% | "
+                            f"Mom={vc.momentum_period}bar"
+                        ),
+                        "inline": False,
+                    },
+                    {
+                        "name": "TF",
+                        "value": (
+                            f"{'15m ' if vc.enable_15m else ''}"
+                            f"{'1h ' if vc.enable_1h else ''}"
+                            f"{'4h' if vc.enable_4h else ''}"
+                        ).strip(),
+                        "inline": True,
+                    },
+                    {"name": "레버리지", "value": f"{vc.base_leverage}x", "inline": True},
+                    {
+                        "name": "CW-Tier",
+                        "value": (f"{'ON' if vc.cw_enabled else 'OFF'} (min={vc.min_conviction_score})"),
+                        "inline": True,
+                    },
+                    {"name": "유니버스", "value": f"{n_symbols}종목", "inline": True},
+                    {"name": "커밋", "value": commit_str, "inline": True},
+                ],
+                "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
+            }
+        )
 
         # Pre-fetch exchange info
         self.get_symbol_info("BTCUSDT")

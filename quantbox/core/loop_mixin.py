@@ -88,7 +88,7 @@ class LoopMixin:
             )
 
         # Periodic VR distribution (every 16 cycles ≈ 4h) when no positions
-        if self.strategy_name == "vol_straddle" and len(positions) == 0 and self._cycle_count % 16 == 0:
+        if len(positions) == 0 and self._cycle_count % 16 == 0:
             self._log_vr_distribution()
 
     def _log_vr_distribution(self: "ScalperProtocol") -> None:
@@ -124,51 +124,32 @@ class LoopMixin:
         print_banner()
         if GIT_COMMIT["short"]:
             logger.info(f"Git: {GIT_COMMIT['short']} — {GIT_COMMIT['message']}")
-        if self.strategy_name == "vol_straddle":
-            vc = self.vs_config
-            print_system_info(
-                mode=mode_str,
-                strategy="vol_straddle",
-                balance=balance,
-                n_symbols=n_symbols,
-                max_slots=vc.max_concurrent,
-                leverage_base=vc.base_leverage,
-                leverage_max=vc.max_leverage,
-                lookback=vc.momentum_period,
-                threshold=vc.d_vr_threshold,
-                target=vc.d_tp,
-                stop_mult=vc.d_sl,
-                max_hold=vc.max_hold_15m,
-                entry_mode="vr_compression",
-                min_confidence=0.0,
-                testnet=settings.binance_testnet,
-                ma_cluster_enabled=vc.ma_cluster_enabled,
-                ma_cluster_pct=vc.ma_cluster_pct,
-                ma_cluster_min_duration=vc.ma_cluster_min_duration,
-                ma_cluster_max_duration=vc.ma_cluster_max_duration,
-                ma_cluster_min_momentum=vc.ma_cluster_min_momentum,
-                ma_cluster_sl=vc.ma_cluster_sl,
-                ma_cluster_tp=vc.ma_cluster_tp,
-                ma_cluster_leverage=vc.ma_cluster_leverage,
-            )
-        else:
-            print_system_info(
-                mode=mode_str,
-                strategy=self.strategy_name,
-                balance=balance,
-                n_symbols=n_symbols,
-                max_slots=self.config.max_concurrent,
-                leverage_base=self.config.base_leverage,
-                leverage_max=self.config.max_leverage,
-                lookback=self.config.lookback,
-                threshold=self.config.threshold,
-                target=self.config.target_retrace,
-                stop_mult=self.config.stop_mult,
-                max_hold=self.config.max_hold,
-                entry_mode=self.config.entry_mode,
-                min_confidence=self.config.min_confidence,
-                testnet=settings.binance_testnet,
-            )
+        vc = self.vs_config
+        print_system_info(
+            mode=mode_str,
+            strategy=self.strategy_name,
+            balance=balance,
+            n_symbols=n_symbols,
+            max_slots=vc.max_concurrent,
+            leverage_base=vc.base_leverage,
+            leverage_max=vc.max_leverage,
+            lookback=vc.momentum_period,
+            threshold=vc.d_vr_threshold,
+            target=vc.d_tp,
+            stop_mult=vc.d_sl,
+            max_hold=vc.max_hold_15m,
+            entry_mode="vr_compression",
+            min_confidence=0.0,
+            testnet=settings.binance_testnet,
+            ma_cluster_enabled=vc.ma_cluster_enabled,
+            ma_cluster_pct=vc.ma_cluster_pct,
+            ma_cluster_min_duration=vc.ma_cluster_min_duration,
+            ma_cluster_max_duration=vc.ma_cluster_max_duration,
+            ma_cluster_min_momentum=vc.ma_cluster_min_momentum,
+            ma_cluster_sl=vc.ma_cluster_sl,
+            ma_cluster_tp=vc.ma_cluster_tp,
+            ma_cluster_leverage=vc.ma_cluster_leverage,
+        )
         print_startup_complete(mode_str)
 
     def _next_bar_time(self: "ScalperProtocol") -> datetime:
