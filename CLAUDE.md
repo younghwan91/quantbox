@@ -130,8 +130,8 @@ When modifying these files, always check the paired files:
 | `vol_straddle/config.py` | All backtest scripts, `.env` |
 | `scalper.py` trading logic | `trade_sim.py` parity |
 | `core/scalper_state.py` | `scalper.py`, `conftest.py`, state-related tests |
-| Any new module | `README.md` structure, `__init__.py`, test file, `agents.md` |
-| `.github/instructions/` or `AGENTS.md` | `.github/skills/` cross-references for staleness |
+| Any new module | `README.md` structure, `__init__.py`, test file, `AGENTS.md` |
+| `AGENTS.md` | `.github/skills/` cross-references for staleness |
 
 ## Git Flow
 
@@ -194,12 +194,17 @@ Project-specific skills live in `.github/skills/*/SKILL.md` (Copilot CLI-compati
    - Use: When positions exist in state but not on exchange, or vice versa
    - Triggers: `ghost detection`, `reconciliation`, `orphan`, `counterpart SL`, `reverse ghost`, `exchange sync`
 
+6. **quantbox-live-ops-agent** (450+ lines)
+   - Autonomous live session diagnostics: tmux capture, Binance API verification, discrepancy detection, strategy performance analysis, error/bug detection, remediation plan
+   - Use: Morning desk check, post-deploy verification, drawdown investigation, weekly performance audit
+   - Triggers: `live ops`, `trading audit`, `session audit`, `desk check`, `risk check`, `discrepancy`, `account audit`, `ops agent`
+   - **Claude Code slash command:** `/live-ops` (`.claude/commands/live-ops.md`)
+
 ### Phase 2 Deferred (Existing coverage in `.instructions.md`)
 
 - quantbox-state-persistence (90% covered by debugging.instructions.md Section 3)
 - quantbox-position-sizing (100% covered by position_sizing.instructions.md)
 - quantbox-bracket-orders (85% covered by debugging.instructions.md Section 2.1)
 - quantbox-hedge-mode (80% covered by debugging.instructions.md Section 1)
-- quantbox-live-ops (100% covered by live_trading.instructions.md)
 
 Add Phase 2 skills when: (a) agent misses guidance in that domain, AND (b) existing `.instructions.md` coverage is demonstrably insufficient.

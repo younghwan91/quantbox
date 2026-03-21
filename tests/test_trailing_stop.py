@@ -195,15 +195,15 @@ class TestStraddleUnchanged:
         assert result is None  # activated but not yet hit
 
     def test_straddle_trail_hits(self, strat: VolStraddleStrategy):
-        """Straddle trail exit: gain reaches 1.5%, then retraces 0.2%."""
+        """Straddle trail exit: gain reaches 1.5%, then retraces past trail_distance."""
         _open_long(strat, symbol="ETHUSDT", entry=100.0, is_straddle=True)
         # Push to +2% to activate and set peak
         strat.update_position("ETHUSDT", 102.0, current_high=102.0, current_low=101.8)
         pos = strat._positions["ETHUSDT"]
         assert pos["trail_active"] is True
         assert pos["peak_gain"] == pytest.approx(0.02, abs=1e-4)
-        # Trail stop = peak(2%) - dist(0.2%) = 1.8% → retrace to 1.7% triggers
-        result = strat.update_position("ETHUSDT", 101.5, current_high=101.9, current_low=101.7)
+        # Trail stop = peak(2%) - dist(0.5%) = 1.5% → retrace to 1.4% triggers
+        result = strat.update_position("ETHUSDT", 101.3, current_high=101.9, current_low=101.4)
         assert result == "trailing_stop"
 
     def test_straddle_no_trail_before_activate(self, strat: VolStraddleStrategy):
@@ -233,7 +233,7 @@ class TestStraddleUnchanged:
         """Straddle uses s_trail_activate/s_trail_distance, not d_trail params."""
         cfg = strat.config
         assert cfg.s_trail_activate == pytest.approx(0.015)
-        assert cfg.s_trail_distance == pytest.approx(0.001)  # r76: updated from 0.002
+        assert cfg.s_trail_distance == pytest.approx(0.005)  # r104b: 0.5% noise floor (was 0.001)
         # Ensure they differ from D_mom8 params
         assert cfg.s_trail_activate != cfg.d_trail_activate
 

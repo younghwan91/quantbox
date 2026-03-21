@@ -71,7 +71,7 @@ class TestGetTrailParams:
     def test_straddle_long(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
-        assert cr == pytest.approx(0.1)  # 0.001 * 100
+        assert cr == pytest.approx(0.5)  # 0.005 * 100
         # activationPrice = entry × (1 + trail_activate) = 100 × 1.015 = 101.5
         assert ap == pytest.approx(101.5)
         assert cs == "SELL"
@@ -79,7 +79,7 @@ class TestGetTrailParams:
     def test_straddle_short(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", -1, 100.0)
-        assert cr == pytest.approx(0.1)
+        assert cr == pytest.approx(0.5)
         # activationPrice = entry × (1 - trail_activate) = 100 × 0.985 = 98.5
         assert ap == pytest.approx(98.5)
         assert cs == "BUY"
@@ -306,7 +306,7 @@ class TestTrailAtEntry:
         # and calls _place_trailing_stop_market + skips _place_server_take_profit.
         # We verify by checking the trail params calculation works correctly.
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
-        assert cr == pytest.approx(0.1)
+        assert cr == pytest.approx(0.5)
         # activationPrice = entry × (1 + trail_activate) = 100 × 1.015 = 101.5
         assert ap == pytest.approx(101.5)
         assert cs == "SELL"
@@ -455,8 +455,8 @@ class TestReconTrailFill:
 
         s._record_server_fill.assert_not_called()
 
-    def test_trail_cancelled_clears_for_repair(self):
-        """Externally cancelled trail should be cleared and repaired."""
+    def test_trail_zero_fill_skips_pnl_recording(self):
+        """Trail FINISHED with price=0/qty=0 must NOT call _record_server_fill (sciomc S3b)."""
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
         _inject_position(
@@ -465,7 +465,39 @@ class TestReconTrailFill:
             server_trail_order_id="77777",
             is_straddle=False,
         )
-        # No need to set trail_active — entry-time placement model repairs regardless
+
+        # Trail reports FINISHED but with zero fill
+        s._check_trail_regular = MagicMock(
+            return_value={
+                "status": "FILLED",
+                "orderId": 77777,
+                "avgPrice": "0",
+                "executedQty": "0",
+            }
+        )
+        s._check_order_filled = MagicMock(return_value=None)  # No matching trades
+        s._record_server_fill = MagicMock()
+        s._save_state = MagicMock()
+
+        s._sync_server_orders()
+
+        # Must NOT record phantom -100% PnL
+        s._record_server_fill.assert_not_called()
+        # But must clean up internal state
+        assert "TESTUSDT:LONG" not in s.strategy._positions
+
+    def test_trail_cancelled_clears_for_repair(self):
+        """Externally cancelled trail should be cleared and repaired if trail_active."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id="77777",
+            is_straddle=False,
+        )
+        # Deferred trail: must be trail_active for repair to re-place
+        s.strategy._positions["TESTUSDT:LONG"]["trail_active"] = True
 
         s._check_trail_regular = MagicMock(return_value={"status": "CANCELED", "orderId": 77777})
         s._check_order_filled = MagicMock(return_value=None)
@@ -475,7 +507,7 @@ class TestReconTrailFill:
 
         s._sync_server_orders()
 
-        # Trail should be repaired immediately
+        # Trail should be repaired because trail_active=True
         s._place_trail_regular.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
         assert pos["server_trail_order_id"] == "88888"
@@ -488,7 +520,7 @@ class TestReconTrailFill:
 
 class TestTrailBracketRepair:
     def test_missing_trail_repaired(self):
-        """Position with missing trail order should get one placed (entry-time placement)."""
+        """Position with missing trail order should get one placed when trail_active."""
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
         _inject_position(
@@ -499,7 +531,8 @@ class TestTrailBracketRepair:
             strategy_type="straddle",
             is_straddle=False,
         )
-        # Trail is placed at entry, so no trail_active check needed for repair
+        # Deferred trail: must be trail_active for repair to place trail
+        s.strategy._positions["TESTUSDT:LONG"]["trail_active"] = True
 
         # Mock all order checks → nothing filled
         s._check_order_filled = MagicMock(return_value=None)
@@ -509,17 +542,17 @@ class TestTrailBracketRepair:
 
         s._sync_server_orders()
 
-        # Trail should be placed as repair
+        # Trail should be placed as repair because trail_active=True
         s._place_trail_regular.assert_called_once()
         pos = s.strategy._positions["TESTUSDT:LONG"]
         assert pos["server_trail_order_id"] == "88888"
 
-    def test_missing_trail_repaired_even_if_inactive(self):
-        """Position with missing trail should get trail even if trail_active=False.
+    def test_missing_trail_not_repaired_when_inactive(self):
+        """Position with missing trail should NOT get trail if trail_active=False.
 
-        New logic: trail is placed at entry with future activationPrice.
-        If trail is missing (API failure at entry), bracket repair restores it
-        regardless of trail_active state.
+        Deferred trail: Binance Algo API ignores future activationPrice, so
+        trail must only be placed after peak_gain >= trail_activate%.
+        Before that, SL protects the position.
         """
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
@@ -531,7 +564,7 @@ class TestTrailBracketRepair:
             strategy_type="straddle",
             is_straddle=False,
         )
-        # trail_active is False, but trail should still be repaired
+        # trail_active is False — trail should NOT be placed
 
         s._check_order_filled = MagicMock(return_value=None)
         s._check_trail_regular = MagicMock(return_value=None)
@@ -540,10 +573,10 @@ class TestTrailBracketRepair:
 
         s._sync_server_orders()
 
-        # Trail SHOULD be placed — entry-time placement model
-        s._place_trail_regular.assert_called_once()
+        # Trail should NOT be placed — deferred until trail_active=True
+        s._place_trail_regular.assert_not_called()
         pos = s.strategy._positions["TESTUSDT:LONG"]
-        assert pos["server_trail_order_id"] == "88888"
+        assert pos["server_trail_order_id"] is None
 
     def test_existing_trail_not_re_placed(self):
         """Position with existing trail order should NOT get a new one."""
@@ -907,11 +940,11 @@ class TestTrailCrossCancel:
 class TestCallbackRateBounds:
     """Test callbackRate edge values from _get_trail_params."""
 
-    def test_straddle_at_minimum_0_1(self):
-        """s_trail_distance=0.001 → callbackRate=0.1 (Binance minimum)."""
+    def test_straddle_callback_rate(self):
+        """s_trail_distance=0.005 → callbackRate=0.5."""
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
-        assert cr == pytest.approx(0.1, abs=0.01)  # 0.001 * 100 = 0.1
+        assert cr == pytest.approx(0.5, abs=0.01)  # 0.005 * 100 = 0.5
 
     def test_vr_squeeze_callback_rate(self):
         """d_trail_distance=0.002 → callbackRate=0.2."""

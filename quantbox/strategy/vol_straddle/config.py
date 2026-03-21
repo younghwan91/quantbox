@@ -69,7 +69,7 @@ class VolStraddleConfig(BaseSettings):
     s_sl: float = 0.015  # 1.5% stop loss (per leg)
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
     s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg
-    s_trail_distance: float = 0.001  # r76: 0.1% behind peak (was 0.2%, PF 4.876→9.349)
+    s_trail_distance: float = 0.005  # r104b: 0.5% behind peak (noise floor — 0.1% fires on tick noise, 81% 1m/15m bias)
     straddle_enabled: bool = True  # S_d8 straddle mode — fixed bracket repair to wait for trail_active
     straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
     # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR.
@@ -337,6 +337,9 @@ class VolStraddleConfig(BaseSettings):
     sl_cancel_retry_delay_s: float = 1.0  # VS_SL_CANCEL_RETRY_DELAY_S: delay between SL cancel retries (s)
     orphan_auto_close_cycles: int = (
         4  # VS_ORPHAN_AUTO_CLOSE_CYCLES: cycles before orphaned leg auto-closes (~60min at 15m)
+    )
+    straddle_rollback_cooldown_cycles: int = (
+        8  # VS_STRADDLE_ROLLBACK_COOLDOWN_CYCLES: skip symbol for N cycles after rollback (~2h at 15m)
     )
 
     @model_validator(mode="after")

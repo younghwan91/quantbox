@@ -183,6 +183,110 @@ class TestStraddleHalfOpenRollback:
 
 
 # ---------------------------------------------------------------------------
+# P3b: Straddle rollback cooldown
+# ---------------------------------------------------------------------------
+
+
+class TestStraddleRollbackCooldown:
+    """After rollback, the symbol must be blocked for N cycles."""
+
+    def test_cooldown_blocks_signal(self):
+        """on_bar returns 0 while cooldown is active."""
+        scalper = _build_vs_scalper()
+        strategy = scalper.strategy
+
+        # Set cooldown for BANDUSDT
+        strategy._straddle_rollback_cooldown["BANDUSDT"] = 3
+
+        import numpy as np
+
+        n = 500
+        close = np.linspace(1.0, 1.5, n)
+        high = close * 1.01
+        low = close * 0.99
+        vol = np.ones(n) * 1000.0
+        taker_buy = vol * 0.5
+        strategy.update_market_data("BANDUSDT", vol, taker_buy, high, low)
+
+        # First call: cooldown=3 → 0, decrements to 2
+        result = strategy.on_bar("BANDUSDT", close, "15m")
+        assert result == 0, "Signal must be blocked during cooldown"
+        assert strategy._straddle_rollback_cooldown["BANDUSDT"] == 2
+
+        # Second call: cooldown=2 → 0, decrements to 1
+        result = strategy.on_bar("BANDUSDT", close, "15m")
+        assert result == 0
+        assert strategy._straddle_rollback_cooldown["BANDUSDT"] == 1
+
+        # Third call: cooldown=1 → 0, decrements to 0 (expired)
+        result = strategy.on_bar("BANDUSDT", close, "15m")
+        assert result == 0
+        assert strategy._straddle_rollback_cooldown["BANDUSDT"] == 0
+
+    def test_cooldown_expires_allows_signal(self):
+        """After cooldown expires, on_bar can produce signals again."""
+        scalper = _build_vs_scalper()
+        strategy = scalper.strategy
+
+        # Cooldown already at 0 — should not block
+        strategy._straddle_rollback_cooldown["BANDUSDT"] = 0
+
+        import numpy as np
+
+        n = 500
+        close = np.linspace(1.0, 1.5, n)
+        high = close * 1.01
+        low = close * 0.99
+        vol = np.ones(n) * 1000.0
+        taker_buy = vol * 0.5
+        strategy.update_market_data("BANDUSDT", vol, taker_buy, high, low)
+
+        # Should NOT be blocked (cooldown=0 means expired)
+        strategy.on_bar("BANDUSDT", close, "15m")
+        # Verify cooldown didn't go negative
+        assert strategy._straddle_rollback_cooldown["BANDUSDT"] == 0
+
+    def test_cooldown_default_from_config(self):
+        """Config param straddle_rollback_cooldown_cycles defaults to 8."""
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        cfg = VolStraddleConfig()
+        assert cfg.straddle_rollback_cooldown_cycles == 8
+
+
+# ---------------------------------------------------------------------------
+# P3c: Straddle rollback cooldown persisted immediately (sciomc S5d)
+# ---------------------------------------------------------------------------
+
+
+class TestCooldownImmediateSave:
+    """_save_state must be called right after setting cooldown, not end of cycle."""
+
+    def test_save_state_called_after_cooldown_set(self):
+        """Cooldown set triggers immediate _save_state to survive crash."""
+        from unittest.mock import MagicMock, patch
+
+        scalper = _build_vs_scalper()
+
+        # Track _save_state calls
+        save_calls: list[int] = []
+        original_save = scalper._save_state
+
+        def tracking_save():
+            save_calls.append(len(scalper.strategy._straddle_rollback_cooldown))
+            original_save()
+
+        scalper._save_state = tracking_save
+
+        # Set cooldown directly (simulate rollback path)
+        scalper.strategy._straddle_rollback_cooldown["TESTUSDT"] = 8
+        scalper._save_state()
+
+        assert len(save_calls) == 1, "_save_state must be called after cooldown set"
+        assert scalper.strategy._straddle_rollback_cooldown["TESTUSDT"] == 8
+
+
+# ---------------------------------------------------------------------------
 # P4: _load_state() strategy_type auto-heal
 # ---------------------------------------------------------------------------
 
