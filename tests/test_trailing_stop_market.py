@@ -71,7 +71,7 @@ class TestGetTrailParams:
     def test_straddle_long(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
-        assert cr == pytest.approx(0.1)  # 0.001 * 100
+        assert cr == pytest.approx(0.5)  # 0.005 * 100
         # activationPrice = entry × (1 + trail_activate) = 100 × 1.015 = 101.5
         assert ap == pytest.approx(101.5)
         assert cs == "SELL"
@@ -79,7 +79,7 @@ class TestGetTrailParams:
     def test_straddle_short(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", -1, 100.0)
-        assert cr == pytest.approx(0.1)
+        assert cr == pytest.approx(0.5)
         # activationPrice = entry × (1 - trail_activate) = 100 × 0.985 = 98.5
         assert ap == pytest.approx(98.5)
         assert cs == "BUY"
@@ -306,7 +306,7 @@ class TestTrailAtEntry:
         # and calls _place_trailing_stop_market + skips _place_server_take_profit.
         # We verify by checking the trail params calculation works correctly.
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
-        assert cr == pytest.approx(0.1)
+        assert cr == pytest.approx(0.5)
         # activationPrice = entry × (1 + trail_activate) = 100 × 1.015 = 101.5
         assert ap == pytest.approx(101.5)
         assert cs == "SELL"
@@ -909,11 +909,11 @@ class TestTrailCrossCancel:
 class TestCallbackRateBounds:
     """Test callbackRate edge values from _get_trail_params."""
 
-    def test_straddle_at_minimum_0_1(self):
-        """s_trail_distance=0.001 → callbackRate=0.1 (Binance minimum)."""
+    def test_straddle_callback_rate(self):
+        """s_trail_distance=0.005 → callbackRate=0.5."""
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
-        assert cr == pytest.approx(0.1, abs=0.01)  # 0.001 * 100 = 0.1
+        assert cr == pytest.approx(0.5, abs=0.01)  # 0.005 * 100 = 0.5
 
     def test_vr_squeeze_callback_rate(self):
         """d_trail_distance=0.002 → callbackRate=0.2."""
