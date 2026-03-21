@@ -83,12 +83,7 @@ class BracketMixin:
         )
 
         try:
-            resp = self.client._request_futures_api(
-                "post",
-                "algoOrder",
-                signed=True,
-                data=params,
-            )
+            resp = self._algo_api.place_order(params)
             algo_id = str(resp["algoId"])
             logger.info(
                 f"[{symbol}] SERVER {label.upper()} placed via Algo API: "
@@ -334,12 +329,7 @@ class BracketMixin:
             return True
 
         try:
-            resp = self.client._request_futures_api(
-                "delete",
-                "algoOrder",
-                signed=True,
-                data={"algoId": int(order_id)},
-            )
+            resp = self._algo_api.cancel_order(int(order_id))
             logger.info(f"[{symbol}] Server {label} cancelled: algoId={order_id} resp={resp}")
             return True
         except BinanceAPIException as e:
@@ -470,12 +460,7 @@ class BracketMixin:
         )
 
         try:
-            resp = self.client._request_futures_api(
-                "post",
-                "algoOrder",
-                signed=True,
-                data=params,
-            )
+            resp = self._algo_api.place_order(params)
             algo_id = str(resp["algoId"])
             logger.info(
                 f"[{symbol}] SERVER TRAIL placed via Algo API: "
@@ -643,12 +628,7 @@ class BracketMixin:
             return None
 
         try:
-            resp = self.client._request_futures_api(
-                "get",
-                "algoOrder",
-                signed=True,
-                data={"algoId": int(order_id)},
-            )
+            resp = self._algo_api.get_order(int(order_id))
             algo_status = resp.get("algoStatus", "")
             logger.info(
                 f"[{symbol}] Algo order check: algoId={order_id} status={algo_status} type={resp.get('orderType', '?')}"
@@ -919,12 +899,7 @@ class BracketMixin:
         if self.paper_mode:
             return "WORKING"
         try:
-            resp = self.client._request_futures_api(
-                "get",
-                "algoOrder",
-                signed=True,
-                data={"algoId": int(algo_id)},
-            )
+            resp = self._algo_api.get_order(int(algo_id))
             # Response may vary — handle both dict and list
             if isinstance(resp, dict):
                 return resp.get("algoStatus") or resp.get("status")
