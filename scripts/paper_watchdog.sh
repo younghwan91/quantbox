@@ -74,7 +74,8 @@ if [ "$LOG_AGE" -gt 1800 ]; then
 fi
 
 # ── Check for errors in last hour ──
-ERROR_COUNT=$(grep -c "ERROR\|CRITICAL" "$PAPER_LOG" 2>/dev/null || echo 0)
+ERROR_COUNT=$(grep -c "ERROR\|CRITICAL" "$PAPER_LOG" 2>/dev/null || true)
+ERROR_COUNT=${ERROR_COUNT:-0}
 LAST_CYCLE=$(grep "Cycle #" "$PAPER_LOG" 2>/dev/null | tail -1 | grep -oP 'Cycle #\K[0-9]+' || echo 0)
 BALANCE=$(grep -oP 'Balance=\$\K[0-9.]+' "$PAPER_LOG" 2>/dev/null | tail -1 || echo "?")
 DD=$(grep -oP 'DD=\K[0-9.]+' "$PAPER_LOG" 2>/dev/null | tail -1 || echo "?")
