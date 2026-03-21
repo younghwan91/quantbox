@@ -80,18 +80,21 @@ from quantbox.execution.data_mixin import DataMixin
 from quantbox.execution.positions import PositionMixin
 from quantbox.execution.preflight import OrderPreflight
 from quantbox.execution.reconciliation import ReconciliationMixin
-from quantbox.core.trade_journal import TradeJournal
-from quantbox.core.divergence_monitor import DivergenceMonitor
+from quantbox.core.trade_journal import TradeJournal  # noqa: F401 (patched by tests)
+from quantbox.core.divergence_monitor import DivergenceMonitor  # noqa: F401 (patched by tests)
+from quantbox.core.lifecycle import (
+    create_divergence_monitor,
+    create_reliability_modules,
+    create_trade_journal,
+)
 
 # ── Reliability modules (Phase 3 integration) ──
-from pathlib import Path
-
-from quantbox.core.heartbeat import Heartbeat
+from quantbox.core.heartbeat import Heartbeat  # noqa: F401 (patched by tests)
 from quantbox.core.rate_limiter import RateLimiter
 from quantbox.core.sd_notify import sd_notify
-from quantbox.execution.exposure import ExposureGuard
-from quantbox.execution.inflight import InFlightTracker, OrderIntent, PendingOrder
-from quantbox.execution.recon_journal import ReconJournal
+from quantbox.execution.exposure import ExposureGuard  # noqa: F401 (patched by tests)
+from quantbox.execution.inflight import InFlightTracker, OrderIntent, PendingOrder  # noqa: F401 (InFlightTracker patched by tests)
+from quantbox.execution.recon_journal import ReconJournal  # noqa: F401 (patched by tests)
 
 load_dotenv()
 
@@ -231,53 +234,18 @@ class RubberBandScalper(
         self._cycle_count: int = 0
 
         # Trade journal (persistent SQLite)
-        _session_str = "paper" if paper_mode else "live"
-        if journal_db_path is not None:
-            _db_path = journal_db_path
-        else:
-            _db_path = "data/journal_paper.sqlite" if paper_mode else "data/journal.sqlite"
-        self._journal = TradeJournal(db_path=_db_path, session=_session_str)
+        self._journal = create_trade_journal(paper_mode, journal_db_path)
 
         # Live-Backtest divergence monitor
-        self._divergence_monitor = DivergenceMonitor(
-            min_trades=self.vs_config.divergence_min_trades,
-            pf_threshold=self.vs_config.divergence_pf_threshold,
-            wr_gap_pp=self.vs_config.divergence_wr_gap_pp,
-            cooldown_hours=self.vs_config.divergence_cooldown_hours,
-        )
+        self._divergence_monitor = create_divergence_monitor(self.vs_config)
 
         # ── Reliability modules (Phase 3) ──
-        try:
-            self._rate_limiter = RateLimiter()
-        except Exception as e:
-            logger.error(f"RateLimiter init failed: {e}")
-            self._rate_limiter = None
-
-        try:
-            self._heartbeat = Heartbeat(stall_threshold_s=300.0)
-        except Exception as e:
-            logger.error(f"Heartbeat init failed: {e}")
-            self._heartbeat = None
-
-        try:
-            _max_mult = self.vs_config.max_exposure_multiplier
-            self._exposure_guard = ExposureGuard(max_multiplier=_max_mult)
-        except Exception as e:
-            logger.error(f"ExposureGuard init failed: {e}")
-            self._exposure_guard = None
-
-        try:
-            inflight_path = Path("data/state/inflight_orders.json")
-            self._inflight = InFlightTracker(persist_path=inflight_path)
-        except Exception as e:
-            logger.error(f"InFlightTracker init failed: {e}")
-            self._inflight = None
-
-        try:
-            self._recon_journal = ReconJournal(Path("data/journal/recon.db"))
-        except Exception as e:
-            logger.error(f"ReconJournal init failed: {e}")
-            self._recon_journal = None
+        _reliability = create_reliability_modules(self.vs_config)
+        self._rate_limiter = _reliability["rate_limiter"]
+        self._heartbeat = _reliability["heartbeat"]
+        self._exposure_guard = _reliability["exposure_guard"]
+        self._inflight = _reliability["inflight"]
+        self._recon_journal = _reliability["recon_journal"]
 
         # Restart tracking & post-restart reconciliation
         self._restart_count: int = 0
