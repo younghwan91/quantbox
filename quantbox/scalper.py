@@ -67,6 +67,7 @@ from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
 from quantbox.core.commands import CommandsMixin
+from quantbox.execution.algo_api import AlgoApiClient
 from quantbox.core.loop_mixin import LoopMixin
 from quantbox.core.scalper_state import (
     PAPER_STATE_FILE,
@@ -179,6 +180,7 @@ class RubberBandScalper(
             api_secret=settings.binance_api_secret,
             testnet=settings.binance_testnet,
         )
+        self._algo_api = AlgoApiClient(self.client)
 
         # Execution engine
         self._chaser = LimitOrderChaser(
@@ -1527,7 +1529,7 @@ class RubberBandScalper(
 
             # 5. Bracket verification (check SL/TP algo orders exist)
             try:
-                open_algo_orders = self.client._request_futures_api("get", "openAlgoOrders", signed=True, data={})
+                open_algo_orders = self._algo_api.list_open_orders()
                 algo_order_symbols: set[str] = set()
                 if isinstance(open_algo_orders, dict):
                     for order in open_algo_orders.get("orders", []):

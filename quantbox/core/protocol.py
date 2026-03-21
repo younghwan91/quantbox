@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from binance.client import Client as BinanceClient
 
     from quantbox.core.trade_journal import TradeJournal
+    from quantbox.execution.algo_api import AlgoApiClient
     from quantbox.execution.recon_journal import ReconJournal
     from quantbox.notifications.bot import DiscordBotRunner
     from quantbox.notifications.discord import DiscordNotifier
@@ -59,6 +60,9 @@ class ScalperProtocol(Protocol):
     # ── Core state ────────────────────────────────────────────────────────
     client: BinanceClient
     """binance.client.Client instance."""
+
+    _algo_api: AlgoApiClient
+    """Algo Order API client (wraps _request_futures_api)."""
 
     config: VolStraddleConfig
     """Active strategy config (VolStraddleConfig). RubberBand deprecated."""
