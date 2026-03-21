@@ -159,13 +159,11 @@ Location: `docs/backtest_results/YYYYMM/` only. Naming: `{YYYYMMDD}_{commit_shor
 | High | Signal/exit/cost/sizing logic | User confirmation + parity verification required |
 | Forbidden | Remove safety guards, use mock data, break parity | Never execute |
 
-## Project Skills (GitHub Copilot CLI & Claude Code)
+## Project Skills
 
-Project-specific skills live in `.github/skills/*/SKILL.md` (Copilot CLI-compatible format).
+Project-specific skills live in `.github/skills/*/SKILL.md`.
 
-**Loading in Copilot CLI**: Skills auto-load based on semantic matching in description field. Use `/skills reload` if manually added.
-
-**Loading in Claude Code**: Reference a skill with `cat .github/skills/<skill-name>/SKILL.md` in your prompt, or Claude will suggest it automatically.
+Claude Code reads these automatically when triggered by keyword matching, or reference directly with `cat .github/skills/<skill-name>/SKILL.md`.
 
 ### Current Priority Skills (5)
 
@@ -200,11 +198,11 @@ Project-specific skills live in `.github/skills/*/SKILL.md` (Copilot CLI-compati
    - Triggers: `live ops`, `trading audit`, `session audit`, `desk check`, `risk check`, `discrepancy`, `account audit`, `ops agent`
    - **Claude Code slash command:** `/live-ops` (`.claude/commands/live-ops.md`)
 
-### Phase 2 Deferred (Existing coverage in `.instructions.md`)
+### Phase 2 Deferred
 
-- quantbox-state-persistence (90% covered by debugging.instructions.md Section 3)
-- quantbox-position-sizing (100% covered by position_sizing.instructions.md)
-- quantbox-bracket-orders (85% covered by debugging.instructions.md Section 2.1)
-- quantbox-hedge-mode (80% covered by debugging.instructions.md Section 1)
+- quantbox-state-persistence
+- quantbox-position-sizing
+- quantbox-bracket-orders
+- quantbox-hedge-mode
 
-Add Phase 2 skills when: (a) agent misses guidance in that domain, AND (b) existing `.instructions.md` coverage is demonstrably insufficient.
+Add Phase 2 skills when: (a) agent misses guidance in that domain, AND (b) existing CLAUDE.md + SKILL.md coverage is demonstrably insufficient.
