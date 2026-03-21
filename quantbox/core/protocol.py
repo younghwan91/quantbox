@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from quantbox.notifications.bot import DiscordBotRunner
     from quantbox.notifications.discord import DiscordNotifier
     from quantbox.strategy.protocol import TradingStrategy
-    from quantbox.strategy.rubberband.config import RubberBandConfig
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 
@@ -61,8 +60,8 @@ class ScalperProtocol(Protocol):
     client: BinanceClient
     """binance.client.Client instance."""
 
-    config: RubberBandConfig | VolStraddleConfig
-    """Active strategy config (RubberBandConfig or VolStraddleConfig)."""
+    config: VolStraddleConfig
+    """Active strategy config (VolStraddleConfig). RubberBand deprecated."""
 
     vs_config: VolStraddleConfig
     """VolStraddleConfig — always set in __init__ (even for rubberband, as fallback config)."""
@@ -97,7 +96,7 @@ class ScalperProtocol(Protocol):
     _bot_runner: DiscordBotRunner | None
 
     # ── Internal config cache ─────────────────────────────────────────────
-    _cfg: RubberBandConfig | VolStraddleConfig
+    _cfg: VolStraddleConfig
     """Cached config shorthand used in loop_mixin."""
 
     # ── Symbol info cache (DataMixin) ─────────────────────────────────────

@@ -225,7 +225,7 @@ def _build_vs_scalper(balance: float = 1000.0, vs_config=None):
 
 
 def _build_rb_scalper(balance: float = 1000.0, rb_cfg=None):
-    """Factory — not a fixture so it can be called with custom params."""
+    """Factory for RubberBand scalper — DEPRECATED but kept for test compat."""
     from quantbox.scalper import RubberBandScalper
     from quantbox.strategy.rubberband.config import RubberBandConfig
 

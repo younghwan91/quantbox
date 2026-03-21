@@ -30,20 +30,7 @@ from quantbox.core.config import Config, TradingMode
 from quantbox.data.cache import DataCache, TimeframedCache
 from quantbox.data.downloader import DataDownloader
 
-# Strategy components
-from quantbox.strategy.rubberband import (
-    RubberBandConfig,
-    RubberBandStrategy,
-    compute_signals,
-    calculate_position_size,
-)
-
-# Backtest components
-from quantbox.backtest.vectorized_backtest import (
-    BacktestConfig,
-    BacktestResult,
-    VectorizedBacktest,
-)
+# Backtest components (VectorizedBacktest deprecated with RubberBand)
 
 __all__ = [
     # Version
@@ -55,13 +42,4 @@ __all__ = [
     "DataCache",
     "TimeframedCache",
     "DataDownloader",
-    # Strategy
-    "RubberBandConfig",
-    "RubberBandStrategy",
-    "compute_signals",
-    "calculate_position_size",
-    # Backtest
-    "BacktestConfig",
-    "BacktestResult",
-    "VectorizedBacktest",
 ]
