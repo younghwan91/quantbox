@@ -105,7 +105,7 @@ Run full test suite before commit:
 
 ## References
 - **Full rules**: CLAUDE.md:94-105
-- **Incident details**: `.github/instructions/debugging.instructions.md` Sections 1-9
+- **Incident details**: `CLAUDE.md` (Incident-Driven Rules #1-#8)
 - **Test suite**: `tests/test_critical_path_guards.py`
 
 ## When to Use This Skill
