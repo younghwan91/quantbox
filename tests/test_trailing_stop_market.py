@@ -128,39 +128,38 @@ class TestPlaceTrailingStopMarket:
     def test_live_mode_calls_algo_api(self):
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client._request_futures_api = MagicMock(return_value={"algoId": "12345678"})
+        s._algo_api.place_order = MagicMock(return_value={"algoId": "12345678"})
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 10.0, 0.1, 101.5, "LONG")
 
         assert oid == "12345678"
-        call_args = s.client._request_futures_api.call_args
-        assert call_args[0] == ("post", "algoOrder")
-        data = call_args[1]["data"]
-        assert data["type"] == "TRAILING_STOP_MARKET"
-        assert data["callbackRate"] == "0.1"
-        assert data["activationPrice"] == "101.5"
-        assert data["positionSide"] == "LONG"
-        assert data["side"] == "SELL"
-        assert data["quantity"] == "10.0"
-        assert data["algoType"] == "CONDITIONAL"
-        assert "reduceOnly" not in data  # mutual exclusion with positionSide
+        call_args = s._algo_api.place_order.call_args
+        params = call_args[0][0]
+        assert params["type"] == "TRAILING_STOP_MARKET"
+        assert params["callbackRate"] == "0.1"
+        assert params["activationPrice"] == "101.5"
+        assert params["positionSide"] == "LONG"
+        assert params["side"] == "SELL"
+        assert params["quantity"] == "10.0"
+        assert params["algoType"] == "CONDITIONAL"
+        assert "reduceOnly" not in params  # mutual exclusion with positionSide
 
     def test_live_mode_no_position_side_uses_reduce_only(self):
         """One-Way mode (no positionSide) should use reduceOnly."""
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client._request_futures_api = MagicMock(return_value={"algoId": "99999"})
+        s._algo_api.place_order = MagicMock(return_value={"algoId": "99999"})
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 5.0, 0.2, 102.0)
 
-        data = s.client._request_futures_api.call_args[1]["data"]
-        assert data["reduceOnly"] == "true"
-        assert "positionSide" not in data
+        params = s._algo_api.place_order.call_args[0][0]
+        assert params["reduceOnly"] == "true"
+        assert "positionSide" not in params
 
     def test_api_error_returns_none(self):
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client._request_futures_api = MagicMock(side_effect=Exception("API error -1000"))
+        s._algo_api.place_order = MagicMock(side_effect=Exception("API error -1000"))
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 10.0, 0.1, 101.5, "LONG")
         assert oid is None
