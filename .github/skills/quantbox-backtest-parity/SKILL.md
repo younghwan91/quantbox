@@ -148,7 +148,7 @@ Backtest vs Live Divergence?
    │  └─ grep for "j + 1" or "// ratio" errors
    ├─ Then check incomplete candles (Step 4)
    ├─ Then isolate by TF (Step 2)
-   └─ If still unresolved, review AGENTS.md parity doctrine
+   └─ If still unresolved, review CLAUDE.md parity section
 ```
 
 ## Test Command
@@ -163,8 +163,8 @@ uv run pytest tests/test_mtf_lookahead.py -v
 ```
 
 ## References
-- **Parity doctrine**: `quantbox/backtest/AGENTS.md` (lines 57-80)
-- **Lookahead checklist**: `.github/instructions/backtesting.instructions.md` Section 3 (lines 180-206)
+- **Parity doctrine**: ``quantbox/backtest/trade_sim.py` (parity docstrings)
+- **Lookahead checklist**: `CLAUDE.md` (Backtest-Live Parity + Incident Rules)
 - **Multi-TF rules**: CLAUDE.md Rule #2 (line 99)
 - **Tests**: `tests/test_backtest_live_parity.py`, `tests/test_*_lookahead.py`
 - **Cost model**: `quantbox/backtest/trade_sim.py` (lines 70-79)

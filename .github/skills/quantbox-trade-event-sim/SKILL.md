@@ -110,7 +110,7 @@ If either fails, the cost model or trade logic has diverged.
 
 ## References
 - **Canonical engine**: `quantbox/backtest/trade_sim.py` (lines 1-26 docstring)
-- **Engine comparison**: `quantbox/backtest/AGENTS.md` (lines 21-55)
+- **Engine comparison**: ``quantbox/backtest/trade_sim.py` (engine docstrings)
 - **Cost model**: `trade_sim.py:70-79` (COST_DIRECTIONAL, COST_STRADDLE)
 - **Tests**: `tests/test_trade_sim.py`, `tests/test_pbt_vol_straddle.py`
 

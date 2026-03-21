@@ -216,7 +216,7 @@ uv run pytest tests/test_reconciliation_reverse_ghost.py -v
 
 ## References
 - **Reconciliation logic**: `quantbox/execution/reconciliation.py` (lines 41-75 counterpart SL, lines 554-930 ghost detection)
-- **Ghost detection guide**: `.github/instructions/debugging.instructions.md` Section 2.2 (lines 244-260)
+- **Ghost detection guide**: `CLAUDE.md` (Incident-Driven Rules section)
 - **Incident #6 details**: 2026-03-13 reverse ghost (state file shows position, Binance shows 0, SL was filled)
 - **Related incidents**: Incident #4 (compound key), Incident #7 (CANCELED spelling)
 - **Tests**: `tests/test_reconciliation.py`, `tests/test_reconciliation_reverse_ghost.py`
