@@ -415,32 +415,18 @@ class PositionMixin:
                 logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — bracket repair next cycle")
                 sl_order_id = None
 
-            # Server-side trailing stop: placed at entry with future activationPrice.
-            # Trail stays in NEW until price reaches trail_activate%, then activates.
-            # API accepts future activationPrice (verified via live test 2026-03-19).
+            # Server-side trailing stop: DEFERRED until trail_active=True.
+            # Binance Algo API ignores future activationPrice — placing at entry
+            # causes immediate fire on any callbackRate% pullback (EGLDUSDT 2026-03-21:
+            # 3 straddle pairs killed in 30min, -$32.81).
+            # The bracket repair loop (_update_trail_ratchet) places the trail when
+            # peak_gain >= trail_activate% and trail_active=True.
             trail_order_id: str | None = None
             if self.vs_config.trail_server_native:
-                # Get trail params based on strategy type
-                cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
-                trail_order_id = self._place_trail_regular(
-                    symbol=symbol,
-                    side=cs,
-                    quantity=fill_qty,
-                    callback_rate=cr,
-                    activation_price=ap,
-                    position_side=pos_side,
+                logger.info(
+                    f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
+                    f"(algoId={sl_order_id}) TRAIL=DEFERRED (until trail_active)"
                 )
-                if trail_order_id:
-                    logger.info(
-                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                        f"(algoId={sl_order_id}) TRAIL=OK (orderId={trail_order_id}, "
-                        f"activate=${ap:.4f}={cr}% callback)"
-                    )
-                else:
-                    logger.warning(
-                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                        f"(algoId={sl_order_id}) TRAIL=FAILED — deferred fallback"
-                    )
                 # No TP needed — trail handles profit-taking once active.
                 tp_order_id = None
             else:
