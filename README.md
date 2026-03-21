@@ -3,18 +3,18 @@
 **바이낸스 USDT-M 선물 VR 스퀴즈 시스템 — Dual-Axis Squeeze (VR + MA Cluster)**
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-v14.24.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-v14.35.0-green.svg)]()
 [![Tests](https://img.shields.io/badge/tests-1929%20passed-brightgreen.svg)]()
 [![Coverage](https://img.shields.io/badge/coverage-77%25-green.svg)]()
 [![Branch](https://img.shields.io/badge/branch-main-blue.svg)]()
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(30x)와 MA Cluster Squeeze(21x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
 
-> **현재 상태**: Live Trading | Tag `v14.24.0` | 1929 tests passed
+> **현재 상태**: Live Trading | Tag `v14.35.0` | 2339 tests passed
 
 ## 🌟 주요 기능
 
-### 🎯 VolStraddle — VR Compression Detector (v14.24.0, 배포 중)
+### 🎯 VolStraddle — VR Compression Detector (v14.35.0, 배포 중)
 - **Volatility Ratio (VR) 압축 감지**: `VR = ATR(8)/ATR(56) < 0.50` — 변동성 압축 후 폭발 포착
 - **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
 - **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정 (D_mom8)
@@ -89,13 +89,13 @@
 - **In-Flight Order Tracker (v14.22.0)**: 미체결 주문 실시간 추적. 크래시 복구 시 자동 재동기화
 - **ExposureGuard (v14.23.0)**: 세션 노출도 상한선 (`max_exposure_multiplier=35.0`). 초과 시 신규 진입 차단
 - **ReconJournal (v14.23.0)**: SQLite 기반 10종 이벤트 감사 로그 (ghost, bracket repair, exposure 등)
-- **TradingStrategy Protocol (v14.24.0)**: 14개 멤버 타입 안전 인터페이스. 전략 확장 표준화
+- **TradingStrategy Protocol (v14.35.0)**: 14개 멤버 타입 안전 인터페이스. 전략 확장 표준화
 
 ### 백테스팅 (Dual-Engine)
 - **Signal-Array Engine** (`vectorized_backtest.py`): RubberBand/Elliott 등 ±1 포지션 어레이 기반. Close-to-close PnL. 단일자산 신속 스캔용.
 - **Trade-Event Engine** (`trade_sim.py`): VolStraddle/MA Cluster 등 이산 트레이드 시뮬레이션. High/Low 기반 인트라바 SL/TP. N-slot 포트폴리오 경합. Numba 가속.
   - `sim_directional_trades()` / `sim_straddle_trades()` → `collect_trades()` → `portfolio_sim()` → `compute_metrics()` 파이프라인
-  - `sim_directional_trailing()` / `sim_straddle_trailing()` — trail-aware 시뮬레이션 (v14.24.0, r43에서 이전)
+  - `sim_directional_trailing()` / `sim_straddle_trailing()` — trail-aware 시뮬레이션 (v14.35.0, r43에서 이전)
   - 리서치 스크립트의 canonical source (`scaling_r38.py`가 re-export)
 - **롤링 윈도우**: Formation/Trading 기간 시뮬레이션
 - **종합 지표**: Sharpe, Sortino, Calmar, Profit Factor, Bootstrap CI 등
@@ -196,7 +196,7 @@ quantbox/
 │   ├── elliott.py          # Elliott Wave 전략 (Numba 가속)
 │   ├── alpha_engine.py     # 멀티팩터 Alpha Engine (향상 RB + 하이브리드)
 │   ├── vol_selector.py     # 변동성 기반 심볼 선택기
-│   └── protocol.py         # TradingStrategy Protocol 14멤버 (v14.24.0)
+│   └── protocol.py         # TradingStrategy Protocol 14멤버 (v14.35.0)
 ├── backtest/               # 듀얼 엔진 백테스팅 프레임워크
 │   ├── vectorized_backtest.py  # Signal-Array 엔진 (RubberBand, close-to-close)
 │   └── trade_sim.py            # Trade-Event 엔진 (VolStraddle, intra-bar SL/TP, slot 경합)
