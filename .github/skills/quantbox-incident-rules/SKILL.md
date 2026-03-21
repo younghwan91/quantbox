@@ -75,7 +75,7 @@ All 8 rules in CLAUDE.md exist because of real capital losses. Before committing
 - **Check**: Trailing stop order type selection
 - **Violation**: Using regular API trailing stop returns error -4120
 - ❏ Verify: TRAILING_STOP_MARKET via Algo API only (not regular API)
-- ❏ Verify: `activationPrice=entry_price` (avoids -2021 error)
+- ❏ Verify: `activationPrice=entry×(1±trail_activate)` — future price OK (verified live 2026-03-19). `callbackRate≥0.5%` (0.1% fires on tick noise)
 - ❏ Verify: Regular API has no trailing stop support
 - ❏ Run: `grep -n "TRAILING_STOP" quantbox/execution/brackets.py`
 
