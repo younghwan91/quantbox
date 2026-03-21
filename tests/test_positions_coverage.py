@@ -801,6 +801,50 @@ class TestExchangeDedup:
         result = _open(scalper)
         assert result is False
 
+    def test_dedup_ignores_dust_below_min_notional(self):
+        """Dust position below min_notional should NOT block new entry (sciomc S3c)."""
+        scalper = _make_vs_scalper(paper=False)
+        _mock_open(scalper)
+        _set_signal_meta(scalper)
+        # Exchange reports tiny dust position (0.1 qty at $4 = $0.40 notional)
+        scalper.client.futures_position_information = MagicMock(
+            return_value=[
+                {"positionSide": "LONG", "positionAmt": "0.1", "entryPrice": "4.0"},
+            ]
+        )
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "min_notional": 5.0,
+                "tick_size": 0.01,
+                "step_size": 0.1,
+                "price_precision": 2,
+            }
+        )
+        result = _open(scalper)
+        assert result is True, "Dust below min_notional must not block entry"
+
+    def test_dedup_blocks_real_position_above_min_notional(self):
+        """Real position above min_notional should block new entry."""
+        scalper = _make_vs_scalper(paper=False)
+        _mock_open(scalper)
+        _set_signal_meta(scalper)
+        # Exchange reports real position (100 qty at $4 = $400 notional)
+        scalper.client.futures_position_information = MagicMock(
+            return_value=[
+                {"positionSide": "LONG", "positionAmt": "100", "entryPrice": "4.0"},
+            ]
+        )
+        scalper.get_symbol_info = MagicMock(
+            return_value={
+                "min_notional": 5.0,
+                "tick_size": 0.01,
+                "step_size": 0.1,
+                "price_precision": 2,
+            }
+        )
+        result = _open(scalper)
+        assert result is False, "Real position must block entry"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestPaperMode — L383-384 paper cost deduction
