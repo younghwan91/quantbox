@@ -299,7 +299,19 @@ class ReconciliationMixin:
                     except Exception:
                         pass
                     pos_side_val = pos.get("position_side")
-                    self._record_server_fill(sym, fill_price, fill_qty, "server_trail")
+                    # Guard: zero-fill trail (Algo API FINISHED but no actual execution)
+                    # produces phantom -100% PnL. Skip recording and let residual check handle.
+                    if fill_price > 0 and fill_qty > 0:
+                        self._record_server_fill(sym, fill_price, fill_qty, "server_trail")
+                    else:
+                        logger.warning(
+                            f"[{sym}] Trail FINISHED with zero fill "
+                            f"(price={fill_price}, qty={fill_qty}) — skipping PnL record, "
+                            f"residual check will handle cleanup"
+                        )
+                        # Clean up internal state without recording phantom trade
+                        self.strategy.close_position(sym)
+                        self._save_state()
                     # Post-trail residual check: trail FINISHED ≠ guaranteed full fill.
                     # Partial fills leave dust on exchange with no state entry (reverse ghost).
                     if not self.paper_mode:
