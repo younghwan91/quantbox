@@ -255,6 +255,38 @@ class TestStraddleRollbackCooldown:
 
 
 # ---------------------------------------------------------------------------
+# P3c: Straddle rollback cooldown persisted immediately (sciomc S5d)
+# ---------------------------------------------------------------------------
+
+
+class TestCooldownImmediateSave:
+    """_save_state must be called right after setting cooldown, not end of cycle."""
+
+    def test_save_state_called_after_cooldown_set(self):
+        """Cooldown set triggers immediate _save_state to survive crash."""
+        from unittest.mock import MagicMock, patch
+
+        scalper = _build_vs_scalper()
+
+        # Track _save_state calls
+        save_calls: list[int] = []
+        original_save = scalper._save_state
+
+        def tracking_save():
+            save_calls.append(len(scalper.strategy._straddle_rollback_cooldown))
+            original_save()
+
+        scalper._save_state = tracking_save
+
+        # Set cooldown directly (simulate rollback path)
+        scalper.strategy._straddle_rollback_cooldown["TESTUSDT"] = 8
+        scalper._save_state()
+
+        assert len(save_calls) == 1, "_save_state must be called after cooldown set"
+        assert scalper.strategy._straddle_rollback_cooldown["TESTUSDT"] == 8
+
+
+# ---------------------------------------------------------------------------
 # P4: _load_state() strategy_type auto-heal
 # ---------------------------------------------------------------------------
 

@@ -455,6 +455,37 @@ class TestReconTrailFill:
 
         s._record_server_fill.assert_not_called()
 
+    def test_trail_zero_fill_skips_pnl_recording(self):
+        """Trail FINISHED with price=0/qty=0 must NOT call _record_server_fill (sciomc S3b)."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id="77777",
+            is_straddle=False,
+        )
+
+        # Trail reports FINISHED but with zero fill
+        s._check_trail_regular = MagicMock(
+            return_value={
+                "status": "FILLED",
+                "orderId": 77777,
+                "avgPrice": "0",
+                "executedQty": "0",
+            }
+        )
+        s._check_order_filled = MagicMock(return_value=None)  # No matching trades
+        s._record_server_fill = MagicMock()
+        s._save_state = MagicMock()
+
+        s._sync_server_orders()
+
+        # Must NOT record phantom -100% PnL
+        s._record_server_fill.assert_not_called()
+        # But must clean up internal state
+        assert "TESTUSDT:LONG" not in s.strategy._positions
+
     def test_trail_cancelled_clears_for_repair(self):
         """Externally cancelled trail should be cleared and repaired if trail_active."""
         s = _build_trail_scalper(trail_server_native=True)
