@@ -122,6 +122,13 @@ class VolStraddleConfig(BaseSettings):
     slippage_rate: float = 0.0002  # 0.02% slippage with limit chaser
     slippage_mode: str = "flat"  # flat | tiered | conservative
 
+    # ── Funding Cost (G3 parity fix) ──
+    # Binance charges funding every 8h on open positions.
+    # At 30x leverage, 0.01% funding = 0.3% equity drag per 8h.
+    # Default is conservative average from 2024-2025 BTC/altcoin funding data.
+    # Set to 0.0 to disable funding in backtest (legacy behavior).
+    default_funding_rate_8h: float = 0.0001  # 0.01% per 8h (on notional)
+
     # ── Direction Diversity ──
     dir_diversity_enabled: bool = True
     max_same_direction: int = 2

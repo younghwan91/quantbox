@@ -860,6 +860,30 @@ def collect_trades(
                     all_trades.append((sym, entry_15m, exit_15m, pnl_val))
                     accepted.append((entry_15m, exit_15m))
 
+    # ── G3 parity fix: deduct funding costs ────────────────────────────────
+    # Binance charges funding every 8h on open positions. At 30x leverage
+    # this is a material drag (0.9-5.4% of notional over 48h holds).
+    # Deduction is post-hoc on collected trades (no Numba signature change).
+    # funding_rate_8h: cost per 8h as fraction of notional (e.g. 0.0001 = 0.01%)
+    if "funding_rate_8h" in cfg:
+        _funding_8h = cfg["funding_rate_8h"]
+    else:
+        try:
+            from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _VSCfg2
+
+            _funding_8h = _VSCfg2().default_funding_rate_8h
+        except Exception:
+            _funding_8h = 0.0001  # conservative default
+
+    if _funding_8h > 0:
+        _BARS_PER_8H_15M = 32  # 8h × 4 bars/h = 32 bars at 15m
+        adjusted: list[tuple[str, int, int, float]] = []
+        for sym, entry_b, exit_b, pnl_val in all_trades:
+            bars_held = exit_b - entry_b
+            funding_drag = _funding_8h * (bars_held / _BARS_PER_8H_15M)
+            adjusted.append((sym, entry_b, exit_b, pnl_val - funding_drag))
+        all_trades = adjusted
+
     return all_trades
 
 
