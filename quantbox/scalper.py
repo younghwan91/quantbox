@@ -1426,6 +1426,7 @@ class RubberBandScalper(
                 # ── Set rollback cooldown to prevent re-entry loop ──
                 cooldown_cycles = self.vs_config.straddle_rollback_cooldown_cycles
                 self.strategy._straddle_rollback_cooldown[sym] = cooldown_cycles
+                self._save_state()  # Persist immediately — crash before save restarts the loop
                 logger.info(
                     f"[{sym}] Straddle rollback cooldown set: {cooldown_cycles} cycles (~{cooldown_cycles * 15}min)"
                 )
