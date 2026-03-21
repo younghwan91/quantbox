@@ -216,8 +216,8 @@ uv run pytest tests/test_mtf_lookahead.py -v
 
 ## References
 - **Signal functions**: `quantbox/strategy/vol_straddle/signals.py` (9 Numba JIT functions)
-- **Signal reference**: `quantbox/strategy/vol_straddle/AGENTS.md` (lines 157-209)
-- **4-phase research structure**: `.github/instructions/backtesting.instructions.md` Section 9 (lines 288-317)
+- **Signal reference**: ``quantbox/strategy/vol_straddle/strategy.py` (signal generation)
+- **4-phase research structure**: `CLAUDE.md` (Backtest-Live Parity section)
 - **Multi-TF rule**: CLAUDE.md Rule #2 (line 99)
 - **Tests**: `tests/test_signals_unit.py`, `tests/test_mtf_lookahead.py`
 - **Config**: `quantbox/strategy/vol_straddle/config.py` (VolStraddleConfig class)
