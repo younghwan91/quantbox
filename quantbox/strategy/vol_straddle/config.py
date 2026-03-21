@@ -2,7 +2,7 @@
 
 r47-Exit (2026-03-07): Exit param overhaul validated vs v14.3.0 (N=3713, PF=1.324).
   Option D chosen: r47 best exits + TBR OFF (N=4097, PF=1.521, Sharpe=5.06, MaxDD=83.3%).
-  D_mom8: trail_activate 2%→0.5%, trail_distance 0.3%→0.2%, F5 TBR disabled.
+  D_mom8: trail_activate 2%→0.5%, trail_distance 0.3%→0.2%→0.5% (r106: callbackRate floor), F5 TBR disabled.
   MA Cluster: flat TP=8% → trailing stop (activate=4%, distance=0.5%).
   All 6 years profitable. Bootstrap CI [1.418, 1.634], P(PF≥1)=100%.
 
@@ -60,15 +60,15 @@ class VolStraddleConfig(BaseSettings):
     # Once unrealized gain reaches trail_activate, a trailing stop
     # follows at trail_distance below peak. Hard TP at d_tp (20% safety cap, rarely hit).
     # Mechanism: lets VR squeeze explosive releases run beyond fixed TP.
-    d_trail_activate: float = 0.010  # Activate trailing after +1.0% gain (r69: 0.005→0.010, OOS +38%/+23%/+40%)
-    d_trail_distance: float = 0.002  # Trail 0.2% behind peak (r47: was 0.003)
+    d_trail_activate: float = 0.040  # r106: 1.0%→4.0% (headroom for 0.5% callbackRate floor; PF=1.395, Calmar=6.0)
+    d_trail_distance: float = 0.005  # r106: 0.2%→0.5% (Binance callbackRate floor, rule #8)
 
     # ── S_d8: Straddle (requires Binance Hedge Mode) ──
     s_vr_threshold: float = 0.57  # S VR entry threshold (r58/r59: 0.55→0.57 +28%N +11%PF)
     s_squeeze_dur: int = 3  # Min consecutive bars below S VR threshold (r58/r59: 4→3 +25%N +12%PF)
     s_sl: float = 0.015  # 1.5% stop loss (per leg)
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
-    s_trail_activate: float = 0.015  # r53: activate trailing after +1.5% gain per leg
+    s_trail_activate: float = 0.030  # r106: 1.5%→3.0% (headroom for 0.5% callbackRate floor; PF=1.238, Calmar=7.8)
     s_trail_distance: float = 0.005  # r104b: 0.5% behind peak (noise floor — 0.1% fires on tick noise, 81% 1m/15m bias)
     straddle_enabled: bool = True  # S_d8 straddle mode — fixed bracket repair to wait for trail_active
     straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
@@ -297,7 +297,7 @@ class VolStraddleConfig(BaseSettings):
     ma_cluster_sl: float = 0.02  # 2% stop loss
     ma_cluster_tp: float = 0.08  # 8% hard TP ceiling (safety; r47: trailing fires first)
     ma_cluster_trail_activate: float = 0.02  # r75: 4%→2% (earlier trail activation)
-    ma_cluster_trail_distance: float = 0.003  # r75: 0.5%→0.3% (tighter trail)
+    ma_cluster_trail_distance: float = 0.005  # r106: 0.3%→0.5% (Binance callbackRate floor, rule #8; pending sweep)
 
     # r65: Server-side trail SL ratchet — closes bar-close execution gap (ΔPF=-0.950)
     # When True, places/updates Binance STOP order at trail_stop_gain price after
@@ -375,6 +375,11 @@ class VolStraddleConfig(BaseSettings):
             object.__setattr__(self, "straddle_max_slots", self.max_concurrent)
         if self.d_trail_distance <= 0:
             errors.append(f"d_trail_distance must be positive, got {self.d_trail_distance}")
+        if self.d_trail_distance < 0.005:
+            errors.append(
+                f"d_trail_distance must be >= 0.005 (Binance callbackRate >= 0.5%, rule #8), "
+                f"got {self.d_trail_distance}"
+            )
         if self.d_trail_distance >= self.d_trail_activate:
             errors.append(
                 f"d_trail_distance must be less than d_trail_activate, "
@@ -382,10 +387,20 @@ class VolStraddleConfig(BaseSettings):
             )
         if self.s_trail_distance <= 0:
             errors.append(f"s_trail_distance must be positive, got {self.s_trail_distance}")
+        if self.s_trail_distance < 0.005:
+            errors.append(
+                f"s_trail_distance must be >= 0.005 (Binance callbackRate >= 0.5%, rule #8), "
+                f"got {self.s_trail_distance}"
+            )
         if self.s_trail_distance >= self.s_trail_activate:
             errors.append(
                 f"s_trail_distance must be less than s_trail_activate, "
                 f"got s_trail_distance={self.s_trail_distance}, s_trail_activate={self.s_trail_activate}"
+            )
+        if self.ma_cluster_trail_distance < 0.005:
+            errors.append(
+                f"ma_cluster_trail_distance must be >= 0.005 (Binance callbackRate >= 0.5%, rule #8), "
+                f"got {self.ma_cluster_trail_distance}"
             )
         if self.ma_cluster_trail_distance >= self.ma_cluster_trail_activate:
             errors.append(
