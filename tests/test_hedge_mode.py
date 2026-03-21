@@ -119,6 +119,7 @@ class TestEnsurePositionMode:
         msg = scalper.discord.send.call_args[1]["content"]
         assert "포지션 모드 전환 실패" in msg
 
+    @pytest.mark.skip(reason="RubberBand deprecated (Phase 2.5) — one-way mode no longer applicable")
     def test_one_way_mode_for_rubberband(self, tmp_path):
         """RubberBand strategy should want one-way mode."""
         with (
@@ -153,6 +154,7 @@ class TestEnsurePositionMode:
 
         scalper.client.futures_change_position_mode.assert_not_called()
 
+    @pytest.mark.skip(reason="RubberBand deprecated (Phase 2.5) — one-way mode no longer applicable")
     def test_rubberband_switches_to_oneway_if_hedge(self, tmp_path):
         """RubberBand on hedge-mode account → switch to one-way."""
         with (
