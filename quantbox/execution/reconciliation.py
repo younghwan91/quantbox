@@ -284,6 +284,7 @@ class ReconciliationMixin:
                                 c_api = counterpart_key.split(":")[0]
                                 if c_sl:
                                     self._cancel_server_stop_loss(c_api, c_sl)
+                                    counterpart["server_sl_order_id"] = None
                     # ReconJournal
                     try:
                         _rj = getattr(self, "_recon_journal", None)
@@ -297,7 +298,43 @@ class ReconciliationMixin:
                             )
                     except Exception:
                         pass
-                    self._record_server_fill(sym, fill_price, fill_qty, "server_trail")
+                    pos_side_val = pos.get("position_side")
+                    # Guard: zero-fill trail (Algo API FINISHED but no actual execution)
+                    # produces phantom -100% PnL. Skip recording and let residual check handle.
+                    if fill_price > 0 and fill_qty > 0:
+                        self._record_server_fill(sym, fill_price, fill_qty, "server_trail")
+                    else:
+                        logger.warning(
+                            f"[{sym}] Trail FINISHED with zero fill "
+                            f"(price={fill_price}, qty={fill_qty}) — skipping PnL record, "
+                            f"residual check will handle cleanup"
+                        )
+                        # Clean up internal state without recording phantom trade
+                        self.strategy.close_position(sym)
+                        self._save_state()
+                    # Post-trail residual check: trail FINISHED ≠ guaranteed full fill.
+                    # Partial fills leave dust on exchange with no state entry (reverse ghost).
+                    if not self.paper_mode:
+                        try:
+                            ex_pos = self.client.futures_position_information(symbol=api_sym)
+                            for ep in ex_pos:
+                                if pos_side_val and ep.get("positionSide") != pos_side_val:
+                                    continue
+                                residual = abs(float(ep.get("positionAmt", 0)))
+                                if residual > 0:
+                                    close_side = "BUY" if pos.get("signal") == -1 else "SELL"
+                                    logger.critical(
+                                        f"[{sym}] Trail partial fill — residual {residual} {api_sym} "
+                                        f"{pos_side_val} on exchange. Force-closing via market order."
+                                    )
+                                    self._place_order(
+                                        api_sym,
+                                        close_side,
+                                        residual,
+                                        position_side=pos_side_val,
+                                    )
+                        except Exception as _e:
+                            logger.error(f"[{sym}] Post-trail residual check failed: {_e}")
                     continue
                 elif trail_status and trail_status.get("status") == "CANCELED":
                     pos["server_trail_order_id"] = None
@@ -521,14 +558,14 @@ class ReconciliationMixin:
                     )
 
             # ── Trail bracket repair ──
-            # Trail is placed at entry with future activationPrice.
-            # If trail is missing (entry-time API failure, state corruption),
-            # repair it here. Uses _get_trail_params which calculates proper
-            # activationPrice based on entry_price and trail_activate.
+            # Trail is DEFERRED until trail_active=True (peak_gain >= trail_activate%).
+            # Binance Algo API ignores future activationPrice — placing before
+            # trail_active causes immediate fire on any callbackRate% pullback.
+            # Only place trail when position is already in profit.
             vs_cfg = getattr(self, "vs_config", None)
             if vs_cfg and getattr(vs_cfg, "trail_server_native", False):
                 trail_oid = pos.get("server_trail_order_id")
-                if trail_oid is None:
+                if trail_oid is None and pos.get("trail_active"):
                     quantity = pos["notional"] / pos["entry_price"]
                     quantity = self._round_qty(quantity, api_sym)
                     if quantity > 0:

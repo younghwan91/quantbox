@@ -1423,6 +1423,41 @@ class RubberBandScalper(
 
                 entries_made -= 1
 
+                # ── Set rollback cooldown to prevent re-entry loop ──
+                cooldown_cycles = self.vs_config.straddle_rollback_cooldown_cycles
+                self.strategy._straddle_rollback_cooldown[sym] = cooldown_cycles
+                self._save_state()  # Persist immediately — crash before save restarts the loop
+                logger.info(
+                    f"[{sym}] Straddle rollback cooldown set: {cooldown_cycles} cycles (~{cooldown_cycles * 15}min)"
+                )
+
+                # ── Close orphaned counterpart on exchange (reverse ghost prevention) ──
+                # The SHORT leg from a prior straddle may still be open on exchange
+                # without internal state tracking it, causing perpetual rollback loops.
+                if not self.paper_mode:
+                    try:
+                        ex_positions = self.client.futures_position_information(symbol=sym)
+                        for ep in ex_positions:
+                            if ep.get("positionSide") == "SHORT" and abs(float(ep.get("positionAmt", 0))) > 0:
+                                orphan_qty = abs(float(ep["positionAmt"]))
+                                logger.warning(
+                                    f"[{sym}] Orphaned SHORT on exchange "
+                                    f"(qty={orphan_qty}) — closing to prevent rollback loop"
+                                )
+                                self.client.futures_create_order(
+                                    symbol=sym,
+                                    side="BUY",
+                                    type="MARKET",
+                                    quantity=orphan_qty,
+                                    positionSide="SHORT",
+                                )
+                                logger.info(f"[{sym}] Orphaned SHORT closed successfully")
+                                self.discord.send(
+                                    content=(f"🧹 **[{sym}] Orphaned SHORT 청산** — qty={orphan_qty}, 롤백 루프 방지")
+                                )
+                    except Exception as e:
+                        logger.error(f"[{sym}] Failed to close orphaned counterpart: {e}")
+
         if entries_made > 0:
             logger.info(f"Opened {entries_made} new positions (from {len(candidates)} candidates)")
 
@@ -1654,6 +1689,10 @@ class RubberBandScalper(
         # re-fire a duplicate signal on the same cluster.
         if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_ma_cluster_cooldown"):
             state["ma_cluster_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._ma_cluster_cooldown.items()}
+        if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_straddle_rollback_cooldown"):
+            active = {s: v for s, v in self.strategy._straddle_rollback_cooldown.items() if v > 0}
+            if active:
+                state["straddle_rollback_cooldown"] = active
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
         try:
             save_scalper_state(state, filepath=filepath)
@@ -1891,6 +1930,14 @@ class RubberBandScalper(
                 self.strategy._ma_cluster_cooldown[sym] = arr
             if cooldown_data:
                 logger.info(f"Restored MA cluster cooldown for {len(cooldown_data)} symbols")
+
+        # v15.0: Restore straddle rollback cooldown
+        if self.strategy_name == "vol_straddle" and hasattr(self.strategy, "_straddle_rollback_cooldown"):
+            rb_cooldown = state.get("straddle_rollback_cooldown", {})
+            for sym, val in rb_cooldown.items():
+                self.strategy._straddle_rollback_cooldown[sym] = val
+            if rb_cooldown:
+                logger.info(f"Restored straddle rollback cooldown for {len(rb_cooldown)} symbols: {rb_cooldown}")
 
         # Startup exchange cross-check: warn immediately if exchange has
         # positions not present in restored state (reverse ghost candidates).

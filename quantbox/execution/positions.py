@@ -344,10 +344,28 @@ class PositionMixin:
                 ex_positions = self.client.futures_position_information(symbol=symbol)
                 # hedge_mode: pos_side='LONG'/'SHORT'; one-way mode: pos_side=None → 'BOTH'
                 wanted_side = pos_side or "BOTH"
-                already_open = any(
-                    p.get("positionSide") == wanted_side and abs(float(p.get("positionAmt", 0))) > 0
-                    for p in ex_positions
-                )
+                # Dust tolerance: ignore residual qty below min_notional ($5).
+                # Partial trail fills can leave tiny dust that permanently blocks
+                # the symbol slot if treated as a real position.
+                info = self.get_symbol_info(symbol)
+                dust_threshold = info.get("min_notional", 5.0)
+                already_open = False
+                for p in ex_positions:
+                    if p.get("positionSide") != wanted_side:
+                        continue
+                    amt = abs(float(p.get("positionAmt", 0)))
+                    if amt <= 0:
+                        continue
+                    entry_px = float(p.get("entryPrice", 0))
+                    notional = amt * entry_px if entry_px > 0 else amt
+                    if notional < dust_threshold:
+                        logger.info(
+                            f"[{symbol}] Exchange dedup: ignoring dust "
+                            f"({amt} qty, ${notional:.2f} < ${dust_threshold:.2f} min_notional)"
+                        )
+                        continue
+                    already_open = True
+                    break
                 if already_open:
                     logger.warning(
                         f"[{symbol}] Exchange dedup: {wanted_side} already open "
@@ -363,7 +381,11 @@ class PositionMixin:
                         )
                     return False
             except Exception as exc:
-                logger.warning(f"[{symbol}] Exchange dedup check failed ({exc}), proceeding anyway")
+                logger.error(
+                    f"[{symbol}] Exchange dedup check failed ({exc}) — "
+                    f"blocking entry to prevent duplicate. Will retry next cycle."
+                )
+                return False
 
         # Capture balance before order fills (used in trade record for accurate tracking).
         balance_before = self.get_balance()
@@ -415,32 +437,18 @@ class PositionMixin:
                 logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — bracket repair next cycle")
                 sl_order_id = None
 
-            # Server-side trailing stop: placed at entry with future activationPrice.
-            # Trail stays in NEW until price reaches trail_activate%, then activates.
-            # API accepts future activationPrice (verified via live test 2026-03-19).
+            # Server-side trailing stop: DEFERRED until trail_active=True.
+            # Binance Algo API ignores future activationPrice — placing at entry
+            # causes immediate fire on any callbackRate% pullback (EGLDUSDT 2026-03-21:
+            # 3 straddle pairs killed in 30min, -$32.81).
+            # The bracket repair loop (_update_trail_ratchet) places the trail when
+            # peak_gain >= trail_activate% and trail_active=True.
             trail_order_id: str | None = None
             if self.vs_config.trail_server_native:
-                # Get trail params based on strategy type
-                cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
-                trail_order_id = self._place_trail_regular(
-                    symbol=symbol,
-                    side=cs,
-                    quantity=fill_qty,
-                    callback_rate=cr,
-                    activation_price=ap,
-                    position_side=pos_side,
+                logger.info(
+                    f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
+                    f"(algoId={sl_order_id}) TRAIL=DEFERRED (until trail_active)"
                 )
-                if trail_order_id:
-                    logger.info(
-                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                        f"(algoId={sl_order_id}) TRAIL=OK (orderId={trail_order_id}, "
-                        f"activate=${ap:.4f}={cr}% callback)"
-                    )
-                else:
-                    logger.warning(
-                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                        f"(algoId={sl_order_id}) TRAIL=FAILED — deferred fallback"
-                    )
                 # No TP needed — trail handles profit-taking once active.
                 tp_order_id = None
             else:
