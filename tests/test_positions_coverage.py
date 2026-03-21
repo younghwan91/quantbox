@@ -792,14 +792,14 @@ class TestExchangeDedup:
         result = _open(scalper)
         assert result is True
 
-    def test_dedup_allows_entry_when_exchange_check_fails(self):
-        """Proceeds if exchange API call raises (fail-safe behavior)."""
+    def test_dedup_blocks_entry_when_exchange_check_fails(self):
+        """Blocks entry if exchange API call raises — prevents duplicate positions."""
         scalper = _make_vs_scalper(paper=False)
         _mock_open(scalper)
         _set_signal_meta(scalper)
         scalper.client.futures_position_information = MagicMock(side_effect=Exception("Network error"))
         result = _open(scalper)
-        assert result is True
+        assert result is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

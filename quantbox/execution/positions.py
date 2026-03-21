@@ -363,7 +363,11 @@ class PositionMixin:
                         )
                     return False
             except Exception as exc:
-                logger.warning(f"[{symbol}] Exchange dedup check failed ({exc}), proceeding anyway")
+                logger.error(
+                    f"[{symbol}] Exchange dedup check failed ({exc}) — "
+                    f"blocking entry to prevent duplicate. Will retry next cycle."
+                )
+                return False
 
         # Capture balance before order fills (used in trade record for accurate tracking).
         balance_before = self.get_balance()
