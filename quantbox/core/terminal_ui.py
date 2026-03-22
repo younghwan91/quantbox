@@ -213,9 +213,92 @@ def print_system_info(
         print()
 
 
+def format_section_header(title: str) -> str:
+    """Format a colored section header for cycle output.
+
+    Args:
+        title: Section name (e.g. 'POSITIONS', 'SIGNALS', 'SUMMARY').
+
+    Returns:
+        Formatted string with CYAN+BOLD brackets.
+    """
+    C = Color
+    return f"  {C.CYAN}{C.BOLD}▸ {title}{C.RESET}"
+
+
+def format_section_divider() -> str:
+    """Return a lightweight dot divider for visual separation between cycle sections."""
+    return f"  {Color.DIM}{DIVIDER_DOT}{Color.RESET}"
+
+
+def format_position_line(
+    pos_key: str,
+    strategy_type: str,
+    direction: str,
+    entry_price: float,
+    current_price: float,
+    upnl_pct: float,
+    bars: int,
+    max_hold: int,
+    sl_pct: float,
+    sl_active: bool,
+    tp_pct: float,
+    tp_active: bool,
+    trail_active: bool,
+    peak_gain: float | None = None,
+) -> str:
+    """Format a colored, structured position status line.
+
+    All arguments are pre-computed display values — this function is a pure
+    display formatter with no knowledge of position internals.
+
+    Args:
+        pos_key: Position compound key (e.g. 'SUIUSDT:LONG').
+        strategy_type: Strategy name (e.g. 'vr_straddle').
+        direction: 'L' or 'S'.
+        entry_price: Entry price.
+        current_price: Current mark price.
+        upnl_pct: Unrealized PnL percentage.
+        bars: Bars held.
+        max_hold: Max hold bars.
+        sl_pct: Stop loss percentage (0-1 scale).
+        sl_active: Whether server SL order is active.
+        tp_pct: Take profit percentage (0-1 scale).
+        tp_active: Whether server TP order is active.
+        trail_active: Whether trailing stop is active.
+        peak_gain: Peak gain percentage (0-1 scale) if trail active.
+
+    Returns:
+        Multi-line formatted string.
+    """
+    C = Color
+    dir_color = C.GREEN if direction == "L" else C.RED
+    pnl_color = C.GREEN if upnl_pct >= 0 else C.RED
+
+    sl_check = f"{C.GREEN}✓{C.RESET}" if sl_active else f"{C.RED}✗{C.RESET}"
+    tp_check = f"{C.GREEN}✓{C.RESET}" if tp_active else f"{C.RED}✗{C.RESET}"
+
+    if trail_active:
+        peak_str = f"({peak_gain * 100:+.1f}%)" if peak_gain is not None else ""
+        trail_str = f"{C.GREEN}✓{C.RESET}{C.DIM}{peak_str}{C.RESET}"
+    else:
+        trail_str = f"{C.DIM}✗{C.RESET}"
+
+    return (
+        f"    {C.BOLD}{pos_key}{C.RESET}  {C.DIM}{strategy_type}{C.RESET}\n"
+        f"      {dir_color}{direction}{C.RESET} "
+        f"${entry_price:.4f} → ${current_price:.4f}  "
+        f"{pnl_color}{C.BOLD}uPnL={upnl_pct:+.2f}%{C.RESET}  "
+        f"{C.DIM}{bars}/{max_hold}bars{C.RESET}\n"
+        f"      SL={sl_pct * 100:.1f}%{sl_check}  "
+        f"TP={tp_pct * 100:.0f}%{tp_check}  "
+        f"trail={trail_str}"
+    )
+
+
 def _print_section(title: str) -> None:
-    """Print a section header."""
-    print(f"  {Color.CYAN}{Color.BOLD}[ {title} ]{Color.RESET}")
+    """Print a section header (startup banner use)."""
+    print(format_section_header(title))
 
 
 def _print_row(label: str, value: str) -> None:
