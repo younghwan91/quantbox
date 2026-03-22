@@ -733,10 +733,17 @@ class RubberBandScalper(
             # consistent with the Summary section printed later.
             bars = pos.get("bars_held", 0) + 1
             direction = "L" if pos.get("signal") == 1 else "S"
+            strat = pos.get("strategy_type", "vr_directional")
+            trail_status = ""
+            if pos.get("trail_active"):
+                peak = pos.get("peak_gain", 0) * 100
+                trail_status = f" trail=✓({peak:+.1f}%)"
+            elif strat != "ma_cluster" and not pos.get("is_straddle"):
+                trail_status = " trail=✗"
             logger.info(
-                f"  [{pos_key}] {direction} entry=${entry_px:.4f} "
+                f"  [{pos_key}] {strat} {direction} entry=${entry_px:.4f} "
                 f"mark=${cur_px:.4f} uPnL={upnl_pct:+.2f}% bars={bars} "
-                f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}"
+                f"SL={'✓' if sl_id else '✗'} TP={'✓' if tp_id else '✗'}{trail_status}"
             )
 
         return btc_close, btc_close_4h
