@@ -41,7 +41,8 @@ def _make_scalper(paper: bool = True, **config_overrides):
         patch("quantbox.scalper.Client", return_value=mock_client),
         patch("quantbox.scalper.LimitOrderChaser"),
     ):
-        scalper = RubberBandScalper(paper_mode=paper)
+        # Use rubberband for backward compat with plain-key tests
+        scalper = RubberBandScalper(paper_mode=paper, strategy_name="rubberband")
 
     scalper.client = mock_client
     if config_overrides:

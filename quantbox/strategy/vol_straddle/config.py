@@ -122,6 +122,13 @@ class VolStraddleConfig(BaseSettings):
     slippage_rate: float = 0.0002  # 0.02% slippage with limit chaser
     slippage_mode: str = "flat"  # flat | tiered | conservative
 
+    # ── Funding Cost (G3 parity fix) ──
+    # Binance charges funding every 8h on open positions.
+    # At 30x leverage, 0.01% funding = 0.3% equity drag per 8h.
+    # Default is conservative average from 2024-2025 BTC/altcoin funding data.
+    # Set to 0.0 to disable funding in backtest (legacy behavior).
+    default_funding_rate_8h: float = 0.0001  # 0.01% per 8h (on notional)
+
     # ── Direction Diversity ──
     dir_diversity_enabled: bool = True
     max_same_direction: int = 2
@@ -317,9 +324,38 @@ class VolStraddleConfig(BaseSettings):
     # ── Compatibility fields (used by scalper internals) ──
     # These map vol straddle concepts to the scalper's existing interface
     # so that shared code (risk checks, brackets, logging) works unchanged.
+    # Phase 2.5: expanded for rubberband deprecation — shared code paths
+    # access these without strategy_name guards.
     lookback: int = 8  # Used for move calc in logging — not for signal
     threshold: float = 0.0  # Not used — signal is VR-based
+    max_hold: int = 192  # Alias for max_hold_15m — used by shared scalper code
     bar_interval_minutes: int = 15
+    stop_mult: float = 1.0  # SL multiplier (shared sizing code)
+    target_retrace: float = 1.5  # TP multiplier (shared code)
+    partial_exit_enabled: bool = False  # VR uses trail, not partial exit
+    breakeven_after_partial: bool = False
+    entry_mode: str = "vr_squeeze"
+    min_confidence: int = 0
+    mtf_confirmation_enabled: bool = False  # VR has its own multi-TF via on_bar
+    atr_stop_enabled: bool = False  # VR uses fixed SL
+    atr_stop_mult: float = 2.0
+    atr_stop_floor: float = 0.005
+    atr_stop_cap: float = 0.04
+    atr_period: int = 48
+    atr_multiplier: float = 2.0
+    htf_independent_enabled: bool = False
+    reconciliation_qty_tolerance_pct: float = 5.0  # % tolerance for qty mismatch
+    partial_exit_fraction: float = 0.5  # 50% partial close (not used by VR)
+    mtf_leverage_mult: float = 2.5
+    mtf_sma_period: int = 12
+    threshold_cap: float = 0.10
+    threshold_floor: float = 0.01
+    # LimitOrderChaser params (shared execution path)
+    initial_offset_ticks: int = 1
+    max_chase_ticks: int = 10
+    chase_interval_seconds: float = 1.0
+    fallback_to_market: bool = True
+    timeout_seconds: float = 30.0
 
     # ── Daily Loss Circuit Breaker ──
     # Block new entries for the rest of the day after realized loss exceeds limit.
