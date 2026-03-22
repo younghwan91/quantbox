@@ -957,6 +957,7 @@ class PositionMixin:
             quantity,
             reduce_only=(pos_side is None),  # One-Way only
             position_side=pos_side,
+            paper_fill_price=current_price,
         )
 
         # ── NO_POSITION: exchange says position already gone ──

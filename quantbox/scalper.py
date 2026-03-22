@@ -402,6 +402,7 @@ class RubberBandScalper(
         leverage: int = 1,
         reduce_only: bool = False,
         position_side: "PositionSide | None" = None,
+        paper_fill_price: float | None = None,
     ) -> dict | None:
         """Place order via LimitOrderChaser.
 
@@ -415,6 +416,8 @@ class RubberBandScalper(
             position_side: Hedge Mode position side ('LONG'/'SHORT').
                 When set, positionSide is sent instead of reduceOnly.
                 None = One-Way Mode (existing behavior).
+            paper_fill_price: Override fill price in paper mode (e.g. SL/TP
+                trigger price). When None, paper mode fetches live orderbook.
 
         Returns dict with avgPrice, executedQty on success, None on failure.
         """
@@ -436,12 +439,14 @@ class RubberBandScalper(
             return None
 
         if self.paper_mode:
-            # Simulate fill at current market price
-            try:
-                book = self.client.futures_orderbook_ticker(symbol=symbol)
-                price = float(book["askPrice"] if side == "BUY" else book["bidPrice"])
-            except Exception:
-                return None
+            if paper_fill_price is not None:
+                price = paper_fill_price
+            else:
+                try:
+                    book = self.client.futures_orderbook_ticker(symbol=symbol)
+                    price = float(book["askPrice"] if side == "BUY" else book["bidPrice"])
+                except Exception:
+                    return None
             return {
                 "avgPrice": str(price),
                 "executedQty": str(quantity),
@@ -808,10 +813,11 @@ class RubberBandScalper(
                         if pos_pre and pos_pre.get("is_straddle"):
                             counterpart_key_pre_close = self._get_pair_counterpart(pos_key)
 
-                    # Paper mode fix: use SL/TP fill price (not mark price)
-                    # to match exchange behavior where STOP_MARKET fills at trigger.
+                    # Compute SL/TP trigger fill price for all modes.
+                    # Live: _place_order ignores this (exchange fills at real price).
+                    # Paper: _place_order uses this as the simulated fill price.
                     close_price = current_price
-                    if self.paper_mode and exit_reason in ("stop_loss", "target"):
+                    if exit_reason in ("stop_loss", "target"):
                         pos_data = self.strategy._positions.get(pos_key)
                         if pos_data:
                             entry = pos_data["entry_price"]
