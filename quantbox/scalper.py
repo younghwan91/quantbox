@@ -57,7 +57,9 @@ from quantbox.core.limit_chaser import (
 from quantbox.core.settings import get_settings
 from quantbox.core.terminal_ui import (
     format_cycle_header,
+    format_position_line,
     format_scan_summary,
+    format_section_header,
     format_session_summary,
 )
 from quantbox.notifications.bot import (
@@ -713,7 +715,7 @@ class RubberBandScalper(
 
         # v12.5.1: Log position status AFTER sync (SL/TP verified)
         if self.strategy.active_positions:
-            logger.info("  [POSITIONS]")
+            logger.info(format_section_header("POSITIONS"))
         for pos_key, pos in self.strategy.active_positions.items():
             api_sym = pos.get("symbol", pos_key.split(":")[0])
             try:
@@ -729,27 +731,27 @@ class RubberBandScalper(
                     upnl_pct = (entry_px - cur_px) / entry_px * 100
             else:
                 upnl_pct = 0.0
-            sl_id = pos.get("server_sl_order_id")
-            tp_id = pos.get("server_tp_order_id")
             # Use bars_held+1 to match the value AFTER this cycle's update,
             # consistent with the Summary section printed later.
             bars = pos.get("bars_held", 0) + 1
             direction = "L" if pos.get("signal") == 1 else "S"
-            strat = pos.get("strategy_type", "vr_directional")
-            trail_status = ""
-            if pos.get("trail_active"):
-                peak = pos.get("peak_gain", 0) * 100
-                trail_status = f" trail=✓({peak:+.1f}%)"
-            else:
-                trail_status = " trail=✗"
-            sl_pct = pos.get("sl", 0)
-            tp_pct = pos.get("tp", 0)
-            max_hold = pos.get("max_hold", 192)
             logger.info(
-                f"  [{pos_key}] {strat} {direction} ${entry_px:.4f}→${cur_px:.4f} "
-                f"uPnL={upnl_pct:+.2f}% {bars}/{max_hold}bars "
-                f"SL={sl_pct * 100:.1f}%{'✓' if sl_id else '✗'} "
-                f"TP={tp_pct * 100:.0f}%{'✓' if tp_id else '✗'}{trail_status}"
+                format_position_line(
+                    pos_key=pos_key,
+                    strategy_type=pos.get("strategy_type", "vr_directional"),
+                    direction=direction,
+                    entry_price=entry_px,
+                    current_price=cur_px,
+                    upnl_pct=upnl_pct,
+                    bars=bars,
+                    max_hold=pos.get("max_hold", 192),
+                    sl_pct=pos.get("sl", 0),
+                    sl_active=bool(pos.get("server_sl_order_id")),
+                    tp_pct=pos.get("tp", 0),
+                    tp_active=bool(pos.get("server_tp_order_id")),
+                    trail_active=bool(pos.get("trail_active")),
+                    peak_gain=pos.get("peak_gain", 0) if pos.get("trail_active") else None,
+                )
             )
 
         return btc_close, btc_close_4h
@@ -1113,7 +1115,7 @@ class RubberBandScalper(
         top_movers = sorted(moves_seen, key=lambda x: x[1], reverse=True)[:3]
         # VR strategy: show VR threshold + actual VR values
         print(format_scan_summary(len(candidates), top_movers, 0.0))
-        logger.info("  [SIGNALS]")
+        logger.info(format_section_header("SIGNALS"))
         if candidates:
             cand_strs = [f"{s}({m * 100:.1f}%)" for s, _, m, _, _, _ in candidates[:3]]
             logger.info(f"🎯 {len(candidates)} candidates: {', '.join(cand_strs)}")
