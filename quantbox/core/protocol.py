@@ -163,6 +163,7 @@ class ScalperProtocol(Protocol):
         leverage: int = 1,
         reduce_only: bool = False,
         position_side: str | None = None,
+        paper_fill_price: float | None = None,
     ) -> dict[str, Any] | None:
         """Place order via LimitOrderChaser; return fill dict or None."""
         ...
