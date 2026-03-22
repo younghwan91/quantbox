@@ -860,7 +860,22 @@ class RubberBandScalper(
                         if pos_pre and pos_pre.get("is_straddle"):
                             counterpart_key_pre_close = self._get_pair_counterpart(pos_key)
 
-                    self._close_position(pos_key, exit_reason, current_price)
+                    # Paper mode fix: use SL/TP fill price (not mark price)
+                    # to match exchange behavior where STOP_MARKET fills at trigger.
+                    close_price = current_price
+                    if self.paper_mode and exit_reason in ("stop_loss", "target"):
+                        pos_data = self.strategy._positions.get(pos_key)
+                        if pos_data:
+                            entry = pos_data["entry_price"]
+                            sig = pos_data["signal"]
+                            sl_pct = pos_data.get("sl", self.vs_config.d_sl)
+                            tp_pct = pos_data.get("tp", self.vs_config.d_tp)
+                            if exit_reason == "stop_loss":
+                                close_price = entry * (1 - sl_pct) if sig == 1 else entry * (1 + sl_pct)
+                            elif exit_reason == "target":
+                                close_price = entry * (1 + tp_pct) if sig == 1 else entry * (1 - tp_pct)
+
+                    self._close_position(pos_key, exit_reason, close_price)
 
                     # ── Step 2.3: Verify counterpart brackets after straddle leg close ──
                     if counterpart_key_pre_close:
