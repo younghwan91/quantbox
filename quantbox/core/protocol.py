@@ -293,6 +293,20 @@ class ScalperProtocol(Protocol):
         """Find counterpart position key for a straddle pair."""
         ...
 
+    def _calculate_sizing(self, symbol: str, signal: int, close_prices: np.ndarray, balance: float) -> dict | None: ...
+    def _execute_entry_order(self, symbol: str, signal: int, sizing: dict, balance: float) -> dict | None: ...
+    def _setup_brackets(self, symbol: str, signal: int, fill: dict, sizing: dict) -> dict: ...
+    def _register_position(
+        self,
+        symbol: str,
+        signal: int,
+        fill: dict,
+        sizing: dict,
+        brackets: dict,
+        balance: float,
+        straddle_pair_id: str | None = None,
+    ) -> bool: ...
+
     def _close_position(self, symbol: str, reason: str, current_price: float) -> bool:
         """Close position by key (may be compound 'SYMBOL:SIDE'); return success flag."""
         ...
