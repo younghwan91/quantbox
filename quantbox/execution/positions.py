@@ -41,26 +41,20 @@ class PositionMixin:
                 return key
         return None
 
-    def _open_position(
+    # ── _open_position sub-methods ──────────────────────────────────────
+
+    def _calculate_sizing(
         self: "ScalperProtocol",
         symbol: "ApiSymbol",
         signal: "SignalValue",
         close_prices: np.ndarray,
         balance: float,
-        straddle_pair_id: str | None = None,
-    ) -> bool:
-        """Open a new position.
+    ) -> dict | None:
+        """Calculate position sizing, SL/TP params, and quantity.
 
-        Args:
-            symbol: Trading symbol.
-            signal: +1 (long) or -1 (short).
-            close_prices: Recent close prices.
-            balance: Current balance.
-            straddle_pair_id: UUID linking LONG+SHORT legs of same straddle pair.
-                Both legs receive the same ID. None for directional positions.
-
-        Returns:
-            True if position was opened.
+        Returns a dict with all sizing parameters needed for order placement,
+        or None if the entry should be skipped (below min notional, exposure
+        cap hit, etc.).
         """
         cfg = self.config
         entry_price = close_prices[-1]
@@ -177,7 +171,7 @@ class PositionMixin:
                         f"[{symbol}] Skipping entry: already at max notional "
                         f"(exchange={existing_notional:.0f} ≥ max={max_notional:.0f})"
                     )
-                    return False
+                    return None
                 if notional > remaining_budget:
                     logger.warning(
                         f"[{symbol}] Notional reduced for cumulative cap: "
@@ -188,7 +182,7 @@ class PositionMixin:
 
         if notional < 10.0:  # Internal strategy minimum ($10); Binance exchange min is $5 (see below)
             logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
-            return False
+            return None
 
         # ── ExposureGuard: block entry if total exposure exceeds cap ──
         try:
@@ -197,27 +191,56 @@ class PositionMixin:
                 current_notional = sum(abs(float(p.get("notional", 0))) for p in self.strategy._positions.values())
                 if not _exp_guard.can_open(current_notional, notional, balance):
                     logger.warning(f"[{symbol}] Exposure cap hit — skipping entry")
-                    return False
+                    return None
         except Exception as e:
             logger.error(f"[{symbol}] ExposureGuard check error: {e}")
 
         # T2-1 runtime guard: entry_price=0 → ZeroDivisionError in quantity calc
         if entry_price <= 0:
             logger.error(f"[{symbol}] INVARIANT VIOLATION: entry_price={entry_price!r} (must be > 0) — aborting open")
-            return False
+            return None
 
         quantity = notional / entry_price
         quantity = self._round_qty(quantity, symbol)
         if quantity <= 0:
-            return False
+            return None
 
         # Check exchange min notional (Binance API; default $5 when not in symbol info)
         info = self.get_symbol_info(symbol)
         min_notional = info.get("min_notional", 5.0)
         if quantity * entry_price < min_notional:
             logger.debug(f"[{symbol}] Below min notional ${min_notional}")
-            return False
+            return None
 
+        return {
+            "notional": notional,
+            "leverage": leverage,
+            "move_size": move_size,
+            "sl_pct": sl_pct,
+            "tp_pct": tp_pct,
+            "tf_label": tf_label,
+            "max_hold": max_hold,
+            "is_straddle": is_straddle,
+            "strategy_type": strategy_type,
+            "conviction_score": conviction_score,
+            "per_slot_capital": per_slot_capital,
+            "entry_price": entry_price,
+            "quantity": quantity,
+        }
+
+    def _execute_entry_order(
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
+        sizing: dict,
+        balance: float,
+    ) -> dict | None:
+        """Place the entry order on the exchange.
+
+        Returns a dict with fill_price, fill_qty, lev_int, pos_side,
+        balance_before, and updated notional, or None on failure.
+        """
+        leverage = sizing["leverage"]
         side = "BUY" if signal > 0 else "SELL"
         lev_int = max(1, min(math.ceil(leverage), int(self.vs_config.max_leverage)))
 
@@ -246,11 +269,11 @@ class PositionMixin:
                     if amt <= 0:
                         continue
                     entry_px = float(p.get("entryPrice", 0))
-                    notional = amt * entry_px if entry_px > 0 else amt
-                    if notional < dust_threshold:
+                    notional_check = amt * entry_px if entry_px > 0 else amt
+                    if notional_check < dust_threshold:
                         logger.info(
                             f"[{symbol}] Exchange dedup: ignoring dust "
-                            f"({amt} qty, ${notional:.2f} < ${dust_threshold:.2f} min_notional)"
+                            f"({amt} qty, ${notional_check:.2f} < ${dust_threshold:.2f} min_notional)"
                         )
                         continue
                     already_open = True
@@ -268,13 +291,13 @@ class PositionMixin:
                             f"No SL/TP protection. "
                             f"Reverse ghost check in _reconcile_positions() will auto-close."
                         )
-                    return False
+                    return None
             except Exception as exc:
                 logger.error(
                     f"[{symbol}] Exchange dedup check failed ({exc}) — "
                     f"blocking entry to prevent duplicate. Will retry next cycle."
                 )
-                return False
+                return None
 
         # Capture balance before order fills (used in trade record for accurate tracking).
         balance_before = self.get_balance()
@@ -282,25 +305,53 @@ class PositionMixin:
         result = self._place_order(
             symbol,
             side,
-            quantity,
+            sizing["quantity"],
             leverage=lev_int,
             position_side=pos_side,
         )
         if result is None:
-            return False
+            return None
 
         fill_price = float(result["avgPrice"])
         fill_qty = float(result["executedQty"])
 
+        return {
+            "fill_price": fill_price,
+            "fill_qty": fill_qty,
+            "lev_int": lev_int,
+            "pos_side": pos_side,
+            "balance_before": balance_before,
+        }
+
+    def _setup_brackets(
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
+        fill: dict,
+        sizing: dict,
+    ) -> dict:
+        """Place SL, trailing stop, and/or TP bracket orders.
+
+        Returns a dict with sl_order_id, tp_order_id, trail_order_id.
+        """
+        fill_price = fill["fill_price"]
+        fill_qty = fill["fill_qty"]
+        pos_side = fill["pos_side"]
+        move_size = sizing["move_size"]
+        sl_pct = sizing["sl_pct"]
+        tp_pct = sizing["tp_pct"]
+        strategy_type = sizing["strategy_type"]
+
         notional = fill_qty * fill_price
         direction = "LONG" if signal > 0 else "SHORT"
+        conviction_score = sizing["conviction_score"]
 
         # ── VolStraddle brackets: fixed SL/TP (no PBT) ──
         # move_size=1.0, so SL distance = sl_pct, TP distance = tp_pct
         logger.info(
             f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
-            f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
-            f"TF={tf_label}, SL={sl_pct * 100:.1f}%, TP={tp_pct * 100:.1f}%, "
+            f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={fill['lev_int']}x, "
+            f"TF={sizing['tf_label']}, SL={sl_pct * 100:.1f}%, TP={tp_pct * 100:.1f}%, "
             f"{strategy_type}"
             f"{f', conviction={conviction_score}/4' if strategy_type == 'vr_squeeze' else ''})"
         )
@@ -325,6 +376,7 @@ class PositionMixin:
         # EGLDUSDT incident (2026-03-21) was caused by 0.1% callbackRate (noise),
         # not by Binance ignoring activationPrice. Fixed by widening to 0.5%.
         trail_order_id: str | None = None
+        tp_order_id: str | None = None
         if self.vs_config.trail_server_native:
             cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
             trail_order_id = self._place_trail_regular(
@@ -347,7 +399,6 @@ class PositionMixin:
                     f"(algoId={sl_order_id}) TRAIL=FAILED — bracket repair will retry"
                 )
             # No TP needed — trail handles profit-taking once active.
-            tp_order_id = None
         else:
             # Legacy: full-qty TP (no partial — matches backtest SL/TP/max_hold exit)
             tp_order_id = self._place_server_take_profit(
@@ -371,6 +422,41 @@ class PositionMixin:
                 f"(algoId={tp_order_id})"
             )
 
+        return {
+            "sl_order_id": sl_order_id,
+            "tp_order_id": tp_order_id,
+            "trail_order_id": trail_order_id,
+        }
+
+    def _register_position(
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
+        fill: dict,
+        sizing: dict,
+        brackets: dict,
+        balance: float,
+        straddle_pair_id: str | None = None,
+    ) -> bool:
+        """Record position in strategy state and send notifications.
+
+        Returns True always (position was successfully opened).
+        """
+        fill_price = fill["fill_price"]
+        fill_qty = fill["fill_qty"]
+        lev_int = fill["lev_int"]
+        pos_side = fill["pos_side"]
+        balance_before = fill["balance_before"]
+        sl_pct = sizing["sl_pct"]
+        tp_pct = sizing["tp_pct"]
+        tf_label = sizing["tf_label"]
+        max_hold = sizing["max_hold"]
+        is_straddle = sizing["is_straddle"]
+        strategy_type = sizing["strategy_type"]
+        conviction_score = sizing["conviction_score"]
+        move_size = sizing["move_size"]
+        vs = self.vs_config
+
         # Record in strategy with TF-specific metadata
         self.strategy.open_position(
             symbol=symbol,
@@ -380,9 +466,9 @@ class PositionMixin:
             leverage=lev_int,
             move_size=move_size,
             entry_stop_mult=sl_pct,
-            server_sl_order_id=sl_order_id,
-            server_tp_order_id=tp_order_id,
-            server_trail_order_id=trail_order_id,
+            server_sl_order_id=brackets["sl_order_id"],
+            server_tp_order_id=brackets["tp_order_id"],
+            server_trail_order_id=brackets["trail_order_id"],
             sl=sl_pct,
             tp=tp_pct,
             tf=tf_label,
@@ -422,8 +508,8 @@ class PositionMixin:
         balance_after = self.get_balance()
         n_active = self.strategy.n_active
         _dir = "LONG ↑" if signal == 1 else "SHORT ↓"
-        _sl_tag = "🟢 서버" if sl_order_id else "🟡 클라이언트"
-        _tp_tag = "🟢 서버" if tp_order_id else "🟡 클라이언트"
+        _sl_tag = "🟢 서버" if brackets["sl_order_id"] else "🟡 클라이언트"
+        _tp_tag = "🟢 서버" if brackets["tp_order_id"] else "🟡 클라이언트"
         _pos_lines = []
         for _sym, _p in self.strategy.active_positions.items():
             _pd = "L" if _p["signal"] == 1 else "S"
@@ -468,6 +554,41 @@ class PositionMixin:
             }
         )
         return True
+
+    # ── _open_position orchestrator ──────────────────────────────────────
+
+    def _open_position(
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
+        close_prices: np.ndarray,
+        balance: float,
+        straddle_pair_id: str | None = None,
+    ) -> bool:
+        """Open a new position.
+
+        Args:
+            symbol: Trading symbol.
+            signal: +1 (long) or -1 (short).
+            close_prices: Recent close prices.
+            balance: Current balance.
+            straddle_pair_id: UUID linking LONG+SHORT legs of same straddle pair.
+                Both legs receive the same ID. None for directional positions.
+
+        Returns:
+            True if position was opened.
+        """
+        sizing = self._calculate_sizing(symbol, signal, close_prices, balance)
+        if sizing is None:
+            return False
+
+        fill = self._execute_entry_order(symbol, signal, sizing, balance)
+        if fill is None:
+            return False
+
+        brackets = self._setup_brackets(symbol, signal, fill, sizing)
+
+        return self._register_position(symbol, signal, fill, sizing, brackets, balance, straddle_pair_id)
 
     def _partial_close_position(
         self: "ScalperProtocol",
