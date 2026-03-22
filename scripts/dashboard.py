@@ -265,6 +265,28 @@ def load_state_strategies() -> dict:
         return {}
 
 
+def load_state_pos_details() -> dict:
+    """Return {pos_key: {sl, tp, trail_active, peak_gain, max_hold}} from state."""
+    if not STATE.exists():
+        return {}
+    try:
+        s = json.load(open(STATE))
+        result = {}
+        for sym, pos in s.get("positions", {}).items():
+            result[sym] = {
+                "sl": pos.get("sl", 0),
+                "tp": pos.get("tp", 0),
+                "trail_active": pos.get("trail_active", False),
+                "peak_gain": pos.get("peak_gain", 0),
+                "max_hold": pos.get("max_hold", 192),
+                "server_sl_order_id": pos.get("server_sl_order_id"),
+                "server_tp_order_id": pos.get("server_tp_order_id"),
+            }
+        return result
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=28, show_spinner=False)
 def load_trades() -> pd.DataFrame:
     if not DB.exists():
@@ -534,6 +556,7 @@ def render():
     positions     = fetch_positions()
     bars_map      = load_state_bars()
     strategies_map = load_state_strategies()
+    pos_details   = load_state_pos_details()
     df            = load_trades()
 
     wallet     = acct.get("wallet", 0)
@@ -640,6 +663,17 @@ def render():
                     strat_cls, strat_label = _strat_tag(strat_type)
                     pct_class = "pos" if p["pct"] >= 0 else "neg"
                     side_cls  = "long-tag" if p["side"] == "LONG" else "short-tag"
+                    # SL/TP/trail from state
+                    det = pos_details.get(sym_key, pos_details.get(p["symbol"], {}))
+                    sl_val = det.get("sl", 0)
+                    tp_val = det.get("tp", 0)
+                    max_hold = det.get("max_hold", 192)
+                    sl_ok = "✓" if det.get("server_sl_order_id") else "✗"
+                    tp_ok = "✓" if det.get("server_tp_order_id") else "✗"
+                    trail_str = "—"
+                    if det.get("trail_active"):
+                        peak = det.get("peak_gain", 0) * 100
+                        trail_str = f"✓({peak:+.1f}%)"
                     rows_html += f"""
 <tr>
   <td class="sym">{p['symbol']}</td>
@@ -648,16 +682,18 @@ def render():
   <td>${p['entry']:,.4f}</td>
   <td>${p['mark']:,.4f}</td>
   <td class="{pct_class}">{p['pct']:+.2f}%</td>
-  <td class="{pct_class}">{p['roi_pct']:+.2f}%</td>
   <td class="{pct_class}">${p['upnl']:+.2f}</td>
+  <td class="neu">{sl_val * 100:.1f}%{sl_ok}</td>
+  <td class="neu">{tp_val * 100:.0f}%{tp_ok}</td>
+  <td class="neu">{trail_str}</td>
   <td class="neu">{p['leverage']}x</td>
-  <td class="neu">{bars}/192</td>
+  <td class="neu">{bars}/{max_hold}</td>
   <td class="neu">${p['notional']:,.0f}</td>
 </tr>"""
                 st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>STRAT</th><th>ENTRY</th><th>MARK</th>
-<th>Price%</th><th>ROI%</th><th>PnL USD</th><th>LEV</th><th>BARS</th><th>NOTIONAL</th></tr>
+<th>Price%</th><th>PnL USD</th><th>SL</th><th>TP</th><th>TRAIL</th><th>LEV</th><th>BARS</th><th>NOTIONAL</th></tr>
 {rows_html}
 </table></div>""", unsafe_allow_html=True)
 

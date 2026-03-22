@@ -1066,11 +1066,14 @@ class PositionMixin:
                 _reason_kr = reason.upper().replace("_", " ")
                 n_remaining = self.strategy.n_active
 
+                _strat = closed_pos.get("strategy_type", "vr_directional")
+                _strat_label = {"vr_directional": "VR-D", "vr_straddle": "VR-S", "ma_cluster": "MA"}.get(_strat, _strat)
                 self.discord.send(
                     embed={
                         "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr} (서버체결)",
                         "color": 0x00C853 if net_pnl > 0 else 0xFF1744,
                         "fields": [
+                            {"name": "전략", "value": _strat_label, "inline": True},
                             {"name": "진입가", "value": f"${closed_pos['entry_price']:.4f}", "inline": True},
                             {"name": "청산가", "value": f"${fill_price:.4f}", "inline": True},
                             {
@@ -1271,11 +1274,14 @@ class PositionMixin:
             _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
         _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
 
+        _strat = pos.get("strategy_type", "vr_directional")
+        _strat_label = {"vr_directional": "VR-D", "vr_straddle": "VR-S", "ma_cluster": "MA"}.get(_strat, _strat)
         self.discord.send(
             embed={
                 "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr}",
                 "color": 0x00C853 if net_pnl > 0 else 0xFF1744,
                 "fields": [
+                    {"name": "전략", "value": _strat_label, "inline": True},
                     {"name": "진입가", "value": f"${pos['entry_price']:.4f}", "inline": True},
                     {"name": "청산가", "value": f"${fill_price:.4f}", "inline": True},
                     {"name": "보유시간", "value": f"{hold_time}분 ({pos['bars_held']}바)", "inline": True},
