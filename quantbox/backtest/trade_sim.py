@@ -43,26 +43,57 @@ from quantbox.strategy.vol_straddle.signals import (
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _load_trade_sim_constants() -> tuple:
-    """Read constants from VolStraddleConfig so trade_sim stays in sync with production."""
+def get_trade_sim_config() -> dict:
+    """Read trade sim constants fresh from VolStraddleConfig.
+
+    G4 parity fix: called per-invocation instead of cached at module load.
+    Returns a dict with cost, warmup, max_hold, and TF tuples.
+    """
     try:
         from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
         cfg = VolStraddleConfig()
-        cost_dir = cfg.round_trip_cost  # fee+slippage × 2 (entry+exit)
-        cost_str = cfg.round_trip_cost * 2  # 4 sides (long+short entry+exit)
+        cost_dir = cfg.round_trip_cost
+        cost_str = cfg.round_trip_cost * 2
         w15 = cfg.warmup_15m
+        w30 = cfg.warmup_30m
         w1h = int(cfg.warmup_15m / 4)
         w4h = int(cfg.warmup_15m / 16) + 1
-        w30 = cfg.warmup_30m
         mh15 = cfg.max_hold_15m
         mh30 = cfg.max_hold_30m
         mh1h = cfg.max_hold_1h
         mh4h = cfg.max_hold_4h
-        return cost_dir, cost_str, w15, w30, w1h, w4h, mh15, mh30, mh1h, mh4h
     except Exception:
-        # Fallback to hardcoded defaults if config cannot be loaded
-        return 0.0008, 0.0016, 200, 100, 50, 13, 192, 96, 48, 12
+        cost_dir, cost_str = 0.0008, 0.0016
+        w15, w30, w1h, w4h = 200, 100, 50, 13
+        mh15, mh30, mh1h, mh4h = 192, 96, 48, 12
+
+    return {
+        "cost_directional": cost_dir,
+        "cost_straddle": cost_str,
+        "tf_15m": ("15m", 1, w15, mh15, mh15 * 2),
+        "tf_30m": ("30m", 2, w30, mh30, mh30 * 2),
+        "tf_1h": ("1h", 4, w1h, mh1h, mh1h * 2),
+        "tf_4h": ("4h", 16, w4h, mh4h, mh4h * 2),
+    }
+
+
+def _load_trade_sim_constants() -> tuple:
+    """Legacy: read constants at module load. Use get_trade_sim_config() for fresh values."""
+    c = get_trade_sim_config()
+    tf15, tf30, tf1h, tf4h = c["tf_15m"], c["tf_30m"], c["tf_1h"], c["tf_4h"]
+    return (
+        c["cost_directional"],
+        c["cost_straddle"],
+        tf15[2],
+        tf30[2],
+        tf1h[2],
+        tf4h[2],  # warmups
+        tf15[3],
+        tf30[3],
+        tf1h[3],
+        tf4h[3],  # max_holds
+    )
 
 
 (
@@ -658,7 +689,7 @@ def collect_trades(
     strat: str,
     *,
     tf_group: list | None = None,
-    tf_priority: bool = False,
+    tf_priority: bool = True,
 ) -> list[tuple[str, int, int, float]]:
     """Collect all trades as (symbol, entry_15m, exit_15m, pnl).
 
@@ -676,9 +707,10 @@ def collect_trades(
         strat: "D_mom8" or "S_d8".
         tf_group: List of TF tuples to scan. None → G_3TF (backward-compat).
             Use G_4TF for production parity (includes 30m).
-        tf_priority: If True, higher TFs take priority — trades from a higher
-            TF block lower-TF trades on the same symbol during the same
-            time window (matches live on_bar first-match-wins behavior).
+        tf_priority: If True (default, G1 parity fix), higher TFs take priority —
+            trades from a higher TF block lower-TF trades on the same symbol
+            during the same time window (matches live on_bar first-match-wins).
+            Set False for legacy behavior (time-dedup without TF priority).
 
     Returns:
         List of (symbol, entry_bar_15m, exit_bar_15m, pnl_float).
@@ -704,6 +736,13 @@ def collect_trades(
     if strat not in ("D_mom8", "S_d8"):
         raise ValueError(f"strat must be 'D_mom8' or 'S_d8', got {strat!r}")
     # ─────────────────────────────────────────────────────────────────────────
+
+    # G4 parity fix: read trade sim config fresh (not module-level cache)
+    _tsc = get_trade_sim_config()
+    _cost_dir = _tsc["cost_directional"]
+    _cost_str = _tsc["cost_straddle"]
+    _G_3TF = [_tsc["tf_15m"], _tsc["tf_1h"], _tsc["tf_4h"]]
+    _G_4TF = [_tsc["tf_15m"], _tsc["tf_30m"], _tsc["tf_1h"], _tsc["tf_4h"]]
 
     sp = cfg["sp"]
     lp = cfg["lp"]
@@ -733,8 +772,8 @@ def collect_trades(
             s_trail_activate = 0.030  # config default
             s_trail_distance = 0.005  # config default (rule #8 floor)
 
-    # Resolve TF group — default G_3TF for backward compat
-    active_tfs = tf_group if tf_group is not None else G_3TF
+    # Resolve TF group — default G_3TF (fresh from config, G4 fix)
+    active_tfs = tf_group if tf_group is not None else _G_3TF
 
     # Build tf_data_map including 30m if needed
     tf_data_map: dict[int, dict] = {1: data_15m, 4: data_1h, 16: data_4h}
@@ -779,14 +818,14 @@ def collect_trades(
                         sl,
                         tp,
                         mh,
-                        COST_STRADDLE,
+                        _cost_str,
                         s_trail_activate,
                         s_trail_distance,
                     )
                 else:
                     sig = gen_vr_signal(vr, d_vr, warmup)
                     dire = make_direction_momentum(sig, d["mom_8"])
-                    p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, COST_DIRECTIONAL)
+                    p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, _cost_dir)
 
                 for k in range(len(p)):
                     entry_15m = int(e[k]) * ratio
@@ -833,14 +872,14 @@ def collect_trades(
                         sl,
                         tp,
                         mh,
-                        COST_STRADDLE,
+                        _cost_str,
                         s_trail_activate,
                         s_trail_distance,
                     )
                 else:
                     sig = gen_vr_signal(vr, d_vr, warmup)
                     dire = make_direction_momentum(sig, d["mom_8"])
-                    p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, COST_DIRECTIONAL)
+                    p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, _cost_dir)
 
                 for k in range(len(p)):
                     entry_15m = int(e[k]) * ratio
