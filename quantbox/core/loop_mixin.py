@@ -75,16 +75,20 @@ class LoopMixin:
             f"Active={len(positions)}{last_trade_ago}"
         )
 
-        # Active position details
+        # Active position details (strategy_type + MFE/MAE + trail status)
         for sym, pos in positions.items():
+            strat = pos.get("strategy_type", "vr_directional")
+            trail_info = ""
+            if pos.get("trail_active"):
+                peak = pos.get("peak_gain", 0) * 100
+                trail_info = f" trail=✓(peak={peak:+.1f}%)"
             logger.info(
-                f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
+                f"  [{sym}] {strat} "
                 f"entry=${pos['entry_price']:.4f} "
                 f"bars={pos['bars_held']}/{pos.get('max_hold', self.config.max_hold)} "
                 f"MFE={pos.get('best_pnl', 0) * 100:+.2f}% "
-                f"MAE={pos.get('worst_pnl', 0) * 100:+.2f}% "
-                f"SL={pos.get('server_sl_order_id') or 'NONE'} "
-                f"TP={pos.get('server_tp_order_id') or 'NONE'}"
+                f"MAE={pos.get('worst_pnl', 0) * 100:+.2f}%"
+                f"{trail_info}"
             )
 
         # Periodic VR distribution (every 16 cycles ≈ 4h) when no positions
