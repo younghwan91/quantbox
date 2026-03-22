@@ -136,10 +136,11 @@ class CommandsMixin:
                 sl_ok = "✓" if pos.get("server_sl_order_id") else "✗"
                 tp_ok = "✓" if pos.get("server_tp_order_id") else "✗"
                 # Trail status
-                trail_str = ""
                 if pos.get("trail_active"):
                     peak = pos.get("peak_gain", 0) * 100
                     trail_str = f" trail✓({peak:+.1f}%)"
+                else:
+                    trail_str = " trail✗"
                 lines.append(f"  [{strat[:6]}] {direction} {sym}")
                 lines.append(f"    ${entry_px:.4f}→${cur_px:.4f} uPnL={upnl_pct:+.1f}% {bars}/{max_hold}bars")
                 lines.append(f"    SL={sl_pct * 100:.1f}%{sl_ok} TP={tp_pct * 100:.0f}%{tp_ok}{trail_str}")

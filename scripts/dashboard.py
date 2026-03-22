@@ -670,10 +670,11 @@ def render():
                     max_hold = det.get("max_hold", 192)
                     sl_ok = "✓" if det.get("server_sl_order_id") else "✗"
                     tp_ok = "✓" if det.get("server_tp_order_id") else "✗"
-                    trail_str = "—"
                     if det.get("trail_active"):
                         peak = det.get("peak_gain", 0) * 100
                         trail_str = f"✓({peak:+.1f}%)"
+                    else:
+                        trail_str = "✗"
                     rows_html += f"""
 <tr>
   <td class="sym">{p['symbol']}</td>

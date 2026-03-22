@@ -740,7 +740,7 @@ class RubberBandScalper(
             if pos.get("trail_active"):
                 peak = pos.get("peak_gain", 0) * 100
                 trail_status = f" trail=✓({peak:+.1f}%)"
-            elif strat != "ma_cluster" and not pos.get("is_straddle"):
+            else:
                 trail_status = " trail=✗"
             sl_pct = pos.get("sl", 0)
             tp_pct = pos.get("tp", 0)
