@@ -91,10 +91,17 @@ def print_system_info(
     target: float,
     stop_mult: float,
     max_hold: int,
-    min_confidence: int,
+    d_trail_activate: float = 0.04,
+    d_trail_distance: float = 0.005,
+    min_confidence: int = 0,
     testnet: bool = False,
     straddle_enabled: bool = True,
     straddle_max_slots: int = 8,
+    straddle_vr_threshold: float = 0.57,
+    straddle_sl: float = 0.015,
+    straddle_tp: float = 0.05,
+    straddle_trail_activate: float = 0.03,
+    straddle_trail_distance: float = 0.005,
     ma_cluster_enabled: bool = False,
     ma_cluster_pct: float = 0.03,
     ma_cluster_min_duration: int = 8,
@@ -102,6 +109,8 @@ def print_system_info(
     ma_cluster_min_momentum: float = 0.01,
     ma_cluster_sl: float = 0.02,
     ma_cluster_tp: float = 0.08,
+    ma_cluster_trail_activate: float = 0.02,
+    ma_cluster_trail_distance: float = 0.005,
     ma_cluster_leverage: float = 12.0,
 ) -> None:
     """Print formatted system configuration table.
@@ -171,21 +180,35 @@ def print_system_info(
         _print_row("MA Cluster", f"{Color.RED}DISABLED{Color.RESET}")
     print()
 
-    _print_section("VR PARAMS")
-    _print_row("Lookback", f"{lookback} bars")
-    _print_row("Threshold", f"{threshold * 100:.1f}%")
+    _print_section("VR DIRECTIONAL")
+    _print_row("VR Threshold", f"{threshold * 100:.1f}%")
     _print_row("SL / TP", f"{stop_mult * 100:.0f}% / {target * 100:.0f}%")
+    _print_row("Trail", f"{d_trail_activate * 100:.1f}%→{d_trail_distance * 100:.1f}% (activate→distance)")
     _print_row("Max Hold", f"{max_hold} bars")
-    _print_row("Leverage", f"{leverage_base}x (max {leverage_max}x)")
-    _print_row("Confidence", f">= {min_confidence}")
+    _print_row("Leverage", f"{leverage_base}x")
     print()
 
+    if straddle_enabled:
+        _print_section("VR STRADDLE")
+        _print_row("VR Threshold", f"{straddle_vr_threshold * 100:.1f}%")
+        _print_row("SL / TP", f"{straddle_sl * 100:.1f}% / {straddle_tp * 100:.0f}%")
+        _print_row(
+            "Trail", f"{straddle_trail_activate * 100:.1f}%→{straddle_trail_distance * 100:.1f}% (activate→distance)"
+        )
+        _print_row("Max Slots", f"{straddle_max_slots} ({straddle_max_slots // 2} pairs)")
+        _print_row("Leverage", f"{leverage_base}x")
+        print()
+
     if ma_cluster_enabled:
-        _print_section("MA CLUSTER PARAMS")
+        _print_section("MA CLUSTER")
         _print_row("Spread", f"{ma_cluster_pct * 100:.0f}%")
         _print_row("Duration", f"{ma_cluster_min_duration}-{ma_cluster_max_duration} bars (4h)")
         _print_row("Min Momentum", f"{ma_cluster_min_momentum * 100:.1f}%")
         _print_row("SL / TP", f"{ma_cluster_sl * 100:.0f}% / {ma_cluster_tp * 100:.0f}%")
+        _print_row(
+            "Trail",
+            f"{ma_cluster_trail_activate * 100:.1f}%→{ma_cluster_trail_distance * 100:.1f}% (activate→distance)",
+        )
         _print_row("Leverage", f"{ma_cluster_leverage:.0f}x")
         print()
 
