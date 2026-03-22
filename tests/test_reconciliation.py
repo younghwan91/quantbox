@@ -76,7 +76,7 @@ def _inject_hedge_position(scalper, sym: str, signal: int = 1, entry_price: floa
         "tf": "15m",
         "position_side": side,
         "trail_active": False,
-        "strategy_type": "vr_squeeze",
+        "strategy_type": "vr_directional",
     }
     return key
 

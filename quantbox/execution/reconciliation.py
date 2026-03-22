@@ -570,7 +570,7 @@ class ReconciliationMixin:
                     if quantity > 0:
                         signal = pos["signal"]
                         entry_price = pos["entry_price"]
-                        strategy_type = pos.get("strategy_type", "vr_squeeze")
+                        strategy_type = pos.get("strategy_type", "vr_directional")
                         cr, ap, cs = self._get_trail_params(strategy_type, signal, entry_price)
                         new_trail = self._place_trail_regular(
                             symbol=api_sym,
@@ -1135,7 +1135,7 @@ class ReconciliationMixin:
             "bars_held": pos["bars_held"],
             "reason": "server_partial_tp",
             "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "strategy_type": pos.get("strategy_type", "vr_directional"),
             "mfe_pct": pos.get("best_pnl", 0.0) * 100,
             "mae_pct": pos.get("worst_pnl", 0.0) * 100,
             "entry_time": pos.get("opened_at"),
@@ -1237,7 +1237,7 @@ class ReconciliationMixin:
             "bars_held": pos["bars_held"],
             "reason": reason,
             "time": _now,
-            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "strategy_type": pos.get("strategy_type", "vr_directional"),
             "mfe_pct": pos.get("best_pnl", 0.0) * 100,
             "mae_pct": pos.get("worst_pnl", 0.0) * 100,
             "entry_time": pos.get("opened_at"),
