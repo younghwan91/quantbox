@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from quantbox.core.trade_journal import TradeJournal
     from quantbox.execution.algo_api import AlgoApiClient
     from quantbox.execution.recon_journal import ReconJournal
+    from quantbox.execution.risk_guard import RiskGuard
     from quantbox.notifications.bot import DiscordBotRunner
     from quantbox.notifications.discord import DiscordNotifier
     from quantbox.strategy.protocol import TradingStrategy
@@ -102,6 +103,10 @@ class ScalperProtocol(Protocol):
     # ── Internal config cache ─────────────────────────────────────────────
     _cfg: VolStraddleConfig
     """Cached config shorthand used in loop_mixin."""
+
+    # ── Risk gate helper ──────────────────────────────────────────────────
+    _risk_guard: RiskGuard
+    """Stateless pre-entry risk gate (G6, straddle cap, direction diversity, G7)."""
 
     # ── Symbol info cache (DataMixin) ─────────────────────────────────────
     _symbol_info_cache: dict[str, dict[str, Any]]

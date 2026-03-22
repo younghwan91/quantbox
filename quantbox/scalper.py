@@ -79,6 +79,7 @@ from quantbox.execution.brackets import BracketMixin
 from quantbox.execution.data_mixin import DataMixin
 from quantbox.execution.positions import PositionMixin
 from quantbox.execution.preflight import OrderPreflight
+from quantbox.execution.risk_guard import RiskGuard
 from quantbox.execution.reconciliation import ReconciliationMixin
 from quantbox.core.trade_journal import TradeJournal  # noqa: F401 (patched by tests)
 from quantbox.core.divergence_monitor import DivergenceMonitor  # noqa: F401 (patched by tests)
@@ -246,6 +247,9 @@ class RubberBandScalper(
         self._exposure_guard = _reliability["exposure_guard"]
         self._inflight = _reliability["inflight"]
         self._recon_journal = _reliability["recon_journal"]
+
+        # Risk gate helper (stateless, injected)
+        self._risk_guard = RiskGuard(self.vs_config)
 
         # Restart tracking & post-restart reconciliation
         self._restart_count: int = 0
@@ -904,7 +908,7 @@ class RubberBandScalper(
                 t["pnl_usd"] for t in self._trade_history if t.get("time", "").startswith(today_utc)
             )
             limit_usd = balance * self.vs_config.daily_loss_limit_pct
-            if not self._daily_loss_blocked and self._daily_realized_pnl < -limit_usd:
+            if not self._daily_loss_blocked and self._risk_guard.check_daily_loss(self._daily_realized_pnl, balance):
                 self._daily_loss_blocked = True
                 logger.warning(
                     f"⛔ G7 DailyBreaker TRIGGERED: "
@@ -1166,20 +1170,7 @@ class RubberBandScalper(
             _diag_logger.log_scan(self._cycle_count, ts, scan_diags)
 
         # ── G6: BTC Trend Gate — compute once, apply to all LONG candidates ──
-        btc_ma = None
-        if (
-            self.vs_config.btc_long_filter_enabled
-            and btc_close is not None
-            and len(btc_close) >= self.vs_config.btc_long_ma_period
-        ):
-            btc_ma = float(np.mean(btc_close[-self.vs_config.btc_long_ma_period :]))
-            btc_cur = float(btc_close[-1])
-            btc_above_ma = btc_cur >= btc_ma
-            logger.info(
-                f"G6 BTC Trend Gate: BTC=${btc_cur:.1f} "
-                f"MA{self.vs_config.btc_long_ma_period}=${btc_ma:.1f} "
-                f"→ {'ABOVE (LONG OK)' if btc_above_ma else 'BELOW (LONG BLOCKED)'}"
-            )
+        btc_ma = self._risk_guard.compute_btc_gate(btc_close)
 
         entries_made = 0
         straddle_opened: dict[str, set[int]] = {}  # {sym: {signals opened}} for rollback
@@ -1193,49 +1184,36 @@ class RubberBandScalper(
                 if sym in straddle_blocked:
                     continue  # second leg of an already-blocked pair
                 if sym not in straddle_opened:
-                    # First leg: upfront check — need at least 2 remaining slots for LONG+SHORT.
+                    # First leg: upfront check via RiskGuard
                     remaining_slots = max_entries - entries_made
-                    if remaining_slots < 2:
-                        straddle_blocked.add(sym)
-                        logger.info(
-                            f"[{sym}] Straddle BLOCKED: only {remaining_slots} slot(s) remaining "
-                            f"(need 2 for LONG+SHORT pair)"
-                        )
-                        continue
-                    # First leg: check if opening a new pair would exceed the cap.
-                    cfg_strd_max = self.vs_config.straddle_max_slots
                     active_straddle_pairs = sum(
                         1 for k, p in self.strategy._positions.items() if ":LONG" in k and p.get("is_straddle", False)
                     )
-                    if active_straddle_pairs * 2 >= cfg_strd_max:
+                    straddle_ok, straddle_reason = self._risk_guard.allow_straddle(
+                        active_straddle_pairs, remaining_slots
+                    )
+                    if not straddle_ok:
                         straddle_blocked.add(sym)
-                        logger.info(
-                            f"[{sym}] Straddle BLOCKED: {active_straddle_pairs} pairs active "
-                            f"({active_straddle_pairs * 2}/{cfg_strd_max} slots) — cap reached"
-                        )
+                        logger.info(f"[{sym}] Straddle BLOCKED: {straddle_reason}")
                         continue
 
             # ── G6: BTC Trend Gate — block directional LONG when BTC below MA ──
             # Straddle is direction-neutral (LONG+SHORT) → G6 does not apply.
-            if signal == 1 and not is_straddle and btc_ma is not None and btc_close is not None:
-                btc_cur = float(btc_close[-1])
-                if btc_cur < btc_ma:
-                    logger.info(
-                        f"[{sym}] G6 LONG suppressed: BTC ${btc_cur:.1f} < "
-                        f"MA{self.vs_config.btc_long_ma_period} ${btc_ma:.1f}"
-                    )
-                    continue
+            if signal == 1 and not is_straddle and not self._risk_guard.allow_long(btc_close, btc_ma):
+                # btc_close is not None here: allow_long returns False only when both args are set
+                btc_cur_log = float(btc_close[-1]) if btc_close is not None else 0.0
+                logger.info(
+                    f"[{sym}] G6 LONG suppressed: BTC ${btc_cur_log:.1f} < "
+                    f"MA{self.vs_config.btc_long_ma_period} ${btc_ma:.1f}"
+                )
+                continue
 
             # ═══ v12.3 PARITY: Direction Diversity Filter ═══
             # Straddle is direction-neutral → diversity filter does not apply.
-            if self._cfg.dir_diversity_enabled and not is_straddle:
-                same_dir = sum(1 for p in self.strategy.active_positions.values() if p.get("signal") == signal)
-                if same_dir >= self._cfg.max_same_direction:
-                    logger.info(
-                        f"[{sym}] DirDiversity blocked: "
-                        f"{same_dir} {'LONG' if signal == 1 else 'SHORT'} "
-                        f"already open (max={self._cfg.max_same_direction})"
-                    )
+            if not is_straddle:
+                dir_ok, dir_reason = self._risk_guard.allow_direction(signal, self.strategy.active_positions)
+                if not dir_ok:
+                    logger.info(f"[{sym}] DirDiversity blocked: {dir_reason}")
                     continue
 
             # ── Straddle: pair-aware entry with retry for second leg ──
