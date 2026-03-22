@@ -19,8 +19,8 @@
 - **멀티 타임프레임**: 15m/1h/4h 독립 신호, 높은 TF 우선 (4h > 1h > 15m)
 - **D_mom8 방향**: 8바 모멘텀 기반 롱/숏 방향 결정 (D_mom8)
 - **S_d8 스트래들**: VR < 0.55 × 4바 지속 → 양방향 동시 진입 (Hedge Mode)
-- **파라미터**: SL=1%, 하드TP=20%(dead cap), Trailing activate +1.0%/distance 0.2%, MaxHold=48h
-- **r69 Trail 개선**: d_trail_activate 0.005→0.010 — 수익 보존 강화 (PF 전 연도 개선)
+- **파라미터**: SL=1%, 하드TP=20%(safety cap), Trailing activate +4.0%/distance 0.5%, MaxHold=48h
+- **r106 Trail 조정**: D 4.0%/0.5%, S 3.0%/0.5%, MA 2.0%/0.5% (callbackRate≥0.5% 준수)
 - **30x @10 slots** (L/N=3.0, Half-Kelly), 6년 연속 흑자, Bootstrap P(PF≥1.0)=100%
 - **현재 엣지 (r73, 5.67yr, trail)**: D+S+MA 3전략, PF=2.002, Calmar=1695.6, 60 syms
 - **제로 룩어헤드**: 완성된 바만 참조, 개발 중 바 제외, 교차 TF 감사 통과
@@ -30,7 +30,7 @@
 - **4h 전용**: 상위 타임프레임에서만 동작, VR squeeze와 ~93% 비중복
 - **Momentum(8) 방향**: 클러스터 이탈 시 모멘텀 방향으로 진입
 - **Half-Kelly 레버리지**: 21x leverage × 2% SL → per-trade risk 4.2% (f*/2=4.33%)
-- **Simple Exit**: SL=2%, TP=8%, MaxHold=12바 (48h), 트레일링 스탑 없음
+- **Exit**: SL=2%, TP=8%(safety cap), Trail activate +2.0%/distance 0.5%, MaxHold=192바 (48h)
 - **R45 Zombie Filter**: `max_duration=24` 바 초과 클러스터 차단 (오래된 클러스터 제거)
 - **R45 Momentum Filter**: `abs(momentum) < 0.010` 차단 (거스름 없는 약한 신호 제거)
 - **MA Cluster 현재 엣지**: N=2,329 accepted, PF=MA-class, 4h TF 독립, VR와 94.5% 비중복

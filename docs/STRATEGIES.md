@@ -38,8 +38,8 @@
 | 조건 | 기준 |
 |------|------|
 | 🔴 Hard SL | 진입가 ±**1.0%** |
-| 🟡 Trail Stop | 고점 대비 **0.2%** 하락 (Trail 활성화: +**1.0%** 수익 도달 시) |
-| 🟢 Hard TP | 진입가 ±**20%** (사실상 미도달 — trail이 먼저 청산) |
+| 🟡 Trail Stop | 고점 대비 **0.5%** 하락 (Trail 활성화: +**4.0%** 수익 도달 시) |
+| 🟢 Hard TP | 진입가 ±**20%** (safety cap — trail이 먼저 청산) |
 | ⏱ Max Hold | **192 bars** (15m 기준 48h) |
 
 ### 성능 (백테스트, 60 syms · 6yr · flat SL/TP 기준)
@@ -48,7 +48,7 @@
 |---|----|----|-----|
 | 2,868 | 62.6% | 1.971 | +39 bp |
 
-**L/N = 2.1** (leverage 21x / 10 slots) → 잔고 $1,000 기준 슬롯당 notional $2,100
+**L/N = 3.0** (leverage 30x / 10 slots) → 잔고 $1,000 기준 슬롯당 notional $3,000
 
 ---
 
@@ -74,8 +74,8 @@
 | 조건 | LONG leg | SHORT leg |
 |------|----------|-----------|
 | 🔴 Hard SL | 진입가 -**1.5%** | 진입가 +**1.5%** |
-| 🟡 Trail Stop | 동일 (`d_trail_activate=1.0%, d_trail_distance=0.2%`) | 동일 |
-| 🟢 Hard TP | ±**20%** | ±**20%** |
+| 🟡 Trail Stop | 동일 (`s_trail_activate=3.0%, s_trail_distance=0.5%`) | 동일 |
+| 🟢 Hard TP | ±**5%** (safety cap) | ±**5%** (safety cap) |
 
 *한쪽이 SL 청산 → 반대쪽 포지션은 계속 운영*
 
@@ -108,10 +108,10 @@
 | 조건 | 기준 |
 |------|------|
 | 🔴 Hard SL | 진입가 ±**2.0%** |
-| 🟡 Trail Stop | 고점 대비 **0.5%** 하락 (Trail 활성화: +**4.0%** 수익 도달 시) |
-| 🟢 Hard TP | ±**8.0%** |
+| 🟡 Trail Stop | 고점 대비 **0.5%** 하락 (Trail 활성화: +**2.0%** 수익 도달 시) |
+| 🟢 Hard TP | ±**8.0%** (safety cap) |
 
-*MA Cluster는 trail 활성화 임계가 높음(4%) — 더 큰 수익 후 보호*
+*MA Cluster는 trail 활성화 임계가 2%로 D_mom8(4%)보다 빠름 — 변동성 작은 종목 대상*
 
 ### 성능
 
@@ -174,23 +174,13 @@ MA Cluster:                  leverage = 21x → Notional = 잔고/10 × 21  (L/N
 | **2026-03-13** | **Straddle G6 버그 수정** (commit `58e0842`) | S_d8이 처음으로 실거래 오픈 가능 |
 | **2026-03-13** | **d_trail_activate 0.5%→1.0%** (r69, commit `a061e07`) | OOS 2023/24/25 PF +38%/+23%/+40% |
 | 2026-03-13 | TBR gate 재검증 (r71) | trail=1.0% 환경에서도 OFF 유지 (2024/25 악화 확인) |
-
----
-
-## 현재 라이브 세션 현황
-
-| 항목 | 값 |
-|------|-----|
-| 잔고 | $1,405.95 |
-| HWM | $1,431.04 |
-| Session DD | 1.8% |
-| WR (8 trades) | 62% |
-| 활성 포지션 | 4개 |
-| 배포 커밋 | `58e0842` (2026-03-13 15:25) |
+| **2026-03-22** | **r106: trail params 대폭 조정** | D: 1.0%→4.0%/0.5%, S: 1.5%→3.0%/0.5%, MA: 4%→2%/0.5% (callbackRate≥0.5% 준수) |
+| **2026-03-22** | **tri-strategy naming unification** | vr_squeeze→vr_directional, straddle→vr_straddle + SQLite 마이그레이션 |
 
 ---
 
 *Source of truth: `quantbox/strategy/vol_straddle/config.py` · 이 문서는 config 변경 시 동기화*
+*라이브 현황은 `!status` 또는 대시보드(`scripts/dashboard.py`)에서 실시간 확인*
 
 ---
 
