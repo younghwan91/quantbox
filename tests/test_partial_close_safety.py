@@ -503,7 +503,7 @@ class TestFreshATRForRunners:
         assert atr_late > atr_early * 1.5, "ATR should increase with volatility"
 
     def test_scalper_imports_compute_atr_pct(self):
-        """scalper.py imports compute_atr_pct for fresh ATR in cycle."""
-        from quantbox.scalper import compute_atr_pct as imported_fn
+        """compute_atr_pct available from rubberband module."""
+        from quantbox.strategy.rubberband import compute_atr_pct as imported_fn
 
         assert callable(imported_fn)

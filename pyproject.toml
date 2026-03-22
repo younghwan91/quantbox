@@ -82,7 +82,6 @@ files = [
     # Utility modules
     "quantbox/core/bot_utils.py",
     "quantbox/core/scalper_state.py",
-    "quantbox/core/events.py",
     "quantbox/core/limit_chaser.py",
     # Execution layer (Protocol pattern applied)
     "quantbox/execution/preflight.py",

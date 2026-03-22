@@ -36,27 +36,42 @@ import numpy as np
 if TYPE_CHECKING:
     from datetime import datetime as _datetime
 
+    from binance.client import Client as BinanceClient
+
+    from quantbox.core.trade_journal import TradeJournal
+    from quantbox.execution.algo_api import AlgoApiClient
+    from quantbox.execution.recon_journal import ReconJournal
+    from quantbox.execution.risk_guard import RiskGuard
+    from quantbox.notifications.bot import DiscordBotRunner
+    from quantbox.notifications.discord import DiscordNotifier
+    from quantbox.strategy.protocol import TradingStrategy
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
 
 class ScalperProtocol(Protocol):
     """Structural type for the fully-composed RubberBandScalper class.
 
     Every attribute and method here corresponds to something defined in one
-    of the Mixin classes or in ``scalper.py`` itself.  This is intentionally
-    permissive (``Any`` for complex types) — the goal is to resolve
-    ``attr-defined`` errors, not to achieve full parametric typing.
+    of the Mixin classes or in ``scalper.py`` itself.
+
+    Phase 2.1 (refactor/mega-v2): eliminated ``Any`` types — all attributes
+    now have concrete type annotations via TYPE_CHECKING imports.
     """
 
     # ── Core state ────────────────────────────────────────────────────────
-    client: Any
+    client: BinanceClient
     """binance.client.Client instance."""
 
-    config: Any
-    """Active strategy config (RubberBandConfig or VolStraddleConfig)."""
+    _algo_api: AlgoApiClient
+    """Algo Order API client (wraps _request_futures_api)."""
 
-    vs_config: Any
-    """VolStraddleConfig — present when strategy_name == 'vol_straddle'."""
+    config: VolStraddleConfig
+    """Active strategy config (VolStraddleConfig). RubberBand deprecated."""
 
-    strategy: Any
+    vs_config: VolStraddleConfig
+    """VolStraddleConfig — always set in __init__ (even for rubberband, as fallback config)."""
+
+    strategy: TradingStrategy
     """Strategy instance (RubberBandStrategy or VolStraddleStrategy)."""
 
     strategy_name: str
@@ -65,7 +80,7 @@ class ScalperProtocol(Protocol):
     paper_mode: bool
     """True = paper trading (no real orders placed)."""
 
-    discord: Any
+    discord: DiscordNotifier
     """DiscordNotifier instance."""
 
     # ── Balance / capital tracking ────────────────────────────────────────
@@ -83,21 +98,25 @@ class ScalperProtocol(Protocol):
     _cycle_count: int
 
     # ── Bot runner (Discord command listener) ─────────────────────────────
-    _bot_runner: Any
+    _bot_runner: DiscordBotRunner | None
 
     # ── Internal config cache ─────────────────────────────────────────────
-    _cfg: Any
+    _cfg: VolStraddleConfig
     """Cached config shorthand used in loop_mixin."""
 
+    # ── Risk gate helper ──────────────────────────────────────────────────
+    _risk_guard: RiskGuard
+    """Stateless pre-entry risk gate (G6, straddle cap, direction diversity, G7)."""
+
     # ── Symbol info cache (DataMixin) ─────────────────────────────────────
-    _symbol_info_cache: dict[str, Any]
+    _symbol_info_cache: dict[str, dict[str, Any]]
     _exchange_info_fetched: bool
 
-    # ── Trade journal (optional) ──────────────────────────────────────────
-    _journal: Any
+    # ── Trade journal ────────────────────────────────────────────────────
+    _journal: TradeJournal
 
-    # ── Recon journal (optional) ────────────────────────────────────────
-    _recon_journal: Any
+    # ── Recon journal (None when disabled) ────────────────────────────────
+    _recon_journal: ReconJournal | None
 
     # ── Exchange notional cache (set by _reconcile_positions each cycle) ──
     _cached_exchange_notionals: dict[str, float]
@@ -273,6 +292,20 @@ class ScalperProtocol(Protocol):
     def _get_pair_counterpart(self, pos_key: str) -> str | None:
         """Find counterpart position key for a straddle pair."""
         ...
+
+    def _calculate_sizing(self, symbol: str, signal: int, close_prices: np.ndarray, balance: float) -> dict | None: ...
+    def _execute_entry_order(self, symbol: str, signal: int, sizing: dict, balance: float) -> dict | None: ...
+    def _setup_brackets(self, symbol: str, signal: int, fill: dict, sizing: dict) -> dict: ...
+    def _register_position(
+        self,
+        symbol: str,
+        signal: int,
+        fill: dict,
+        sizing: dict,
+        brackets: dict,
+        balance: float,
+        straddle_pair_id: str | None = None,
+    ) -> bool: ...
 
     def _close_position(self, symbol: str, reason: str, current_price: float) -> bool:
         """Close position by key (may be compound 'SYMBOL:SIDE'); return success flag."""

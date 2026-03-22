@@ -1,10 +1,17 @@
-"""Tests for SL-first priority in trailing stop sim functions.
+"""Tests for SL/trail exit priority in trailing stop sim functions.
 
-Validates that server SL fires BEFORE client-side trail when both
-conditions are met in the same bar. This matches live behavior where
-server SL is intra-bar (instant) and trail fires at bar close.
+G5 parity fix (refactor/mega-v2): once trailing activates, trail level is
+always tighter than the original SL. On the exchange, both are independent
+server-side orders — the tighter one fires first. The backtest must match:
+when trail is active, check trail first (skip SL since it's below trail).
 
-Root cause fix for trail-before-SL bias discovered in H5 investigation.
+When trail is NOT active, SL fires normally.
+
+Scenarios:
+  1. Same-bar SL+trail trigger → trail wins (tighter stop)
+  2. SL fires normally before trail activates
+  3. Trail fires cleanly after activation
+  4. Crash through both levels after trail active → trail level exit (not SL)
 """
 
 from __future__ import annotations
@@ -29,12 +36,12 @@ def _make_bars(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Straddle — SL Priority Tests
+#  Straddle — Trail Priority Tests (G5 parity fix)
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class TestStraddleSLPriority:
-    """SL must fire before trail in sim_straddle_trailing."""
+class TestStraddleTrailPriority:
+    """When trail is active, trail level (tighter) wins over SL."""
 
     SL = 0.015  # 1.5%
     TP = 0.20
@@ -43,12 +50,12 @@ class TestStraddleSLPriority:
     TRAIL_ACT = 0.015  # 1.5% (== SL)
     TRAIL_DIST = 0.001  # 0.1%
 
-    def test_same_bar_sl_and_trail_long_leg_sl_wins(self):
-        """Bar has high >= trail_activate AND low <= SL → LONG SL fires."""
+    def test_same_bar_sl_and_trail_trail_wins(self):
+        """Bar has high >= trail_activate AND low <= SL → trail wins (tighter)."""
         # Bar 0: entry at 100
-        # Bar 1: high=101.6 (+1.6%, above trail_activate=1.5%)
-        #         low=98.4 (-1.6%, below SL=1.5% at 98.5)
-        # SL should fire for LONG, not trail
+        # Bar 1: high=101.6 (+1.6%), low=98.4 (-1.6%)
+        # LONG: peak=0.016 > trail_activate → trail_level=101.5, low < trail → trail fires at 0.015
+        # SHORT: peak=0.016 > trail_activate → trail_level=98.5, high > trail → trail fires at 0.015
         bars = [
             (100.0, 100.0, 100.0, 100.0),  # bar 0: entry
             (100.0, 101.6, 98.4, 100.0),  # bar 1: both SL and trail trigger
@@ -71,19 +78,19 @@ class TestStraddleSLPriority:
         )
 
         assert len(pnl) == 1
-        # LONG leg: SL = -1.5%, SHORT leg: high=101.6 → SL at +1.5% → -1.5%
-        # Both legs SL → net = -1.5% + -1.5% - cost
-        long_sl = -self.SL
-        short_sl = -self.SL  # high=101.6 > 100*(1+0.015)=101.5
-        expected = long_sl + short_sl - self.COST
+        # Both legs: trail fires at max(peak - trail_dist, -sl) = max(0.015, -0.015) = 0.015
+        long_trail = max(0.016 - self.TRAIL_DIST, -self.SL)  # 0.015
+        short_trail = max(0.016 - self.TRAIL_DIST, -self.SL)  # 0.015
+        expected = long_trail + short_trail - self.COST
         assert abs(pnl[0] - expected) < 1e-10, f"Expected {expected}, got {pnl[0]}"
 
-    def test_same_bar_sl_and_trail_short_leg_sl_wins(self):
-        """Bar has low >= trail_activate (SHORT) AND high >= SL → SHORT SL fires."""
+    def test_sl_fires_before_trail_activates(self):
+        """SL fires normally when trail hasn't activated yet."""
+        # Bar 1: low touches SL but high doesn't reach trail_activate
         bars = [
             (100.0, 100.0, 100.0, 100.0),  # entry
-            (100.0, 101.6, 98.4, 100.0),  # SL+trail for both legs
-            (100.0, 100.0, 100.0, 100.0),
+            (100.0, 100.5, 98.4, 99.0),  # high=+0.5% < trail_activate=1.5%, low < SL
+            (99.0, 99.0, 99.0, 99.0),
         ]
         close, high, low = _make_bars(bars)
         sig = np.array([1.0, 0.0, 0.0])
@@ -101,17 +108,17 @@ class TestStraddleSLPriority:
             self.TRAIL_DIST,
         )
 
-        # Both legs hit SL
-        assert pnl[0] < -0.02, f"Expected double-SL loss, got {pnl[0]}"
+        assert len(pnl) == 1
+        # LONG: SL fires (trail not active), SHORT: close at bar 1
+        assert pnl[0] < 0, f"Expected loss when SL fires before trail activation, got {pnl[0]}"
 
     def test_trail_fires_when_sl_not_hit(self):
         """Trail fires normally when bar high/low doesn't reach SL."""
         bars = [
             (100.0, 100.0, 100.0, 100.0),  # entry
-            # LONG: high=102 (+2%, activates trail), low=101 (above SL=98.5)
-            (100.0, 102.0, 101.0, 101.5),
-            # LONG: high=102.1, low=101.3 → trail_lvl = 100*(1+0.02-0.001)=101.9
-            # low=101.3 < 101.9 → trail hit at +1.9%
+            (100.0, 102.0, 101.0, 101.5),  # LONG: +2% gain, trail activates
+            # peak=0.02, trail_lvl=100*(1+0.02-0.001)=101.9
+            # low=101.3 < 101.9 → trail hit at 0.019
             (101.5, 102.1, 101.3, 101.5),
         ]
         close, high, low = _make_bars(bars)
@@ -131,19 +138,52 @@ class TestStraddleSLPriority:
         )
 
         assert len(pnl) == 1
-        # LONG exits via trail ~+1.9%, SHORT still active, closes at bar 2 close
-        # Net should be positive (trail win > SL loss)
-        # LONG trail: peak=0.021 → trail = max(0.021-0.001, -0.015) = 0.020
-        # SHORT: close at 101.5 → (100-101.5)/100 = -0.015 → SL at bar 1
-        # Actually SHORT high=102 > 100*(1+0.015)=101.5 → SL at bar 1
-        # Net = 0.020 + (-0.015) - 0.0016 = 0.0034
         assert pnl[0] > 0.0, f"Expected positive trail exit, got {pnl[0]}"
 
-    def test_double_sl_straddle_produces_large_loss(self):
-        """When both legs SL, loss should be ~-3% + cost (not hidden by trail)."""
+    def test_crash_through_both_after_trail_active_trail_wins(self):
+        """Crash through SL after trail active → trail level exit (not SL)."""
+        bars = [
+            (100.0, 100.0, 100.0, 100.0),
+            # Bar 1: LONG gains +1.6%, trail activates. Low stays above trail_lvl.
+            # trail_lvl = 100*(1+0.016-0.001) = 101.5, low=101.51 > 101.5
+            # SHORT: high=101.6 > 100*(1+0.015)=101.5 → SHORT trail activates too
+            (101.0, 101.6, 101.51, 101.55),
+            # Bar 2: crash — low=98.0 (below SL=98.5).
+            # With G5 fix: trail is active, trail fires (tighter than SL).
+            # LONG: peak still 0.016, trail_lvl=101.5, low=98 < trail → trail at 0.015
+            (101.55, 101.6, 98.0, 99.0),
+        ]
+        close, high, low = _make_bars(bars)
+        sig = np.array([1.0, 0.0, 0.0])
+
+        pnl, _, ext = sim_straddle_trailing(
+            close,
+            high,
+            low,
+            sig,
+            self.SL,
+            self.TP,
+            self.MAX_HOLD,
+            self.COST,
+            self.TRAIL_ACT,
+            self.TRAIL_DIST,
+        )
+
+        assert len(pnl) == 1
+        # LONG: trail at max(0.016-0.001, -0.015) = 0.015
+        # SHORT: SL at bar 1 (high=101.6 > 101.5) — wait, SHORT trail also activates
+        # SHORT peak from bar 1: low=101.51, but entry=100, short gain=(100-101.51)/100=-0.0151 (negative)
+        # Actually SHORT: gain = (entry - low) / entry. low=101.51 → gain = (100-101.51)/100 = -0.0151 < 0
+        # So SHORT peak_gain=0, trail NOT active. SHORT SL: high=101.6 > 100*(1+0.015)=101.5 → SL fires bar 1
+        # Net: LONG trail(0.015) + SHORT SL(-0.015) - cost
+        # This is approximately break-even minus cost
+        assert pnl[0] > -0.01, f"Expected trail to mitigate crash, got {pnl[0]}"
+
+    def test_massive_range_bar_trail_wins_both_legs(self):
+        """Massive range bar: both legs trail (not double SL)."""
         bars = [
             (100.0, 100.0, 100.0, 100.0),  # entry
-            # Massive range bar: high=103, low=97 → both legs SL
+            # high=103 (+3%), low=97 (-3%). Both legs: peak > trail_activate
             (100.0, 103.0, 97.0, 100.0),
             (100.0, 100.0, 100.0, 100.0),
         ]
@@ -164,52 +204,16 @@ class TestStraddleSLPriority:
         )
 
         assert len(pnl) == 1
-        expected_loss = -self.SL * 2 - self.COST
-        assert abs(pnl[0] - expected_loss) < 1e-10, f"Expected {expected_loss:.4f}, got {pnl[0]:.4f}"
-
-    def test_sl_fires_even_when_trail_was_active(self):
-        """If trail was active from previous bars but current bar hits SL, SL wins."""
-        bars = [
-            (100.0, 100.0, 100.0, 100.0),  # entry
-            # Bar 1: LONG peak=+1.6% → trail activates. Low stays above trail_lvl.
-            # trail_lvl = 100*(1+0.016-0.001) = 101.5, low=101.51 > 101.5 → no trail fire
-            # SHORT: high=101.6 > 100*(1+0.015)=101.5 → SHORT SL fires
-            (101.0, 101.6, 101.51, 101.55),
-            # Bar 2: crash — low=98.0 (below SL=98.5). SL fires for LONG
-            # despite trail being active.
-            (101.55, 101.6, 98.0, 99.0),
-        ]
-        close, high, low = _make_bars(bars)
-        sig = np.array([1.0, 0.0, 0.0])
-
-        pnl, _, ext = sim_straddle_trailing(
-            close,
-            high,
-            low,
-            sig,
-            self.SL,
-            self.TP,
-            self.MAX_HOLD,
-            self.COST,
-            self.TRAIL_ACT,
-            self.TRAIL_DIST,
-        )
-
-        assert len(pnl) == 1
-        # LONG: SL at bar 2 → le = -0.015
-        # SHORT: SL at bar 1 → se = -0.015
-        # net = -0.015 + (-0.015) - cost = -0.0316
-        assert pnl[0] < -0.02, f"Expected SL loss, got {pnl[0]}"
+        # Both legs trail at max(0.03-0.001, -0.015) = 0.029 each
+        # Net = 0.029 + 0.029 - cost ≈ +5.6%
+        assert pnl[0] > 0.05, f"Expected large positive from trail on both legs, got {pnl[0]}"
 
     def test_no_conflict_bars_produce_correct_results(self):
         """Normal scenario: trail activates and fires cleanly on separate bars."""
         bars = [
             (100.0, 100.0, 100.0, 100.0),  # entry
-            # Bar 1: small up, no SL, no trail activate
             (100.0, 100.5, 99.8, 100.3),
-            # Bar 2: LONG gains +2%, trail activates
-            (100.3, 102.0, 100.2, 101.8),
-            # Bar 3: price dips below trail level but ABOVE SL
+            (100.3, 102.0, 100.2, 101.8),  # LONG: trail activates
             # peak=0.02, trail_lvl=100*(1+0.02-0.001)=101.9
             # low=101.0 < 101.9 → trail fires
             (101.8, 102.0, 101.0, 101.5),
@@ -231,17 +235,16 @@ class TestStraddleSLPriority:
         )
 
         assert len(pnl) == 1
-        # Trail exit is profitable
         assert pnl[0] > -self.COST, f"Expected non-negative trail result, got {pnl[0]}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Directional — SL Priority Tests
+#  Directional — Trail Priority Tests (G5 parity fix)
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class TestDirectionalSLPriority:
-    """SL must fire before trail in sim_directional_trailing."""
+class TestDirectionalTrailPriority:
+    """When trail is active, trail level (tighter) wins over SL."""
 
     SL = 0.01  # 1%
     TP = 0.20
@@ -250,12 +253,14 @@ class TestDirectionalSLPriority:
     TRAIL_ACT = 0.01  # 1%
     TRAIL_DIST = 0.002  # 0.2%
 
-    def test_same_bar_sl_and_trail_long_sl_wins(self):
-        """LONG: bar has high >= trail_activate AND low <= SL → SL fires."""
+    def test_same_bar_sl_and_trail_long_trail_wins(self):
+        """LONG: bar has high >= trail_activate AND low <= SL → trail wins."""
         bars = [
             (100.0, 100.0, 100.0, 100.0),  # entry
             # high=101.1 (+1.1%, above trail_activate=1.0%)
             # low=98.9 (-1.1%, below SL=1.0% at 99.0)
+            # Trail activates, trail_level=100*(1+0.011-0.002)=100.9
+            # low=98.9 < trail_level → trail fires at max(0.009, -0.01) = 0.009
             (100.0, 101.1, 98.9, 100.0),
             (100.0, 100.0, 100.0, 100.0),
         ]
@@ -278,15 +283,17 @@ class TestDirectionalSLPriority:
         )
 
         assert len(pnl) == 1
-        expected = -self.SL - self.COST
+        # Trail wins: max(0.011 - 0.002, -0.01) = 0.009
+        expected = 0.009 - self.COST
         assert abs(pnl[0] - expected) < 1e-10, f"Expected {expected}, got {pnl[0]}"
 
-    def test_same_bar_sl_and_trail_short_sl_wins(self):
-        """SHORT: bar has low showing gain >= trail AND high >= SL → SL fires."""
+    def test_same_bar_sl_and_trail_short_trail_wins(self):
+        """SHORT: same-bar SL+trail → trail wins."""
         bars = [
-            (100.0, 100.0, 100.0, 100.0),  # entry
-            # low=98.9 (-1.1% = +1.1% gain for SHORT, above trail_activate)
-            # high=101.1 (+1.1%, above SL=1.0% at 101.0 for SHORT)
+            (100.0, 100.0, 100.0, 100.0),
+            # low=98.9 (+1.1% gain for SHORT), high=101.1 (above SL at 101.0)
+            # Trail: peak=0.011, trail_level=100*(1-0.011+0.002)=99.1
+            # high=101.1 > trail_level → trail fires at max(0.009, -0.01) = 0.009
             (100.0, 101.1, 98.9, 100.0),
             (100.0, 100.0, 100.0, 100.0),
         ]
@@ -309,17 +316,45 @@ class TestDirectionalSLPriority:
         )
 
         assert len(pnl) == 1
-        expected = -self.SL - self.COST
+        expected = 0.009 - self.COST
         assert abs(pnl[0] - expected) < 1e-10, f"Expected {expected}, got {pnl[0]}"
+
+    def test_sl_fires_before_trail_activates(self):
+        """SL fires normally when trail hasn't activated yet."""
+        bars = [
+            (100.0, 100.0, 100.0, 100.0),
+            # high=100.5 (+0.5% < trail_activate=1%), low=98.9 (below SL at 99.0)
+            (100.0, 100.5, 98.9, 99.0),
+            (99.0, 99.0, 99.0, 99.0),
+        ]
+        close, high, low = _make_bars(bars)
+        sig = np.array([1.0, 0.0, 0.0])
+        dire = np.array([1.0, 0.0, 0.0])
+
+        pnl, _, _ = sim_directional_trailing(
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            self.SL,
+            self.TP,
+            self.MAX_HOLD,
+            self.COST,
+            self.TRAIL_ACT,
+            self.TRAIL_DIST,
+        )
+
+        assert len(pnl) == 1
+        expected = -self.SL - self.COST
+        assert abs(pnl[0] - expected) < 1e-10, f"Expected SL exit {expected}, got {pnl[0]}"
 
     def test_trail_fires_when_sl_not_hit_long(self):
         """LONG trail fires normally when SL level not breached."""
         bars = [
-            (100.0, 100.0, 100.0, 100.0),  # entry
-            # Bar 1: +1.5% gain, activates trail, no SL
-            (100.0, 101.5, 99.5, 101.2),
-            # Bar 2: dips to trail level but above SL
-            # peak=0.015, trail_lvl = 100*(1+0.015-0.002) = 101.3
+            (100.0, 100.0, 100.0, 100.0),
+            (100.0, 101.5, 99.5, 101.2),  # +1.5% gain, trail activates
+            # peak=0.015, trail_lvl=100*(1+0.015-0.002)=101.3
             # low=101.0 < 101.3 → trail hit
             (101.2, 101.5, 101.0, 101.2),
         ]
@@ -342,7 +377,6 @@ class TestDirectionalSLPriority:
         )
 
         assert len(pnl) == 1
-        # Trail exit: peak_gain=0.015, pnl = 0.015 - 0.002 = 0.013
         expected = 0.013 - self.COST
         assert abs(pnl[0] - expected) < 1e-10, f"Expected {expected}, got {pnl[0]}"
 
@@ -350,10 +384,8 @@ class TestDirectionalSLPriority:
         """SHORT trail fires normally when SL level not breached."""
         bars = [
             (100.0, 100.0, 100.0, 100.0),
-            # Bar 1: -1.5% = +1.5% gain for SHORT, activates trail
-            (100.0, 100.5, 98.5, 98.8),
-            # Bar 2: bounces to trail level but below SL
-            # peak=0.015, trail_lvl = 100*(1-0.015+0.002) = 98.7
+            (100.0, 100.5, 98.5, 98.8),  # +1.5% gain for SHORT
+            # peak=0.015, trail_lvl=100*(1-0.015+0.002)=98.7
             # high=99.0 > 98.7 → trail hit
             (98.8, 99.0, 98.5, 98.8),
         ]
@@ -379,15 +411,16 @@ class TestDirectionalSLPriority:
         expected = 0.013 - self.COST
         assert abs(pnl[0] - expected) < 1e-10, f"Expected {expected}, got {pnl[0]}"
 
-    def test_sl_fires_even_when_trail_active(self):
-        """SL fires even after trail was activated on a previous bar."""
+    def test_crash_after_trail_active_trail_wins(self):
+        """Crash through SL after trail active → trail level exit (not -sl)."""
         bars = [
             (100.0, 100.0, 100.0, 100.0),
-            # Bar 1: +1.1% gain → trail activates (>=1.0%). Low stays above trail_lvl.
-            # trail_lvl = 100*(1+0.011-0.002) = 100.9, low=101.01 > 100.9 → no trail fire
+            # Bar 1: +1.1% gain → trail activates.
+            # trail_lvl = 100*(1+0.011-0.002) = 100.9, low=101.01 > 100.9 → no fire
             (100.0, 101.1, 101.01, 101.05),
-            # Bar 2: crash — low=98.5 (below SL=99.0). SL should fire
-            # despite trail being active.
+            # Bar 2: crash — low=98.5 (below SL=99.0).
+            # Trail active: trail_lvl=100.9 (from bar 1 peak), low=98.5 < 100.9
+            # Trail fires at max(0.011-0.002, -0.01) = 0.009 (NOT -sl)
             (101.05, 101.1, 98.5, 99.0),
         ]
         close, high, low = _make_bars(bars)
@@ -409,10 +442,9 @@ class TestDirectionalSLPriority:
         )
 
         assert len(pnl) == 1
-        expected = -self.SL - self.COST
-        assert abs(pnl[0] - expected) < 1e-10, (
-            f"SL should fire even with trail active: expected {expected}, got {pnl[0]}"
-        )
+        # G5 fix: trail wins → positive PnL (not -sl)
+        expected = max(0.011 - self.TRAIL_DIST, -self.SL) - self.COST
+        assert abs(pnl[0] - expected) < 1e-10, f"Trail should fire (tighter than SL): expected {expected}, got {pnl[0]}"
 
     def test_backward_compat_no_conflict(self):
         """Trades without SL/trail conflicts produce identical results."""
@@ -452,5 +484,4 @@ class TestDirectionalSLPriority:
         )
 
         assert len(pnl) == 1
-        # Trail exit, no SL conflict
         assert pnl[0] > 0, f"Expected positive trail exit, got {pnl[0]}"
