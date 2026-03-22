@@ -50,9 +50,6 @@ class LoopMixin:
         total_pnl = sum(t["pnl_usd"] for t in self._trade_history)
         wr = wins / n_trades * 100 if n_trades > 0 else 0
 
-        hwm = self._high_water_mark if self._high_water_mark > 0 else balance
-        dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
-
         # Time since last trade
         last_trade_ago = ""
         if self._trade_history:
@@ -68,14 +65,9 @@ class LoopMixin:
                 except Exception:
                     pass
 
-        logger.info(
-            f"[Summary] Trades={n_trades}, WR={wr:.0f}%, "
-            f"PnL=${total_pnl:+.2f}, Balance=${balance:.2f}, "
-            f"HWM=${hwm:.2f}, DD={dd_pct:.1f}%, "
-            f"Active={len(positions)}{last_trade_ago}"
-        )
+        logger.info(f"  [SUMMARY] Trades={n_trades} WR={wr:.0f}% PnL=${total_pnl:+.2f}{last_trade_ago}")
 
-        # Active position details (strategy_type + MFE/MAE + trail status)
+        # Active position MFE/MAE + trail (strategy_type + bars already shown in [POSITIONS])
         for sym, pos in positions.items():
             strat = pos.get("strategy_type", "vr_directional")
             trail_info = ""
@@ -84,8 +76,6 @@ class LoopMixin:
                 trail_info = f" trail=✓(peak={peak:+.1f}%)"
             logger.info(
                 f"  [{sym}] {strat} "
-                f"entry=${pos['entry_price']:.4f} "
-                f"bars={pos['bars_held']}/{pos.get('max_hold', self.config.max_hold)} "
                 f"MFE={pos.get('best_pnl', 0) * 100:+.2f}% "
                 f"MAE={pos.get('worst_pnl', 0) * 100:+.2f}%"
                 f"{trail_info}"
