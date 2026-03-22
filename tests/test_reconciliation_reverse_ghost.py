@@ -158,7 +158,7 @@ class TestReverseGhostReconciliation:
             "tf": "15m",
             "position_side": "LONG",
             "trail_active": False,
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
         exchange_positions = [
             _make_exchange_position("TESTUSDT", "LONG", QTY),
@@ -261,7 +261,7 @@ class TestStartupExchangeCrosscheck:
             "tf": "15m",
             "position_side": "LONG",
             "trail_active": False,
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
         exchange_positions = [
             _make_exchange_position("TESTUSDT", "LONG", QTY),

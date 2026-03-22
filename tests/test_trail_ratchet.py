@@ -19,7 +19,7 @@ PRICE = 100.0
 def _make_pos(
     trail_active: bool = True,
     peak_gain: float = 0.008,
-    strategy_type: str = "vr_squeeze",
+    strategy_type="vr_directional",
     signal: int = 1,
     sl_order_id: str = "sl_111",
     trail_sl_ratcheted: float = -999.0,

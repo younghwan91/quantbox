@@ -66,6 +66,7 @@ from quantbox.notifications.bot import (
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
+from quantbox.core.strategy_names import normalize_strategy_type
 from quantbox.core.commands import CommandsMixin
 from quantbox.execution.algo_api import AlgoApiClient
 from quantbox.core.loop_mixin import LoopMixin
@@ -108,19 +109,6 @@ logger = logging.getLogger("Scalper")
 from quantbox.utils.diagnostics import _diag_logger  # noqa: E402
 
 # ──────────────────────── Helpers ──────────────────────────────────────────
-
-
-def _healed_strategy_type(pos: dict) -> str:
-    """Return strategy_type, auto-healing straddle positions mislabeled as vr_squeeze.
-
-    Positions opened before commit 0ac2e2b (strategy_type propagation fix) were
-    stored with strategy_type='vr_squeeze' even when is_straddle=True.  Detect
-    and correct on state restore so the dashboard / journal always show 'straddle'.
-    """
-    raw = pos.get("strategy_type", "vr_squeeze")
-    if pos.get("is_straddle", False) and raw == "vr_squeeze":
-        return "straddle"
-    return raw
 
 
 # ──────────────────────── Scalper Class ────────────────────────────────
@@ -872,7 +860,7 @@ class RubberBandScalper(
                         and getattr(self.vs_config, "trail_server_native", False)
                     ):
                         api_sym = pos_key.split(":")[0]
-                        strategy_type = pos.get("strategy_type", "vr_squeeze")
+                        strategy_type = pos.get("strategy_type", "vr_directional")
                         signal = pos.get("signal", 1)
                         entry_price = pos.get("entry_price", current_price)
                         pos_side = pos.get("position_side")
@@ -1760,7 +1748,7 @@ class RubberBandScalper(
                 tp=pos.get("tp"),
                 tf=pos.get("tf"),
                 max_hold=pos.get("max_hold"),
-                strategy_type=_healed_strategy_type(pos),
+                strategy_type=normalize_strategy_type(pos.get("strategy_type", "vr_directional")),
                 is_straddle=pos.get("is_straddle", False),
                 server_trail_order_id=pos.get("server_trail_order_id"),
             )
@@ -1792,9 +1780,11 @@ class RubberBandScalper(
                 if pos.get("straddle_orphan_since_cycle") is not None:
                     self.strategy._positions[sym]["straddle_orphan_since_cycle"] = pos["straddle_orphan_since_cycle"]
                 # v14.0: Restore per-signal fields (sl/tp/tf/max_hold/strategy_type).
-                # Without this, crash recovery defaults to VR squeeze params
+                # Without this, crash recovery defaults to VR directional params
                 # for ALL positions — breaking MA cluster SL/TP/max_hold/exit routing.
-                self.strategy._positions[sym]["strategy_type"] = _healed_strategy_type(pos)
+                self.strategy._positions[sym]["strategy_type"] = normalize_strategy_type(
+                    pos.get("strategy_type", "vr_directional")
+                )
                 self.strategy._positions[sym]["sl"] = pos.get("sl", self.strategy._positions[sym].get("sl"))
                 self.strategy._positions[sym]["tp"] = pos.get("tp", self.strategy._positions[sym].get("tp"))
                 self.strategy._positions[sym]["tf"] = pos.get("tf", self.strategy._positions[sym].get("tf"))

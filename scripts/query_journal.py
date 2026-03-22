@@ -171,7 +171,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Query trade journal")
     parser.add_argument("--db", default="data/journal.sqlite")
     parser.add_argument("--symbol", help="Filter by symbol")
-    parser.add_argument("--strategy", choices=["vr_squeeze", "ma_cluster"], help="Filter by strategy")
+    parser.add_argument("--strategy", choices=["vr_directional", "vr_straddle", "ma_cluster"], help="Filter by strategy")
     parser.add_argument("--session", choices=["live", "paper"], help="Filter by session")
     parser.add_argument("--days", type=int, help="Last N days only")
     parser.add_argument("--by-symbol", action="store_true", help="Rank by symbol")

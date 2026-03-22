@@ -84,7 +84,7 @@ def _set_signal_meta(scalper: RubberBandScalper, **meta) -> None:
         "tp": scalper.vs_config.d_tp,
         "tf": "15m",
         "straddle": False,
-        "strategy_type": "vr_squeeze",
+        "strategy_type": "vr_directional",
         "conviction_score": 1,
     }
     defaults.update(meta)
@@ -327,7 +327,7 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=0, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=0, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -343,7 +343,7 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=1, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=1, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -359,7 +359,7 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=4, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=4, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -376,7 +376,7 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=99, strategy_type="vr_squeeze")  # clamped to 4
+        _set_signal_meta(scalper, conviction_score=99, strategy_type="vr_directional")  # clamped to 4
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -594,7 +594,7 @@ class TestClosePaths:
             "position_side": pos_side,
             "trail_active": False,
             "opened_at": "2026-03-09T10:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
             "balance_before": 1234.0,
         }
         return pos_key
@@ -1060,7 +1060,7 @@ class TestCloseWithRemainingPositions:
             "position_side": "LONG",
             "trail_active": False,
             "opened_at": "2026-03-09T10:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
 
         # Add a second position that remains after close
@@ -1147,7 +1147,7 @@ class TestCloseEdgeCases:
             "position_side": "LONG",
             "trail_active": False,
             "opened_at": "2026-01-01T00:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
         scalper.config.partial_exit_fraction = 1e-10  # tiny → rounds to 0
         scalper._round_qty = MagicMock(return_value=0.0)
@@ -1175,7 +1175,7 @@ class TestCloseEdgeCases:
             "position_side": "LONG",
             "trail_active": False,
             "opened_at": "2026-01-01T00:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
         scalper._round_qty = MagicMock(return_value=0.0)
         result = scalper._close_position("TESTUSDT:LONG", "max_hold", 100.0)
@@ -1202,7 +1202,7 @@ class TestCloseEdgeCases:
             "position_side": "LONG",
             "trail_active": False,
             "opened_at": "2026-01-01T00:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
         # Fake order placed successfully, but strategy.close_position returns None (race)
         scalper.client.futures_create_order = MagicMock(
@@ -1236,7 +1236,7 @@ class TestMaxNotionalCap:
         # max_notional = $4000 → should cap to $4000
         scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 4000.0
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -1257,7 +1257,7 @@ class TestMaxNotionalCap:
         # CW score=2 → 1.5x → notional = $4500, max_notional = $10000 → no cap
         scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 10000.0
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -1279,7 +1279,7 @@ class TestMaxNotionalCap:
         # _make_vs_scalper already sets None; this is explicit for documentation.
         scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = None
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])

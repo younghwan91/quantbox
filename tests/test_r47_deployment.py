@@ -28,7 +28,7 @@ from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 
 def _open_vr_long(strategy, symbol="BTCUSDT", entry=100.0):
-    """Open D_mom8 VR squeeze LONG. strategy_type = 'vr_squeeze'."""
+    """Open D_mom8 VR directional LONG. strategy_type = 'vr_directional'."""
     cfg = strategy.config
     pos_key = f"{symbol}:LONG"
     strategy.open_position(
@@ -473,12 +473,12 @@ class TestFreshStateAfterTrailExit:
 class TestStrategyTypeInPositionDict:
     """position dict에 strategy_type이 정확히 저장된다."""
 
-    def test_vr_squeeze_has_vr_squeeze_type(self, strategy):
-        """D_mom8 포지션은 strategy_type='vr_squeeze'."""
+    def test_vr_directional_has_correct_type(self, strategy):
+        """D_mom8 포지션은 strategy_type='vr_directional'."""
         pos_key = _open_vr_long(strategy, "BTCUSDT", entry=100.0)
         pos = strategy._positions[pos_key]
-        assert pos.get("strategy_type") in ("vr_squeeze", None, ""), (
-            f"D_mom8 strategy_type should be vr_squeeze, got {pos.get('strategy_type')}"
+        assert pos.get("strategy_type") in ("vr_directional", None, ""), (
+            f"D_mom8 strategy_type should be vr_directional, got {pos.get('strategy_type')}"
         )
 
     def test_ma_cluster_has_ma_cluster_type(self, strategy):

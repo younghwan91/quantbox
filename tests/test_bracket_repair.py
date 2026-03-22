@@ -388,7 +388,7 @@ class TestSaveStateOnServerFill:
             "notional": 2400.0,
             "bars_held": 5,
             "move_size": 0.02,
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
             "best_pnl": 0.02,
             "worst_pnl": -0.005,
             "opened_at": "2026-03-15T05:00:00+00:00",
@@ -408,7 +408,7 @@ class TestSaveStateOnServerFill:
         assert trade_arg["symbol"] == "BTCUSDT"
         assert trade_arg["reason"] == "server_partial_tp"
         assert "strategy_type" in trade_arg
-        assert trade_arg["strategy_type"] == "vr_squeeze"
+        assert trade_arg["strategy_type"] == "vr_directional"
         assert trade_arg["pnl_usd"] > 0  # TP should be profitable
 
     def test_wait_for_bar_saves_after_sync(self):

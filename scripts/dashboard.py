@@ -254,11 +254,11 @@ def load_state_strategies() -> dict:
         s = json.load(open(STATE))
         result = {}
         for sym, pos in s.get("positions", {}).items():
-            strat = pos.get("strategy_type", "vr_squeeze")
+            strat = pos.get("strategy_type", "vr_directional")
             is_straddle = pos.get("is_straddle", False)
             # Patch in-flight: state written before code fix may have vr_squeeze for straddles
-            if is_straddle and strat == "vr_squeeze":
-                strat = "straddle"
+            if is_straddle and strat == "vr_directional":
+                strat = "vr_straddle"
             result[sym] = strat
         return result
     except Exception:
@@ -283,7 +283,7 @@ def load_trades() -> pd.DataFrame:
 def _strat_tag(strategy_type: str) -> tuple[str, str]:
     """Return (css_class, display_label) for a strategy_type value."""
     s = str(strategy_type).lower()
-    if "straddle" in s:
+    if "vr_straddle" in s:
         return "tag-vr-s", "STRD"
     if "squeeze" in s or "vr" in s:
         return "tag-vr-d", "VR"
@@ -460,8 +460,8 @@ def chart_trades_scatter(df: pd.DataFrame) -> go.Figure | None:
 
     fig = go.Figure()
     for strat, grp in d.groupby("strategy_type"):
-        color = "#C084FC" if "straddle" in str(strat) else ("#4A90D9" if "vr" in str(strat) else "#C8960C")
-        label = "S_d8" if "straddle" in str(strat) else ("D_mom8" if "directional" in str(strat) else "MA CLUSTER")
+        color = "#C084FC" if "vr_straddle" in str(strat) else ("#4A90D9" if "vr" in str(strat) else "#C8960C")
+        label = "S_d8" if "vr_straddle" in str(strat) else ("D_mom8" if "directional" in str(strat) else "MA CLUSTER")
         fig.add_trace(go.Scatter(
             x=grp["exit_time"], y=grp["pnl_usd"],
             mode="markers",
@@ -636,7 +636,7 @@ def render():
                 for p in positions:
                     sym_key   = f"{p['symbol']}:{p['side']}"
                     bars      = bars_map.get(sym_key, bars_map.get(p["symbol"], "?"))
-                    strat_type = strategies_map.get(sym_key, strategies_map.get(p["symbol"], "vr_squeeze"))
+                    strat_type = strategies_map.get(sym_key, strategies_map.get(p["symbol"], "vr_directional"))
                     strat_cls, strat_label = _strat_tag(strat_type)
                     pct_class = "pos" if p["pct"] >= 0 else "neg"
                     side_cls  = "long-tag" if p["side"] == "LONG" else "short-tag"
@@ -954,7 +954,7 @@ def render():
                 strat_comp = ""
                 for _, r in grp_strat.iterrows():
                     tag_cls, label = _strat_tag(r["strategy_type"])
-                    if "straddle" not in str(r["strategy_type"]) and "squeeze" not in str(r["strategy_type"]) and "directional" not in str(r["strategy_type"]):
+                    if "vr" not in str(r["strategy_type"]):
                         label = "MA CLUSTER"
                     tot_cls = "pos" if r["total"] >= 0 else "neg"
                     pf_str2 = f"{r['pf']:.2f}" if r["pf"] != float("inf") else "∞"

@@ -4,9 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-QuantBox is a production algorithmic trading system for Binance USDT-M perpetual futures. It runs a dual-axis squeeze strategy: **VR Squeeze** (VolStraddle, 30x leverage) and **MA Cluster Squeeze** (21x leverage) sharing a 10-slot portfolio. This is a live system managing real capital — all rules exist because of past losses or bugs.
+QuantBox is a production algorithmic trading system for Binance USDT-M perpetual futures. It runs a tri-axis squeeze strategy sharing a 10-slot portfolio:
+- **VR Directional (D_mom8)** — VR < 0.50 → momentum direction entry, signal ±1, 30x leverage
+- **VR Straddle (S_d8)** — VR squeeze → simultaneous long+short, signal 2, 30x leverage
+- **MA Cluster Squeeze** — 4h SMA cluster breakout, 21x leverage
+
+This is a live system managing real capital — all rules exist because of past losses or bugs.
 
 **Top Rule: Never guess numbers or facts. If you don't know, say so. Always read the code/config first.**
+
+## Strategy Naming (Canonical)
+
+| `strategy_type` | Human Label | Signal | Leverage |
+|-----------------|-------------|--------|----------|
+| `vr_directional` | VR Directional | D_mom8 | 30x |
+| `vr_straddle` | VR Straddle | S_d8 | 30x |
+| `ma_cluster` | MA Cluster | — | 21x |
+
+All canonical names are defined in `core/strategy_names.py`. Use `normalize_strategy_type()` to resolve old names.
+
+### Naming Migration (2026-03-22)
+
+Old names may appear in log files and historical data before this date:
+
+| Old Name | New Canonical | Context |
+|----------|--------------|---------|
+| `vr_squeeze` | `vr_directional` | Was used for D_mom8 directional entries |
+| `straddle` | `vr_straddle` | Was used for S_d8 straddle entries |
+| `vr_compression` | `vr_directional` | Was used in startup banner `entry_mode` |
 
 ## Build & Development Commands
 

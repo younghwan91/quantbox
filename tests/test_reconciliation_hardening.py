@@ -71,7 +71,7 @@ def _make_scalper(paper_mode: bool = False, positions: dict | None = None):
                     leverage=pos_data.get("leverage", 3),
                     move_size=0.03,
                     position_side=pos_side,
-                    strategy_type=pos_data.get("strategy_type", "vr_squeeze"),
+                    strategy_type="vr_directional",
                 )
                 if pos_key in scalper.strategy._positions:
                     scalper.strategy._positions[pos_key].update(pos_data)

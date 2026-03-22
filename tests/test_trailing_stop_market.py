@@ -52,7 +52,7 @@ def _inject_position(scalper, pos_key: str, **overrides):
         "position_side": "LONG" if signal == 1 else "SHORT",
         "trail_active": False,
         "opened_at": "2026-01-01T00:00:00+00:00",
-        "strategy_type": "straddle",
+        "strategy_type": "vr_straddle",
         "is_straddle": True,
         "move_size": 1.0,
         "entry_stop_mult": 0.015,
@@ -70,7 +70,7 @@ def _inject_position(scalper, pos_key: str, **overrides):
 class TestGetTrailParams:
     def test_straddle_long(self):
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100
         # activationPrice = entry × (1 + trail_activate) = 100 × 1.030 = 103.0
         assert ap == pytest.approx(103.0)
@@ -78,7 +78,7 @@ class TestGetTrailParams:
 
     def test_straddle_short(self):
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("straddle", -1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_straddle", -1, 100.0)
         assert cr == pytest.approx(0.5)
         # activationPrice = entry × (1 - trail_activate) = 100 × 0.970 = 97.0
         assert ap == pytest.approx(97.0)
@@ -86,7 +86,7 @@ class TestGetTrailParams:
 
     def test_vr_squeeze_long(self):
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("vr_squeeze", 1, 200.0)
+        cr, ap, cs = s._get_trail_params("vr_directional", 1, 200.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100 (r106: rule #8 floor)
         # activationPrice = entry × (1 + trail_activate) = 200 × 1.040 = 208
         assert ap == pytest.approx(208.0)
@@ -108,7 +108,7 @@ class TestGetTrailParams:
         # Bypass validator to simulate a sub-floor value reaching brackets.py clamp
         object.__setattr__(cfg, "s_trail_distance", 0.001)
         s = _build_vs_scalper(vs_config=cfg)
-        cr, _, _ = s._get_trail_params("straddle", 1, 100.0)
+        cr, _, _ = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == 0.5  # 0.001 * 100 = 0.1 → clamped to 0.5 (rule #8)
 
 
@@ -265,7 +265,7 @@ class TestTrailAtEntry:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
         )
 
         pos = s.strategy._positions["TESTUSDT:LONG"]
@@ -289,7 +289,7 @@ class TestTrailAtEntry:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
         )
 
         pos = s.strategy._positions["TESTUSDT:LONG"]
@@ -306,7 +306,7 @@ class TestTrailAtEntry:
         # The positions.py code at L405-460 checks vs_config.trail_server_native
         # and calls _place_trailing_stop_market + skips _place_server_take_profit.
         # We verify by checking the trail params calculation works correctly.
-        cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == pytest.approx(0.5)
         # activationPrice = entry × (1 + trail_activate) = 100 × 1.030 = 103.0
         assert ap == pytest.approx(103.0)
@@ -360,7 +360,7 @@ class TestClientTrailSuppression:
             trail_active=True,
             peak_gain=0.025,  # 2.5%
             worst_pnl=-0.001,
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
             sl=0.015,
         )
 
@@ -383,7 +383,7 @@ class TestClientTrailSuppression:
             trail_active=True,
             peak_gain=0.025,  # 2.5%
             worst_pnl=-0.001,
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
             sl=0.015,
         )
 
@@ -528,7 +528,7 @@ class TestTrailBracketRepair:
             "TESTUSDT:LONG",
             server_trail_order_id=None,
             server_sl_order_id="sl_111",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
             is_straddle=False,
         )
         # Entry-time placement: trail repaired regardless of trail_active
@@ -559,7 +559,7 @@ class TestTrailBracketRepair:
             "TESTUSDT:LONG",
             server_trail_order_id=None,
             server_sl_order_id="sl_111",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
             is_straddle=False,
         )
         # trail_active is False — trail should STILL be placed (future activationPrice)
@@ -653,7 +653,7 @@ class TestStatePersistence:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
         )
 
         pos_key = "TESTUSDT:LONG"
@@ -941,13 +941,13 @@ class TestCallbackRateBounds:
     def test_straddle_callback_rate(self):
         """s_trail_distance=0.005 → callbackRate=0.5."""
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == pytest.approx(0.5, abs=0.01)  # 0.005 * 100 = 0.5
 
     def test_vr_squeeze_callback_rate(self):
         """d_trail_distance=0.005 → callbackRate=0.5 (r106: rule #8 floor)."""
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("vr_squeeze", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_directional", 1, 100.0)
         assert cr == pytest.approx(0.5, abs=0.01)
 
     def test_ma_cluster_callback_rate(self):
