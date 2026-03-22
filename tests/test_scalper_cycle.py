@@ -50,7 +50,7 @@ def _inject_position(scalper, key: str = "TESTUSDT:LONG", **overrides) -> dict:
         "position_side": "LONG" if "LONG" in key else "SHORT",
         "trail_active": False,
         "opened_at": "2026-01-01T00:00:00+00:00",
-        "strategy_type": "vr_squeeze",
+        "strategy_type": "vr_directional",
     }
     pos.update(overrides)
     scalper.strategy._positions[key] = pos

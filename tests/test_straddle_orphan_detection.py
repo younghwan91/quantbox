@@ -256,7 +256,7 @@ def _relink_state_pos(signal: int, pair_id: str | None = None) -> dict:
         "leverage": 30,
         "move_size": 1.0,
         "position_side": pos_side,
-        "strategy_type": "straddle",
+        "strategy_type": "vr_straddle",
         "sl": 0.015,
         "tp": 0.05,
         "tf": "15m",

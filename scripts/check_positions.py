@@ -24,9 +24,9 @@ STATE_PATH = ROOT / "data" / "state" / "scalper_state.json"
 
 # strategy_type → (sl_pct, trail_activate, trail_distance)
 _SL_PARAMS: dict[str, tuple[float, float, float]] = {
-    "vr_squeeze": (0.01, 0.01, 0.002),
-    "straddle":   (0.015, 0.015, 0.001),
-    "ma_cluster": (0.02, 0.02, 0.003),
+    "vr_directional": (0.01, 0.01, 0.002),
+    "vr_straddle":    (0.015, 0.015, 0.001),
+    "ma_cluster":     (0.02, 0.02, 0.003),
 }
 
 BASE = "https://fapi.binance.com"
@@ -74,14 +74,14 @@ def main() -> None:
         sym = pos.get("symbol", pos_key.split(":")[0])
         side = pos.get("position_side", "N/A")
         entry = float(pos.get("entry_price", 0))
-        strategy_type = pos.get("strategy_type", "vr_squeeze")
+        strategy_type = pos.get("strategy_type", "vr_directional")
         bars = pos.get("bars_held", 0)
         max_hold = pos.get("max_hold", 192)
         peak_pct = (pos.get("peak_gain") or 0.0) * 100
         trail_active = pos.get("trail_active", False)
 
         sl_pct, trail_act, trail_dist = _SL_PARAMS.get(
-            strategy_type, _SL_PARAMS["vr_squeeze"]
+            strategy_type, _SL_PARAMS["vr_directional"]
         )
 
         # Current mark price

@@ -38,7 +38,7 @@ def _make_trade(pair_id: str | None = None, signal: int = 1, pnl_usd: float = 50
         "bars_held": 10,
         "reason": "server_tp",
         "time": "2026-03-15T10:00:00+00:00",
-        "strategy_type": "straddle",
+        "strategy_type": "vr_straddle",
         "entry_time": "2026-03-15T00:00:00+00:00",
         "balance_before": 1000.0,
         "balance_after": 1050.0,

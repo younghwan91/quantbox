@@ -2,7 +2,7 @@
 
 Validates:
   1. Config defaults: ma_cluster_btc_gate_enabled=True, ma_cluster_btc_ma_period_4h=50
-  2. Strategy.on_bar tags _last_signal_source correctly (vr_squeeze vs ma_cluster vs none)
+  2. Strategy.on_bar tags _last_signal_source correctly (vr_directional vs ma_cluster vs none)
   3. Gate blocks MA cluster LONG when BTC 4h below MA50
   4. Gate allows MA cluster LONG when BTC 4h above MA50
   5. Gate does NOT apply to MA cluster SHORT signals
@@ -67,8 +67,8 @@ class TestLastSignalSource:
         strat.on_bar("SYM", close)
         assert strat._last_signal_source.get("SYM") == "none"
 
-    def test_vr_signal_tags_vr_squeeze(self):
-        """When VR signal fires, source must be vr_squeeze."""
+    def test_vr_signal_tags_vr_directional(self):
+        """When VR signal fires, source must be vr_directional."""
         strat = _make_strategy()
         # Build close array that triggers a VR squeeze: low then spike
         n = 300
@@ -82,11 +82,11 @@ class TestLastSignalSource:
         low = close - 0.5
         strat.update_market_data("SYM", np.ones(n), np.ones(n), high, low)
         sig = strat.on_bar("SYM", close)
-        # Whether or not signal fires, source must be vr_squeeze or none (not ma_cluster)
+        # Whether or not signal fires, source must be vr_directional or none (not ma_cluster)
         src = strat._last_signal_source.get("SYM", "none")
-        assert src in ("vr_squeeze", "none"), f"Unexpected source: {src}"
+        assert src in ("vr_directional", "none"), f"Unexpected source: {src}"
         if sig != 0:
-            assert src == "vr_squeeze"
+            assert src == "vr_directional"
 
     def test_ma_cluster_signal_tags_ma_cluster(self):
         """When MA cluster fires, source must be ma_cluster."""
@@ -106,7 +106,7 @@ class TestLastSignalSource:
         close_15m = _flat_close()
         strat.update_market_data("SYM", np.ones(300), np.ones(300), close_15m + 0.1, close_15m - 0.1)
         strat.on_bar("SYM", close_15m)
-        # Whether signal fires or not, it should never be tagged vr_squeeze
+        # Whether signal fires or not, it should never be tagged vr_directional
         src = strat._last_signal_source.get("SYM", "none")
         assert src in ("ma_cluster", "none")
 
@@ -151,10 +151,10 @@ class TestGateLogic:
         result = _apply_gate(signal=-1, signal_src="ma_cluster", btc_4h_close=btc)
         assert result == -1, "Gate should NOT block SHORT signals"
 
-    def test_does_not_apply_to_vr_squeeze(self):
+    def test_does_not_apply_to_vr_directional(self):
         # Gate only applies to MA cluster signals, not VR squeeze
         btc = np.linspace(100_000, 80_000, 100)
-        result = _apply_gate(signal=1, signal_src="vr_squeeze", btc_4h_close=btc)
+        result = _apply_gate(signal=1, signal_src="vr_directional", btc_4h_close=btc)
         assert result == 1, "Gate should NOT block VR squeeze signals"
 
     def test_gate_disabled(self):

@@ -106,7 +106,7 @@ def backfill(log_dir: str, db_path: str, session: str = "live", dry_run: bool = 
                 "bars_held": int(m.group("bars")) if m.group("bars") else None,
                 "reason": m.group("reason"),
                 "time": exit_time,
-                "strategy_type": strategy_map.get(key, "vr_squeeze"),
+                "strategy_type": strategy_map.get(key, "vr_directional"),
                 "mfe_pct": float(m.group("mfe")) if m.group("mfe") else None,
                 "mae_pct": float(m.group("mae")) if m.group("mae") else None,
                 "entry_time": entry_map.get(key),

@@ -91,9 +91,10 @@ def print_system_info(
     target: float,
     stop_mult: float,
     max_hold: int,
-    entry_mode: str,
     min_confidence: int,
     testnet: bool = False,
+    straddle_enabled: bool = True,
+    straddle_max_slots: int = 8,
     ma_cluster_enabled: bool = False,
     ma_cluster_pct: float = 0.03,
     ma_cluster_min_duration: int = 8,
@@ -118,9 +119,10 @@ def print_system_info(
         target: Target retrace.
         stop_mult: Stop loss multiplier.
         max_hold: Max hold bars.
-        entry_mode: Entry mode name.
         min_confidence: Minimum confidence score.
         testnet: Whether using testnet.
+        straddle_enabled: Whether S_d8 straddle is active.
+        straddle_max_slots: Max slots for straddle pairs.
         ma_cluster_enabled: Whether MA cluster strategy is active.
         ma_cluster_pct: MA cluster spread threshold.
         ma_cluster_min_duration: Min bars in cluster.
@@ -150,32 +152,38 @@ def print_system_info(
     # System table
     _print_section("SYSTEM")
     _print_row("Strategy", strategy.upper())
-    _print_row("Entry Mode", entry_mode)
     _print_row("Balance", f"${balance:,.2f}")
     _print_row("Universe", f"{n_symbols} symbols")
     _print_row("Max Slots", str(max_slots))
     print()
 
-    _print_section("PARAMETERS")
+    _print_section("STRATEGIES")
+    _print_row("VR Directional", f"{Color.GREEN}ENABLED{Color.RESET} (D_mom8, {leverage_base}x)")
+    if straddle_enabled:
+        _print_row(
+            "VR Straddle", f"{Color.GREEN}ENABLED{Color.RESET} (S_d8, {leverage_base}x, max {straddle_max_slots} slots)"
+        )
+    else:
+        _print_row("VR Straddle", f"{Color.RED}DISABLED{Color.RESET}")
+    if ma_cluster_enabled:
+        _print_row("MA Cluster", f"{Color.GREEN}ENABLED{Color.RESET} ({ma_cluster_leverage:.0f}x)")
+    else:
+        _print_row("MA Cluster", f"{Color.RED}DISABLED{Color.RESET}")
+    print()
+
+    _print_section("VR PARAMS")
     _print_row("Lookback", f"{lookback} bars")
     _print_row("Threshold", f"{threshold * 100:.1f}%")
-    _print_row("Target", f"{target * 100:.1f}% retrace")
-    _print_row("Stop", f"{stop_mult}x move")
+    _print_row("SL / TP", f"{stop_mult * 100:.0f}% / {target * 100:.0f}%")
     _print_row("Max Hold", f"{max_hold} bars")
+    _print_row("Leverage", f"{leverage_base}x (max {leverage_max}x)")
     _print_row("Confidence", f">= {min_confidence}")
     print()
 
-    _print_section("LEVERAGE")
-    _print_row("Base", f"{leverage_base}x")
-    _print_row("Max", f"{leverage_max}x")
-    print()
-
     if ma_cluster_enabled:
-        _print_section("MA CLUSTER")
-        _print_row("Status", f"{Color.GREEN}ENABLED{Color.RESET}")
+        _print_section("MA CLUSTER PARAMS")
         _print_row("Spread", f"{ma_cluster_pct * 100:.0f}%")
-        _print_row("Min Duration", f"{ma_cluster_min_duration} bars (4h)")
-        _print_row("Max Duration", f"{ma_cluster_max_duration} bars (4h)")
+        _print_row("Duration", f"{ma_cluster_min_duration}-{ma_cluster_max_duration} bars (4h)")
         _print_row("Min Momentum", f"{ma_cluster_min_momentum * 100:.1f}%")
         _print_row("SL / TP", f"{ma_cluster_sl * 100:.0f}% / {ma_cluster_tp * 100:.0f}%")
         _print_row("Leverage", f"{ma_cluster_leverage:.0f}x")

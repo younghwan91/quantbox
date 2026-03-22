@@ -142,7 +142,7 @@ class TestPrintSystemInfo:
         Color.disable()
         print_system_info(
             mode="PAPER",
-            strategy="rubberband",
+            strategy="vol_straddle",
             balance=10000.0,
             n_symbols=20,
             max_slots=5,
@@ -153,8 +153,11 @@ class TestPrintSystemInfo:
             target=0.5,
             stop_mult=1.2,
             max_hold=6,
-            entry_mode="confidence",
             min_confidence=3,
+            straddle_enabled=True,
+            straddle_max_slots=8,
+            ma_cluster_enabled=True,
+            ma_cluster_leverage=21.0,
         )
         captured = capsys.readouterr()
         assert "PAPER" in captured.out

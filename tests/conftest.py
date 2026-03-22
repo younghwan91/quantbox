@@ -324,5 +324,5 @@ def vs_position() -> dict:
         "position_side": "LONG",
         "trail_active": False,
         "opened_at": "2026-01-01T00:00:00+00:00",
-        "strategy_type": "vr_squeeze",
+        "strategy_type": "vr_directional",
     }

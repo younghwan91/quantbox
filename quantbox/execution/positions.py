@@ -115,10 +115,7 @@ class PositionMixin:
         tf_label = sig_meta.get("tf", "15m")
         max_hold = sig_meta.get("max_hold", vs.get_max_hold(tf_label))
         is_straddle = sig_meta.get("straddle", False)
-        strategy_type = sig_meta.get("strategy_type", "vr_squeeze")
-        # Split vr_squeeze into vr_straddle / vr_directional for dashboard
-        if strategy_type == "vr_squeeze":
-            strategy_type = "vr_straddle" if is_straddle else "vr_directional"
+        strategy_type = sig_meta.get("strategy_type", "vr_directional")
 
         # ── R44d V17: MA Cluster uses different leverage ──
         # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
@@ -353,7 +350,7 @@ class PositionMixin:
             f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={fill['lev_int']}x, "
             f"TF={sizing['tf_label']}, SL={sl_pct * 100:.1f}%, TP={tp_pct * 100:.1f}%, "
             f"{strategy_type}"
-            f"{f', conviction={conviction_score}/4' if strategy_type == 'vr_squeeze' else ''})"
+            f"{f', conviction={conviction_score}/4' if strategy_type.startswith('vr_') else ''})"
         )
 
         sl_order_id = self._place_server_stop_loss(
@@ -523,7 +520,7 @@ class PositionMixin:
                 "fields": [
                     {
                         "name": "전략",
-                        "value": f"VolStraddle {'S' if is_straddle else ('MA' if strategy_type == 'ma_cluster' else 'D')} ({tf_label})",
+                        "value": f"VolStraddle {'S' if strategy_type == 'vr_straddle' else ('MA' if strategy_type == 'ma_cluster' else 'D')} ({tf_label})",
                         "inline": True,
                     },
                     {"name": "진입가", "value": f"${fill_price:.4f}", "inline": True},
@@ -542,8 +539,8 @@ class PositionMixin:
                     },
                     {"name": "SL 방식", "value": _sl_tag, "inline": True},
                     {
-                        "name": "확신도" if strategy_type == "vr_squeeze" else "전략타입",
-                        "value": (f"{conviction_score}/4" if strategy_type == "vr_squeeze" else "MA Cluster"),
+                        "name": "확신도" if strategy_type.startswith("vr_") else "전략타입",
+                        "value": (f"{conviction_score}/4" if strategy_type.startswith("vr_") else strategy_type),
                         "inline": True,
                     },
                     {"name": "슬롯", "value": f"{n_active}/{self.vs_config.max_concurrent}", "inline": True},
@@ -751,7 +748,7 @@ class PositionMixin:
                     "bars_held": closed_pos["bars_held"],
                     "reason": "server_fill_race",
                     "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", "vr_squeeze"),
+                    "strategy_type": closed_pos.get("strategy_type", "vr_directional"),
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
@@ -848,7 +845,7 @@ class PositionMixin:
             "bars_held": pos["bars_held"],
             "reason": "partial_close",
             "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "strategy_type": pos.get("strategy_type", "vr_directional"),
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
@@ -1018,7 +1015,7 @@ class PositionMixin:
                     "bars_held": closed_pos["bars_held"],
                     "reason": f"{reason}_no_position",
                     "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", "vr_squeeze"),
+                    "strategy_type": closed_pos.get("strategy_type", "vr_directional"),
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
@@ -1222,7 +1219,7 @@ class PositionMixin:
             "bars_held": pos["bars_held"],
             "reason": reason,
             "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "strategy_type": pos.get("strategy_type", "vr_directional"),
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
