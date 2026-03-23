@@ -699,7 +699,8 @@ def collect_trades(
     Args:
         cfg: Strategy config dict with keys:
             sp, lp, d_vr, s_vr, s_dur, d_sl, s_sl, tp,
-            s_trail_activate, s_trail_distance.
+            s_trail_activate, s_trail_distance,
+            d_trail_activate, d_trail_distance.
             Build from VolStraddleConfig — do NOT hardcode values.
         data_15m: {symbol: {close, high, low, vr_X_Y, mom_8, ...}}.
         data_1h: Same structure, 1h resampled.
@@ -772,6 +773,22 @@ def collect_trades(
             s_trail_activate = 0.030  # config default
             s_trail_distance = 0.005  # config default (rule #8 floor)
 
+    # D_mom8 directional trailing params — parity fix: live uses trailing stop
+    # for D_mom8 but backtest was using sim_directional_trades (no trail).
+    if "d_trail_activate" in cfg:
+        d_trail_activate = cfg["d_trail_activate"]
+        d_trail_distance = cfg["d_trail_distance"]
+    else:
+        try:
+            from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _VSCfg
+
+            _vs = _VSCfg()
+            d_trail_activate = _vs.d_trail_activate
+            d_trail_distance = _vs.d_trail_distance
+        except Exception:
+            d_trail_activate = 0.040  # config default
+            d_trail_distance = 0.005  # config default (rule #8 floor)
+
     # Resolve TF group — default G_3TF (fresh from config, G4 fix)
     active_tfs = tf_group if tf_group is not None else _G_3TF
 
@@ -825,7 +842,19 @@ def collect_trades(
                 else:
                     sig = gen_vr_signal(vr, d_vr, warmup)
                     dire = make_direction_momentum(sig, d["mom_8"])
-                    p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, _cost_dir)
+                    p, e, x = sim_directional_trailing(
+                        c,
+                        h,
+                        lo,
+                        sig,
+                        dire,
+                        sl,
+                        tp,
+                        mh,
+                        _cost_dir,
+                        d_trail_activate,
+                        d_trail_distance,
+                    )
 
                 for k in range(len(p)):
                     entry_15m = int(e[k]) * ratio
@@ -879,7 +908,19 @@ def collect_trades(
                 else:
                     sig = gen_vr_signal(vr, d_vr, warmup)
                     dire = make_direction_momentum(sig, d["mom_8"])
-                    p, e, x = sim_directional_trades(c, h, lo, sig, dire, sl, tp, mh, _cost_dir)
+                    p, e, x = sim_directional_trailing(
+                        c,
+                        h,
+                        lo,
+                        sig,
+                        dire,
+                        sl,
+                        tp,
+                        mh,
+                        _cost_dir,
+                        d_trail_activate,
+                        d_trail_distance,
+                    )
 
                 for k in range(len(p)):
                     entry_15m = int(e[k]) * ratio

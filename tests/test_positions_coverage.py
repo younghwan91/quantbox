@@ -866,6 +866,32 @@ class TestPaperMode:
         # Cost should have been deducted
         assert scalper._paper_balance < balance_before
 
+    def test_paper_round_trip_fee_equals_config(self):
+        """Paper mode fee model: cost_per_side at entry + cost_per_side at exit = round_trip_cost.
+
+        Regression test confirming no double-counting. Verifies the math directly
+        against config values rather than going through the full close path.
+        """
+        cfg = VolStraddleConfig()
+        # cost_per_side should be exactly half of round_trip_cost
+        assert cfg.round_trip_cost == pytest.approx(2 * cfg.cost_per_side, abs=1e-10), (
+            f"round_trip_cost ({cfg.round_trip_cost}) must equal 2 * cost_per_side ({cfg.cost_per_side})"
+        )
+
+        # Verify entry deduction uses cost_per_side (not round_trip_cost)
+        scalper = _make_vs_scalper(paper=True, balance=10000.0)
+        _mock_open(scalper)
+        _set_signal_meta(scalper)
+
+        initial_balance = scalper._paper_balance
+        _open(scalper, 10000.0)
+
+        # Entry charges cost_per_side: qty(1.0) * price(100) * cost_per_side
+        expected_entry_cost = 1.0 * PRICE * cfg.cost_per_side
+        assert scalper._paper_balance == pytest.approx(initial_balance - expected_entry_cost, abs=0.01), (
+            "Entry should deduct exactly cost_per_side, not round_trip_cost"
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestSteepXConfidence — L151-162
