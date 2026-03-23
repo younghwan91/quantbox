@@ -24,6 +24,7 @@ from quantbox.backtest.trade_sim import (
     portfolio_sim,
     portfolio_sim_with_details,
     sim_directional_trades,
+    sim_directional_trailing,
     sim_straddle_trades,
 )
 
@@ -739,6 +740,147 @@ class TestCollectTrades:
             assert isinstance(exit_b, int)
             assert isinstance(pnl_val, float)
             assert entry < exit_b
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  sim_directional_trailing: trailing stop for D_mom8 parity
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestSimDirectionalTrailing:
+    """Tests for the Numba-compiled directional trailing stop simulator."""
+
+    def test_trail_activates_and_exits(self):
+        """Price rises past trail_activate, then retraces → trail exit."""
+        n = 30
+        close = np.full(n, 100.0)
+        high = np.full(n, 100.0)
+        low = np.full(n, 100.0)
+
+        sig = np.zeros(n, dtype=np.int8)
+        sig[0] = 1
+        dire = np.zeros(n, dtype=np.int8)
+        dire[0] = 1  # long
+
+        # entry at bar 0, close=100
+        # Bars 3-5: price rises to +5% with tight range (no trail trigger)
+        # Peak from high = 5%, trail activates (>4%), trail level = 5%-0.5%=4.5%
+        # low must stay above trail level: 100*(1+0.045) = 104.5
+        for i in range(3, 6):
+            close[i] = 105.0
+            high[i] = 105.0
+            low[i] = 104.6  # +4.6% > trail level 4.5% → holds
+
+        # Bar 6: new peak at +6%, then retrace below trail level
+        # Peak updates to 6%, trail level = 6%-0.5% = 5.5%
+        # low at 104.0 = +4% which is < 5.5% → trail fires
+        high[6] = 106.0
+        close[6] = 104.0
+        low[6] = 104.0
+
+        pnl, ent, ext = sim_directional_trailing(
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            sl=0.01,
+            tp=0.20,
+            max_hold=50,
+            cost=0.0,
+            trail_activate=0.04,
+            trail_distance=0.005,
+        )
+        assert len(pnl) == 1
+        assert ent[0] == 0
+        assert ext[0] == 6  # trail exit on bar 6
+        # PnL should be peak - distance = 6% - 0.5% = 5.5%
+        assert pnl[0] == pytest.approx(0.055, abs=0.005)
+
+    def test_no_trail_without_activation(self):
+        """If price never reaches trail_activate, use normal SL/TP."""
+        n = 20
+        close = np.full(n, 100.0)
+        high = np.full(n, 100.0)
+        low = np.full(n, 100.0)
+
+        sig = np.zeros(n, dtype=np.int8)
+        sig[0] = 1
+        dire = np.zeros(n, dtype=np.int8)
+        dire[0] = 1  # long
+
+        # Price rises only +2% (below trail_activate=4%), then hits SL
+        high[3] = 102.0
+        low[5] = 98.5  # -1.5% → SL at 1%
+
+        pnl, ent, ext = sim_directional_trailing(
+            close,
+            high,
+            low,
+            sig,
+            dire,
+            sl=0.01,
+            tp=0.20,
+            max_hold=50,
+            cost=0.0,
+            trail_activate=0.04,
+            trail_distance=0.005,
+        )
+        assert len(pnl) == 1
+        # Should exit at SL, not trail
+        assert pnl[0] == pytest.approx(-0.01, abs=1e-9)
+
+    def test_collect_trades_d_mom8_uses_trailing(self):
+        """collect_trades for D_mom8 now uses trailing stop (parity fix)."""
+        n = 500
+        close = np.full(n, 100.0, dtype=np.float64)
+        high = np.full(n, 100.0, dtype=np.float64)
+        low = np.full(n, 100.0, dtype=np.float64)
+        vr = np.full(n, 0.8, dtype=np.float64)
+        mom = np.full(n, 0.001, dtype=np.float64)
+
+        # Trigger at bar 250 with price ramp that would activate trail
+        vr[250] = 0.30
+        # Ramp price up after entry to activate trail (>4%)
+        for i in range(252, 260):
+            close[i] = 105.0
+            high[i] = 105.0
+            low[i] = 105.0
+        # Then retrace to trigger trail exit
+        for i in range(260, 270):
+            close[i] = 103.0
+            high[i] = 103.5
+            low[i] = 103.0
+
+        data_15m = {
+            "BTCUSDT": {
+                "close": close,
+                "high": high,
+                "low": low,
+                "volume": np.ones(n, dtype=np.float64),
+                "vr_8_56": vr,
+                "mom_8": mom,
+                "bars": n,
+            }
+        }
+        cfg = {
+            "sp": 8,
+            "lp": 56,
+            "d_vr": 0.50,
+            "s_vr": 0.55,
+            "s_dur": 4,
+            "d_sl": 0.01,
+            "s_sl": 0.015,
+            "tp": 0.20,
+            "d_trail_activate": 0.04,
+            "d_trail_distance": 0.005,
+        }
+        trades = collect_trades(cfg, data_15m, {}, {}, "D_mom8")
+        assert len(trades) >= 1
+        # With trail, PnL should be > SL (trail exit preserves gains)
+        for _sym, _e, _x, pnl_val in trades:
+            # Trail exit from +5% peak should give positive PnL, not -1% SL
+            assert pnl_val > 0.0, f"Expected positive trail exit, got {pnl_val}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

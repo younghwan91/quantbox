@@ -31,7 +31,6 @@ from quantbox.core.bot_utils import GIT_COMMIT
 from quantbox.core.sd_notify import sd_notify as _sd_notify
 from quantbox.core.settings import get_settings
 from quantbox.core.terminal_ui import (
-    format_section_header,
     print_banner,
     print_startup_complete,
     print_system_info,
@@ -66,7 +65,7 @@ class LoopMixin:
                 except Exception:
                     pass
 
-        logger.info(format_section_header("SUMMARY"))
+        logger.info("[SUMMARY]")
         logger.info(f"  Trades={n_trades} WR={wr:.0f}% PnL=${total_pnl:+.2f}{last_trade_ago}")
 
         # Active position MFE/MAE + trail (strategy_type + bars already shown in [POSITIONS])
