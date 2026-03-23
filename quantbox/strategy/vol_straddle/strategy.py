@@ -874,7 +874,8 @@ class VolStraddleStrategy:
             trail_stop_gain = peak_gain - trail_distance
             if worst_gain <= trail_stop_gain:
                 exit_pnl = max(trail_stop_gain, -sl_pct)
-                if self.config.trail_server_native:
+                has_server_trail = bool(pos.get("server_trail_order_id"))
+                if self.config.trail_server_native and has_server_trail:
                     # Server handles trail — Binance fires TRAILING_STOP_MARKET.
                     # Log for monitoring but don't trigger client-side close.
                     logger.debug(
