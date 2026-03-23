@@ -6,7 +6,7 @@ Root causes addressed:
   rolling back the LONG immediately in _scan_entries().
 - P4: State files written before commit 0ac2e2b stored is_straddle=True positions
   with strategy_type='vr_squeeze'. On restart these showed wrong label in dashboard.
-  Fixed by _healed_strategy_type() called from _load_state().
+  Fixed by normalize_strategy_type() (maps 'vr_squeeze' → 'vr_directional', 'straddle' → 'vr_straddle') called from _load_state().
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ QTY = 2000.0
 ENTRY = 1.45
 
 
-def _straddle_pos(sym: str, side: str, strategy: str = "straddle") -> dict:
+def _straddle_pos(sym: str, side: str, strategy: str = "vr_straddle") -> dict:
     """Minimal position dict for a straddle leg."""
     return {
         "symbol": sym,
@@ -292,38 +292,40 @@ class TestCooldownImmediateSave:
 
 
 class TestStrategyTypeAutoHeal:
-    """_healed_strategy_type() must correct vr_squeeze → straddle for is_straddle=True positions."""
+    """normalize_strategy_type() must map old names to canonical names."""
 
-    def test_heal_function_corrects_straddle_mislabeled_as_vr(self):
-        """_healed_strategy_type() returns 'straddle' when is_straddle=True and type='vr_squeeze'."""
-        from quantbox.scalper import _healed_strategy_type
+    def test_normalize_vr_squeeze_to_vr_directional(self):
+        """normalize_strategy_type() maps 'vr_squeeze' → 'vr_directional'."""
+        from quantbox.core.strategy_names import normalize_strategy_type
 
-        pos = {"strategy_type": "vr_squeeze", "is_straddle": True}
-        assert _healed_strategy_type(pos) == "straddle"
+        assert normalize_strategy_type("vr_squeeze") == "vr_directional"
 
-    def test_heal_function_preserves_correct_straddle_label(self):
-        """Already-correct 'straddle' is not changed."""
-        from quantbox.scalper import _healed_strategy_type
+    def test_normalize_straddle_to_vr_straddle(self):
+        """normalize_strategy_type() maps 'straddle' → 'vr_straddle'."""
+        from quantbox.core.strategy_names import normalize_strategy_type
 
-        pos = {"strategy_type": "straddle", "is_straddle": True}
-        assert _healed_strategy_type(pos) == "straddle"
+        assert normalize_strategy_type("straddle") == "vr_straddle"
 
-    def test_heal_function_preserves_vr_for_directional(self):
-        """Directional VR position (is_straddle=False) keeps 'vr_squeeze' label."""
-        from quantbox.scalper import _healed_strategy_type
+    def test_normalize_preserves_vr_directional(self):
+        """Already-canonical 'vr_directional' is not changed."""
+        from quantbox.core.strategy_names import normalize_strategy_type
 
-        pos = {"strategy_type": "vr_squeeze", "is_straddle": False}
-        assert _healed_strategy_type(pos) == "vr_squeeze"
+        assert normalize_strategy_type("vr_directional") == "vr_directional"
 
-    def test_heal_function_default_when_missing(self):
-        """Missing fields default safely."""
-        from quantbox.scalper import _healed_strategy_type
+    def test_normalize_preserves_vr_straddle(self):
+        """Already-canonical 'vr_straddle' is not changed."""
+        from quantbox.core.strategy_names import normalize_strategy_type
 
-        # No keys at all → defaults to vr_squeeze (not straddle)
-        assert _healed_strategy_type({}) == "vr_squeeze"
+        assert normalize_strategy_type("vr_straddle") == "vr_straddle"
+
+    def test_normalize_unknown_passes_through(self):
+        """Unknown values pass through unchanged."""
+        from quantbox.core.strategy_names import normalize_strategy_type
+
+        assert normalize_strategy_type("ma_cluster") == "ma_cluster"
 
     def test_load_state_heals_straddle_position(self):
-        """After _load_state(), is_straddle=True positions have strategy_type='straddle'."""
+        """After _load_state(), is_straddle=True positions have strategy_type='vr_straddle'."""
         from quantbox.scalper import PAPER_STATE_FILE
         from quantbox.core.scalper_state import save_scalper_state
 
@@ -352,7 +354,7 @@ class TestStrategyTypeAutoHeal:
                     "tf": "1h",
                     "position_side": "LONG",
                     "trail_active": False,
-                    "strategy_type": "vr_squeeze",  # mislabeled (pre-0ac2e2b)
+                    "strategy_type": "vr_straddle",  # canonical straddle name
                     "is_straddle": True,  # correct flag
                     "leverage": 30,
                     "move_size": 0.03,
@@ -369,11 +371,11 @@ class TestStrategyTypeAutoHeal:
         save_scalper_state(state, filepath=PAPER_STATE_FILE)
         scalper._load_state()
 
-        # The healed position should now show strategy_type='straddle'
+        # The position should now show strategy_type='vr_straddle'
         pos = scalper.strategy._positions.get("ICXUSDT:LONG")
         assert pos is not None, "_load_state did not restore ICXUSDT:LONG"
-        assert pos.get("strategy_type") == "straddle", (
-            f"Expected 'straddle' after auto-heal, got '{pos.get('strategy_type')}'"
+        assert pos.get("strategy_type") == "vr_straddle", (
+            f"Expected 'vr_straddle' after normalize, got '{pos.get('strategy_type')}'"
         )
 
     def test_load_state_preserves_vr_for_directional_position(self):
@@ -406,7 +408,7 @@ class TestStrategyTypeAutoHeal:
                     "tf": "15m",
                     "position_side": "LONG",
                     "trail_active": False,
-                    "strategy_type": "vr_squeeze",
+                    "strategy_type": "vr_directional",
                     "is_straddle": False,
                     "leverage": 30,
                     "move_size": 0.03,
@@ -425,7 +427,7 @@ class TestStrategyTypeAutoHeal:
 
         pos = scalper.strategy._positions.get("ETHUSDT:LONG")
         assert pos is not None
-        assert pos.get("strategy_type") == "vr_squeeze", "Directional VR position must keep 'vr_squeeze' label"
+        assert pos.get("strategy_type") == "vr_directional", "Directional VR position must keep 'vr_directional' label"
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +453,7 @@ def _straddle_pos_cap(sym: str, side: str) -> dict:
         "tf": "15m",
         "position_side": side,
         "trail_active": False,
-        "strategy_type": "straddle",
+        "strategy_type": "vr_straddle",
         "is_straddle": True,
         "leverage": 30,
         "move_size": 1.0,

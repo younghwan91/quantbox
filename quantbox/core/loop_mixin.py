@@ -50,9 +50,6 @@ class LoopMixin:
         total_pnl = sum(t["pnl_usd"] for t in self._trade_history)
         wr = wins / n_trades * 100 if n_trades > 0 else 0
 
-        hwm = self._high_water_mark if self._high_water_mark > 0 else balance
-        dd_pct = (hwm - balance) / hwm * 100 if hwm > 0 else 0.0
-
         # Time since last trade
         last_trade_ago = ""
         if self._trade_history:
@@ -68,27 +65,25 @@ class LoopMixin:
                 except Exception:
                     pass
 
-        logger.info(
-            f"[Summary] Trades={n_trades}, WR={wr:.0f}%, "
-            f"PnL=${total_pnl:+.2f}, Balance=${balance:.2f}, "
-            f"HWM=${hwm:.2f}, DD={dd_pct:.1f}%, "
-            f"Active={len(positions)}{last_trade_ago}"
-        )
+        logger.info("[SUMMARY]")
+        logger.info(f"  Trades={n_trades} WR={wr:.0f}% PnL=${total_pnl:+.2f}{last_trade_ago}")
 
-        # Active position details
+        # Active position MFE/MAE + trail (strategy_type + bars already shown in [POSITIONS])
         for sym, pos in positions.items():
+            strat = pos.get("strategy_type", "vr_directional")
+            trail_info = ""
+            if pos.get("trail_active"):
+                peak = pos.get("peak_gain", 0) * 100
+                trail_info = f" trail=✓(peak={peak:+.1f}%)"
             logger.info(
-                f"  [{sym}] {'L' if pos['signal'] == 1 else 'S'} "
-                f"entry=${pos['entry_price']:.4f} "
-                f"bars={pos['bars_held']}/{pos.get('max_hold', self.config.max_hold)} "
+                f"  [{sym}] {strat} "
                 f"MFE={pos.get('best_pnl', 0) * 100:+.2f}% "
-                f"MAE={pos.get('worst_pnl', 0) * 100:+.2f}% "
-                f"SL={pos.get('server_sl_order_id') or 'NONE'} "
-                f"TP={pos.get('server_tp_order_id') or 'NONE'}"
+                f"MAE={pos.get('worst_pnl', 0) * 100:+.2f}%"
+                f"{trail_info}"
             )
 
         # Periodic VR distribution (every 16 cycles ≈ 4h) when no positions
-        if self.strategy_name == "vol_straddle" and len(positions) == 0 and self._cycle_count % 16 == 0:
+        if len(positions) == 0 and self._cycle_count % 16 == 0:
             self._log_vr_distribution()
 
     def _log_vr_distribution(self: "ScalperProtocol") -> None:
@@ -124,51 +119,42 @@ class LoopMixin:
         print_banner()
         if GIT_COMMIT["short"]:
             logger.info(f"Git: {GIT_COMMIT['short']} — {GIT_COMMIT['message']}")
-        if self.strategy_name == "vol_straddle":
-            vc = self.vs_config
-            print_system_info(
-                mode=mode_str,
-                strategy="vol_straddle",
-                balance=balance,
-                n_symbols=n_symbols,
-                max_slots=vc.max_concurrent,
-                leverage_base=vc.base_leverage,
-                leverage_max=vc.max_leverage,
-                lookback=vc.momentum_period,
-                threshold=vc.d_vr_threshold,
-                target=vc.d_tp,
-                stop_mult=vc.d_sl,
-                max_hold=vc.max_hold_15m,
-                entry_mode="vr_compression",
-                min_confidence=0.0,
-                testnet=settings.binance_testnet,
-                ma_cluster_enabled=vc.ma_cluster_enabled,
-                ma_cluster_pct=vc.ma_cluster_pct,
-                ma_cluster_min_duration=vc.ma_cluster_min_duration,
-                ma_cluster_max_duration=vc.ma_cluster_max_duration,
-                ma_cluster_min_momentum=vc.ma_cluster_min_momentum,
-                ma_cluster_sl=vc.ma_cluster_sl,
-                ma_cluster_tp=vc.ma_cluster_tp,
-                ma_cluster_leverage=vc.ma_cluster_leverage,
-            )
-        else:
-            print_system_info(
-                mode=mode_str,
-                strategy=self.strategy_name,
-                balance=balance,
-                n_symbols=n_symbols,
-                max_slots=self.config.max_concurrent,
-                leverage_base=self.config.base_leverage,
-                leverage_max=self.config.max_leverage,
-                lookback=self.config.lookback,
-                threshold=self.config.threshold,
-                target=self.config.target_retrace,
-                stop_mult=self.config.stop_mult,
-                max_hold=self.config.max_hold,
-                entry_mode=self.config.entry_mode,
-                min_confidence=self.config.min_confidence,
-                testnet=settings.binance_testnet,
-            )
+        vc = self.vs_config
+        print_system_info(
+            mode=mode_str,
+            strategy=self.strategy_name,
+            balance=balance,
+            n_symbols=n_symbols,
+            max_slots=vc.max_concurrent,
+            leverage_base=vc.base_leverage,
+            leverage_max=vc.max_leverage,
+            lookback=vc.momentum_period,
+            threshold=vc.d_vr_threshold,
+            target=vc.d_tp,
+            stop_mult=vc.d_sl,
+            max_hold=vc.max_hold_15m,
+            d_trail_activate=vc.d_trail_activate,
+            d_trail_distance=vc.d_trail_distance,
+            min_confidence=0,
+            straddle_enabled=vc.straddle_enabled,
+            straddle_max_slots=vc.straddle_max_slots,
+            straddle_vr_threshold=vc.s_vr_threshold,
+            straddle_sl=vc.s_sl,
+            straddle_tp=vc.s_tp,
+            straddle_trail_activate=vc.s_trail_activate,
+            straddle_trail_distance=vc.s_trail_distance,
+            testnet=settings.binance_testnet,
+            ma_cluster_enabled=vc.ma_cluster_enabled,
+            ma_cluster_pct=vc.ma_cluster_pct,
+            ma_cluster_min_duration=vc.ma_cluster_min_duration,
+            ma_cluster_max_duration=vc.ma_cluster_max_duration,
+            ma_cluster_min_momentum=vc.ma_cluster_min_momentum,
+            ma_cluster_sl=vc.ma_cluster_sl,
+            ma_cluster_tp=vc.ma_cluster_tp,
+            ma_cluster_trail_activate=vc.ma_cluster_trail_activate,
+            ma_cluster_trail_distance=vc.ma_cluster_trail_distance,
+            ma_cluster_leverage=vc.ma_cluster_leverage,
+        )
         print_startup_complete(mode_str)
 
     def _next_bar_time(self: "ScalperProtocol") -> datetime:

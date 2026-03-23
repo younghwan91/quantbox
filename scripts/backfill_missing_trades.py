@@ -70,7 +70,7 @@ MISSING_TRADES = [
     # 03-12 09:44 (6h hold, 23 bars). Binance fills confirm -$65.33.
     {
         "symbol":        "CRVUSDT",
-        "strategy_type": "vr_squeeze",
+        "strategy_type": "vr_directional",
         "direction":     "SHORT",
         "entry_price":   0.2300,
         "exit_price":    0.2350,

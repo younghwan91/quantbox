@@ -45,7 +45,7 @@ class TestVerifyAlgoOrderActive:
         from quantbox.execution.brackets import BracketMixin
 
         scalper = _make_scalper()
-        scalper.client._request_futures_api.return_value = {"algoStatus": "WORKING"}
+        scalper._algo_api.get_order.return_value = {"algoStatus": "WORKING"}
         result = BracketMixin._verify_algo_order_active(scalper, "12345", "BTCUSDT")
         assert result == "WORKING"
 
@@ -53,7 +53,7 @@ class TestVerifyAlgoOrderActive:
         from quantbox.execution.brackets import BracketMixin
 
         scalper = _make_scalper()
-        scalper.client._request_futures_api.return_value = {"algoStatus": "EXPIRED"}
+        scalper._algo_api.get_order.return_value = {"algoStatus": "EXPIRED"}
         result = BracketMixin._verify_algo_order_active(scalper, "12345", "BTCUSDT")
         assert result == "EXPIRED"
 
@@ -61,7 +61,7 @@ class TestVerifyAlgoOrderActive:
         from quantbox.execution.brackets import BracketMixin
 
         scalper = _make_scalper()
-        scalper.client._request_futures_api.return_value = {"algoStatus": "CANCELLED"}
+        scalper._algo_api.get_order.return_value = {"algoStatus": "CANCELLED"}
         result = BracketMixin._verify_algo_order_active(scalper, "99", "ETHUSDT")
         assert result == "CANCELLED"
 
@@ -69,7 +69,7 @@ class TestVerifyAlgoOrderActive:
         from quantbox.execution.brackets import BracketMixin
 
         scalper = _make_scalper()
-        scalper.client._request_futures_api.side_effect = Exception("network error")
+        scalper._algo_api.get_order.side_effect = Exception("network error")
         result = BracketMixin._verify_algo_order_active(scalper, "99", "ETHUSDT")
         assert result is None
 
@@ -78,7 +78,7 @@ class TestVerifyAlgoOrderActive:
 
         scalper = _make_scalper()
         # No algoStatus key, falls back to 'status'
-        scalper.client._request_futures_api.return_value = {"status": "WORKING"}
+        scalper._algo_api.get_order.return_value = {"status": "WORKING"}
         result = BracketMixin._verify_algo_order_active(scalper, "99", "ETHUSDT")
         assert result == "WORKING"
 
@@ -86,7 +86,7 @@ class TestVerifyAlgoOrderActive:
         from quantbox.execution.brackets import BracketMixin
 
         scalper = _make_scalper()
-        scalper.client._request_futures_api.return_value = ["item1"]
+        scalper._algo_api.get_order.return_value = ["item1"]
         result = BracketMixin._verify_algo_order_active(scalper, "99", "ETHUSDT")
         assert result is None
 
@@ -111,7 +111,7 @@ class TestCheckBracketStaleness:
         scalper = _make_scalper(paper_mode=True)
         scalper.strategy.active_positions = {"BTCUSDT:LONG": {}}
         BracketMixin._check_bracket_staleness(scalper)
-        scalper.client._request_futures_api.assert_not_called()
+        scalper._algo_api.get_order.assert_not_called()
 
     def test_detects_expired_sl(self):
         from quantbox.execution.brackets import BracketMixin
@@ -160,7 +160,7 @@ class TestCheckBracketStaleness:
         scalper.strategy._positions = {"BTCUSDT:LONG": pos}
 
         BracketMixin._check_bracket_staleness(scalper)
-        scalper.client._request_futures_api.assert_not_called()
+        scalper._algo_api.get_order.assert_not_called()
 
     def test_skips_paper_sl_order_ids(self):
         from quantbox.execution.brackets import BracketMixin
@@ -171,7 +171,7 @@ class TestCheckBracketStaleness:
         scalper.strategy._positions = {"BTCUSDT:LONG": pos}
 
         BracketMixin._check_bracket_staleness(scalper)
-        scalper.client._request_futures_api.assert_not_called()
+        scalper._algo_api.get_order.assert_not_called()
 
 
 # ── _verify_ratchet ───────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ class TestVerifyRatchet:
         from quantbox.execution.brackets import BracketMixin
 
         scalper = _make_scalper()
-        scalper.client._request_futures_api.return_value = {"algoStatus": "EXPIRED"}
+        scalper._algo_api.get_order.return_value = {"algoStatus": "EXPIRED"}
         pos = {"symbol": "BTCUSDT", "server_sl_order_id": "555"}
 
         result = BracketMixin._verify_ratchet(scalper, "BTCUSDT:LONG", pos, expected_price=95000.0)
@@ -221,7 +221,7 @@ class TestVerifyRatchet:
         scalper.discord.send.assert_called_once()
         assert "SL 없음" in scalper.discord.send.call_args[1]["content"]
         # No API call — no SL to check
-        scalper.client._request_futures_api.assert_not_called()
+        scalper._algo_api.get_order.assert_not_called()
 
     def test_ratchet_history_appends_multiple(self):
         from quantbox.execution.brackets import BracketMixin
@@ -240,7 +240,7 @@ class TestVerifyRatchet:
         from quantbox.execution.brackets import BracketMixin
 
         scalper = _make_scalper()
-        scalper.client._request_futures_api.side_effect = Exception("timeout")
+        scalper._algo_api.get_order.side_effect = Exception("timeout")
         pos = {"symbol": "ETHUSDT", "server_sl_order_id": "999"}
 
         # Query fails → status=None → not WORKING → returns False

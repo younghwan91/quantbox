@@ -244,7 +244,7 @@ def check_straddle_orphans(state: dict) -> bool:
     This check serves as a backstop for missed rollbacks only.
     """
     positions = state.get("positions", {})
-    straddle_pos = {k: v for k, v in positions.items() if v.get("is_straddle") or v.get("strategy_type") == "straddle"}
+    straddle_pos = {k: v for k, v in positions.items() if v.get("is_straddle") or v.get("strategy_type") == "vr_straddle"}
 
     by_sym: dict[str, list[tuple[str, int]]] = defaultdict(list)
     for key, pos in straddle_pos.items():

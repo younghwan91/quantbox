@@ -111,7 +111,7 @@ class VolStraddleStrategy:
 
         # ── Signal source tracking (populated by on_bar for each symbol) ──
         # Allows scalper to apply strategy-specific gates after on_bar returns.
-        # Values: 'vr_squeeze' | 'ma_cluster' | 'none'
+        # Values: 'vr_directional' | 'vr_straddle' | 'ma_cluster' | 'none'
         self._last_signal_source: dict[str, str] = {}
 
     # ══════════════════════════════════════════════════════════════════
@@ -196,7 +196,7 @@ class VolStraddleStrategy:
                     "4h",
                 )
                 if sig_4h != 0:
-                    self._last_signal_source[symbol] = "vr_squeeze"
+                    self._last_signal_source[symbol] = "vr_directional"
                     return sig_4h
 
         # 1h: resampled from 15m (completed bars only)
@@ -208,7 +208,7 @@ class VolStraddleStrategy:
                 if len(c1h) >= cfg.warmup_1h + 1:
                     sig_1h = self._check_tf_signal(c1h, h1h, l1h, "1h")
                     if sig_1h != 0:
-                        self._last_signal_source[symbol] = "vr_squeeze"
+                        self._last_signal_source[symbol] = "vr_directional"
                         return sig_1h
 
         # 30m: resampled from 15m (completed bars only) — r57 A0
@@ -218,14 +218,14 @@ class VolStraddleStrategy:
                 if len(c30) >= cfg.warmup_30m + 1:
                     sig_30m = self._check_tf_signal(c30, h30, l30, "30m")
                     if sig_30m != 0:
-                        self._last_signal_source[symbol] = "vr_squeeze"
+                        self._last_signal_source[symbol] = "vr_directional"
                         return sig_30m
 
         # 15m: direct from downloaded data
         if cfg.enable_15m:
             sig_15m = self._check_tf_signal(c15, h15, l15, "15m")
             if sig_15m != 0:
-                self._last_signal_source[symbol] = "vr_squeeze"
+                self._last_signal_source[symbol] = "vr_directional"
                 return sig_15m
 
         # ── MA Cluster Squeeze (R44d V17, 4h-only) ──
@@ -344,7 +344,7 @@ class VolStraddleStrategy:
                         "vr": vr_val,
                         "momentum": 0.0,
                         "straddle": True,
-                        "strategy_type": "straddle",
+                        "strategy_type": "vr_straddle",
                         "d_overlap": d_overlap,
                         "conviction_score": score,
                         "conviction_cond": cond,
@@ -839,7 +839,7 @@ class VolStraddleStrategy:
 
         # ── Select trail params based on position type ──
         is_straddle = pos.get("is_straddle", False)
-        strategy_type = pos.get("strategy_type", "vr_squeeze")
+        strategy_type = pos.get("strategy_type", "vr_directional")
         if is_straddle:
             # r53 Option A: per-leg trailing for S_d8 straddle
             trail_activate = self.config.s_trail_activate
@@ -874,7 +874,8 @@ class VolStraddleStrategy:
             trail_stop_gain = peak_gain - trail_distance
             if worst_gain <= trail_stop_gain:
                 exit_pnl = max(trail_stop_gain, -sl_pct)
-                if self.config.trail_server_native:
+                has_server_trail = bool(pos.get("server_trail_order_id"))
+                if self.config.trail_server_native and has_server_trail:
                     # Server handles trail — Binance fires TRAILING_STOP_MARKET.
                     # Log for monitoring but don't trigger client-side close.
                     logger.debug(
@@ -1037,7 +1038,7 @@ class VolStraddleStrategy:
             "max_hold": max_hold,
             "is_straddle": kwargs.get("is_straddle", False),
             "straddle_pair_id": kwargs.get("straddle_pair_id", None),
-            "strategy_type": kwargs.get("strategy_type", meta.get("strategy_type", "vr_squeeze")),
+            "strategy_type": kwargs.get("strategy_type", meta.get("strategy_type", "vr_directional")),
             # Balance at open time (for trade record accuracy)
             "balance_before": kwargs.get("balance_before"),
             # Entry timestamp (for trade journal)
@@ -1059,7 +1060,7 @@ class VolStraddleStrategy:
             "position_side": position_side,
         }
 
-        strategy_label = kwargs.get("strategy_type", meta.get("strategy_type", "vr_squeeze"))
+        strategy_label = kwargs.get("strategy_type", meta.get("strategy_type", "vr_directional"))
         extra = ""
         if strategy_label == "ma_cluster":
             spread = meta.get("ma_cluster_spread", 0)

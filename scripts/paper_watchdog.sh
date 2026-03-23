@@ -80,5 +80,11 @@ LAST_CYCLE=$(grep "Cycle #" "$PAPER_LOG" 2>/dev/null | tail -1 | grep -oP 'Cycle
 BALANCE=$(grep -oP 'Balance=\$\K[0-9.]+' "$PAPER_LOG" 2>/dev/null | tail -1 || echo "?")
 DD=$(grep -oP 'DD=\K[0-9.]+' "$PAPER_LOG" 2>/dev/null | tail -1 || echo "?")
 POSITIONS=$(grep -oP 'Positions=\K[0-9]+/[0-9]+' "$PAPER_LOG" 2>/dev/null | tail -1 || echo "?")
+# Post-entry summary uses "Active=N" — prefer it if available
+ACTIVE=$(grep -oP 'Active=\K[0-9]+' "$PAPER_LOG" 2>/dev/null | tail -1 || true)
+if [ -n "$ACTIVE" ] && [ "$POSITIONS" != "?" ]; then
+    MAX_SLOTS="${POSITIONS#*/}"
+    POSITIONS="${ACTIVE}/${MAX_SLOTS}"
+fi
 
 log "HEALTHY — PID=$PAPER_PID cycle=#$LAST_CYCLE bal=\$$BALANCE DD=${DD}% pos=$POSITIONS errors=$ERROR_COUNT age=${LOG_AGE}s"

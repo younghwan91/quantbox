@@ -1,19 +1,17 @@
 """Tests for quantbox.core.terminal_ui — startup banner and formatted output."""
 
-from datetime import datetime, timezone
-
-import pytest
-
 from quantbox.core.terminal_ui import (
     Color,
     format_cycle_header,
     format_entry,
     format_exit,
+    format_position_line,
     format_scan_summary,
+    format_section_divider,
+    format_section_header,
     format_session_summary,
     print_banner,
     print_system_info,
-    print_startup_complete,
 )
 
 
@@ -123,6 +121,106 @@ class TestFormatSessionSummary:
         assert "ETHUSDT" in result
 
 
+class TestFormatSectionHeader:
+    """Section header contains title with color codes."""
+
+    def test_contains_title(self):
+        result = format_section_header("POSITIONS")
+        assert "POSITIONS" in result
+
+    def test_contains_ansi_when_enabled(self):
+        # Color codes should be present (non-empty strings in TTY mode)
+        result = format_section_header("SIGNALS")
+        assert "SIGNALS" in result
+
+    def test_plain_after_disable(self):
+        Color.disable()
+        result = format_section_header("SUMMARY")
+        assert "SUMMARY" in result
+        # No ANSI escape sequences
+        assert "\033[" not in result
+
+
+class TestFormatSectionDivider:
+    """Section divider returns dot divider string."""
+
+    def test_contains_dot_chars(self):
+        Color.disable()
+        result = format_section_divider()
+        assert "┄" in result
+
+
+class TestFormatPositionLine:
+    """Position line shows structured, colored position status."""
+
+    def test_long_position_positive_pnl(self):
+        result = format_position_line(
+            pos_key="SUIUSDT:LONG",
+            strategy_type="vr_straddle",
+            direction="L",
+            entry_price=1.2340,
+            current_price=1.2380,
+            upnl_pct=0.32,
+            bars=5,
+            max_hold=192,
+            sl_pct=0.015,
+            sl_active=True,
+            tp_pct=0.05,
+            tp_active=True,
+            trail_active=True,
+            peak_gain=0.012,
+        )
+        assert "SUIUSDT:LONG" in result
+        assert "vr_straddle" in result
+        assert "L" in result
+        assert "1.2340" in result
+        assert "1.2380" in result
+        assert "+0.32%" in result
+        assert "5/192bars" in result
+        assert "1.5%" in result
+        assert "5%" in result
+
+    def test_short_position_negative_pnl(self):
+        result = format_position_line(
+            pos_key="BTCUSDT:SHORT",
+            strategy_type="vr_directional",
+            direction="S",
+            entry_price=50000.0,
+            current_price=50500.0,
+            upnl_pct=-1.0,
+            bars=3,
+            max_hold=192,
+            sl_pct=0.02,
+            sl_active=False,
+            tp_pct=0.04,
+            tp_active=True,
+            trail_active=False,
+        )
+        assert "BTCUSDT:SHORT" in result
+        assert "S" in result
+        assert "-1.00%" in result
+
+    def test_plain_after_disable(self):
+        Color.disable()
+        result = format_position_line(
+            pos_key="ETHUSDT:LONG",
+            strategy_type="ma_cluster",
+            direction="L",
+            entry_price=3000.0,
+            current_price=3050.0,
+            upnl_pct=1.67,
+            bars=10,
+            max_hold=24,
+            sl_pct=0.02,
+            sl_active=True,
+            tp_pct=0.08,
+            tp_active=True,
+            trail_active=False,
+        )
+        assert "ETHUSDT:LONG" in result
+        assert "\033[" not in result
+
+
 class TestPrintBanner:
     """Banner prints without error."""
 
@@ -142,7 +240,7 @@ class TestPrintSystemInfo:
         Color.disable()
         print_system_info(
             mode="PAPER",
-            strategy="rubberband",
+            strategy="vol_straddle",
             balance=10000.0,
             n_symbols=20,
             max_slots=5,
@@ -153,8 +251,11 @@ class TestPrintSystemInfo:
             target=0.5,
             stop_mult=1.2,
             max_hold=6,
-            entry_mode="confidence",
             min_confidence=3,
+            straddle_enabled=True,
+            straddle_max_slots=8,
+            ma_cluster_enabled=True,
+            ma_cluster_leverage=21.0,
         )
         captured = capsys.readouterr()
         assert "PAPER" in captured.out

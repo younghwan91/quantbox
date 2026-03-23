@@ -12,11 +12,12 @@ Bug #13: Recursion guard on force close
 """
 
 from unittest.mock import MagicMock, patch, call
+import numpy as np
 import pytest
 
-
-# Re-use the _make_scalper helper from test_server_oco
 from tests.test_server_oco import _make_scalper
+from tests.test_positions_coverage import _make_vs_scalper, _set_signal_meta
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -28,11 +29,17 @@ class TestWouldTriggerAtEntry:
     """When _place_server_stop_loss or _place_server_take_profit returns
     'WOULD_TRIGGER' during _open_position, it must be stored as None."""
 
+    def _make_vs(self, paper=False):
+        """Vol_straddle scalper with trail_server_native=False so TP is placed."""
+        vs_cfg = VolStraddleConfig(trail_server_native=False, hedge_mode=False)
+        scalper = _make_vs_scalper(vs_config=vs_cfg, paper=paper)
+        _set_signal_meta(scalper)
+        scalper._symbol_info_cache["TESTUSDT"]["min_qty"] = 0.001
+        scalper._symbol_info_cache["TESTUSDT"]["max_qty"] = 1000.0
+        return scalper
+
     def test_sl_would_trigger_stored_as_none(self):
-        # v12.4.1: Disable PBT to test server TP placement path
-        scalper = _make_scalper(paper=False, partial_exit_enabled=False)
-        scalper._save_state = MagicMock()
-        # _place_order succeeds (position opened)
+        scalper = self._make_vs(paper=False)
         scalper._place_order = MagicMock(
             return_value={
                 "avgPrice": "100.0",
@@ -44,8 +51,6 @@ class TestWouldTriggerAtEntry:
         scalper._place_server_take_profit = MagicMock(return_value="tp_999")
         scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
 
-        import numpy as np
-
         closes = np.array([95.0] * 20 + [100.0])
         result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
 
@@ -55,8 +60,7 @@ class TestWouldTriggerAtEntry:
         assert pos["server_tp_order_id"] == "tp_999"
 
     def test_tp_would_trigger_stored_as_none(self):
-        scalper = _make_scalper(paper=False)
-        scalper._save_state = MagicMock()
+        scalper = self._make_vs(paper=False)
         scalper._place_order = MagicMock(
             return_value={
                 "avgPrice": "100.0",
@@ -67,8 +71,6 @@ class TestWouldTriggerAtEntry:
         scalper._place_server_stop_loss = MagicMock(return_value="sl_888")
         scalper._place_server_take_profit = MagicMock(return_value="WOULD_TRIGGER")
         scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
-
-        import numpy as np
 
         closes = np.array([95.0] * 20 + [100.0])
         scalper._open_position("TESTUSDT", -1, closes, 1000.0)
@@ -386,7 +388,7 @@ class TestSaveStateOnServerFill:
             "notional": 2400.0,
             "bars_held": 5,
             "move_size": 0.02,
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
             "best_pnl": 0.02,
             "worst_pnl": -0.005,
             "opened_at": "2026-03-15T05:00:00+00:00",
@@ -406,7 +408,7 @@ class TestSaveStateOnServerFill:
         assert trade_arg["symbol"] == "BTCUSDT"
         assert trade_arg["reason"] == "server_partial_tp"
         assert "strategy_type" in trade_arg
-        assert trade_arg["strategy_type"] == "vr_squeeze"
+        assert trade_arg["strategy_type"] == "vr_directional"
         assert trade_arg["pnl_usd"] > 0  # TP should be profitable
 
     def test_wait_for_bar_saves_after_sync(self):
@@ -486,7 +488,9 @@ class TestForceCloseRecursionGuard:
         # Second call (force_sl_would_trigger): _place_order returns a fill
         call_count = [0]
 
-        def mock_place_order(symbol, side, qty, reduce_only=False, leverage=1, position_side=None):
+        def mock_place_order(
+            symbol, side, qty, reduce_only=False, leverage=1, position_side=None, paper_fill_price=None
+        ):
             call_count[0] += 1
             if call_count[0] == 1:
                 return None  # first attempt fails
