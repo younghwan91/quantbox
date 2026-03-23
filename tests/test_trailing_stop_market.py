@@ -1069,3 +1069,157 @@ class TestDeferredTrailPlacement:
         s._manage_active_positions()
 
         s._place_trail_regular.assert_not_called()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# T11: Edge cases — close failure trail re-placement, WOULD_TRIGGER guard,
+#      paper mode client-side trail fallback
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestCloseFailureTrailReplacement:
+    """When _close_position fails after cancelling trail, trail must be re-placed."""
+
+    def test_trail_replaced_after_close_failure(self):
+        """Close fails (result=None) → SL + trail re-placed."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False  # live mode: trail re-placement applies
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id="trail_original",
+            trail_active=True,
+            peak_gain=0.03,
+        )
+        # Ensure _round_qty returns valid quantity
+        s._round_qty = MagicMock(return_value=30.0)
+        s._cancel_server_stop_loss = MagicMock(return_value=True)
+        s._cancel_server_take_profit = MagicMock(return_value=True)
+        s._cancel_trail_regular = MagicMock(return_value=True)
+        s._place_order = MagicMock(return_value=None)  # close fails
+        s._place_server_stop_loss = MagicMock(return_value="sl_new")
+        s._place_trail_regular = MagicMock(return_value="trail_new")
+        s._save_state = MagicMock()
+
+        result = s._close_position("TESTUSDT:LONG", "trailing_stop", 102.0)
+
+        assert result is False  # close failed
+        # Trail should be re-placed
+        s._place_trail_regular.assert_called_once()
+        pos = s.strategy._positions["TESTUSDT:LONG"]
+        assert pos["server_trail_order_id"] == "trail_new"
+
+    def test_trail_not_replaced_when_no_original_trail(self):
+        """If position had no server trail, don't try to re-place on close failure."""
+        s = _build_trail_scalper(trail_server_native=True)
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id=None,
+            trail_active=True,
+            peak_gain=0.03,
+        )
+        s._round_qty = MagicMock(return_value=30.0)
+        s._cancel_server_stop_loss = MagicMock(return_value=True)
+        s._cancel_server_take_profit = MagicMock(return_value=True)
+        s._place_order = MagicMock(return_value=None)
+        s._place_server_stop_loss = MagicMock(return_value="sl_new")
+        s._place_trail_regular = MagicMock()
+        s._save_state = MagicMock()
+
+        s._close_position("TESTUSDT:LONG", "trailing_stop", 102.0)
+
+        s._place_trail_regular.assert_not_called()
+
+
+class TestTrailWouldTriggerAtEntry:
+    """WOULD_TRIGGER from trail placement at entry must not be stored as order ID."""
+
+    def test_would_trigger_trail_cleared(self):
+        """Trail WOULD_TRIGGER at entry → trail_order_id = None in bracket result."""
+        s = _build_trail_scalper(trail_server_native=True)
+
+        s._place_server_stop_loss = MagicMock(return_value="sl_111")
+        s._place_trail_regular = MagicMock(return_value="WOULD_TRIGGER")
+
+        fill = {"fill_price": 100.0, "fill_qty": 1.0, "pos_side": "LONG", "lev_int": 30}
+        sizing = {
+            "move_size": 1.0,
+            "sl_pct": 0.015,
+            "tp_pct": 0.05,
+            "strategy_type": "vr_directional",
+            "conviction_score": 1,
+            "tf_label": "15m",
+        }
+
+        result = s._setup_brackets("TESTUSDT", 1, fill, sizing)
+
+        assert result["trail_order_id"] is None, "WOULD_TRIGGER must not be stored as trail order ID"
+
+
+class TestPaperTrailClientSideFallback:
+    """Paper mode: trail_server_native=True but no server order → client-side exit fires."""
+
+    def test_paper_trail_fires_without_server_order(self):
+        """update_position returns 'trailing_stop' when no server_trail_order_id (paper)."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = True
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            peak_gain=0.025,
+            server_trail_order_id=None,
+            strategy_type="vr_straddle",
+            sl=0.015,
+        )
+
+        result = s.strategy.update_position(
+            symbol="TESTUSDT:LONG",
+            current_price=102.0,
+            current_high=103.0,
+            current_low=101.5,
+        )
+        assert result == "trailing_stop", "Paper mode with no server trail must fire client-side trailing_stop"
+
+    def test_live_trail_defers_with_server_order(self):
+        """Live mode with server_trail_order_id → does NOT fire client-side."""
+        s = _build_trail_scalper(trail_server_native=True)
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            peak_gain=0.025,
+            server_trail_order_id="trail_9999001",
+            strategy_type="vr_straddle",
+            sl=0.015,
+        )
+
+        result = s.strategy.update_position(
+            symbol="TESTUSDT:LONG",
+            current_price=102.0,
+            current_high=103.0,
+            current_low=101.5,
+        )
+        assert result != "trailing_stop", "Live mode with server trail must defer to Binance, not fire client-side"
+
+    def test_trail_entry_failed_fallback_fires(self):
+        """trail_server_native=True, entry placement failed → client-side exit fires."""
+        s = _build_trail_scalper(trail_server_native=True)
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            peak_gain=0.025,
+            server_trail_order_id=None,
+            strategy_type="vr_straddle",
+            sl=0.015,
+        )
+
+        result = s.strategy.update_position(
+            symbol="TESTUSDT:LONG",
+            current_price=102.0,
+            current_high=103.0,
+            current_low=101.5,
+        )
+        assert result == "trailing_stop", "When server trail placement failed, client-side must fire as fallback"
