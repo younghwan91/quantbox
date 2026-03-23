@@ -19,10 +19,6 @@ from datetime import datetime, timezone
 import numpy as np
 
 from quantbox.core.terminal_ui import format_entry, format_exit
-from quantbox.strategy.rubberband import (
-    calculate_position_size,
-    compute_confidence_leverage,
-)
 from quantbox.utils.diagnostics import _diag_logger
 
 logger = logging.getLogger("Scalper")
@@ -45,6 +41,522 @@ class PositionMixin:
                 return key
         return None
 
+    # ── _open_position sub-methods ──────────────────────────────────────
+
+    def _calculate_sizing(
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
+        close_prices: np.ndarray,
+        balance: float,
+    ) -> dict | None:
+        """Calculate position sizing, SL/TP params, and quantity.
+
+        Returns a dict with all sizing parameters needed for order placement,
+        or None if the entry should be skipped (below min notional, exposure
+        cap hit, etc.).
+        """
+        cfg = self.config
+        entry_price = close_prices[-1]
+
+        # Measure the move that triggered the signal
+        lookback_price = close_prices[-cfg.lookback - 1]
+        move_size = abs(entry_price / lookback_price - 1.0)
+
+        # ── VolStraddle: simple flat sizing (R35 parity) ──
+        vs = self.vs_config
+        # move_size = 1.0 convention: SL/TP are absolute fractions
+        move_size = 1.0
+
+        # Dynamic capital allocation
+        flat_per_slot = balance / vs.max_concurrent  # hard floor/ceiling
+        if vs.dynamic_capital_enabled:
+            n_active = self.strategy.n_active
+            per_slot_capital = balance / max(1, n_active + 1)
+            per_slot_capital = min(per_slot_capital, balance * vs.dynamic_capital_max_fraction)
+            # Hard cap: never exceed flat sizing regardless of n_active
+            if per_slot_capital > flat_per_slot:
+                logger.warning(
+                    f"[{symbol}] dynamic_capital capped: "
+                    f"${per_slot_capital:.2f} → ${flat_per_slot:.2f} "
+                    f"(balance/max_concurrent={vs.max_concurrent})"
+                )
+                per_slot_capital = flat_per_slot
+        else:
+            per_slot_capital = flat_per_slot
+
+        # SoftTight DD Scaling (safety mechanism)
+        if vs.soft_equity_scale:
+            hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+            dd_pct = (hwm - balance) / hwm if hwm > 0 else 0.0
+            eq_scale = 1.0
+            if dd_pct >= vs.soft_eq_dd3:
+                eq_scale = vs.soft_eq_scale3
+                per_slot_capital *= eq_scale
+            elif dd_pct >= vs.soft_eq_dd2:
+                eq_scale = vs.soft_eq_scale2
+                per_slot_capital *= eq_scale
+            elif dd_pct >= vs.soft_eq_dd1:
+                eq_scale = vs.soft_eq_scale1
+                per_slot_capital *= eq_scale
+            if eq_scale < 1.0:
+                logger.info(
+                    f"[{symbol}] SoftTight DD Scaling: DD={dd_pct * 100:.1f}% "
+                    f"→ {eq_scale:.2f}x → slot=${per_slot_capital:.2f}"
+                )
+
+        leverage = vs.base_leverage
+        notional = per_slot_capital * leverage
+
+        # Get signal metadata (SL/TP/TF from on_bar)
+        sig_meta = self.strategy.get_last_signal_meta(symbol)
+        sl_pct = sig_meta.get("sl", vs.d_sl)
+        tp_pct = sig_meta.get("tp", vs.d_tp)
+        tf_label = sig_meta.get("tf", "15m")
+        max_hold = sig_meta.get("max_hold", vs.get_max_hold(tf_label))
+        is_straddle = sig_meta.get("straddle", False)
+        strategy_type = sig_meta.get("strategy_type", "vr_directional")
+
+        # ── R44d V17: MA Cluster uses different leverage ──
+        # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
+        if "leverage_override" in sig_meta:
+            raw_lev = sig_meta["leverage_override"]
+            leverage = max(1.0, min(125.0, float(raw_lev)))
+            if leverage != raw_lev:
+                logger.warning(f"[{symbol}] leverage_override clamped: {raw_lev} → {leverage:.0f} (must be [1, 125])")
+            notional = per_slot_capital * leverage
+            logger.info(f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x (override, SL={sl_pct * 100:.0f}%)")
+
+        # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
+        conviction_score = sig_meta.get("conviction_score", 0)
+        if vs.cw_enabled and vs.cw_multipliers and "vr" in strategy_type:
+            idx = min(conviction_score, len(vs.cw_multipliers) - 1)
+            cw_mult = vs.cw_multipliers[idx]
+            notional *= cw_mult
+            logger.info(
+                f"[{symbol}] CW-Tier: score={conviction_score}/4 → "
+                f"{cw_mult:.1f}x → notional=${notional:.2f} "
+                f"({sig_meta.get('conviction_cond', {})})"
+            )
+
+        # ── Cap notional at Binance's max allowable for this symbol/leverage ──
+        # Prevents -2027 "Exceeded the maximum allowable position" errors.
+        sym_info = self.get_symbol_info(symbol)
+        max_notional = sym_info.get("max_notional")
+        if max_notional and notional > max_notional:
+            logger.warning(
+                f"[{symbol}] Notional capped: ${notional:.2f} → ${max_notional:.2f} "
+                f"(Binance max_notional limit at current leverage)"
+            )
+            notional = max_notional
+
+        # ── Cumulative notional pre-check: account for existing exchange positions ──
+        # Prevents -2027 when partial fill or untracked position already exists.
+        # _cached_exchange_notionals is set by _reconcile_positions() each cycle.
+        if max_notional:
+            pos_side_key = (
+                f"{symbol}:{'LONG' if signal == 1 else 'SHORT'}"
+                if hasattr(self, "vs_config") and self.vs_config.hedge_mode
+                else symbol
+            )
+            cached = getattr(self, "_cached_exchange_notionals", {})
+            existing_notional = cached.get(pos_side_key, 0.0)
+            if existing_notional > 0:
+                remaining_budget = max_notional - existing_notional
+                if remaining_budget <= 0:
+                    logger.warning(
+                        f"[{symbol}] Skipping entry: already at max notional "
+                        f"(exchange={existing_notional:.0f} ≥ max={max_notional:.0f})"
+                    )
+                    return None
+                if notional > remaining_budget:
+                    logger.warning(
+                        f"[{symbol}] Notional reduced for cumulative cap: "
+                        f"${notional:.0f} → ${remaining_budget:.0f} "
+                        f"(existing=${existing_notional:.0f} + new would exceed ${max_notional:.0f})"
+                    )
+                    notional = remaining_budget
+
+        if notional < 10.0:  # Internal strategy minimum ($10); Binance exchange min is $5 (see below)
+            logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
+            return None
+
+        # ── ExposureGuard: block entry if total exposure exceeds cap ──
+        try:
+            _exp_guard = getattr(self, "_exposure_guard", None)
+            if _exp_guard is not None:
+                current_notional = sum(abs(float(p.get("notional", 0))) for p in self.strategy._positions.values())
+                if not _exp_guard.can_open(current_notional, notional, balance):
+                    logger.warning(f"[{symbol}] Exposure cap hit — skipping entry")
+                    return None
+        except Exception as e:
+            logger.error(f"[{symbol}] ExposureGuard check error: {e}")
+
+        # T2-1 runtime guard: entry_price=0 → ZeroDivisionError in quantity calc
+        if entry_price <= 0:
+            logger.error(f"[{symbol}] INVARIANT VIOLATION: entry_price={entry_price!r} (must be > 0) — aborting open")
+            return None
+
+        quantity = notional / entry_price
+        quantity = self._round_qty(quantity, symbol)
+        if quantity <= 0:
+            return None
+
+        # Check exchange min notional (Binance API; default $5 when not in symbol info)
+        info = self.get_symbol_info(symbol)
+        min_notional = info.get("min_notional", 5.0)
+        if quantity * entry_price < min_notional:
+            logger.debug(f"[{symbol}] Below min notional ${min_notional}")
+            return None
+
+        return {
+            "notional": notional,
+            "leverage": leverage,
+            "move_size": move_size,
+            "sl_pct": sl_pct,
+            "tp_pct": tp_pct,
+            "tf_label": tf_label,
+            "max_hold": max_hold,
+            "is_straddle": is_straddle,
+            "strategy_type": strategy_type,
+            "conviction_score": conviction_score,
+            "per_slot_capital": per_slot_capital,
+            "entry_price": entry_price,
+            "quantity": quantity,
+        }
+
+    def _execute_entry_order(
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
+        sizing: dict,
+        balance: float,
+    ) -> dict | None:
+        """Place the entry order on the exchange.
+
+        Returns a dict with fill_price, fill_qty, lev_int, pos_side,
+        balance_before, and updated notional, or None on failure.
+        """
+        leverage = sizing["leverage"]
+        side = "BUY" if signal > 0 else "SELL"
+        lev_int = max(1, min(math.ceil(leverage), int(self.vs_config.max_leverage)))
+
+        # Hedge Mode: derive positionSide from signal
+        pos_side = None
+        if self.vs_config.hedge_mode:
+            pos_side = "LONG" if signal > 0 else "SHORT"
+
+        # ── Exchange-level dedup (prevents double-entry after rapid restarts) ──
+        # Even if internal state is stale, the exchange will tell us the truth.
+        if not self.paper_mode:
+            try:
+                ex_positions = self.client.futures_position_information(symbol=symbol)
+                # hedge_mode: pos_side='LONG'/'SHORT'; one-way mode: pos_side=None → 'BOTH'
+                wanted_side = pos_side or "BOTH"
+                # Dust tolerance: ignore residual qty below min_notional ($5).
+                # Partial trail fills can leave tiny dust that permanently blocks
+                # the symbol slot if treated as a real position.
+                info = self.get_symbol_info(symbol)
+                dust_threshold = info.get("min_notional", 5.0)
+                already_open = False
+                for p in ex_positions:
+                    if p.get("positionSide") != wanted_side:
+                        continue
+                    amt = abs(float(p.get("positionAmt", 0)))
+                    if amt <= 0:
+                        continue
+                    entry_px = float(p.get("entryPrice", 0))
+                    notional_check = amt * entry_px if entry_px > 0 else amt
+                    if notional_check < dust_threshold:
+                        logger.info(
+                            f"[{symbol}] Exchange dedup: ignoring dust "
+                            f"({amt} qty, ${notional_check:.2f} < ${dust_threshold:.2f} min_notional)"
+                        )
+                        continue
+                    already_open = True
+                    break
+                if already_open:
+                    logger.warning(
+                        f"[{symbol}] Exchange dedup: {wanted_side} already open "
+                        f"on exchange — skipping entry to prevent duplication"
+                    )
+                    # Sync internal state to reflect reality
+                    if not self.strategy.has_position(symbol):
+                        logger.warning(
+                            f"[{symbol}] State out of sync — "
+                            f"position exists on exchange but not in internal state. "
+                            f"No SL/TP protection. "
+                            f"Reverse ghost check in _reconcile_positions() will auto-close."
+                        )
+                    return None
+            except Exception as exc:
+                logger.error(
+                    f"[{symbol}] Exchange dedup check failed ({exc}) — "
+                    f"blocking entry to prevent duplicate. Will retry next cycle."
+                )
+                return None
+
+        # Capture balance before order fills (used in trade record for accurate tracking).
+        balance_before = self.get_balance()
+
+        result = self._place_order(
+            symbol,
+            side,
+            sizing["quantity"],
+            leverage=lev_int,
+            position_side=pos_side,
+        )
+        if result is None:
+            return None
+
+        fill_price = float(result["avgPrice"])
+        fill_qty = float(result["executedQty"])
+
+        return {
+            "fill_price": fill_price,
+            "fill_qty": fill_qty,
+            "lev_int": lev_int,
+            "pos_side": pos_side,
+            "balance_before": balance_before,
+        }
+
+    def _setup_brackets(
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
+        fill: dict,
+        sizing: dict,
+    ) -> dict:
+        """Place SL, trailing stop, and/or TP bracket orders.
+
+        Returns a dict with sl_order_id, tp_order_id, trail_order_id.
+        """
+        fill_price = fill["fill_price"]
+        fill_qty = fill["fill_qty"]
+        pos_side = fill["pos_side"]
+        move_size = sizing["move_size"]
+        sl_pct = sizing["sl_pct"]
+        tp_pct = sizing["tp_pct"]
+        strategy_type = sizing["strategy_type"]
+
+        notional = fill_qty * fill_price
+        direction = "LONG" if signal > 0 else "SHORT"
+        conviction_score = sizing["conviction_score"]
+
+        # ── VolStraddle brackets: fixed SL/TP (no PBT) ──
+        # move_size=1.0, so SL distance = sl_pct, TP distance = tp_pct
+        logger.info(
+            f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
+            f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={fill['lev_int']}x, "
+            f"TF={sizing['tf_label']}, SL={sl_pct * 100:.1f}%, TP={tp_pct * 100:.1f}%, "
+            f"{strategy_type}"
+            f"{f', conviction={conviction_score}/4' if strategy_type.startswith('vr_') else ''})"
+        )
+
+        sl_order_id = self._place_server_stop_loss(
+            symbol=symbol,
+            signal=signal,
+            quantity=fill_qty,
+            entry_price=fill_price,
+            move_size=move_size,
+            stop_mult=sl_pct,
+            position_side=pos_side,
+        )
+        if sl_order_id == "WOULD_TRIGGER":
+            logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — bracket repair next cycle")
+            sl_order_id = None
+
+        # Server-side trailing stop: placed at entry with future activationPrice.
+        # Binance keeps trail in NEW until price reaches activationPrice, then
+        # tracks peak tick-by-tick and fires on callbackRate% pullback.
+        # Verified via live test (commit 3cb8865, 2026-03-19).
+        # EGLDUSDT incident (2026-03-21) was caused by 0.1% callbackRate (noise),
+        # not by Binance ignoring activationPrice. Fixed by widening to 0.5%.
+        trail_order_id: str | None = None
+        tp_order_id: str | None = None
+        if self.vs_config.trail_server_native:
+            cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
+            trail_order_id = self._place_trail_regular(
+                symbol=symbol,
+                side=cs,
+                quantity=fill_qty,
+                callback_rate=cr,
+                activation_price=ap,
+                position_side=pos_side,
+            )
+            if trail_order_id == "WOULD_TRIGGER":
+                logger.warning(f"[{symbol}] Trail WOULD_TRIGGER at entry — bracket repair next cycle")
+                trail_order_id = None
+            if trail_order_id:
+                logger.info(
+                    f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
+                    f"(algoId={sl_order_id}) TRAIL=OK (orderId={trail_order_id}, "
+                    f"activate=${ap:.4f}={cr}% callback)"
+                )
+            else:
+                logger.warning(
+                    f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
+                    f"(algoId={sl_order_id}) TRAIL=FAILED — bracket repair will retry"
+                )
+            # No TP needed — trail handles profit-taking once active.
+        else:
+            # Legacy: full-qty TP (no partial — matches backtest SL/TP/max_hold exit)
+            tp_order_id = self._place_server_take_profit(
+                symbol=symbol,
+                signal=signal,
+                quantity=fill_qty,
+                entry_price=fill_price,
+                move_size=move_size,
+                target_retrace=tp_pct,
+                position_side=pos_side,
+            )
+            if tp_order_id == "WOULD_TRIGGER":
+                logger.warning(f"[{symbol}] TP WOULD_TRIGGER at entry — client-side will handle TP")
+                tp_order_id = None
+
+            sl_status = "OK" if sl_order_id else "FAILED"
+            tp_status = "OK" if tp_order_id else "FAILED"
+            logger.info(
+                f"[{symbol}] Server bracket: SL={sl_status} "
+                f"(algoId={sl_order_id}) TP={tp_status} "
+                f"(algoId={tp_order_id})"
+            )
+
+        return {
+            "sl_order_id": sl_order_id,
+            "tp_order_id": tp_order_id,
+            "trail_order_id": trail_order_id,
+        }
+
+    def _register_position(
+        self: "ScalperProtocol",
+        symbol: "ApiSymbol",
+        signal: "SignalValue",
+        fill: dict,
+        sizing: dict,
+        brackets: dict,
+        balance: float,
+        straddle_pair_id: str | None = None,
+    ) -> bool:
+        """Record position in strategy state and send notifications.
+
+        Returns True always (position was successfully opened).
+        """
+        fill_price = fill["fill_price"]
+        fill_qty = fill["fill_qty"]
+        lev_int = fill["lev_int"]
+        pos_side = fill["pos_side"]
+        balance_before = fill["balance_before"]
+        sl_pct = sizing["sl_pct"]
+        tp_pct = sizing["tp_pct"]
+        tf_label = sizing["tf_label"]
+        max_hold = sizing["max_hold"]
+        is_straddle = sizing["is_straddle"]
+        strategy_type = sizing["strategy_type"]
+        conviction_score = sizing["conviction_score"]
+        move_size = sizing["move_size"]
+        vs = self.vs_config
+
+        # Record in strategy with TF-specific metadata
+        self.strategy.open_position(
+            symbol=symbol,
+            signal=signal,
+            entry_price=fill_price,
+            notional=fill_qty * fill_price,
+            leverage=lev_int,
+            move_size=move_size,
+            entry_stop_mult=sl_pct,
+            server_sl_order_id=brackets["sl_order_id"],
+            server_tp_order_id=brackets["tp_order_id"],
+            server_trail_order_id=brackets["trail_order_id"],
+            sl=sl_pct,
+            tp=tp_pct,
+            tf=tf_label,
+            max_hold=max_hold,
+            position_side=pos_side,
+            is_straddle=is_straddle,
+            straddle_pair_id=straddle_pair_id,
+            strategy_type=strategy_type,
+            balance_before=balance_before,
+        )
+
+        # Paper balance cost
+        if self.paper_mode:
+            cost = fill_qty * fill_price * self.vs_config.cost_per_side
+            self._paper_balance -= cost
+
+        # Print + log entry
+        _side_str = "LONG" if signal == 1 else "SHORT"
+        print(
+            format_entry(
+                symbol=symbol,
+                side=_side_str,
+                price=fill_price,
+                leverage=lev_int,
+                size_usd=fill_qty * fill_price,
+            )
+        )
+
+        # Compute TP/SL prices for notification
+        if signal == 1:
+            tp_price = fill_price * (1.0 + tp_pct)
+            sl_price = fill_price * (1.0 - sl_pct)
+        else:
+            tp_price = fill_price * (1.0 - tp_pct)
+            sl_price = fill_price * (1.0 + sl_pct)
+
+        balance_after = self.get_balance()
+        n_active = self.strategy.n_active
+        _dir = "LONG ↑" if signal == 1 else "SHORT ↓"
+        _sl_tag = "🟢 서버" if brackets["sl_order_id"] else "🟡 클라이언트"
+        _tp_tag = "🟢 서버" if brackets["tp_order_id"] else "🟡 클라이언트"
+        _pos_lines = []
+        for _sym, _p in self.strategy.active_positions.items():
+            _pd = "L" if _p["signal"] == 1 else "S"
+            _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
+        _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
+
+        self.discord.send(
+            embed={
+                "title": f"{'🟢' if signal == 1 else '🔴'} {symbol} {_dir} | VS 진입",
+                "color": 0x00C853 if signal == 1 else 0xFF1744,
+                "fields": [
+                    {
+                        "name": "전략",
+                        "value": f"VolStraddle {'S' if strategy_type == 'vr_straddle' else ('MA' if strategy_type == 'ma_cluster' else 'D')} ({tf_label})",
+                        "inline": True,
+                    },
+                    {"name": "진입가", "value": f"${fill_price:.4f}", "inline": True},
+                    {"name": "포지션", "value": f"${fill_qty * fill_price:,.2f}", "inline": True},
+                    {"name": "레버리지", "value": f"{lev_int}x", "inline": True},
+                    {"name": "🎯 TP", "value": f"${tp_price:.4f} ({tp_pct * 100:.1f}%)", "inline": True},
+                    {"name": "🛑 SL", "value": f"${sl_price:.4f} ({sl_pct * 100:.1f}%)", "inline": True},
+                    {
+                        "name": "Exit",
+                        "value": (
+                            "SL/TP"
+                            if (is_straddle or strategy_type == "ma_cluster")
+                            else f"Trail({vs.d_trail_activate * 100:.0f}%/{vs.d_trail_distance * 100:.1f}%)"
+                        ),
+                        "inline": True,
+                    },
+                    {"name": "SL 방식", "value": _sl_tag, "inline": True},
+                    {
+                        "name": "확신도" if strategy_type.startswith("vr_") else "전략타입",
+                        "value": (f"{conviction_score}/4" if strategy_type.startswith("vr_") else strategy_type),
+                        "inline": True,
+                    },
+                    {"name": "슬롯", "value": f"{n_active}/{self.vs_config.max_concurrent}", "inline": True},
+                    {"name": "── 활성 포지션 ──", "value": f"```\n{_pos_summary}\n```", "inline": False},
+                    {"name": "잔고", "value": f"${balance_after:,.2f}", "inline": True},
+                ],
+                "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
+            }
+        )
+        return True
+
+    # ── _open_position orchestrator ──────────────────────────────────────
+
     def _open_position(
         self: "ScalperProtocol",
         symbol: "ApiSymbol",
@@ -66,707 +578,17 @@ class PositionMixin:
         Returns:
             True if position was opened.
         """
-        cfg = self.config
-        entry_price = close_prices[-1]
-
-        # Measure the move that triggered the signal
-        lookback_price = close_prices[-cfg.lookback - 1]
-        move_size = abs(entry_price / lookback_price - 1.0)
-
-        # ── VolStraddle: simple flat sizing (R35 parity) ──
-        if self.strategy_name == "vol_straddle":
-            vs = self.vs_config
-            # move_size = 1.0 convention: SL/TP are absolute fractions
-            move_size = 1.0
-
-            # Dynamic capital allocation
-            flat_per_slot = balance / vs.max_concurrent  # hard floor/ceiling
-            if vs.dynamic_capital_enabled:
-                n_active = self.strategy.n_active
-                per_slot_capital = balance / max(1, n_active + 1)
-                per_slot_capital = min(per_slot_capital, balance * vs.dynamic_capital_max_fraction)
-                # Hard cap: never exceed flat sizing regardless of n_active
-                if per_slot_capital > flat_per_slot:
-                    logger.warning(
-                        f"[{symbol}] dynamic_capital capped: "
-                        f"${per_slot_capital:.2f} → ${flat_per_slot:.2f} "
-                        f"(balance/max_concurrent={vs.max_concurrent})"
-                    )
-                    per_slot_capital = flat_per_slot
-            else:
-                per_slot_capital = flat_per_slot
-
-            # SoftTight DD Scaling (safety mechanism)
-            if vs.soft_equity_scale:
-                hwm = self._high_water_mark if self._high_water_mark > 0 else balance
-                dd_pct = (hwm - balance) / hwm if hwm > 0 else 0.0
-                eq_scale = 1.0
-                if dd_pct >= vs.soft_eq_dd3:
-                    eq_scale = vs.soft_eq_scale3
-                    per_slot_capital *= eq_scale
-                elif dd_pct >= vs.soft_eq_dd2:
-                    eq_scale = vs.soft_eq_scale2
-                    per_slot_capital *= eq_scale
-                elif dd_pct >= vs.soft_eq_dd1:
-                    eq_scale = vs.soft_eq_scale1
-                    per_slot_capital *= eq_scale
-                if eq_scale < 1.0:
-                    logger.info(
-                        f"[{symbol}] SoftTight DD Scaling: DD={dd_pct * 100:.1f}% "
-                        f"→ {eq_scale:.2f}x → slot=${per_slot_capital:.2f}"
-                    )
-
-            leverage = vs.base_leverage
-            notional = per_slot_capital * leverage
-
-            # Get signal metadata (SL/TP/TF from on_bar)
-            sig_meta = self.strategy.get_last_signal_meta(symbol)
-            sl_pct = sig_meta.get("sl", vs.d_sl)
-            tp_pct = sig_meta.get("tp", vs.d_tp)
-            tf_label = sig_meta.get("tf", "15m")
-            max_hold = sig_meta.get("max_hold", vs.get_max_hold(tf_label))
-            is_straddle = sig_meta.get("straddle", False)
-            strategy_type = sig_meta.get("strategy_type", "vr_squeeze")
-            # Split vr_squeeze into vr_straddle / vr_directional for dashboard
-            if strategy_type == "vr_squeeze":
-                strategy_type = "vr_straddle" if is_straddle else "vr_directional"
-
-            # ── R44d V17: MA Cluster uses different leverage ──
-            # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
-            if "leverage_override" in sig_meta:
-                raw_lev = sig_meta["leverage_override"]
-                leverage = max(1.0, min(125.0, float(raw_lev)))
-                if leverage != raw_lev:
-                    logger.warning(
-                        f"[{symbol}] leverage_override clamped: {raw_lev} → {leverage:.0f} (must be [1, 125])"
-                    )
-                notional = per_slot_capital * leverage
-                logger.info(f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x (override, SL={sl_pct * 100:.0f}%)")
-
-            # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
-            conviction_score = sig_meta.get("conviction_score", 0)
-            if vs.cw_enabled and vs.cw_multipliers and "vr" in strategy_type:
-                idx = min(conviction_score, len(vs.cw_multipliers) - 1)
-                cw_mult = vs.cw_multipliers[idx]
-                notional *= cw_mult
-                logger.info(
-                    f"[{symbol}] CW-Tier: score={conviction_score}/4 → "
-                    f"{cw_mult:.1f}x → notional=${notional:.2f} "
-                    f"({sig_meta.get('conviction_cond', {})})"
-                )
-
-            # ── Cap notional at Binance's max allowable for this symbol/leverage ──
-            # Prevents -2027 "Exceeded the maximum allowable position" errors.
-            sym_info = self.get_symbol_info(symbol)
-            max_notional = sym_info.get("max_notional")
-            if max_notional and notional > max_notional:
-                logger.warning(
-                    f"[{symbol}] Notional capped: ${notional:.2f} → ${max_notional:.2f} "
-                    f"(Binance max_notional limit at current leverage)"
-                )
-                notional = max_notional
-
-            # ── Cumulative notional pre-check: account for existing exchange positions ──
-            # Prevents -2027 when partial fill or untracked position already exists.
-            # _cached_exchange_notionals is set by _reconcile_positions() each cycle.
-            if max_notional:
-                pos_side_key = (
-                    f"{symbol}:{'LONG' if signal == 1 else 'SHORT'}"
-                    if hasattr(self, "vs_config") and self.vs_config.hedge_mode
-                    else symbol
-                )
-                cached = getattr(self, "_cached_exchange_notionals", {})
-                existing_notional = cached.get(pos_side_key, 0.0)
-                if existing_notional > 0:
-                    remaining_budget = max_notional - existing_notional
-                    if remaining_budget <= 0:
-                        logger.warning(
-                            f"[{symbol}] Skipping entry: already at max notional "
-                            f"(exchange={existing_notional:.0f} ≥ max={max_notional:.0f})"
-                        )
-                        return False
-                    if notional > remaining_budget:
-                        logger.warning(
-                            f"[{symbol}] Notional reduced for cumulative cap: "
-                            f"${notional:.0f} → ${remaining_budget:.0f} "
-                            f"(existing=${existing_notional:.0f} + new would exceed ${max_notional:.0f})"
-                        )
-                        notional = remaining_budget
-
-        else:
-            # Position sizing — v10.0: dynamic capital allocation
-            if cfg.dynamic_capital_enabled:
-                n_active = self.strategy.n_active
-                per_slot_capital = balance / max(1, n_active + 1)
-                # Safety: cap at cfg.dynamic_capital_max_fraction of balance to prevent over-concentration
-                per_slot_capital = min(per_slot_capital, balance * cfg.dynamic_capital_max_fraction)
-            else:
-                per_slot_capital = balance / cfg.max_concurrent
-
-            # ═══ v12.3 PARITY: SteepX Confidence Sizing ═══
-            conf_level = self.strategy.get_last_confidence(symbol)
-            if cfg.steep_cap_curve and conf_level > 0:
-                if conf_level >= 5:
-                    cap_mult = cfg.cap_mult_conf5
-                elif conf_level == 4:
-                    cap_mult = cfg.cap_mult_conf4
-                elif conf_level == 3:
-                    cap_mult = cfg.cap_mult_conf3
-                elif conf_level == 2:
-                    cap_mult = cfg.cap_mult_conf2
-                else:
-                    cap_mult = cfg.cap_mult_conf2  # conf=1
-                per_slot_capital *= cap_mult
-                logger.debug(f"[{symbol}] SteepX: conf={conf_level} → {cap_mult:.1f}x → slot=${per_slot_capital:.2f}")
-
-            # ═══ v12.3 PARITY: SoftTight DD Scaling ═══
-            if cfg.soft_equity_scale:
-                hwm = self._high_water_mark if self._high_water_mark > 0 else balance
-                dd_pct = (hwm - balance) / hwm if hwm > 0 else 0.0
-                if dd_pct >= cfg.soft_eq_dd3:
-                    eq_scale = cfg.soft_eq_scale3
-                elif dd_pct >= cfg.soft_eq_dd2:
-                    eq_scale = cfg.soft_eq_scale2
-                elif dd_pct >= cfg.soft_eq_dd1:
-                    eq_scale = cfg.soft_eq_scale1
-                else:
-                    eq_scale = 1.0
-                if eq_scale < 1.0:
-                    per_slot_capital *= eq_scale
-                    logger.debug(
-                        f"[{symbol}] SoftTight: DD={dd_pct * 100:.1f}% → {eq_scale:.2f}x → slot=${per_slot_capital:.2f}"
-                    )
-
-            # ═══ v12.3 PARITY: Vol-Adjusted Sizing ═══
-            if cfg.vol_adjusted_size:
-                cur_atr = self.strategy.get_last_atr_pct(symbol)
-                if cur_atr > 0:
-                    vol_factor = cfg.vol_adj_median_atr / cur_atr
-                    vol_factor = max(cfg.vol_adj_min, min(cfg.vol_adj_max, vol_factor))
-                    per_slot_capital *= vol_factor
-                    logger.debug(
-                        f"[{symbol}] VolAdj: ATR={cur_atr * 100:.2f}% "
-                        f"→ {vol_factor:.2f}x → slot=${per_slot_capital:.2f}"
-                    )
-            notional, leverage = calculate_position_size(
-                capital=per_slot_capital,
-                risk_per_trade=cfg.risk_per_trade,
-                entry_price=entry_price,
-                move_size=move_size,
-                stop_mult=cfg.stop_mult,
-                max_leverage=cfg.max_leverage,
-            )
-
-            # Dynamic leverage: override with move-confidence scaling
-            if cfg.dynamic_leverage_enabled:
-                if cfg.rr_leverage_enabled:
-                    # v4.3: R:R-gated leverage — only deploy when R:R justifies it
-                    from quantbox.strategy.rubberband import compute_rr_gated_leverage
-
-                    conf_lev = compute_rr_gated_leverage(
-                        move_size=move_size,
-                        threshold=cfg.threshold,
-                        target_retrace=cfg.target_retrace,
-                        stop_mult=cfg.stop_mult,
-                        cost_per_side=cfg.cost_per_side,
-                        base_leverage=cfg.base_leverage,
-                        leverage_scale=cfg.leverage_scale,
-                        max_leverage=cfg.max_leverage,
-                        min_rr=cfg.min_rr_for_leverage,
-                    )
-                else:
-                    conf_lev = compute_confidence_leverage(
-                        move_size=move_size,
-                        threshold=cfg.threshold,
-                        base_leverage=cfg.base_leverage,
-                        leverage_scale=cfg.leverage_scale,
-                        max_leverage=cfg.max_leverage,
-                    )
-                notional = per_slot_capital * conf_lev
-                leverage = conf_lev
-
-            # ═══ v10.2 PARITY FIX: Apply MTF leverage multiplier ═══
-            if cfg.mtf_confirmation_enabled and cfg.mtf_leverage_mult > 1.0:
-                if self.strategy.was_mtf_confirmed(symbol):
-                    leverage *= cfg.mtf_leverage_mult
-                    notional = per_slot_capital * leverage
-                    logger.debug(
-                        f"[{symbol}] MTF leverage boost: {leverage / cfg.mtf_leverage_mult:.2f}x → {leverage:.2f}x"
-                    )
-
-        if notional < 10.0:  # Internal strategy minimum ($10); Binance exchange min is $5 (see below)
-            logger.debug(f"[{symbol}] Notional too small: ${notional:.2f}")
+        sizing = self._calculate_sizing(symbol, signal, close_prices, balance)
+        if sizing is None:
             return False
 
-        # ── ExposureGuard: block entry if total exposure exceeds cap ──
-        try:
-            _exp_guard = getattr(self, "_exposure_guard", None)
-            if _exp_guard is not None:
-                current_notional = sum(abs(float(p.get("notional", 0))) for p in self.strategy._positions.values())
-                if not _exp_guard.can_open(current_notional, notional, balance):
-                    logger.warning(f"[{symbol}] Exposure cap hit — skipping entry")
-                    return False
-        except Exception as e:
-            logger.error(f"[{symbol}] ExposureGuard check error: {e}")
-
-        # T2-1 runtime guard: entry_price=0 → ZeroDivisionError in quantity calc
-        if entry_price <= 0:
-            logger.error(f"[{symbol}] INVARIANT VIOLATION: entry_price={entry_price!r} (must be > 0) — aborting open")
+        fill = self._execute_entry_order(symbol, signal, sizing, balance)
+        if fill is None:
             return False
 
-        quantity = notional / entry_price
-        quantity = self._round_qty(quantity, symbol)
-        if quantity <= 0:
-            return False
+        brackets = self._setup_brackets(symbol, signal, fill, sizing)
 
-        # Check exchange min notional (Binance API; default $5 when not in symbol info)
-        info = self.get_symbol_info(symbol)
-        min_notional = info.get("min_notional", 5.0)
-        if quantity * entry_price < min_notional:
-            logger.debug(f"[{symbol}] Below min notional ${min_notional}")
-            return False
-
-        side = "BUY" if signal > 0 else "SELL"
-        if self.strategy_name == "vol_straddle":
-            lev_int = max(1, min(math.ceil(leverage), int(self.vs_config.max_leverage)))
-        else:
-            lev_int = max(1, min(math.ceil(leverage), int(cfg.max_leverage)))
-
-        # Hedge Mode: derive positionSide from signal
-        pos_side = None
-        if self.strategy_name == "vol_straddle" and self.vs_config.hedge_mode:
-            pos_side = "LONG" if signal > 0 else "SHORT"
-
-        # ── Exchange-level dedup (prevents double-entry after rapid restarts) ──
-        # Even if internal state is stale, the exchange will tell us the truth.
-        if not self.paper_mode and self.strategy_name == "vol_straddle":
-            try:
-                ex_positions = self.client.futures_position_information(symbol=symbol)
-                # hedge_mode: pos_side='LONG'/'SHORT'; one-way mode: pos_side=None → 'BOTH'
-                wanted_side = pos_side or "BOTH"
-                # Dust tolerance: ignore residual qty below min_notional ($5).
-                # Partial trail fills can leave tiny dust that permanently blocks
-                # the symbol slot if treated as a real position.
-                info = self.get_symbol_info(symbol)
-                dust_threshold = info.get("min_notional", 5.0)
-                already_open = False
-                for p in ex_positions:
-                    if p.get("positionSide") != wanted_side:
-                        continue
-                    amt = abs(float(p.get("positionAmt", 0)))
-                    if amt <= 0:
-                        continue
-                    entry_px = float(p.get("entryPrice", 0))
-                    notional = amt * entry_px if entry_px > 0 else amt
-                    if notional < dust_threshold:
-                        logger.info(
-                            f"[{symbol}] Exchange dedup: ignoring dust "
-                            f"({amt} qty, ${notional:.2f} < ${dust_threshold:.2f} min_notional)"
-                        )
-                        continue
-                    already_open = True
-                    break
-                if already_open:
-                    logger.warning(
-                        f"[{symbol}] Exchange dedup: {wanted_side} already open "
-                        f"on exchange — skipping entry to prevent duplication"
-                    )
-                    # Sync internal state to reflect reality
-                    if not self.strategy.has_position(symbol):
-                        logger.warning(
-                            f"[{symbol}] State out of sync — "
-                            f"position exists on exchange but not in internal state. "
-                            f"No SL/TP protection. "
-                            f"Reverse ghost check in _reconcile_positions() will auto-close."
-                        )
-                    return False
-            except Exception as exc:
-                logger.error(
-                    f"[{symbol}] Exchange dedup check failed ({exc}) — "
-                    f"blocking entry to prevent duplicate. Will retry next cycle."
-                )
-                return False
-
-        # Capture balance before order fills (used in trade record for accurate tracking).
-        balance_before = self.get_balance()
-
-        result = self._place_order(
-            symbol,
-            side,
-            quantity,
-            leverage=lev_int,
-            position_side=pos_side,
-        )
-        if result is None:
-            return False
-
-        fill_price = float(result["avgPrice"])
-        fill_qty = float(result["executedQty"])
-
-        # Compute effective stop (v12.6: ATR-based if enabled, else HTF-agree fixed)
-        eff_stop = self.strategy.get_effective_stop_mult(
-            close_prices,
-            symbol=symbol,
-            move_size=move_size,
-        )
-
-        notional = fill_qty * fill_price
-        direction = "LONG" if signal > 0 else "SHORT"
-
-        if self.strategy_name == "vol_straddle":
-            # ── VolStraddle brackets: fixed SL/TP (no PBT) ──
-            # move_size=1.0, so SL distance = sl_pct, TP distance = tp_pct
-            logger.info(
-                f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
-                f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
-                f"TF={tf_label}, SL={sl_pct * 100:.1f}%, TP={tp_pct * 100:.1f}%, "
-                f"{strategy_type}"
-                f"{f', conviction={conviction_score}/4' if strategy_type == 'vr_squeeze' else ''})"
-            )
-
-            sl_order_id = self._place_server_stop_loss(
-                symbol=symbol,
-                signal=signal,
-                quantity=fill_qty,
-                entry_price=fill_price,
-                move_size=move_size,
-                stop_mult=sl_pct,
-                position_side=pos_side,
-            )
-            if sl_order_id == "WOULD_TRIGGER":
-                logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — bracket repair next cycle")
-                sl_order_id = None
-
-            # Server-side trailing stop: placed at entry with future activationPrice.
-            # Binance keeps trail in NEW until price reaches activationPrice, then
-            # tracks peak tick-by-tick and fires on callbackRate% pullback.
-            # Verified via live test (commit 3cb8865, 2026-03-19).
-            # EGLDUSDT incident (2026-03-21) was caused by 0.1% callbackRate (noise),
-            # not by Binance ignoring activationPrice. Fixed by widening to 0.5%.
-            trail_order_id: str | None = None
-            if self.vs_config.trail_server_native:
-                cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
-                trail_order_id = self._place_trail_regular(
-                    symbol=symbol,
-                    side=cs,
-                    quantity=fill_qty,
-                    callback_rate=cr,
-                    activation_price=ap,
-                    position_side=pos_side,
-                )
-                if trail_order_id:
-                    logger.info(
-                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                        f"(algoId={sl_order_id}) TRAIL=OK (orderId={trail_order_id}, "
-                        f"activate=${ap:.4f}={cr}% callback)"
-                    )
-                else:
-                    logger.warning(
-                        f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
-                        f"(algoId={sl_order_id}) TRAIL=FAILED — bracket repair will retry"
-                    )
-                # No TP needed — trail handles profit-taking once active.
-                tp_order_id = None
-            else:
-                # Legacy: full-qty TP (no partial — matches backtest SL/TP/max_hold exit)
-                tp_order_id = self._place_server_take_profit(
-                    symbol=symbol,
-                    signal=signal,
-                    quantity=fill_qty,
-                    entry_price=fill_price,
-                    move_size=move_size,
-                    target_retrace=tp_pct,
-                    position_side=pos_side,
-                )
-                if tp_order_id == "WOULD_TRIGGER":
-                    logger.warning(f"[{symbol}] TP WOULD_TRIGGER at entry — client-side will handle TP")
-                    tp_order_id = None
-
-                sl_status = "OK" if sl_order_id else "FAILED"
-                tp_status = "OK" if tp_order_id else "FAILED"
-                logger.info(
-                    f"[{symbol}] Server bracket: SL={sl_status} "
-                    f"(algoId={sl_order_id}) TP={tp_status} "
-                    f"(algoId={tp_order_id})"
-                )
-
-            # Record in strategy with TF-specific metadata
-            self.strategy.open_position(
-                symbol=symbol,
-                signal=signal,
-                entry_price=fill_price,
-                notional=fill_qty * fill_price,
-                leverage=lev_int,
-                move_size=move_size,
-                entry_stop_mult=sl_pct,
-                server_sl_order_id=sl_order_id,
-                server_tp_order_id=tp_order_id,
-                server_trail_order_id=trail_order_id,
-                sl=sl_pct,
-                tp=tp_pct,
-                tf=tf_label,
-                max_hold=max_hold,
-                position_side=pos_side,
-                is_straddle=is_straddle,
-                straddle_pair_id=straddle_pair_id,
-                strategy_type=strategy_type,
-                balance_before=balance_before,
-            )
-
-            # Paper balance cost
-            if self.paper_mode:
-                cost = fill_qty * fill_price * self.vs_config.cost_per_side
-                self._paper_balance -= cost
-
-            # Print + log entry
-            _side_str = "LONG" if signal == 1 else "SHORT"
-            print(
-                format_entry(
-                    symbol=symbol,
-                    side=_side_str,
-                    price=fill_price,
-                    leverage=lev_int,
-                    size_usd=fill_qty * fill_price,
-                )
-            )
-
-            # Compute TP/SL prices for notification
-            if signal == 1:
-                tp_price = fill_price * (1.0 + tp_pct)
-                sl_price = fill_price * (1.0 - sl_pct)
-            else:
-                tp_price = fill_price * (1.0 - tp_pct)
-                sl_price = fill_price * (1.0 + sl_pct)
-
-            balance_after = self.get_balance()
-            n_active = self.strategy.n_active
-            _dir = "LONG ↑" if signal == 1 else "SHORT ↓"
-            _sl_tag = "🟢 서버" if sl_order_id else "🟡 클라이언트"
-            _tp_tag = "🟢 서버" if tp_order_id else "🟡 클라이언트"
-            _pos_lines = []
-            for _sym, _p in self.strategy.active_positions.items():
-                _pd = "L" if _p["signal"] == 1 else "S"
-                _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
-            _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
-
-            self.discord.send(
-                embed={
-                    "title": f"{'🟢' if signal == 1 else '🔴'} {symbol} {_dir} | VS 진입",
-                    "color": 0x00C853 if signal == 1 else 0xFF1744,
-                    "fields": [
-                        {
-                            "name": "전략",
-                            "value": f"VolStraddle {'S' if is_straddle else ('MA' if strategy_type == 'ma_cluster' else 'D')} ({tf_label})",
-                            "inline": True,
-                        },
-                        {"name": "진입가", "value": f"${fill_price:.4f}", "inline": True},
-                        {"name": "포지션", "value": f"${fill_qty * fill_price:,.2f}", "inline": True},
-                        {"name": "레버리지", "value": f"{lev_int}x", "inline": True},
-                        {"name": "🎯 TP", "value": f"${tp_price:.4f} ({tp_pct * 100:.1f}%)", "inline": True},
-                        {"name": "🛑 SL", "value": f"${sl_price:.4f} ({sl_pct * 100:.1f}%)", "inline": True},
-                        {
-                            "name": "Exit",
-                            "value": (
-                                "SL/TP"
-                                if (is_straddle or strategy_type == "ma_cluster")
-                                else f"Trail({vs.d_trail_activate * 100:.0f}%/{vs.d_trail_distance * 100:.1f}%)"
-                            ),
-                            "inline": True,
-                        },
-                        {"name": "SL 방식", "value": _sl_tag, "inline": True},
-                        {
-                            "name": "확신도" if strategy_type == "vr_squeeze" else "전략타입",
-                            "value": (f"{conviction_score}/4" if strategy_type == "vr_squeeze" else "MA Cluster"),
-                            "inline": True,
-                        },
-                        {"name": "슬롯", "value": f"{n_active}/{self.vs_config.max_concurrent}", "inline": True},
-                        {"name": "── 활성 포지션 ──", "value": f"```\n{_pos_summary}\n```", "inline": False},
-                        {"name": "잔고", "value": f"${balance_after:,.2f}", "inline": True},
-                    ],
-                    "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
-                }
-            )
-            return True
-
-        else:
-            # ── Rubber Band brackets ──
-            logger.info(
-                f"[{symbol}] OPENED {direction} qty={fill_qty:.6f} "
-                f"@ ${fill_price:.4f} (notional=${notional:.2f}, lev={lev_int}x, "
-                f"move={move_size * 100:.2f}%, eff_stop={eff_stop:.4f})"
-            )
-
-        # ═══ Place server-side bracket orders via Algo API ═══
-        sl_order_id = self._place_server_stop_loss(
-            symbol=symbol,
-            signal=signal,
-            quantity=fill_qty,
-            entry_price=fill_price,
-            move_size=move_size,
-            stop_mult=eff_stop,
-            position_side=pos_side,
-        )
-        # v12.3.1: Guard against WOULD_TRIGGER sentinel — let bracket repair handle it
-        if sl_order_id == "WOULD_TRIGGER":
-            logger.warning(f"[{symbol}] SL WOULD_TRIGGER at entry — will rely on bracket repair next cycle")
-            sl_order_id = None
-
-        # v12.5: In PBT mode, place server TP for PARTIAL qty (50%).
-        # Previously skipped entirely because "server TP closes 100%".
-        # But server TP qty is user-specified — placing 50% qty makes
-        # server handle the partial close intra-bar, fixing the critical
-        # SL-TP asymmetry: SL fires intra-bar (server) but TP only at
-        # bar close (client) → systematic loss bias.
-        # When server TP (50%) fires, _sync_server_orders detects it
-        # and transitions to Phase 2 runner (BE stop + ATR trailing).
-        if cfg.partial_exit_enabled:
-            tp_qty = self._round_qty(
-                fill_qty * cfg.partial_exit_fraction,
-                symbol,
-            )
-            tp_order_id = self._place_server_take_profit(
-                symbol=symbol,
-                signal=signal,
-                quantity=tp_qty,
-                entry_price=fill_price,
-                move_size=move_size,
-                target_retrace=cfg.target_retrace,
-                position_side=pos_side,
-            )
-            if tp_order_id == "WOULD_TRIGGER":
-                logger.warning(f"[{symbol}] TP WOULD_TRIGGER at entry — client-side will handle TP1")
-                tp_order_id = None
-            _tp_is_partial = bool(tp_order_id)
-            if tp_order_id:
-                logger.info(
-                    f"[{symbol}] PBT: server TP for {cfg.partial_exit_fraction * 100:.0f}% "
-                    f"qty={tp_qty:.6f} (intra-bar partial close)"
-                )
-            else:
-                logger.info(f"[{symbol}] PBT: server TP failed — client-side handles partial close at TP1")
-        else:
-            _tp_is_partial = False
-            # Non-PBT: captures intra-bar TP hits that 15m polling would miss.
-            tp_order_id = self._place_server_take_profit(
-                symbol=symbol,
-                signal=signal,
-                quantity=fill_qty,
-                entry_price=fill_price,
-                move_size=move_size,
-                target_retrace=cfg.target_retrace,
-                position_side=pos_side,
-            )
-            # v12.3.1: Guard against WOULD_TRIGGER sentinel for TP too
-            if tp_order_id == "WOULD_TRIGGER":
-                logger.warning(f"[{symbol}] TP WOULD_TRIGGER at entry — will rely on client-side TP")
-                tp_order_id = None
-
-        sl_status = "OK" if sl_order_id else "FAILED"
-        tp_status = "OK" if tp_order_id else "FAILED"
-        logger.info(
-            f"[{symbol}] Server bracket: SL={sl_status} (algoId={sl_order_id}) TP={tp_status} (algoId={tp_order_id})"
-        )
-
-        # Record in strategy
-        self.strategy.open_position(
-            symbol=symbol,
-            signal=signal,
-            entry_price=fill_price,
-            notional=fill_qty * fill_price,
-            leverage=lev_int,
-            move_size=move_size,
-            entry_stop_mult=eff_stop,
-            server_sl_order_id=sl_order_id,
-            server_tp_order_id=tp_order_id,
-            confidence=self.strategy.get_last_confidence(symbol),
-            balance_before=balance_before,
-        )
-
-        # v12.5: Set partial TP flag AFTER open_position() created the dict
-        if cfg.partial_exit_enabled and _tp_is_partial:
-            pos_ref = self.strategy._positions.get(symbol)
-            if pos_ref:
-                pos_ref["server_tp_is_partial"] = True
-
-        # Paper balance adjustment
-        if self.paper_mode:
-            cost = fill_qty * fill_price * cfg.cost_per_side
-            self._paper_balance -= cost
-
-        _side_str = "LONG" if signal == 1 else "SHORT"
-        print(
-            format_entry(
-                symbol=symbol,
-                side=_side_str,
-                price=fill_price,
-                leverage=lev_int,
-                size_usd=fill_qty * fill_price,
-            )
-        )
-
-        # v12.0: Entry diagnostic to JSONL
-        if hasattr(self.strategy, "diagnose_bar"):
-            entry_diag = self.strategy.diagnose_bar(symbol, close_prices)
-            _diag_logger.log_entry(
-                self._cycle_count,
-                datetime.now(timezone.utc).isoformat(),
-                symbol,
-                signal,
-                entry_diag,
-                {
-                    "notional": round(fill_qty * fill_price, 2),
-                    "leverage": lev_int,
-                    "move_size": round(move_size, 6),
-                    "fill_price": fill_price,
-                    "tp_pct": round(cfg.target_retrace * 100, 2),
-                    "sl_mult": round(eff_stop, 4),
-                },
-            )
-
-        # Compute TP/SL prices for notification
-        tp_distance = move_size * cfg.target_retrace
-        sl_distance = move_size * eff_stop
-        if signal == 1:
-            tp_price = fill_price * (1.0 + tp_distance)
-            sl_price = fill_price * (1.0 - sl_distance)
-        else:
-            tp_price = fill_price * (1.0 - tp_distance)
-            sl_price = fill_price * (1.0 + sl_distance)
-
-        balance_after = self.get_balance()
-        n_active = self.strategy.n_active
-        _dir = "LONG ↑" if signal == 1 else "SHORT ↓"
-        # Server bracket status
-        _sl_tag = "🟢 서버" if sl_order_id else "🟡 클라이언트"
-        _tp_tag = "🟢 서버" if tp_order_id else "🟡 클라이언트"
-        # Active positions summary
-        _pos_lines = []
-        for _sym, _p in self.strategy.active_positions.items():
-            _pd = "L" if _p["signal"] == 1 else "S"
-            _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
-        _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
-
-        self.discord.send(
-            embed={
-                "title": f"{'🟢' if signal == 1 else '🔴'} {symbol} {_dir} | 진입",
-                "color": 0x00C853 if signal == 1 else 0xFF1744,
-                "fields": [
-                    {"name": "진입가", "value": f"${fill_price:.4f}", "inline": True},
-                    {"name": "포지션", "value": f"${fill_qty * fill_price:,.2f}", "inline": True},
-                    {"name": "레버리지", "value": f"{lev_int}x", "inline": True},
-                    {"name": "이동폭", "value": f"{move_size * 100:.2f}%", "inline": True},
-                    {"name": "🎯 TP", "value": f"${tp_price:.4f}", "inline": True},
-                    {"name": "🛑 SL", "value": f"${sl_price:.4f}", "inline": True},
-                    {"name": "TP 방식", "value": _tp_tag, "inline": True},
-                    {"name": "SL 방식", "value": _sl_tag, "inline": True},
-                    {"name": "슬롯", "value": f"{n_active}/{cfg.max_concurrent}", "inline": True},
-                    {"name": "── 활성 포지션 ──", "value": f"```\n{_pos_summary}\n```", "inline": False},
-                    {"name": "잔고", "value": f"${balance_after:,.2f}", "inline": True},
-                ],
-                "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
-            }
-        )
-        return True
+        return self._register_position(symbol, signal, fill, sizing, brackets, balance, straddle_pair_id)
 
     def _partial_close_position(
         self: "ScalperProtocol",
@@ -929,7 +751,7 @@ class PositionMixin:
                     "bars_held": closed_pos["bars_held"],
                     "reason": "server_fill_race",
                     "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", "vr_squeeze"),
+                    "strategy_type": closed_pos.get("strategy_type", "vr_directional"),
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
@@ -1026,7 +848,7 @@ class PositionMixin:
             "bars_held": pos["bars_held"],
             "reason": "partial_close",
             "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "strategy_type": pos.get("strategy_type", "vr_directional"),
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
@@ -1135,6 +957,7 @@ class PositionMixin:
             quantity,
             reduce_only=(pos_side is None),  # One-Way only
             position_side=pos_side,
+            paper_fill_price=current_price,
         )
 
         # ── NO_POSITION: exchange says position already gone ──
@@ -1195,7 +1018,7 @@ class PositionMixin:
                     "bars_held": closed_pos["bars_held"],
                     "reason": f"{reason}_no_position",
                     "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", "vr_squeeze"),
+                    "strategy_type": closed_pos.get("strategy_type", "vr_directional"),
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
@@ -1246,11 +1069,14 @@ class PositionMixin:
                 _reason_kr = reason.upper().replace("_", " ")
                 n_remaining = self.strategy.n_active
 
+                _strat = closed_pos.get("strategy_type", "vr_directional")
+                _strat_label = {"vr_directional": "VR-D", "vr_straddle": "VR-S", "ma_cluster": "MA"}.get(_strat, _strat)
                 self.discord.send(
                     embed={
                         "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr} (서버체결)",
                         "color": 0x00C853 if net_pnl > 0 else 0xFF1744,
                         "fields": [
+                            {"name": "전략", "value": _strat_label, "inline": True},
                             {"name": "진입가", "value": f"${closed_pos['entry_price']:.4f}", "inline": True},
                             {"name": "청산가", "value": f"${fill_price:.4f}", "inline": True},
                             {
@@ -1333,6 +1159,23 @@ class PositionMixin:
                         target_retrace=retry_tp,
                         position_side=pos.get("position_side"),
                     )
+            # Re-place trail if it was cancelled before the failed close
+            if trail_oid and self.vs_config.trail_server_native and not self.paper_mode:
+                strategy_type = pos.get("strategy_type", "vr_directional")
+                cr, ap, cs = self._get_trail_params(strategy_type, pos["signal"], pos["entry_price"])
+                new_trail_oid = self._place_trail_regular(
+                    symbol=api_symbol,
+                    side=cs,
+                    quantity=quantity,
+                    callback_rate=cr,
+                    activation_price=ap,
+                    position_side=pos.get("position_side"),
+                )
+                if new_trail_oid and new_trail_oid != "WOULD_TRIGGER":
+                    pos["server_trail_order_id"] = new_trail_oid
+                else:
+                    pos["server_trail_order_id"] = None
+
             # Update existing position's server order IDs
             # Guard against sentinel values being stored as order IDs
             if new_sl_oid and new_sl_oid != "WOULD_TRIGGER":
@@ -1399,7 +1242,7 @@ class PositionMixin:
             "bars_held": pos["bars_held"],
             "reason": reason,
             "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", "vr_squeeze"),
+            "strategy_type": pos.get("strategy_type", "vr_directional"),
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
@@ -1451,11 +1294,14 @@ class PositionMixin:
             _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
         _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
 
+        _strat = pos.get("strategy_type", "vr_directional")
+        _strat_label = {"vr_directional": "VR-D", "vr_straddle": "VR-S", "ma_cluster": "MA"}.get(_strat, _strat)
         self.discord.send(
             embed={
                 "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr}",
                 "color": 0x00C853 if net_pnl > 0 else 0xFF1744,
                 "fields": [
+                    {"name": "전략", "value": _strat_label, "inline": True},
                     {"name": "진입가", "value": f"${pos['entry_price']:.4f}", "inline": True},
                     {"name": "청산가", "value": f"${fill_price:.4f}", "inline": True},
                     {"name": "보유시간", "value": f"{hold_time}분 ({pos['bars_held']}바)", "inline": True},

@@ -177,7 +177,7 @@ class PositionDict(TypedDict, total=False):
 
     # ── Strategy metadata ─────────────────────────────────────────────────
     strategy_type: str
-    """``'vr_squeeze'`` or ``'ma_cluster'``."""
+    """``'vr_directional'``, ``'vr_straddle'``, or ``'ma_cluster'``."""
 
     tf: str
     """Signal timeframe label: ``'15m'``, ``'1h'``, ``'4h'``."""

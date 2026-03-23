@@ -52,7 +52,7 @@ def _inject_position(scalper, pos_key: str, **overrides):
         "position_side": "LONG" if signal == 1 else "SHORT",
         "trail_active": False,
         "opened_at": "2026-01-01T00:00:00+00:00",
-        "strategy_type": "straddle",
+        "strategy_type": "vr_straddle",
         "is_straddle": True,
         "move_size": 1.0,
         "entry_stop_mult": 0.015,
@@ -70,7 +70,7 @@ def _inject_position(scalper, pos_key: str, **overrides):
 class TestGetTrailParams:
     def test_straddle_long(self):
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100
         # activationPrice = entry × (1 + trail_activate) = 100 × 1.030 = 103.0
         assert ap == pytest.approx(103.0)
@@ -78,7 +78,7 @@ class TestGetTrailParams:
 
     def test_straddle_short(self):
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("straddle", -1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_straddle", -1, 100.0)
         assert cr == pytest.approx(0.5)
         # activationPrice = entry × (1 - trail_activate) = 100 × 0.970 = 97.0
         assert ap == pytest.approx(97.0)
@@ -86,7 +86,7 @@ class TestGetTrailParams:
 
     def test_vr_squeeze_long(self):
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("vr_squeeze", 1, 200.0)
+        cr, ap, cs = s._get_trail_params("vr_directional", 1, 200.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100 (r106: rule #8 floor)
         # activationPrice = entry × (1 + trail_activate) = 200 × 1.040 = 208
         assert ap == pytest.approx(208.0)
@@ -108,7 +108,7 @@ class TestGetTrailParams:
         # Bypass validator to simulate a sub-floor value reaching brackets.py clamp
         object.__setattr__(cfg, "s_trail_distance", 0.001)
         s = _build_vs_scalper(vs_config=cfg)
-        cr, _, _ = s._get_trail_params("straddle", 1, 100.0)
+        cr, _, _ = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == 0.5  # 0.001 * 100 = 0.1 → clamped to 0.5 (rule #8)
 
 
@@ -128,39 +128,38 @@ class TestPlaceTrailingStopMarket:
     def test_live_mode_calls_algo_api(self):
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client._request_futures_api = MagicMock(return_value={"algoId": "12345678"})
+        s._algo_api.place_order = MagicMock(return_value={"algoId": "12345678"})
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 10.0, 0.1, 101.5, "LONG")
 
         assert oid == "12345678"
-        call_args = s.client._request_futures_api.call_args
-        assert call_args[0] == ("post", "algoOrder")
-        data = call_args[1]["data"]
-        assert data["type"] == "TRAILING_STOP_MARKET"
-        assert data["callbackRate"] == "0.1"
-        assert data["activationPrice"] == "101.5"
-        assert data["positionSide"] == "LONG"
-        assert data["side"] == "SELL"
-        assert data["quantity"] == "10.0"
-        assert data["algoType"] == "CONDITIONAL"
-        assert "reduceOnly" not in data  # mutual exclusion with positionSide
+        call_args = s._algo_api.place_order.call_args
+        params = call_args[0][0]
+        assert params["type"] == "TRAILING_STOP_MARKET"
+        assert params["callbackRate"] == "0.1"
+        assert params["activationPrice"] == "101.5"
+        assert params["positionSide"] == "LONG"
+        assert params["side"] == "SELL"
+        assert params["quantity"] == "10.0"
+        assert params["algoType"] == "CONDITIONAL"
+        assert "reduceOnly" not in params  # mutual exclusion with positionSide
 
     def test_live_mode_no_position_side_uses_reduce_only(self):
         """One-Way mode (no positionSide) should use reduceOnly."""
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client._request_futures_api = MagicMock(return_value={"algoId": "99999"})
+        s._algo_api.place_order = MagicMock(return_value={"algoId": "99999"})
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 5.0, 0.2, 102.0)
 
-        data = s.client._request_futures_api.call_args[1]["data"]
-        assert data["reduceOnly"] == "true"
-        assert "positionSide" not in data
+        params = s._algo_api.place_order.call_args[0][0]
+        assert params["reduceOnly"] == "true"
+        assert "positionSide" not in params
 
     def test_api_error_returns_none(self):
         s = _build_trail_scalper()
         s.paper_mode = False
-        s.client._request_futures_api = MagicMock(side_effect=Exception("API error -1000"))
+        s._algo_api.place_order = MagicMock(side_effect=Exception("API error -1000"))
 
         oid = s._place_trailing_stop_market("TESTUSDT", "SELL", 10.0, 0.1, 101.5, "LONG")
         assert oid is None
@@ -266,7 +265,7 @@ class TestTrailAtEntry:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
         )
 
         pos = s.strategy._positions["TESTUSDT:LONG"]
@@ -290,7 +289,7 @@ class TestTrailAtEntry:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
         )
 
         pos = s.strategy._positions["TESTUSDT:LONG"]
@@ -307,7 +306,7 @@ class TestTrailAtEntry:
         # The positions.py code at L405-460 checks vs_config.trail_server_native
         # and calls _place_trailing_stop_market + skips _place_server_take_profit.
         # We verify by checking the trail params calculation works correctly.
-        cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == pytest.approx(0.5)
         # activationPrice = entry × (1 + trail_activate) = 100 × 1.030 = 103.0
         assert ap == pytest.approx(103.0)
@@ -361,7 +360,7 @@ class TestClientTrailSuppression:
             trail_active=True,
             peak_gain=0.025,  # 2.5%
             worst_pnl=-0.001,
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
             sl=0.015,
         )
 
@@ -384,7 +383,7 @@ class TestClientTrailSuppression:
             trail_active=True,
             peak_gain=0.025,  # 2.5%
             worst_pnl=-0.001,
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
             sl=0.015,
         )
 
@@ -529,7 +528,7 @@ class TestTrailBracketRepair:
             "TESTUSDT:LONG",
             server_trail_order_id=None,
             server_sl_order_id="sl_111",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
             is_straddle=False,
         )
         # Entry-time placement: trail repaired regardless of trail_active
@@ -560,7 +559,7 @@ class TestTrailBracketRepair:
             "TESTUSDT:LONG",
             server_trail_order_id=None,
             server_sl_order_id="sl_111",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
             is_straddle=False,
         )
         # trail_active is False — trail should STILL be placed (future activationPrice)
@@ -654,7 +653,7 @@ class TestStatePersistence:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="straddle",
+            strategy_type="vr_straddle",
         )
 
         pos_key = "TESTUSDT:LONG"
@@ -942,13 +941,13 @@ class TestCallbackRateBounds:
     def test_straddle_callback_rate(self):
         """s_trail_distance=0.005 → callbackRate=0.5."""
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("straddle", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == pytest.approx(0.5, abs=0.01)  # 0.005 * 100 = 0.5
 
     def test_vr_squeeze_callback_rate(self):
         """d_trail_distance=0.005 → callbackRate=0.5 (r106: rule #8 floor)."""
         s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("vr_squeeze", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_directional", 1, 100.0)
         assert cr == pytest.approx(0.5, abs=0.01)
 
     def test_ma_cluster_callback_rate(self):
@@ -1070,3 +1069,157 @@ class TestDeferredTrailPlacement:
         s._manage_active_positions()
 
         s._place_trail_regular.assert_not_called()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# T11: Edge cases — close failure trail re-placement, WOULD_TRIGGER guard,
+#      paper mode client-side trail fallback
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestCloseFailureTrailReplacement:
+    """When _close_position fails after cancelling trail, trail must be re-placed."""
+
+    def test_trail_replaced_after_close_failure(self):
+        """Close fails (result=None) → SL + trail re-placed."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False  # live mode: trail re-placement applies
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id="trail_original",
+            trail_active=True,
+            peak_gain=0.03,
+        )
+        # Ensure _round_qty returns valid quantity
+        s._round_qty = MagicMock(return_value=30.0)
+        s._cancel_server_stop_loss = MagicMock(return_value=True)
+        s._cancel_server_take_profit = MagicMock(return_value=True)
+        s._cancel_trail_regular = MagicMock(return_value=True)
+        s._place_order = MagicMock(return_value=None)  # close fails
+        s._place_server_stop_loss = MagicMock(return_value="sl_new")
+        s._place_trail_regular = MagicMock(return_value="trail_new")
+        s._save_state = MagicMock()
+
+        result = s._close_position("TESTUSDT:LONG", "trailing_stop", 102.0)
+
+        assert result is False  # close failed
+        # Trail should be re-placed
+        s._place_trail_regular.assert_called_once()
+        pos = s.strategy._positions["TESTUSDT:LONG"]
+        assert pos["server_trail_order_id"] == "trail_new"
+
+    def test_trail_not_replaced_when_no_original_trail(self):
+        """If position had no server trail, don't try to re-place on close failure."""
+        s = _build_trail_scalper(trail_server_native=True)
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            server_trail_order_id=None,
+            trail_active=True,
+            peak_gain=0.03,
+        )
+        s._round_qty = MagicMock(return_value=30.0)
+        s._cancel_server_stop_loss = MagicMock(return_value=True)
+        s._cancel_server_take_profit = MagicMock(return_value=True)
+        s._place_order = MagicMock(return_value=None)
+        s._place_server_stop_loss = MagicMock(return_value="sl_new")
+        s._place_trail_regular = MagicMock()
+        s._save_state = MagicMock()
+
+        s._close_position("TESTUSDT:LONG", "trailing_stop", 102.0)
+
+        s._place_trail_regular.assert_not_called()
+
+
+class TestTrailWouldTriggerAtEntry:
+    """WOULD_TRIGGER from trail placement at entry must not be stored as order ID."""
+
+    def test_would_trigger_trail_cleared(self):
+        """Trail WOULD_TRIGGER at entry → trail_order_id = None in bracket result."""
+        s = _build_trail_scalper(trail_server_native=True)
+
+        s._place_server_stop_loss = MagicMock(return_value="sl_111")
+        s._place_trail_regular = MagicMock(return_value="WOULD_TRIGGER")
+
+        fill = {"fill_price": 100.0, "fill_qty": 1.0, "pos_side": "LONG", "lev_int": 30}
+        sizing = {
+            "move_size": 1.0,
+            "sl_pct": 0.015,
+            "tp_pct": 0.05,
+            "strategy_type": "vr_directional",
+            "conviction_score": 1,
+            "tf_label": "15m",
+        }
+
+        result = s._setup_brackets("TESTUSDT", 1, fill, sizing)
+
+        assert result["trail_order_id"] is None, "WOULD_TRIGGER must not be stored as trail order ID"
+
+
+class TestPaperTrailClientSideFallback:
+    """Paper mode: trail_server_native=True but no server order → client-side exit fires."""
+
+    def test_paper_trail_fires_without_server_order(self):
+        """update_position returns 'trailing_stop' when no server_trail_order_id (paper)."""
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = True
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            peak_gain=0.025,
+            server_trail_order_id=None,
+            strategy_type="vr_straddle",
+            sl=0.015,
+        )
+
+        result = s.strategy.update_position(
+            symbol="TESTUSDT:LONG",
+            current_price=102.0,
+            current_high=103.0,
+            current_low=101.5,
+        )
+        assert result == "trailing_stop", "Paper mode with no server trail must fire client-side trailing_stop"
+
+    def test_live_trail_defers_with_server_order(self):
+        """Live mode with server_trail_order_id → does NOT fire client-side."""
+        s = _build_trail_scalper(trail_server_native=True)
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            peak_gain=0.025,
+            server_trail_order_id="trail_9999001",
+            strategy_type="vr_straddle",
+            sl=0.015,
+        )
+
+        result = s.strategy.update_position(
+            symbol="TESTUSDT:LONG",
+            current_price=102.0,
+            current_high=103.0,
+            current_low=101.5,
+        )
+        assert result != "trailing_stop", "Live mode with server trail must defer to Binance, not fire client-side"
+
+    def test_trail_entry_failed_fallback_fires(self):
+        """trail_server_native=True, entry placement failed → client-side exit fires."""
+        s = _build_trail_scalper(trail_server_native=True)
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            peak_gain=0.025,
+            server_trail_order_id=None,
+            strategy_type="vr_straddle",
+            sl=0.015,
+        )
+
+        result = s.strategy.update_position(
+            symbol="TESTUSDT:LONG",
+            current_price=102.0,
+            current_high=103.0,
+            current_low=101.5,
+        )
+        assert result == "trailing_stop", "When server trail placement failed, client-side must fire as fallback"

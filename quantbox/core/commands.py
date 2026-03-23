@@ -114,27 +114,36 @@ class CommandsMixin:
             for sym, pos in positions.items():
                 direction = "L" if pos["signal"] == 1 else "S"
                 bars = pos.get("bars_held", 0)
-                best = pos.get("best_pnl", 0) * 100  # noqa: F841
-                notional = pos.get("notional", 0)
+                max_hold = pos.get("max_hold", 192)
+                strat = pos.get("strategy_type", "vr_directional")
                 # Extract Binance symbol from compound key
                 api_sym = pos.get("symbol", sym.split(":")[0])
+                entry_px = pos["entry_price"]
                 # v12.5.2: Show real-time mark price uPnL
                 try:
                     mark = self.client.futures_mark_price(symbol=api_sym)
                     cur_px = float(mark["markPrice"])
-                    entry_px = pos["entry_price"]
                     if pos["signal"] == 1:
                         upnl_pct = (cur_px - entry_px) / entry_px * 100
                     else:
                         upnl_pct = (entry_px - cur_px) / entry_px * 100
                 except Exception:
+                    cur_px = entry_px
                     upnl_pct = 0.0
-                lines.append(
-                    f"  {direction} {sym}: "
-                    f"${pos['entry_price']:.4f} | "
-                    f"${notional:.0f} | "
-                    f"{bars}bars | uPnL={upnl_pct:+.1f}%"
-                )
+                # SL/TP status
+                sl_pct = pos.get("sl", 0)
+                tp_pct = pos.get("tp", 0)
+                sl_ok = "✓" if pos.get("server_sl_order_id") else "✗"
+                tp_ok = "✓" if pos.get("server_tp_order_id") else "✗"
+                # Trail status
+                if pos.get("trail_active"):
+                    peak = pos.get("peak_gain", 0) * 100
+                    trail_str = f" trail✓({peak:+.1f}%)"
+                else:
+                    trail_str = " trail✗"
+                lines.append(f"  [{strat[:6]}] {direction} {sym}")
+                lines.append(f"    ${entry_px:.4f}→${cur_px:.4f} uPnL={upnl_pct:+.1f}% {bars}/{max_hold}bars")
+                lines.append(f"    SL={sl_pct * 100:.1f}%{sl_ok} TP={tp_pct * 100:.0f}%{tp_ok}{trail_str}")
         else:
             lines.append("  No open positions")
 

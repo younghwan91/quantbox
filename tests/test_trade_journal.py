@@ -25,7 +25,7 @@ def _trade(
     pnl_usd: float = 100.0,
     pnl_pct: float = 1.5,
     reason: str = "trailing_stop",
-    strategy_type: str = "vr_squeeze",
+    strategy_type="vr_directional",
     exit_time: str = "2026-01-01T12:00:00+00:00",
     mfe_pct: float = 2.0,
     mae_pct: float = 0.3,
@@ -175,8 +175,8 @@ class TestRecord:
 class TestGetStats:
     def _populate(self, j: TradeJournal) -> None:
         trades = [
-            _trade("BTCUSDT", 1, 100.0, 1.5, "trailing_stop", "vr_squeeze", "2026-01-01T10:00:00+00:00"),
-            _trade("BTCUSDT", -1, -50.0, -0.8, "stop_loss", "vr_squeeze", "2026-01-01T11:00:00+00:00"),
+            _trade("BTCUSDT", 1, 100.0, 1.5, "trailing_stop", "vr_directional", "2026-01-01T10:00:00+00:00"),
+            _trade("BTCUSDT", -1, -50.0, -0.8, "stop_loss", "vr_directional", "2026-01-01T11:00:00+00:00"),
             _trade("ETHUSDT", 1, 80.0, 1.2, "take_profit", "ma_cluster", "2026-01-01T12:00:00+00:00"),
             _trade("ETHUSDT", -1, -30.0, -0.5, "stop_loss", "ma_cluster", "2026-01-01T13:00:00+00:00"),
         ]
@@ -209,7 +209,7 @@ class TestGetStats:
     def test_filter_by_strategy(self, tmp_path):
         j = _journal(tmp_path)
         self._populate(j)
-        s_vr = j.get_stats(strategy="vr_squeeze")
+        s_vr = j.get_stats(strategy="vr_directional")
         s_ma = j.get_stats(strategy="ma_cluster")
         assert s_vr["n"] == 2
         assert s_ma["n"] == 2

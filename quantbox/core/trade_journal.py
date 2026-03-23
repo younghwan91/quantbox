@@ -44,6 +44,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_key ON trades(symbol, exit_time);
 """
 
 
+def migrate_strategy_types(db_path: str | Path) -> int:
+    """Migrate old strategy_type values to canonical names. Idempotent.
+
+    Wraps both UPDATEs in a single transaction for atomicity.
+    Safe to call on a fresh DB (no-op if trades table doesn't exist).
+    """
+    conn = sqlite3.connect(db_path)
+    count = 0
+    try:
+        with conn:  # explicit transaction — atomic commit or rollback
+            for old, new in [("vr_squeeze", "vr_directional"), ("straddle", "vr_straddle")]:
+                cursor = conn.execute("UPDATE trades SET strategy_type = ? WHERE strategy_type = ?", (new, old))
+                count += cursor.rowcount
+    except sqlite3.OperationalError:
+        pass  # Table doesn't exist yet (fresh DB)
+    finally:
+        conn.close()
+    return count
+
+
 class TradeJournal:
     """Persistent SQLite trade journal.
 
@@ -72,6 +92,10 @@ class TradeJournal:
                 conn.commit()
             except Exception:
                 pass  # 이미 존재하는 컬럼
+        # Naming migration: vr_squeeze→vr_directional, straddle→vr_straddle (멱등)
+        n = migrate_strategy_types(self.db_path)
+        if n > 0:
+            logger.info(f"Migrated {n} trade records to canonical strategy names")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -95,7 +119,7 @@ class TradeJournal:
         direction = "LONG" if trade.get("signal", 1) == 1 else "SHORT"
         row = (
             trade.get("symbol"),
-            trade.get("strategy_type", "vr_squeeze"),
+            trade.get("strategy_type", "vr_directional"),
             direction,
             trade.get("entry_price"),
             trade.get("exit_price"),

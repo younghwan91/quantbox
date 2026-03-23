@@ -19,7 +19,38 @@ from pathlib import Path
 
 logger = logging.getLogger("Scalper")
 
-STATE_DIR = Path("data/state")
+# ── Schema versioning (Phase 2.4, refactor/mega-v2) ──────────────────────
+# Increment when position dict fields change. Migration runs on load.
+CURRENT_SCHEMA_VERSION = 1
+
+
+def migrate_state(state: dict) -> dict:
+    """Upgrade state dict from any older schema version to current.
+
+    Each version bump adds a migration step. Runs on load — no manual
+    intervention needed when deploying new code with schema changes.
+
+    Version history:
+        0 (implicit): pre-versioning state files (no _schema_version field)
+        1: added _schema_version field; no structural changes
+    """
+    version = state.get("_schema_version", 0)
+
+    if version >= CURRENT_SCHEMA_VERSION:
+        return state
+
+    # v0 → v1: just add the version field (no structural changes yet)
+    if version < 1:
+        state["_schema_version"] = 1
+        logger.info("State migrated: v0 → v1 (added _schema_version)")
+
+    return state
+
+
+# Resolve to absolute path from project root to prevent working-directory footgun.
+# If STATE_DATA_DIR env var is set, use it; otherwise resolve relative to this file's project root.
+_project_root = Path(__file__).resolve().parents[2]  # quantbox/core/scalper_state.py → project root
+STATE_DIR = Path(os.environ.get("STATE_DATA_DIR", str(_project_root / "data" / "state")))
 STATE_FILE = STATE_DIR / "scalper_state.json"
 PAPER_STATE_FILE = STATE_DIR / "scalper_state_paper.json"
 
@@ -83,9 +114,9 @@ def save_scalper_state(state: dict, filepath: Path | None = None) -> None:
         except OSError:
             pass
 
-    # Build the dict to write: original state + fresh checksum.
-    # Checksum is computed BEFORE adding the field so it covers all real data.
+    # Build the dict to write: original state + schema version + fresh checksum.
     state_to_write = {k: v for k, v in state.items() if k != "_checksum"}
+    state_to_write["_schema_version"] = CURRENT_SCHEMA_VERSION
     state_to_write["_checksum"] = _compute_checksum(state_to_write)
 
     fd, tmp = tempfile.mkstemp(dir=str(filepath.parent), suffix=".tmp")
@@ -157,7 +188,7 @@ def load_scalper_state(filepath: Path | None = None) -> dict | None:
     if raw is not None:
         verified = _verify_and_strip_checksum(raw, filepath.name)
         if verified is not None:
-            return verified
+            return migrate_state(verified)
 
     # Primary failed — try the most recent backup.
     pattern = filepath.stem + "_backup_"
@@ -170,7 +201,7 @@ def load_scalper_state(filepath: Path | None = None) -> dict | None:
         backup_verified = _verify_and_strip_checksum(backup_raw, backup_path.name)
         if backup_verified is not None:
             logger.warning(f"State restored successfully from backup: {backup_path.name}")
-            return backup_verified
+            return migrate_state(backup_verified)
 
     # All backups exhausted — return raw primary state with CRITICAL warning.
     if raw is not None:

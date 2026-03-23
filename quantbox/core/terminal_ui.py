@@ -91,9 +91,17 @@ def print_system_info(
     target: float,
     stop_mult: float,
     max_hold: int,
-    entry_mode: str,
-    min_confidence: int,
+    d_trail_activate: float = 0.04,
+    d_trail_distance: float = 0.005,
+    min_confidence: int = 0,
     testnet: bool = False,
+    straddle_enabled: bool = True,
+    straddle_max_slots: int = 8,
+    straddle_vr_threshold: float = 0.57,
+    straddle_sl: float = 0.015,
+    straddle_tp: float = 0.05,
+    straddle_trail_activate: float = 0.03,
+    straddle_trail_distance: float = 0.005,
     ma_cluster_enabled: bool = False,
     ma_cluster_pct: float = 0.03,
     ma_cluster_min_duration: int = 8,
@@ -101,6 +109,8 @@ def print_system_info(
     ma_cluster_min_momentum: float = 0.01,
     ma_cluster_sl: float = 0.02,
     ma_cluster_tp: float = 0.08,
+    ma_cluster_trail_activate: float = 0.02,
+    ma_cluster_trail_distance: float = 0.005,
     ma_cluster_leverage: float = 12.0,
 ) -> None:
     """Print formatted system configuration table.
@@ -118,9 +128,10 @@ def print_system_info(
         target: Target retrace.
         stop_mult: Stop loss multiplier.
         max_hold: Max hold bars.
-        entry_mode: Entry mode name.
         min_confidence: Minimum confidence score.
         testnet: Whether using testnet.
+        straddle_enabled: Whether S_d8 straddle is active.
+        straddle_max_slots: Max slots for straddle pairs.
         ma_cluster_enabled: Whether MA cluster strategy is active.
         ma_cluster_pct: MA cluster spread threshold.
         ma_cluster_min_duration: Min bars in cluster.
@@ -150,41 +161,144 @@ def print_system_info(
     # System table
     _print_section("SYSTEM")
     _print_row("Strategy", strategy.upper())
-    _print_row("Entry Mode", entry_mode)
     _print_row("Balance", f"${balance:,.2f}")
     _print_row("Universe", f"{n_symbols} symbols")
     _print_row("Max Slots", str(max_slots))
     print()
 
-    _print_section("PARAMETERS")
-    _print_row("Lookback", f"{lookback} bars")
-    _print_row("Threshold", f"{threshold * 100:.1f}%")
-    _print_row("Target", f"{target * 100:.1f}% retrace")
-    _print_row("Stop", f"{stop_mult}x move")
-    _print_row("Max Hold", f"{max_hold} bars")
-    _print_row("Confidence", f">= {min_confidence}")
+    _print_section("STRATEGIES")
+    _print_row("VR Directional", f"{Color.GREEN}ENABLED{Color.RESET} (D_mom8, {leverage_base}x)")
+    if straddle_enabled:
+        _print_row(
+            "VR Straddle", f"{Color.GREEN}ENABLED{Color.RESET} (S_d8, {leverage_base}x, max {straddle_max_slots} slots)"
+        )
+    else:
+        _print_row("VR Straddle", f"{Color.RED}DISABLED{Color.RESET}")
+    if ma_cluster_enabled:
+        _print_row("MA Cluster", f"{Color.GREEN}ENABLED{Color.RESET} ({ma_cluster_leverage:.0f}x)")
+    else:
+        _print_row("MA Cluster", f"{Color.RED}DISABLED{Color.RESET}")
     print()
 
-    _print_section("LEVERAGE")
-    _print_row("Base", f"{leverage_base}x")
-    _print_row("Max", f"{leverage_max}x")
+    _print_section("VR DIRECTIONAL")
+    _print_row("VR Threshold", f"{threshold * 100:.1f}%")
+    _print_row("SL / TP", f"{stop_mult * 100:.0f}% / {target * 100:.0f}%")
+    _print_row("Trail", f"{d_trail_activate * 100:.1f}%→{d_trail_distance * 100:.1f}% (activate→distance)")
+    _print_row("Max Hold", f"{max_hold} bars")
+    _print_row("Leverage", f"{leverage_base}x")
     print()
+
+    if straddle_enabled:
+        _print_section("VR STRADDLE")
+        _print_row("VR Threshold", f"{straddle_vr_threshold * 100:.1f}%")
+        _print_row("SL / TP", f"{straddle_sl * 100:.1f}% / {straddle_tp * 100:.0f}%")
+        _print_row(
+            "Trail", f"{straddle_trail_activate * 100:.1f}%→{straddle_trail_distance * 100:.1f}% (activate→distance)"
+        )
+        _print_row("Max Slots", f"{straddle_max_slots} ({straddle_max_slots // 2} pairs)")
+        _print_row("Leverage", f"{leverage_base}x")
+        print()
 
     if ma_cluster_enabled:
         _print_section("MA CLUSTER")
-        _print_row("Status", f"{Color.GREEN}ENABLED{Color.RESET}")
         _print_row("Spread", f"{ma_cluster_pct * 100:.0f}%")
-        _print_row("Min Duration", f"{ma_cluster_min_duration} bars (4h)")
-        _print_row("Max Duration", f"{ma_cluster_max_duration} bars (4h)")
+        _print_row("Duration", f"{ma_cluster_min_duration}-{ma_cluster_max_duration} bars (4h)")
         _print_row("Min Momentum", f"{ma_cluster_min_momentum * 100:.1f}%")
         _print_row("SL / TP", f"{ma_cluster_sl * 100:.0f}% / {ma_cluster_tp * 100:.0f}%")
+        _print_row(
+            "Trail",
+            f"{ma_cluster_trail_activate * 100:.1f}%→{ma_cluster_trail_distance * 100:.1f}% (activate→distance)",
+        )
         _print_row("Leverage", f"{ma_cluster_leverage:.0f}x")
         print()
 
 
+def format_section_header(title: str) -> str:
+    """Format a colored section header for cycle output.
+
+    Args:
+        title: Section name (e.g. 'POSITIONS', 'SIGNALS', 'SUMMARY').
+
+    Returns:
+        Formatted string with CYAN+BOLD brackets.
+    """
+    C = Color
+    return f"  {C.CYAN}{C.BOLD}▸ {title}{C.RESET}"
+
+
+def format_section_divider() -> str:
+    """Return a lightweight dot divider for visual separation between cycle sections."""
+    return f"  {Color.DIM}{DIVIDER_DOT}{Color.RESET}"
+
+
+def format_position_line(
+    pos_key: str,
+    strategy_type: str,
+    direction: str,
+    entry_price: float,
+    current_price: float,
+    upnl_pct: float,
+    bars: int,
+    max_hold: int,
+    sl_pct: float,
+    sl_active: bool,
+    tp_pct: float,
+    tp_active: bool,
+    trail_active: bool,
+    peak_gain: float | None = None,
+) -> str:
+    """Format a colored, structured position status line.
+
+    All arguments are pre-computed display values — this function is a pure
+    display formatter with no knowledge of position internals.
+
+    Args:
+        pos_key: Position compound key (e.g. 'SUIUSDT:LONG').
+        strategy_type: Strategy name (e.g. 'vr_straddle').
+        direction: 'L' or 'S'.
+        entry_price: Entry price.
+        current_price: Current mark price.
+        upnl_pct: Unrealized PnL percentage.
+        bars: Bars held.
+        max_hold: Max hold bars.
+        sl_pct: Stop loss percentage (0-1 scale).
+        sl_active: Whether server SL order is active.
+        tp_pct: Take profit percentage (0-1 scale).
+        tp_active: Whether server TP order is active.
+        trail_active: Whether trailing stop is active.
+        peak_gain: Peak gain percentage (0-1 scale) if trail active.
+
+    Returns:
+        Multi-line formatted string.
+    """
+    C = Color
+    dir_color = C.GREEN if direction == "L" else C.RED
+    pnl_color = C.GREEN if upnl_pct >= 0 else C.RED
+
+    sl_check = f"{C.GREEN}✓{C.RESET}" if sl_active else f"{C.RED}✗{C.RESET}"
+    tp_check = f"{C.GREEN}✓{C.RESET}" if tp_active else f"{C.RED}✗{C.RESET}"
+
+    if trail_active:
+        peak_str = f"({peak_gain * 100:+.1f}%)" if peak_gain is not None else ""
+        trail_str = f"{C.GREEN}✓{C.RESET}{C.DIM}{peak_str}{C.RESET}"
+    else:
+        trail_str = f"{C.DIM}✗{C.RESET}"
+
+    return (
+        f"    {C.BOLD}{pos_key}{C.RESET}  {C.DIM}{strategy_type}{C.RESET}\n"
+        f"      {dir_color}{direction}{C.RESET} "
+        f"${entry_price:.4f} → ${current_price:.4f}  "
+        f"{pnl_color}{C.BOLD}uPnL={upnl_pct:+.2f}%{C.RESET}  "
+        f"{C.DIM}{bars}/{max_hold}bars{C.RESET}\n"
+        f"      SL={sl_pct * 100:.1f}%{sl_check}  "
+        f"TP={tp_pct * 100:.0f}%{tp_check}  "
+        f"trail={trail_str}"
+    )
+
+
 def _print_section(title: str) -> None:
-    """Print a section header."""
-    print(f"  {Color.CYAN}{Color.BOLD}[ {title} ]{Color.RESET}")
+    """Print a section header (startup banner use)."""
+    print(format_section_header(title))
 
 
 def _print_row(label: str, value: str) -> None:

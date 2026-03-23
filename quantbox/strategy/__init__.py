@@ -3,27 +3,14 @@ Strategy module — Production strategy: vol_straddle (VR Squeeze).
 
 Infrastructure:
   - TradingStrategy: Protocol formalising the shared strategy interface.
-  - RubberBandScalper: Base execution class (all strategies run on this)
-  - RubberBand: Mean-reversion strategy (inactive, infrastructure only)
   - VolSelector: Backtest utility (compute_realized_vol)
+
+DEPRECATED (Phase 2.5, refactor/mega-v2):
+  - RubberBand strategy is deprecated. Module files kept for reference.
+    Do not import from quantbox.strategy.rubberband for new code.
 """
 
 from quantbox.strategy.protocol import TradingStrategy
-from quantbox.strategy.rubberband import (
-    RubberBandConfig,
-    RubberBandStrategy,
-    compute_signals,
-    compute_signals_mtf,
-    compute_signals_with_btc_directional,
-    compute_signals_regime_switch,
-    compute_signals_confidence,
-    compute_signals_4h_independent,
-    apply_mtf_confirmation,
-    apply_mtf_leverage,
-    calculate_position_size,
-    compute_confidence_leverage,
-    apply_confidence_leverage,
-)
 from quantbox.strategy.vol_selector import (
     VolSelectorConfig,
     VolatilitySelector,
@@ -34,16 +21,6 @@ from quantbox.strategy.vol_selector import (
 __all__ = [
     # Strategy protocol (type-checking interface)
     "TradingStrategy",
-    # Rubber band (infrastructure base)
-    "RubberBandConfig",
-    "RubberBandStrategy",
-    "compute_signals",
-    "compute_signals_with_btc_directional",
-    "compute_signals_regime_switch",
-    "compute_signals_confidence",
-    "calculate_position_size",
-    "compute_confidence_leverage",
-    "apply_confidence_leverage",
     # Volatility-based symbol selection (backtest utilities)
     "VolSelectorConfig",
     "VolatilitySelector",

@@ -254,12 +254,34 @@ def load_state_strategies() -> dict:
         s = json.load(open(STATE))
         result = {}
         for sym, pos in s.get("positions", {}).items():
-            strat = pos.get("strategy_type", "vr_squeeze")
+            strat = pos.get("strategy_type", "vr_directional")
             is_straddle = pos.get("is_straddle", False)
             # Patch in-flight: state written before code fix may have vr_squeeze for straddles
-            if is_straddle and strat == "vr_squeeze":
-                strat = "straddle"
+            if is_straddle and strat == "vr_directional":
+                strat = "vr_straddle"
             result[sym] = strat
+        return result
+    except Exception:
+        return {}
+
+
+def load_state_pos_details() -> dict:
+    """Return {pos_key: {sl, tp, trail_active, peak_gain, max_hold}} from state."""
+    if not STATE.exists():
+        return {}
+    try:
+        s = json.load(open(STATE))
+        result = {}
+        for sym, pos in s.get("positions", {}).items():
+            result[sym] = {
+                "sl": pos.get("sl", 0),
+                "tp": pos.get("tp", 0),
+                "trail_active": pos.get("trail_active", False),
+                "peak_gain": pos.get("peak_gain", 0),
+                "max_hold": pos.get("max_hold", 192),
+                "server_sl_order_id": pos.get("server_sl_order_id"),
+                "server_tp_order_id": pos.get("server_tp_order_id"),
+            }
         return result
     except Exception:
         return {}
@@ -283,7 +305,7 @@ def load_trades() -> pd.DataFrame:
 def _strat_tag(strategy_type: str) -> tuple[str, str]:
     """Return (css_class, display_label) for a strategy_type value."""
     s = str(strategy_type).lower()
-    if "straddle" in s:
+    if "vr_straddle" in s:
         return "tag-vr-s", "STRD"
     if "squeeze" in s or "vr" in s:
         return "tag-vr-d", "VR"
@@ -460,8 +482,8 @@ def chart_trades_scatter(df: pd.DataFrame) -> go.Figure | None:
 
     fig = go.Figure()
     for strat, grp in d.groupby("strategy_type"):
-        color = "#C084FC" if "straddle" in str(strat) else ("#4A90D9" if "vr" in str(strat) else "#C8960C")
-        label = "S_d8" if "straddle" in str(strat) else ("D_mom8" if "directional" in str(strat) else "MA CLUSTER")
+        color = "#C084FC" if "vr_straddle" in str(strat) else ("#4A90D9" if "vr" in str(strat) else "#C8960C")
+        label = "S_d8" if "vr_straddle" in str(strat) else ("D_mom8" if "directional" in str(strat) else "MA CLUSTER")
         fig.add_trace(go.Scatter(
             x=grp["exit_time"], y=grp["pnl_usd"],
             mode="markers",
@@ -534,6 +556,7 @@ def render():
     positions     = fetch_positions()
     bars_map      = load_state_bars()
     strategies_map = load_state_strategies()
+    pos_details   = load_state_pos_details()
     df            = load_trades()
 
     wallet     = acct.get("wallet", 0)
@@ -636,10 +659,22 @@ def render():
                 for p in positions:
                     sym_key   = f"{p['symbol']}:{p['side']}"
                     bars      = bars_map.get(sym_key, bars_map.get(p["symbol"], "?"))
-                    strat_type = strategies_map.get(sym_key, strategies_map.get(p["symbol"], "vr_squeeze"))
+                    strat_type = strategies_map.get(sym_key, strategies_map.get(p["symbol"], "vr_directional"))
                     strat_cls, strat_label = _strat_tag(strat_type)
                     pct_class = "pos" if p["pct"] >= 0 else "neg"
                     side_cls  = "long-tag" if p["side"] == "LONG" else "short-tag"
+                    # SL/TP/trail from state
+                    det = pos_details.get(sym_key, pos_details.get(p["symbol"], {}))
+                    sl_val = det.get("sl", 0)
+                    tp_val = det.get("tp", 0)
+                    max_hold = det.get("max_hold", 192)
+                    sl_ok = "✓" if det.get("server_sl_order_id") else "✗"
+                    tp_ok = "✓" if det.get("server_tp_order_id") else "✗"
+                    if det.get("trail_active"):
+                        peak = det.get("peak_gain", 0) * 100
+                        trail_str = f"✓({peak:+.1f}%)"
+                    else:
+                        trail_str = "✗"
                     rows_html += f"""
 <tr>
   <td class="sym">{p['symbol']}</td>
@@ -648,16 +683,18 @@ def render():
   <td>${p['entry']:,.4f}</td>
   <td>${p['mark']:,.4f}</td>
   <td class="{pct_class}">{p['pct']:+.2f}%</td>
-  <td class="{pct_class}">{p['roi_pct']:+.2f}%</td>
   <td class="{pct_class}">${p['upnl']:+.2f}</td>
+  <td class="neu">{sl_val * 100:.1f}%{sl_ok}</td>
+  <td class="neu">{tp_val * 100:.0f}%{tp_ok}</td>
+  <td class="neu">{trail_str}</td>
   <td class="neu">{p['leverage']}x</td>
-  <td class="neu">{bars}/192</td>
+  <td class="neu">{bars}/{max_hold}</td>
   <td class="neu">${p['notional']:,.0f}</td>
 </tr>"""
                 st.markdown(f"""
 <div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>STRAT</th><th>ENTRY</th><th>MARK</th>
-<th>Price%</th><th>ROI%</th><th>PnL USD</th><th>LEV</th><th>BARS</th><th>NOTIONAL</th></tr>
+<th>Price%</th><th>PnL USD</th><th>SL</th><th>TP</th><th>TRAIL</th><th>LEV</th><th>BARS</th><th>NOTIONAL</th></tr>
 {rows_html}
 </table></div>""", unsafe_allow_html=True)
 
@@ -954,7 +991,7 @@ def render():
                 strat_comp = ""
                 for _, r in grp_strat.iterrows():
                     tag_cls, label = _strat_tag(r["strategy_type"])
-                    if "straddle" not in str(r["strategy_type"]) and "squeeze" not in str(r["strategy_type"]) and "directional" not in str(r["strategy_type"]):
+                    if "vr" not in str(r["strategy_type"]):
                         label = "MA CLUSTER"
                     tot_cls = "pos" if r["total"] >= 0 else "neg"
                     pf_str2 = f"{r['pf']:.2f}" if r["pf"] != float("inf") else "∞"

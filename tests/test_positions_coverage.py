@@ -84,7 +84,7 @@ def _set_signal_meta(scalper: RubberBandScalper, **meta) -> None:
         "tp": scalper.vs_config.d_tp,
         "tf": "15m",
         "straddle": False,
-        "strategy_type": "vr_squeeze",
+        "strategy_type": "vr_directional",
         "conviction_score": 1,
     }
     defaults.update(meta)
@@ -327,7 +327,7 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=0, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=0, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -343,7 +343,7 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=1, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=1, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -359,7 +359,7 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=4, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=4, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -376,7 +376,7 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=99, strategy_type="vr_squeeze")  # clamped to 4
+        _set_signal_meta(scalper, conviction_score=99, strategy_type="vr_directional")  # clamped to 4
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -594,7 +594,7 @@ class TestClosePaths:
             "position_side": pos_side,
             "trail_active": False,
             "opened_at": "2026-03-09T10:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
             "balance_before": 1234.0,
         }
         return pos_key
@@ -866,6 +866,32 @@ class TestPaperMode:
         # Cost should have been deducted
         assert scalper._paper_balance < balance_before
 
+    def test_paper_round_trip_fee_equals_config(self):
+        """Paper mode fee model: cost_per_side at entry + cost_per_side at exit = round_trip_cost.
+
+        Regression test confirming no double-counting. Verifies the math directly
+        against config values rather than going through the full close path.
+        """
+        cfg = VolStraddleConfig()
+        # cost_per_side should be exactly half of round_trip_cost
+        assert cfg.round_trip_cost == pytest.approx(2 * cfg.cost_per_side, abs=1e-10), (
+            f"round_trip_cost ({cfg.round_trip_cost}) must equal 2 * cost_per_side ({cfg.cost_per_side})"
+        )
+
+        # Verify entry deduction uses cost_per_side (not round_trip_cost)
+        scalper = _make_vs_scalper(paper=True, balance=10000.0)
+        _mock_open(scalper)
+        _set_signal_meta(scalper)
+
+        initial_balance = scalper._paper_balance
+        _open(scalper, 10000.0)
+
+        # Entry charges cost_per_side: qty(1.0) * price(100) * cost_per_side
+        expected_entry_cost = 1.0 * PRICE * cfg.cost_per_side
+        assert scalper._paper_balance == pytest.approx(initial_balance - expected_entry_cost, abs=0.01), (
+            "Entry should deduct exactly cost_per_side, not round_trip_cost"
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestSteepXConfidence — L151-162
@@ -1060,7 +1086,7 @@ class TestCloseWithRemainingPositions:
             "position_side": "LONG",
             "trail_active": False,
             "opened_at": "2026-03-09T10:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
 
         # Add a second position that remains after close
@@ -1120,335 +1146,6 @@ class TestCloseWithRemainingPositions:
         scalper._cancel_server_take_profit.assert_not_called()  # No TP to cancel
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TestRubberbandOpen — L455-533 rubberband else branch in _open_position
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def _make_rb_scalper(balance: float = 1000.0, rb_cfg=None) -> RubberBandScalper:
-    """Create a rubberband scalper with mocked Binance client."""
-    from quantbox.strategy.rubberband.config import RubberBandConfig
-
-    if rb_cfg is None:
-        rb_cfg = RubberBandConfig(
-            lookback=10,
-            threshold=0.01,
-            partial_exit_enabled=False,  # simpler non-PBT
-            dynamic_leverage_enabled=False,
-            vol_adjusted_size=False,  # disable ATR-based sizing
-            steep_cap_curve=False,  # disable confidence curve
-            mtf_confirmation_enabled=False,
-        )
-
-    with (
-        patch("quantbox.scalper.get_settings") as mock_settings,
-        patch("quantbox.scalper.Client"),
-        patch("quantbox.scalper.DiscordNotifier"),
-        patch("quantbox.scalper.DiscordBotRunner", None),
-    ):
-        mock_settings.return_value = MagicMock(
-            binance_api_key="k",
-            binance_api_secret="s",
-            binance_testnet=False,
-            discord_webhook_url="",
-            discord_bot_token="",
-            discord_channel_id="",
-            paper_balance=balance,
-        )
-        scalper = RubberBandScalper(
-            paper_mode=True,
-            strategy_name="rubberband",
-            config=rb_cfg,
-        )
-
-    scalper._symbol_info_cache["TESTUSDT"] = {
-        "step_size": 0.001,
-        "tick_size": 0.01,
-        "quantity_precision": 3,
-        "price_precision": 2,
-        "min_notional": 5.0,
-        "min_qty": 0.001,
-        "max_qty": 1000.0,
-    }
-    scalper.get_balance = MagicMock(return_value=balance)
-    return scalper
-
-
-class TestRubberbandOpen:
-    """_open_position rubberband else branch (L455-533)."""
-
-    def test_rubberband_open_long(self):
-        """Rubberband strategy: _open_position places order and records position."""
-        scalper = _make_rb_scalper()
-        scalper._place_order = MagicMock(
-            return_value={
-                "avgPrice": str(PRICE),
-                "executedQty": "1.0",
-                "status": "FILLED",
-            }
-        )
-        scalper._place_server_stop_loss = MagicMock(return_value="sl_rb")
-        scalper._place_server_take_profit = MagicMock(return_value="tp_rb")
-        scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
-        scalper.strategy.signal_meta = {
-            "TESTUSDT": {
-                "sl": 0.01,
-                "tp": 0.12,
-                "tf": "15m",
-                "conviction_score": 3,
-                "strategy_type": "rubberband",
-            }
-        }
-
-        closes = np.array([95.0] * 69 + [100.0])  # 5% move for non-zero move_size
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-
-        assert result is True
-        assert "TESTUSDT" in scalper.strategy._positions
-        """Rubberband strategy: SHORT signal=-1 opens position."""
-        scalper = _make_rb_scalper()
-        scalper._place_order = MagicMock(
-            return_value={
-                "avgPrice": str(PRICE),
-                "executedQty": "1.0",
-                "status": "FILLED",
-            }
-        )
-        scalper._place_server_stop_loss = MagicMock(return_value="sl_rb")
-        scalper._place_server_take_profit = MagicMock(return_value=None)
-        scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
-        scalper.strategy.signal_meta = {
-            "TESTUSDT": {
-                "sl": 0.01,
-                "tp": 0.12,
-                "tf": "15m",
-                "conviction_score": 2,
-                "strategy_type": "rubberband",
-            }
-        }
-
-        closes = np.array([105.0] * 69 + [100.0])  # 5% drop for non-zero move_size
-        result = scalper._open_position("TESTUSDT", -1, closes, 1000.0)
-
-        assert result is True
-        pos = scalper.strategy._positions["TESTUSDT"]
-        assert pos["signal"] == -1
-
-    def test_rubberband_open_returns_false_on_failed_order(self):
-        """_open_position returns False when _place_order returns None."""
-        scalper = _make_rb_scalper()
-        scalper._place_order = MagicMock(return_value=None)
-        scalper._place_server_stop_loss = MagicMock(return_value="sl_rb")
-        scalper._place_server_take_profit = MagicMock(return_value=None)
-        scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
-        scalper.strategy.signal_meta = {
-            "TESTUSDT": {
-                "sl": 0.01,
-                "tp": 0.12,
-                "tf": "15m",
-                "conviction_score": 3,
-                "strategy_type": "rubberband",
-            }
-        }
-
-        closes = np.array([95.0] * 69 + [100.0])  # non-zero move_size
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is False
-
-
-class TestRubberbandSteepXAndLeverage:
-    """Rubberband SteepX confidence sizing and dynamic leverage paths."""
-
-    def _make_scalper(self, **extra_cfg) -> RubberBandScalper:
-        from quantbox.strategy.rubberband.config import RubberBandConfig
-
-        rb_cfg = RubberBandConfig(
-            lookback=10,
-            threshold=0.01,
-            partial_exit_enabled=False,
-            dynamic_leverage_enabled=False,
-            vol_adjusted_size=False,
-            mtf_confirmation_enabled=False,
-            **extra_cfg,
-        )
-
-        with (
-            patch("quantbox.scalper.get_settings") as mock_settings,
-            patch("quantbox.scalper.Client"),
-            patch("quantbox.scalper.DiscordNotifier"),
-            patch("quantbox.scalper.DiscordBotRunner", None),
-        ):
-            mock_settings.return_value = MagicMock(
-                binance_api_key="k",
-                binance_api_secret="s",
-                binance_testnet=False,
-                discord_webhook_url="",
-                discord_bot_token="",
-                discord_channel_id="",
-                paper_balance=1000.0,
-            )
-            scalper = RubberBandScalper(
-                paper_mode=True,
-                strategy_name="rubberband",
-                config=rb_cfg,
-            )
-        scalper._symbol_info_cache["TESTUSDT"] = {
-            "step_size": 0.001,
-            "tick_size": 0.01,
-            "quantity_precision": 3,
-            "price_precision": 2,
-            "min_notional": 5.0,
-            "min_qty": 0.001,
-            "max_qty": 1000.0,
-        }
-        scalper.get_balance = MagicMock(return_value=1000.0)
-        scalper._place_order = MagicMock(return_value={"avgPrice": "100.0", "executedQty": "1.0", "status": "FILLED"})
-        scalper._place_server_stop_loss = MagicMock(return_value="sl_rb")
-        scalper._place_server_take_profit = MagicMock(return_value="tp_rb")
-        scalper.strategy.get_effective_stop_mult = MagicMock(return_value=1.0)
-        scalper.strategy.signal_meta = {"TESTUSDT": {"sl": 0.01, "tp": 0.12, "tf": "15m", "conviction_score": 3}}
-        return scalper
-
-    def test_steep_cap_curve_conf5(self):
-        """SteepX: conf_level >= 5 uses cap_mult_conf5."""
-        scalper = self._make_scalper(steep_cap_curve=True)
-        scalper.strategy.get_last_confidence = MagicMock(return_value=5)
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is True
-
-    def test_steep_cap_curve_conf4(self):
-        """SteepX: conf_level == 4 uses cap_mult_conf4."""
-        scalper = self._make_scalper(steep_cap_curve=True)
-        scalper.strategy.get_last_confidence = MagicMock(return_value=4)
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is True
-
-    def test_steep_cap_curve_conf3(self):
-        """SteepX: conf_level == 3 uses cap_mult_conf3."""
-        scalper = self._make_scalper(steep_cap_curve=True)
-        scalper.strategy.get_last_confidence = MagicMock(return_value=3)
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is True
-
-    def test_steep_cap_curve_conf2(self):
-        """SteepX: conf_level == 2 uses cap_mult_conf2."""
-        scalper = self._make_scalper(steep_cap_curve=True)
-        scalper.strategy.get_last_confidence = MagicMock(return_value=2)
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is True
-
-    def test_steep_cap_curve_conf1_uses_conf2_mult(self):
-        """SteepX: conf_level == 1 falls through to cap_mult_conf2 (else branch)."""
-        scalper = self._make_scalper(steep_cap_curve=True)
-        scalper.strategy.get_last_confidence = MagicMock(return_value=1)
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is True
-
-    def test_dynamic_leverage_confidence_path(self):
-        """dynamic_leverage_enabled=True, rr_leverage_enabled=False → confidence leverage."""
-        scalper = self._make_scalper()
-        # Override config to enable dynamic leverage
-        scalper.config.dynamic_leverage_enabled = True
-        scalper.config.rr_leverage_enabled = False
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is True
-
-
-class TestRubberbandEdgeCases:
-    """Cover rubberband-specific edge cases: SoftTight, MTF boost, small notional, TP WOULD_TRIGGER."""
-
-    def _make_rb(self, **kwargs):
-        """Rubberband scalper with sensible defaults."""
-        from quantbox.strategy.rubberband.config import RubberBandConfig
-
-        rb_cfg = RubberBandConfig(
-            lookback=10,
-            threshold=0.01,
-            partial_exit_enabled=False,
-            dynamic_leverage_enabled=False,
-            vol_adjusted_size=False,
-            steep_cap_curve=False,
-            mtf_confirmation_enabled=False,
-            soft_equity_scale=False,
-        )
-        for k, v in kwargs.items():
-            setattr(rb_cfg, k, v)
-        return _make_rb_scalper(rb_cfg=rb_cfg)
-
-    def test_softtight_dd3_rubberband(self):
-        """L169: DD=7% → soft_eq_scale3 (0.40x) in rubberband else block."""
-        scalper = self._make_rb(soft_equity_scale=True)
-        scalper._high_water_mark = 1000.0
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 930.0)  # DD=7%
-        assert result is True
-
-    def test_softtight_dd2_rubberband(self):
-        """L171: DD=5% → soft_eq_scale2 (0.60x) in rubberband else block."""
-        scalper = self._make_rb(soft_equity_scale=True)
-        scalper._high_water_mark = 1000.0
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 950.0)  # DD=5%
-        assert result is True
-
-    def test_softtight_dd1_rubberband(self):
-        """L173: DD=3% → soft_eq_scale1 (0.80x) in rubberband else block."""
-        scalper = self._make_rb(soft_equity_scale=True)
-        scalper._high_water_mark = 1000.0
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 970.0)  # DD=3%
-        assert result is True
-
-    def test_mtf_leverage_boost_rubberband(self):
-        """L233-235: MTF confirmed → leverage multiplied by mtf_leverage_mult."""
-        scalper = self._make_rb(
-            mtf_confirmation_enabled=True,
-            mtf_leverage_mult=2.0,
-            dynamic_leverage_enabled=True,
-        )
-        scalper.strategy.was_mtf_confirmed = MagicMock(return_value=True)
-        scalper.strategy.get_last_confidence = MagicMock(return_value=5)
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is True
-
-    def test_notional_too_small_returns_false(self):
-        """L240-241: notional < $10 → return False."""
-        scalper = self._make_rb()
-        closes = np.array([95.0] * 69 + [100.0])
-        # balance=0.05 → per_slot=$0.005 → notional too small
-        result = scalper._open_position("TESTUSDT", 1, closes, 0.05)
-        assert result is False
-
-    def test_below_min_notional_returns_false(self):
-        """L252-253: quantity * price < min_notional → return False."""
-        scalper = self._make_rb()
-        # Override get_symbol_info to return high min_notional
-        scalper.get_symbol_info = MagicMock(return_value={"min_notional": 1_000_000.0})
-        closes = np.array([95.0] * 69 + [100.0])
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is False
-
-    def test_tp_would_trigger_rubberband_bracket(self):
-        """L526-527: TP WOULD_TRIGGER sentinel in rubberband bracket → tp_order_id=None."""
-        scalper = self._make_rb()
-        closes = np.array([95.0] * 69 + [100.0])
-        # SL returns valid id, TP returns WOULD_TRIGGER
-        scalper._place_server_stop_loss = MagicMock(return_value="sl_001")
-        scalper._place_server_take_profit = MagicMock(return_value="WOULD_TRIGGER")
-        result = scalper._open_position("TESTUSDT", 1, closes, 1000.0)
-        assert result is True
-        key = list(scalper.strategy._positions.keys())[0]
-        pos = scalper.strategy._positions[key]
-        assert pos.get("server_tp_order_id") is None
-
-
 class TestCloseEdgeCases:
     """L679 (partial qty=0), L1126 (close qty=0), L1377 (race condition)."""
 
@@ -1476,7 +1173,7 @@ class TestCloseEdgeCases:
             "position_side": "LONG",
             "trail_active": False,
             "opened_at": "2026-01-01T00:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
         scalper.config.partial_exit_fraction = 1e-10  # tiny → rounds to 0
         scalper._round_qty = MagicMock(return_value=0.0)
@@ -1504,7 +1201,7 @@ class TestCloseEdgeCases:
             "position_side": "LONG",
             "trail_active": False,
             "opened_at": "2026-01-01T00:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
         scalper._round_qty = MagicMock(return_value=0.0)
         result = scalper._close_position("TESTUSDT:LONG", "max_hold", 100.0)
@@ -1531,7 +1228,7 @@ class TestCloseEdgeCases:
             "position_side": "LONG",
             "trail_active": False,
             "opened_at": "2026-01-01T00:00:00+00:00",
-            "strategy_type": "vr_squeeze",
+            "strategy_type": "vr_directional",
         }
         # Fake order placed successfully, but strategy.close_position returns None (race)
         scalper.client.futures_create_order = MagicMock(
@@ -1565,7 +1262,7 @@ class TestMaxNotionalCap:
         # max_notional = $4000 → should cap to $4000
         scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 4000.0
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -1586,7 +1283,7 @@ class TestMaxNotionalCap:
         # CW score=2 → 1.5x → notional = $4500, max_notional = $10000 → no cap
         scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 10000.0
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
@@ -1608,7 +1305,7 @@ class TestMaxNotionalCap:
         # _make_vs_scalper already sets None; this is explicit for documentation.
         scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = None
         _mock_open(scalper)
-        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_squeeze")
+        _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])

@@ -83,12 +83,7 @@ class BracketMixin:
         )
 
         try:
-            resp = self.client._request_futures_api(
-                "post",
-                "algoOrder",
-                signed=True,
-                data=params,
-            )
+            resp = self._algo_api.place_order(params)
             algo_id = str(resp["algoId"])
             logger.info(
                 f"[{symbol}] SERVER {label.upper()} placed via Algo API: "
@@ -334,12 +329,7 @@ class BracketMixin:
             return True
 
         try:
-            resp = self.client._request_futures_api(
-                "delete",
-                "algoOrder",
-                signed=True,
-                data={"algoId": int(order_id)},
-            )
+            resp = self._algo_api.cancel_order(int(order_id))
             logger.info(f"[{symbol}] Server {label} cancelled: algoId={order_id} resp={resp}")
             return True
         except BinanceAPIException as e:
@@ -392,7 +382,7 @@ class BracketMixin:
         """Calculate TRAILING_STOP_MARKET parameters from config.
 
         Args:
-            strategy_type: 'straddle', 'ma_cluster', or 'vr_squeeze'/'vr_*'.
+            strategy_type: 'vr_straddle', 'ma_cluster', or 'vr_directional'.
             signal: +1 (LONG) or -1 (SHORT).
             entry_price: Position entry price.
 
@@ -404,13 +394,13 @@ class BracketMixin:
             close_side: 'SELL' for LONG, 'BUY' for SHORT.
         """
         vs = self.vs_config
-        if strategy_type == "straddle":
+        if strategy_type == "vr_straddle":
             td = vs.s_trail_distance
             ta = vs.s_trail_activate
         elif strategy_type == "ma_cluster":
             td = vs.ma_cluster_trail_distance
             ta = vs.ma_cluster_trail_activate
-        else:  # vr_squeeze, vr_directional, vr_straddle
+        else:  # vr_directional
             td = vs.d_trail_distance
             ta = vs.d_trail_activate
 
@@ -470,12 +460,7 @@ class BracketMixin:
         )
 
         try:
-            resp = self.client._request_futures_api(
-                "post",
-                "algoOrder",
-                signed=True,
-                data=params,
-            )
+            resp = self._algo_api.place_order(params)
             algo_id = str(resp["algoId"])
             logger.info(
                 f"[{symbol}] SERVER TRAIL placed via Algo API: "
@@ -643,12 +628,7 @@ class BracketMixin:
             return None
 
         try:
-            resp = self.client._request_futures_api(
-                "get",
-                "algoOrder",
-                signed=True,
-                data={"algoId": int(order_id)},
-            )
+            resp = self._algo_api.get_order(int(order_id))
             algo_status = resp.get("algoStatus", "")
             logger.info(
                 f"[{symbol}] Algo order check: algoId={order_id} status={algo_status} type={resp.get('orderType', '?')}"
@@ -827,7 +807,7 @@ class BracketMixin:
         if not pos.get("trail_active") or self.paper_mode:
             return
 
-        strategy_type = pos.get("strategy_type", "vr_squeeze")
+        strategy_type = pos.get("strategy_type", "vr_directional")
         is_straddle = pos.get("is_straddle", False)
 
         vs = self.vs_config
@@ -919,12 +899,7 @@ class BracketMixin:
         if self.paper_mode:
             return "WORKING"
         try:
-            resp = self.client._request_futures_api(
-                "get",
-                "algoOrder",
-                signed=True,
-                data={"algoId": int(algo_id)},
-            )
+            resp = self._algo_api.get_order(int(algo_id))
             # Response may vary — handle both dict and list
             if isinstance(resp, dict):
                 return resp.get("algoStatus") or resp.get("status")
