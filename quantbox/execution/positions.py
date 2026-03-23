@@ -384,6 +384,9 @@ class PositionMixin:
                 activation_price=ap,
                 position_side=pos_side,
             )
+            if trail_order_id == "WOULD_TRIGGER":
+                logger.warning(f"[{symbol}] Trail WOULD_TRIGGER at entry — bracket repair next cycle")
+                trail_order_id = None
             if trail_order_id:
                 logger.info(
                     f"[{symbol}] Server bracket: SL={'OK' if sl_order_id else 'FAILED'} "
@@ -1156,6 +1159,23 @@ class PositionMixin:
                         target_retrace=retry_tp,
                         position_side=pos.get("position_side"),
                     )
+            # Re-place trail if it was cancelled before the failed close
+            if trail_oid and self.vs_config.trail_server_native and not self.paper_mode:
+                strategy_type = pos.get("strategy_type", "vr_directional")
+                cr, ap, cs = self._get_trail_params(strategy_type, pos["signal"], pos["entry_price"])
+                new_trail_oid = self._place_trail_regular(
+                    symbol=api_symbol,
+                    side=cs,
+                    quantity=quantity,
+                    callback_rate=cr,
+                    activation_price=ap,
+                    position_side=pos.get("position_side"),
+                )
+                if new_trail_oid and new_trail_oid != "WOULD_TRIGGER":
+                    pos["server_trail_order_id"] = new_trail_oid
+                else:
+                    pos["server_trail_order_id"] = None
+
             # Update existing position's server order IDs
             # Guard against sentinel values being stored as order IDs
             if new_sl_oid and new_sl_oid != "WOULD_TRIGGER":
