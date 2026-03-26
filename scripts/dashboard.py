@@ -20,8 +20,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB = Path(__file__).parent.parent / "data" / "journal.sqlite"
-STATE = Path(__file__).parent.parent / "data" / "state" / "scalper_state.json"
+_DATA = Path(__file__).parent.parent / "data"
+DB_LIVE = _DATA / "journal.sqlite"
+DB_PAPER = _DATA / "journal_paper.sqlite"
+STATE_LIVE = _DATA / "state" / "scalper_state.json"
+STATE_PAPER = _DATA / "state" / "scalper_state_paper.json"
+# Active paths — overridden per-render based on mode toggle
+DB = DB_LIVE
+STATE = STATE_LIVE
 REAL = "ABS(pnl_pct) < 10 AND symbol NOT LIKE 'TEST%' AND symbol NOT LIKE '%:%'"
 REFRESH = 30
 POSITIONS_TTL = 10
@@ -288,10 +294,11 @@ def load_state_pos_details() -> dict:
 
 
 @st.cache_data(ttl=28, show_spinner=False)
-def load_trades() -> pd.DataFrame:
-    if not DB.exists():
+def load_trades(_db_path: str = "") -> pd.DataFrame:
+    db = Path(_db_path) if _db_path else DB
+    if not db.exists():
         return pd.DataFrame()
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(db)
     df = pd.read_sql_query(
         f"SELECT * FROM trades WHERE {REAL} ORDER BY id", conn
     )
@@ -548,16 +555,68 @@ def chart_mfe_mae(df: pd.DataFrame) -> go.Figure | None:
 
 
 # ─── Render ───────────────────────────────────────────────────────────────────
+def _fetch_account_paper() -> dict:
+    """Read balance from paper state file (no Binance API call)."""
+    if not STATE_PAPER.exists():
+        return {"wallet": 0, "unrealized": 0, "margin": 0, "available": 0}
+    try:
+        s = json.load(open(STATE_PAPER))
+        bal = s.get("paper_balance", 1000.0)
+        return {"wallet": bal, "unrealized": 0, "margin": 0, "available": bal}
+    except Exception:
+        return {"wallet": 0, "unrealized": 0, "margin": 0, "available": 0}
+
+
+def _fetch_positions_paper() -> list[dict]:
+    """Read positions from paper state file (no Binance API call)."""
+    if not STATE_PAPER.exists():
+        return []
+    try:
+        s = json.load(open(STATE_PAPER))
+        rows = []
+        for sym, pos in s.get("positions", {}).items():
+            entry = pos.get("entry_price", 0)
+            signal = pos.get("signal", 1)
+            leverage = pos.get("leverage", 30)
+            rows.append({
+                "symbol": sym.split(":")[0],
+                "side": pos.get("position_side", "LONG" if signal == 1 else "SHORT"),
+                "entry": entry,
+                "mark": entry,  # no mark price in paper mode
+                "pct": 0,
+                "roi_pct": 0,
+                "leverage": leverage,
+                "upnl": 0,
+                "notional": pos.get("notional", 0),
+            })
+        return rows
+    except Exception:
+        return []
+
+
 def render():
+    global DB, STATE
+
+    # ── Mode toggle (persists across 30s auto-refresh via session_state) ──
+    mode = st.radio(
+        "Mode", ["LIVE", "PAPER"],
+        horizontal=True,
+        key="dashboard_mode",
+        label_visibility="collapsed",
+    )
+    is_paper = mode == "PAPER"
+    DB = DB_PAPER if is_paper else DB_LIVE
+    STATE = STATE_PAPER if is_paper else STATE_LIVE
+
     now_utc = pd.Timestamp.now(tz="UTC")
     now_str = now_utc.strftime("%Y-%m-%d  %H:%M UTC")
 
-    acct          = fetch_account()
-    positions     = fetch_positions()
+    acct          = _fetch_account_paper() if is_paper else fetch_account()
+    positions     = _fetch_positions_paper() if is_paper else fetch_positions()
     bars_map      = load_state_bars()
     strategies_map = load_state_strategies()
     pos_details   = load_state_pos_details()
-    df            = load_trades()
+    df            = load_trades(str(DB))
 
     wallet     = acct.get("wallet", 0)
     unrealized = acct.get("unrealized", 0)
@@ -571,11 +630,16 @@ def render():
     upnl_class   = "pos" if unrealized >= 0 else "neg"
     totpnl_class = "pos" if total_pnl >= 0 else "neg"
 
+    _badge_bg = "#FFD600" if is_paper else "#00C853"
+    _badge_text = "PAPER" if is_paper else "LIVE"
+    _wallet_label = "PAPER BAL" if is_paper else "WALLET"
+
     st.markdown(f"""
 <div class="ticker">
   <span class="logo">QUANTBOX TERMINAL</span>
+  <span style="background:{_badge_bg};color:#000;padding:1px 8px;font-weight:bold;border-radius:3px;margin:0 6px;">{_badge_text}</span>
   <span class="sep">|</span>
-  <span>WALLET <b>${wallet:,.2f}</b></span>
+  <span>{_wallet_label} <b>${wallet:,.2f}</b></span>
   <span class="sep">|</span>
   <span>UNREALIZED <span class="{upnl_class}">{unrealized:+,.2f} ({upnl_pct:+.2f}%)</span></span>
   <span class="sep">|</span>
