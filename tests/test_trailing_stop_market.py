@@ -137,7 +137,7 @@ class TestPlaceTrailingStopMarket:
         params = call_args[0][0]
         assert params["type"] == "TRAILING_STOP_MARKET"
         assert params["callbackRate"] == "0.1"
-        assert params["activationPrice"] == "101.5"
+        assert params["activatePrice"] == "101.5"
         assert params["positionSide"] == "LONG"
         assert params["side"] == "SELL"
         assert params["quantity"] == "10.0"
