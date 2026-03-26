@@ -84,6 +84,7 @@ def _isolate_journal_db(monkeypatch):
     Must patch quantbox.scalper.TradeJournal (where it was already imported),
     not the source module (that reference is stale after import).
     """
+    import quantbox.core.lifecycle as _lifecycle_mod
     import quantbox.scalper as _scalper_mod
     from quantbox.core.trade_journal import TradeJournal as _OrigJournal
 
@@ -92,6 +93,7 @@ def _isolate_journal_db(monkeypatch):
             super().__init__(db_path=":memory:", **kwargs)
 
     monkeypatch.setattr(_scalper_mod, "TradeJournal", _MemJournal)
+    monkeypatch.setattr(_lifecycle_mod, "TradeJournal", _MemJournal)
 
 
 def _get_real_data_loader():
