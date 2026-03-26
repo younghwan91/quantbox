@@ -439,6 +439,12 @@ class BracketMixin:
         if self.paper_mode:
             return f"paper_trail_{int(time.time() * 1000)}"
 
+        # Round activatePrice to symbol's tick size (Binance rejects malformed precision)
+        info = self.get_symbol_info(symbol)
+        tick_size = info.get("tick_size", 0.01)
+        price_precision = info.get("price_precision", 2)
+        activation_price = round(round(activation_price / tick_size) * tick_size, price_precision)
+
         params: dict = {
             "algoType": "CONDITIONAL",
             "symbol": symbol,
