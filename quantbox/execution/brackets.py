@@ -446,7 +446,7 @@ class BracketMixin:
             "type": "TRAILING_STOP_MARKET",
             "quantity": str(quantity),
             "callbackRate": str(callback_rate),
-            "activationPrice": str(activation_price),
+            "activatePrice": str(activation_price),
         }
         # Hedge Mode: positionSide is mutually exclusive with reduceOnly
         if position_side is not None:
