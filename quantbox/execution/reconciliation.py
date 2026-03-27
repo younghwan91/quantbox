@@ -72,31 +72,6 @@ class ReconciliationMixin:
             # state file — always strip the suffix defensively.
             api_sym = to_api_symbol(sym, pos)
 
-            # ── Step 2.1: Re-attempt counterpart SL cancel if flagged from previous cycle ──
-            if pos.get("counterpart_sl_cancel_failed") and pos.get("is_straddle"):
-                counterpart_key = self._get_pair_counterpart(sym)
-                if counterpart_key:
-                    counterpart = self.strategy._positions.get(counterpart_key)
-                    if counterpart:
-                        retry_sl_oid = counterpart.get("server_sl_order_id")
-                        retry_api_sym = to_api_symbol(counterpart_key)
-                        if retry_sl_oid:
-                            cfg_vs = getattr(self, "vs_config", None)
-                            retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
-                            retry_delay = cfg_vs.sl_cancel_retry_delay_s if cfg_vs else 1.0
-                            for attempt in range(retry_count + 1):
-                                if self._cancel_server_stop_loss(retry_api_sym, retry_sl_oid):
-                                    logger.info(f"[{sym}] 카운터파트 SL 재시도 취소 성공: {counterpart_key}")
-                                    pos["counterpart_sl_cancel_failed"] = False
-                                    break
-                                if attempt < retry_count:
-                                    time.sleep(retry_delay)
-                            else:
-                                logger.warning(f"[{sym}] 카운터파트 SL 재시도도 실패: {counterpart_key}")
-                else:
-                    # Counterpart no longer exists — clear the flag
-                    pos["counterpart_sl_cancel_failed"] = False
-
             tp_oid = pos.get("server_tp_order_id")
             sl_oid = pos.get("server_sl_order_id")
             logger.debug(
@@ -149,39 +124,6 @@ class ReconciliationMixin:
                     if trail_oid_cross:
                         self._cancel_trail_regular(api_sym, str(trail_oid_cross))
 
-                    # ── Step 2.1: Straddle counterpart SL cancel with retry ──
-                    counterpart_key = self._get_pair_counterpart(sym) if pos.get("is_straddle") else None
-                    if counterpart_key:
-                        counterpart = self.strategy._positions.get(counterpart_key)
-                        if counterpart:
-                            counterpart_sl_oid = counterpart.get("server_sl_order_id")
-                            counterpart_api_sym = to_api_symbol(counterpart_key)
-                            if counterpart_sl_oid:
-                                cfg_vs = getattr(self, "vs_config", None)
-                                retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
-                                retry_delay = cfg_vs.sl_cancel_retry_delay_s if cfg_vs else 1.0
-                                counterpart_cancelled = False
-                                for attempt in range(retry_count + 1):
-                                    if self._cancel_server_stop_loss(counterpart_api_sym, counterpart_sl_oid):
-                                        counterpart_cancelled = True
-                                        break
-                                    if attempt < retry_count:
-                                        time.sleep(retry_delay)
-                                if counterpart_cancelled:
-                                    logger.info(
-                                        f"[{sym}] 카운터파트 SL 취소 성공: {counterpart_key} algoId={counterpart_sl_oid}"
-                                    )
-                                else:
-                                    logger.warning(
-                                        f"[{sym}] 카운터파트 SL 취소 실패 ({retry_count + 1}회 시도): {counterpart_key}"
-                                    )
-                                    counterpart["counterpart_sl_cancel_failed"] = True
-                                    self.discord.send(
-                                        content=(
-                                            f"⚠️ **[{counterpart_key}] 카운터파트 SL 취소 실패** — "
-                                            f"다음 사이클에서 재시도"
-                                        )
-                                    )
                     # ── ReconJournal: record server TP fill ──
                     self._record_recon_event(
                         ReconEventType.SERVER_TP_FILL,
@@ -219,39 +161,6 @@ class ReconciliationMixin:
                     if trail_oid_cross:
                         self._cancel_trail_regular(api_sym, str(trail_oid_cross))
 
-                    # ── Step 2.1: Straddle counterpart SL cancel with retry ──
-                    counterpart_key = self._get_pair_counterpart(sym) if pos.get("is_straddle") else None
-                    if counterpart_key:
-                        counterpart = self.strategy._positions.get(counterpart_key)
-                        if counterpart:
-                            counterpart_sl_oid = counterpart.get("server_sl_order_id")
-                            counterpart_api_sym = to_api_symbol(counterpart_key)
-                            if counterpart_sl_oid:
-                                cfg_vs = getattr(self, "vs_config", None)
-                                retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
-                                retry_delay = cfg_vs.sl_cancel_retry_delay_s if cfg_vs else 1.0
-                                counterpart_cancelled = False
-                                for attempt in range(retry_count + 1):
-                                    if self._cancel_server_stop_loss(counterpart_api_sym, counterpart_sl_oid):
-                                        counterpart_cancelled = True
-                                        break
-                                    if attempt < retry_count:
-                                        time.sleep(retry_delay)
-                                if counterpart_cancelled:
-                                    logger.info(
-                                        f"[{sym}] 카운터파트 SL 취소 성공: {counterpart_key} algoId={counterpart_sl_oid}"
-                                    )
-                                else:
-                                    logger.warning(
-                                        f"[{sym}] 카운터파트 SL 취소 실패 ({retry_count + 1}회 시도): {counterpart_key}"
-                                    )
-                                    counterpart["counterpart_sl_cancel_failed"] = True
-                                    self.discord.send(
-                                        content=(
-                                            f"⚠️ **[{counterpart_key}] 카운터파트 SL 취소 실패** — "
-                                            f"다음 사이클에서 재시도"
-                                        )
-                                    )
                     # ── ReconJournal: record server SL fill ──
                     self._record_recon_event(
                         ReconEventType.SERVER_SL_FILL,
@@ -287,17 +196,6 @@ class ReconciliationMixin:
                     # Cancel orphaned TP (algo API, if any)
                     if tp_oid:
                         self._cancel_server_take_profit(api_sym, tp_oid)
-                    # Straddle counterpart SL cancel
-                    if pos.get("is_straddle"):
-                        counterpart_key = self._get_pair_counterpart(sym)
-                        if counterpart_key:
-                            counterpart = self.strategy._positions.get(counterpart_key)
-                            if counterpart:
-                                c_sl = counterpart.get("server_sl_order_id")
-                                c_api = to_api_symbol(counterpart_key)
-                                if c_sl:
-                                    self._cancel_server_stop_loss(c_api, c_sl)
-                                    counterpart["server_sl_order_id"] = None
                     # ReconJournal
                     self._record_recon_event(
                         ReconEventType.SERVER_SL_FILL,
