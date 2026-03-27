@@ -5,6 +5,7 @@ Usage:
 Access:
     http://localhost:8501
 """
+
 import json
 import os
 import sqlite3
@@ -41,7 +42,8 @@ st.set_page_config(
 )
 
 # ─── Bloomberg CSS ────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(
+    """
 <style>
 /* Terminal base */
 html, body, [data-testid="stApp"] {
@@ -173,7 +175,9 @@ hr { border-color: #2a2a2a !important; margin: 6px 0 !important; }
     .bar-label { width: 110px; }
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # ─── Plotly dark theme ────────────────────────────────────────────────────────
 PLOT_LAYOUT = dict(
@@ -219,23 +223,25 @@ def fetch_positions() -> list[dict]:
             amt = float(p["positionAmt"])
             if abs(amt) == 0:
                 continue
-            entry    = float(p["entryPrice"])
-            mark     = float(p["markPrice"])
-            upnl     = float(p["unRealizedProfit"])
+            entry = float(p["entryPrice"])
+            mark = float(p["markPrice"])
+            upnl = float(p["unRealizedProfit"])
             leverage = int(p.get("leverage", 30))
-            pct      = (mark - entry) / entry * 100 if amt > 0 else (entry - mark) / entry * 100
-            roi_pct  = pct * leverage
-            rows.append({
-                "symbol":   p["symbol"],
-                "side":     p["positionSide"],
-                "entry":    entry,
-                "mark":     mark,
-                "pct":      pct,
-                "roi_pct":  roi_pct,
-                "leverage": leverage,
-                "upnl":     upnl,
-                "notional": abs(float(p["notional"])),
-            })
+            pct = (mark - entry) / entry * 100 if amt > 0 else (entry - mark) / entry * 100
+            roi_pct = pct * leverage
+            rows.append(
+                {
+                    "symbol": p["symbol"],
+                    "side": p["positionSide"],
+                    "entry": entry,
+                    "mark": mark,
+                    "pct": pct,
+                    "roi_pct": roi_pct,
+                    "leverage": leverage,
+                    "upnl": upnl,
+                    "notional": abs(float(p["notional"])),
+                }
+            )
         return sorted(rows, key=lambda x: x["pct"], reverse=True)
     except Exception as e:
         st.error(f"positions error: {e}")
@@ -299,9 +305,7 @@ def load_trades(_db_path: str = "") -> pd.DataFrame:
     if not db.exists():
         return pd.DataFrame()
     conn = sqlite3.connect(db)
-    df = pd.read_sql_query(
-        f"SELECT * FROM trades WHERE {REAL} ORDER BY id", conn
-    )
+    df = pd.read_sql_query(f"SELECT * FROM trades WHERE {REAL} ORDER BY id", conn)
     conn.close()
     if not df.empty and "exit_time" in df.columns:
         # format="ISO8601" handles mixed precision (seconds vs microseconds) in pandas 2.x
@@ -340,6 +344,7 @@ def _reason_tag(reason: str) -> tuple[str, str]:
 def _fmt_pct(v: object) -> str:
     """Format a pct float, returning '–' for None / NaN."""
     import math
+
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return "–"
     return f"{float(v):+.1f}%"
@@ -371,7 +376,7 @@ def _pf(df: pd.DataFrame) -> float:
     """Profit factor = gross wins / gross losses."""
     if df.empty:
         return 0.0
-    wins   = df.loc[df["pnl_usd"] > 0, "pnl_usd"].sum()
+    wins = df.loc[df["pnl_usd"] > 0, "pnl_usd"].sum()
     losses = df.loc[df["pnl_usd"] < 0, "pnl_usd"].sum()
     return wins / abs(losses) if losses != 0 else float("inf")
 
@@ -381,7 +386,7 @@ def _sharpe(df: pd.DataFrame) -> float:
     if df.empty or len(df) < 2:
         return 0.0
     pnl = df["pnl_pct"].values
-    mu  = np.mean(pnl)
+    mu = np.mean(pnl)
     sig = np.std(pnl, ddof=1)
     if sig == 0:
         return 0.0
@@ -396,7 +401,7 @@ def _max_drawdown(df: pd.DataFrame) -> float:
     if len(bal) == 0:
         return 0.0
     peak = np.maximum.accumulate(bal)
-    dd   = (peak - bal) / peak * 100
+    dd = (peak - bal) / peak * 100
     return float(dd.max())
 
 
@@ -426,34 +431,43 @@ def chart_equity(df: pd.DataFrame) -> go.Figure | None:
         interp_mask = d["balance_source"] == "interpolated"
         if real_mask.any():
             dr = d[real_mask]
-            fig.add_trace(go.Scatter(
-                x=dr["exit_time"], y=dr["equity"],
+            fig.add_trace(
+                go.Scatter(
+                    x=dr["exit_time"],
+                    y=dr["equity"],
+                    mode="lines",
+                    line=dict(color="#FF8C00", width=2),
+                    fill="tozeroy",
+                    fillcolor="rgba(255,140,0,0.06)",
+                    name="Equity",
+                    hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f}<extra></extra>",
+                )
+            )
+        if interp_mask.any():
+            di = d[interp_mask]
+            fig.add_trace(
+                go.Scatter(
+                    x=di["exit_time"],
+                    y=di["equity"],
+                    mode="lines",
+                    line=dict(color="#FF8C00", width=1, dash="dot"),
+                    name="Equity (interpolated)",
+                    hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f} (interp)<extra></extra>",
+                )
+            )
+    else:
+        fig.add_trace(
+            go.Scatter(
+                x=d["exit_time"],
+                y=d["equity"],
                 mode="lines",
                 line=dict(color="#FF8C00", width=2),
                 fill="tozeroy",
                 fillcolor="rgba(255,140,0,0.06)",
                 name="Equity",
                 hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f}<extra></extra>",
-            ))
-        if interp_mask.any():
-            di = d[interp_mask]
-            fig.add_trace(go.Scatter(
-                x=di["exit_time"], y=di["equity"],
-                mode="lines",
-                line=dict(color="#FF8C00", width=1, dash="dot"),
-                name="Equity (interpolated)",
-                hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f} (interp)<extra></extra>",
-            ))
-    else:
-        fig.add_trace(go.Scatter(
-            x=d["exit_time"], y=d["equity"],
-            mode="lines",
-            line=dict(color="#FF8C00", width=2),
-            fill="tozeroy",
-            fillcolor="rgba(255,140,0,0.06)",
-            name="Equity",
-            hovertemplate="<b>%{x|%m/%d %H:%M}</b><br>$%{y:,.2f}<extra></extra>",
-        ))
+            )
+        )
 
     fig.update_layout(**PLOT_LAYOUT, title=dict(text="EQUITY CURVE", font=dict(color="#FF8C00", size=11), x=0))
     return fig
@@ -466,16 +480,22 @@ def chart_pnl_bars(df: pd.DataFrame) -> go.Figure | None:
     d = df.sort_values("id")
     colors = ["#00C853" if v > 0 else "#D50000" for v in d["pnl_usd"]]
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=list(range(1, len(d) + 1)),
-        y=d["pnl_usd"],
-        marker_color=colors,
-        name="Trade PnL",
-        hovertemplate="Trade #%{x}<br><b>%{y:+.2f} USD</b><extra></extra>",
-    ))
+    fig.add_trace(
+        go.Bar(
+            x=list(range(1, len(d) + 1)),
+            y=d["pnl_usd"],
+            marker_color=colors,
+            name="Trade PnL",
+            hovertemplate="Trade #%{x}<br><b>%{y:+.2f} USD</b><extra></extra>",
+        )
+    )
     fig.add_hline(y=0, line_color="#333", line_width=1)
-    fig.update_layout(**PLOT_LAYOUT, title=dict(text="TRADE P&L  (chronological)", font=dict(color="#FF8C00", size=11), x=0),
-                      yaxis_title=None, xaxis_title=None)
+    fig.update_layout(
+        **PLOT_LAYOUT,
+        title=dict(text="TRADE P&L  (chronological)", font=dict(color="#FF8C00", size=11), x=0),
+        yaxis_title=None,
+        xaxis_title=None,
+    )
     return fig
 
 
@@ -491,17 +511,16 @@ def chart_trades_scatter(df: pd.DataFrame) -> go.Figure | None:
     for strat, grp in d.groupby("strategy_type"):
         color = "#C084FC" if "vr_straddle" in str(strat) else ("#4A90D9" if "vr" in str(strat) else "#C8960C")
         label = "S_d8" if "vr_straddle" in str(strat) else ("D_mom8" if "directional" in str(strat) else "MA CLUSTER")
-        fig.add_trace(go.Scatter(
-            x=grp["exit_time"], y=grp["pnl_usd"],
-            mode="markers",
-            marker=dict(color=[color if v > 0 else "#FF4444" for v in grp["pnl_usd"]],
-                        size=8, line=dict(width=0)),
-            name=label,
-            hovertemplate=(
-                "<b>%{x|%m/%d %H:%M}</b><br>"
-                + "PnL: <b>%{y:+.2f} USD</b><extra></extra>"
-            ),
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=grp["exit_time"],
+                y=grp["pnl_usd"],
+                mode="markers",
+                marker=dict(color=[color if v > 0 else "#FF4444" for v in grp["pnl_usd"]], size=8, line=dict(width=0)),
+                name=label,
+                hovertemplate=("<b>%{x|%m/%d %H:%M}</b><br>" + "PnL: <b>%{y:+.2f} USD</b><extra></extra>"),
+            )
+        )
     fig.add_hline(y=0, line_color="#333", line_width=1)
     fig.update_layout(**PLOT_LAYOUT, title=dict(text="TRADE TIMELINE", font=dict(color="#FF8C00", size=11), x=0))
     return fig
@@ -515,15 +534,18 @@ def chart_rolling_wr(df: pd.DataFrame, window: int = 20) -> go.Figure | None:
     wr = d["pnl_usd"].gt(0).rolling(window).mean() * 100
     fig = go.Figure()
     fig.add_hline(y=50, line_color="#333", line_dash="dash", line_width=1)
-    fig.add_trace(go.Scatter(
-        x=list(range(1, len(d) + 1)), y=wr,
-        mode="lines",
-        line=dict(color="#4A90D9", width=2),
-        fill="tozeroy",
-        fillcolor="rgba(74,144,217,0.08)",
-        name=f"WR {window}T",
-        hovertemplate="Trade #%{x}<br>WR: <b>%{y:.1f}%</b><extra></extra>",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=list(range(1, len(d) + 1)),
+            y=wr,
+            mode="lines",
+            line=dict(color="#4A90D9", width=2),
+            fill="tozeroy",
+            fillcolor="rgba(74,144,217,0.08)",
+            name=f"WR {window}T",
+            hovertemplate="Trade #%{x}<br>WR: <b>%{y:.1f}%</b><extra></extra>",
+        )
+    )
     fig.update_layout(
         **PLOT_LAYOUT,
         title=dict(text=f"ROLLING WIN RATE  ({window}-trade)", font=dict(color="#FF8C00", size=11), x=0),
@@ -542,43 +564,55 @@ def chart_mfe_mae(df: pd.DataFrame) -> go.Figure | None:
         return None
     colors = ["#00C853" if v > 0 else "#D50000" for v in d["pnl_usd"]]
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=d["mfe_pct"], y=d["mae_pct"],
-        mode="markers",
-        marker=dict(color=colors, size=7, opacity=0.8, line=dict(width=0)),
-        hovertemplate="MFE: %{x:+.2f}%<br>MAE: %{y:.2f}%<extra></extra>",
-    ))
-    fig.update_layout(**PLOT_LAYOUT,
-                      title=dict(text="MFE vs MAE  (green=win)", font=dict(color="#FF8C00", size=11), x=0),
-                      xaxis_title="MFE %", yaxis_title="MAE %")
+    fig.add_trace(
+        go.Scatter(
+            x=d["mfe_pct"],
+            y=d["mae_pct"],
+            mode="markers",
+            marker=dict(color=colors, size=7, opacity=0.8, line=dict(width=0)),
+            hovertemplate="MFE: %{x:+.2f}%<br>MAE: %{y:.2f}%<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        **PLOT_LAYOUT,
+        title=dict(text="MFE vs MAE  (green=win)", font=dict(color="#FF8C00", size=11), x=0),
+        xaxis_title="MFE %",
+        yaxis_title="MAE %",
+    )
     return fig
 
 
 # ─── Render ───────────────────────────────────────────────────────────────────
-def _fetch_account_paper() -> dict:
-    """Read balance from paper state file (no Binance API call)."""
-    if not STATE_PAPER.exists():
-        return {"wallet": 0, "unrealized": 0, "margin": 0, "available": 0}
+def _load_paper_state() -> dict:
+    """Read and parse paper state file once (no Binance API call)."""
     try:
-        s = json.load(open(STATE_PAPER))
-        bal = s.get("paper_balance", 1000.0)
-        return {"wallet": bal, "unrealized": 0, "margin": 0, "available": bal}
+        with STATE_PAPER.open() as fh:
+            return json.load(fh)
     except Exception:
+        return {}
+
+
+def _fetch_account_paper() -> dict:
+    """Extract balance from paper state."""
+    s = _load_paper_state()
+    if not s:
         return {"wallet": 0, "unrealized": 0, "margin": 0, "available": 0}
+    bal = s.get("paper_balance", 1000.0)
+    return {"wallet": bal, "unrealized": 0, "margin": 0, "available": bal}
 
 
 def _fetch_positions_paper() -> list[dict]:
-    """Read positions from paper state file (no Binance API call)."""
-    if not STATE_PAPER.exists():
+    """Extract positions from paper state."""
+    s = _load_paper_state()
+    if not s:
         return []
-    try:
-        s = json.load(open(STATE_PAPER))
-        rows = []
-        for sym, pos in s.get("positions", {}).items():
-            entry = pos.get("entry_price", 0)
-            signal = pos.get("signal", 1)
-            leverage = pos.get("leverage", 30)
-            rows.append({
+    rows = []
+    for sym, pos in s.get("positions", {}).items():
+        entry = pos.get("entry_price", 0)
+        signal = pos.get("signal", 1)
+        leverage = pos.get("leverage", 30)
+        rows.append(
+            {
                 "symbol": sym.split(":")[0],
                 "side": pos.get("position_side", "LONG" if signal == 1 else "SHORT"),
                 "entry": entry,
@@ -588,10 +622,9 @@ def _fetch_positions_paper() -> list[dict]:
                 "leverage": leverage,
                 "upnl": 0,
                 "notional": pos.get("notional", 0),
-            })
-        return rows
-    except Exception:
-        return []
+            }
+        )
+    return rows
 
 
 def render():
@@ -599,7 +632,8 @@ def render():
 
     # ── Mode toggle (persists across 30s auto-refresh via session_state) ──
     mode = st.radio(
-        "Mode", ["LIVE", "PAPER"],
+        "Mode",
+        ["LIVE", "PAPER"],
         horizontal=True,
         key="dashboard_mode",
         label_visibility="collapsed",
@@ -611,30 +645,31 @@ def render():
     now_utc = pd.Timestamp.now(tz="UTC")
     now_str = now_utc.strftime("%Y-%m-%d  %H:%M UTC")
 
-    acct          = _fetch_account_paper() if is_paper else fetch_account()
-    positions     = _fetch_positions_paper() if is_paper else fetch_positions()
-    bars_map      = load_state_bars()
+    acct = _fetch_account_paper() if is_paper else fetch_account()
+    positions = _fetch_positions_paper() if is_paper else fetch_positions()
+    bars_map = load_state_bars()
     strategies_map = load_state_strategies()
-    pos_details   = load_state_pos_details()
-    df            = load_trades(str(DB))
+    pos_details = load_state_pos_details()
+    df = load_trades(str(DB))
 
-    wallet     = acct.get("wallet", 0)
+    wallet = acct.get("wallet", 0)
     unrealized = acct.get("unrealized", 0)
-    margin     = acct.get("margin", 0)
+    margin = acct.get("margin", 0)
     margin_pct = margin / wallet * 100 if wallet else 0
-    n_pos      = len(positions)
-    total_pnl  = df["pnl_usd"].sum() if not df.empty else 0
-    upnl_pct   = unrealized / wallet * 100 if wallet else 0
+    n_pos = len(positions)
+    total_pnl = df["pnl_usd"].sum() if not df.empty else 0
+    upnl_pct = unrealized / wallet * 100 if wallet else 0
 
     # ── TICKER BAR (always visible, above tabs) ───────────────────────────────
-    upnl_class   = "pos" if unrealized >= 0 else "neg"
+    upnl_class = "pos" if unrealized >= 0 else "neg"
     totpnl_class = "pos" if total_pnl >= 0 else "neg"
 
     _badge_bg = "#FFD600" if is_paper else "#00C853"
     _badge_text = "PAPER" if is_paper else "LIVE"
     _wallet_label = "PAPER BAL" if is_paper else "WALLET"
 
-    st.markdown(f"""
+    st.markdown(
+        f"""
 <div class="ticker">
   <span class="logo">QUANTBOX TERMINAL</span>
   <span style="background:{_badge_bg};color:#000;padding:1px 8px;font-weight:bold;border-radius:3px;margin:0 6px;">{_badge_text}</span>
@@ -651,26 +686,29 @@ def render():
   <span class="sep">|</span>
   <span class="neu">{now_str}</span>
 </div>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
     # ── SCORECARD (always visible) ────────────────────────────────────────────
-    n_trades    = len(df)
-    wr          = df["pnl_usd"].gt(0).mean() * 100 if n_trades > 0 else 0
-    best        = df.loc[df["pnl_usd"].idxmax()] if n_trades > 0 else None
-    worst       = df.loc[df["pnl_usd"].idxmin()] if n_trades > 0 else None
+    n_trades = len(df)
+    wr = df["pnl_usd"].gt(0).mean() * 100 if n_trades > 0 else 0
+    best = df.loc[df["pnl_usd"].idxmax()] if n_trades > 0 else None
+    worst = df.loc[df["pnl_usd"].idxmin()] if n_trades > 0 else None
     streak_type, streak_n = win_streak(df)
-    avg_bars    = df["bars_held"].mean() if n_trades > 0 else 0
-    wins        = int(df["pnl_usd"].gt(0).sum()) if n_trades > 0 else 0
-    losses      = int(df["pnl_usd"].le(0).sum()) if n_trades > 0 else 0
+    avg_bars = df["bars_held"].mean() if n_trades > 0 else 0
+    wins = int(df["pnl_usd"].gt(0).sum()) if n_trades > 0 else 0
+    losses = int(df["pnl_usd"].le(0).sum()) if n_trades > 0 else 0
 
-    wr_color     = "#00C853" if wr >= 50 else "#D50000"
+    wr_color = "#00C853" if wr >= 50 else "#D50000"
     totpnl_color = "#00C853" if total_pnl >= 0 else "#D50000"
-    streak_label = f"{'WIN' if streak_type=='W' else 'LOSS'} STREAK" if streak_type != "–" else "STREAK"
+    streak_label = f"{'WIN' if streak_type == 'W' else 'LOSS'} STREAK" if streak_type != "–" else "STREAK"
     streak_color = "#00C853" if streak_type == "W" else ("#D50000" if streak_type == "L" else "#555")
-    best_str     = f"+${best['pnl_usd']:.2f}  {best['symbol']}" if best is not None else "—"
-    worst_str    = f"${worst['pnl_usd']:.2f}  {worst['symbol']}" if worst is not None else "—"
+    best_str = f"+${best['pnl_usd']:.2f}  {best['symbol']}" if best is not None else "—"
+    worst_str = f"${worst['pnl_usd']:.2f}  {worst['symbol']}" if worst is not None else "—"
 
-    st.markdown(f"""
+    st.markdown(
+        f"""
 <div class="statstrip">
   <div class="stat">
     <div class="lbl">TRADES</div>
@@ -690,20 +728,22 @@ def render():
   <div class="stat">
     <div class="lbl">BEST TRADE</div>
     <div class="val" style="color:#00C853;font-size:1.05rem">{best_str}</div>
-    <div class="sub">{best['exit_reason'] if best is not None else ''}</div>
+    <div class="sub">{best["exit_reason"] if best is not None else ""}</div>
   </div>
   <div class="stat">
     <div class="lbl">WORST TRADE</div>
     <div class="val" style="color:#D50000;font-size:1.05rem">{worst_str}</div>
-    <div class="sub">{worst['exit_reason'] if worst is not None else ''}</div>
+    <div class="sub">{worst["exit_reason"] if worst is not None else ""}</div>
   </div>
   <div class="stat">
     <div class="lbl">{streak_label}</div>
     <div class="val" style="color:{streak_color}">{streak_n}</div>
-    <div class="sub">{'consecutive' if streak_n > 1 else ''}</div>
+    <div class="sub">{"consecutive" if streak_n > 1 else ""}</div>
   </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
     # ── TABS ──────────────────────────────────────────────────────────────────
     tab1, tab2, tab3, tab4 = st.tabs(["📊  OVERVIEW", "📈  EQUITY", "🕐  TRADES", "📉  ANALYTICS"])
@@ -717,16 +757,18 @@ def render():
         with col_l:
             st.markdown('<div class="bb-header">OPEN POSITIONS</div>', unsafe_allow_html=True)
             if not positions:
-                st.markdown('<span class="neu" style="font-size:0.85rem">— No open positions —</span>', unsafe_allow_html=True)
+                st.markdown(
+                    '<span class="neu" style="font-size:0.85rem">— No open positions —</span>', unsafe_allow_html=True
+                )
             else:
                 rows_html = ""
                 for p in positions:
-                    sym_key   = f"{p['symbol']}:{p['side']}"
-                    bars      = bars_map.get(sym_key, bars_map.get(p["symbol"], "?"))
+                    sym_key = f"{p['symbol']}:{p['side']}"
+                    bars = bars_map.get(sym_key, bars_map.get(p["symbol"], "?"))
                     strat_type = strategies_map.get(sym_key, strategies_map.get(p["symbol"], "vr_directional"))
                     strat_cls, strat_label = _strat_tag(strat_type)
                     pct_class = "pos" if p["pct"] >= 0 else "neg"
-                    side_cls  = "long-tag" if p["side"] == "LONG" else "short-tag"
+                    side_cls = "long-tag" if p["side"] == "LONG" else "short-tag"
                     # SL/TP/trail from state
                     det = pos_details.get(sym_key, pos_details.get(p["symbol"], {}))
                     sl_val = det.get("sl", 0)
@@ -741,40 +783,43 @@ def render():
                         trail_str = "✗"
                     rows_html += f"""
 <tr>
-  <td class="sym">{p['symbol']}</td>
-  <td><span class="{side_cls}">{p['side']}</span></td>
+  <td class="sym">{p["symbol"]}</td>
+  <td><span class="{side_cls}">{p["side"]}</span></td>
   <td><span class="{strat_cls}">{strat_label}</span></td>
-  <td>${p['entry']:,.4f}</td>
-  <td>${p['mark']:,.4f}</td>
-  <td class="{pct_class}">{p['pct']:+.2f}%</td>
-  <td class="{pct_class}">${p['upnl']:+.2f}</td>
+  <td>${p["entry"]:,.4f}</td>
+  <td>${p["mark"]:,.4f}</td>
+  <td class="{pct_class}">{p["pct"]:+.2f}%</td>
+  <td class="{pct_class}">${p["upnl"]:+.2f}</td>
   <td class="neu">{sl_val * 100:.1f}%{sl_ok}</td>
   <td class="neu">{tp_val * 100:.0f}%{tp_ok}</td>
   <td class="neu">{trail_str}</td>
-  <td class="neu">{p['leverage']}x</td>
+  <td class="neu">{p["leverage"]}x</td>
   <td class="neu">{bars}/{max_hold}</td>
-  <td class="neu">${p['notional']:,.0f}</td>
+  <td class="neu">${p["notional"]:,.0f}</td>
 </tr>"""
-                st.markdown(f"""
+                st.markdown(
+                    f"""
 <div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">SYMBOL</th><th>SIDE</th><th>STRAT</th><th>ENTRY</th><th>MARK</th>
 <th>Price%</th><th>PnL USD</th><th>SL</th><th>TP</th><th>TRAIL</th><th>LEV</th><th>BARS</th><th>NOTIONAL</th></tr>
 {rows_html}
-</table></div>""", unsafe_allow_html=True)
+</table></div>""",
+                    unsafe_allow_html=True,
+                )
 
         with col_r:
             st.markdown('<div class="bb-header">STRATEGY BREAKDOWN</div>', unsafe_allow_html=True)
             if not df.empty:
                 strat_rows = ""
                 for strat, grp in df.groupby("strategy_type"):
-                    n_s     = len(grp)
-                    wr_s    = grp["pnl_usd"].gt(0).mean() * 100
-                    tot_s   = grp["pnl_usd"].sum()
-                    _mfe    = grp["mfe_pct"].mean() if "mfe_pct" in grp else None
-                    _mae    = grp["mae_pct"].mean() if "mae_pct" in grp else None
+                    n_s = len(grp)
+                    wr_s = grp["pnl_usd"].gt(0).mean() * 100
+                    tot_s = grp["pnl_usd"].sum()
+                    _mfe = grp["mfe_pct"].mean() if "mfe_pct" in grp else None
+                    _mae = grp["mae_pct"].mean() if "mae_pct" in grp else None
                     avg_mfe_disp = _fmt_pct(_mfe)
                     avg_mae_disp = _fmt_pct(_mae)
-                    avg_b   = grp["bars_held"].mean()
+                    avg_b = grp["bars_held"].mean()
                     tot_cls = "pos" if tot_s >= 0 else "neg"
                     tag_cls, label = _strat_tag(strat)
                     strat_rows += f"""
@@ -787,68 +832,80 @@ def render():
   <td class="neu">{avg_mae_disp}</td>
   <td class="neu">{avg_b:.0f}b</td>
 </tr>"""
-                st.markdown(f"""
+                st.markdown(
+                    f"""
 <div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">STRAT</th><th>N</th><th>WIN%</th>
 <th>PnL USD</th><th>MFE AVG</th><th>MAE AVG</th><th>AVG BARS</th></tr>
 {strat_rows}
-</table></div>""", unsafe_allow_html=True)
+</table></div>""",
+                    unsafe_allow_html=True,
+                )
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
         col_t, col_b = st.columns([3, 2])
 
         with col_t:
-            st.markdown('<div class="bb-header">RECENT TRADES  <span class="neu">(15)</span></div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="bb-header">RECENT TRADES  <span class="neu">(15)</span></div>', unsafe_allow_html=True
+            )
             if df.empty:
                 st.markdown('<span class="neu">No closed trades.</span>', unsafe_allow_html=True)
             else:
-                recent     = df.sort_values("exit_time", ascending=False).head(15)
+                recent = df.sort_values("exit_time", ascending=False).head(15)
                 trade_rows = ""
                 for _, r in recent.iterrows():
-                    pnl      = r["pnl_usd"]
-                    pct_cls  = "pos" if pnl >= 0 else "neg"
+                    pnl = r["pnl_usd"]
+                    pct_cls = "pos" if pnl >= 0 else "neg"
                     side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
                     tag_cls, strat_label = _strat_tag(r["strategy_type"])
-                    rsn_cls, rsn_label   = _reason_tag(r["exit_reason"])
-                    t        = str(r["exit_time"])[:16]
+                    rsn_cls, rsn_label = _reason_tag(r["exit_reason"])
+                    t = str(r["exit_time"])[:16]
                     mfe_disp = _fmt_pct(r.get("mfe_pct"))
                     trade_rows += f"""
 <tr>
   <td class="neu" style="text-align:left">{t}</td>
-  <td class="sym" style="text-align:left">{r['symbol']}</td>
-  <td><span class="{side_cls}">{r['direction']}</span></td>
+  <td class="sym" style="text-align:left">{r["symbol"]}</td>
+  <td><span class="{side_cls}">{r["direction"]}</span></td>
   <td><span class="{tag_cls}">{strat_label}</span></td>
   <td class="{pct_cls}">${pnl:+.2f}</td>
   <td class="neu">{mfe_disp}</td>
-  <td class="neu">{r['bars_held']}</td>
+  <td class="neu">{r["bars_held"]}</td>
   <td><span class="{rsn_cls}">{rsn_label}</span></td>
 </tr>"""
-                st.markdown(f"""
+                st.markdown(
+                    f"""
 <div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">EXIT TIME</th><th style="text-align:left">SYMBOL</th>
 <th>DIR</th><th>STR</th><th>PnL USD</th><th>MFE</th><th>BARS</th>
 <th style="text-align:left">REASON</th></tr>
 {trade_rows}
-</table></div>""", unsafe_allow_html=True)
+</table></div>""",
+                    unsafe_allow_html=True,
+                )
 
         with col_b:
             st.markdown('<div class="bb-header">EXIT REASON DISTRIBUTION</div>', unsafe_allow_html=True)
             if not df.empty:
-                grp = df.groupby("exit_reason").agg(
-                    n=("pnl_usd", "count"),
-                    avg_pnl=("pnl_usd", "mean"),
-                ).sort_values("n", ascending=False)
-                max_n    = grp["n"].max()
+                grp = (
+                    df.groupby("exit_reason")
+                    .agg(
+                        n=("pnl_usd", "count"),
+                        avg_pnl=("pnl_usd", "mean"),
+                    )
+                    .sort_values("n", ascending=False)
+                )
+                max_n = grp["n"].max()
                 bars_html = ""
                 for reason, row in grp.iterrows():
-                    bar     = unicode_bar(row["n"], max_n, 12)
+                    bar = unicode_bar(row["n"], max_n, 12)
                     avg_cls = "pos" if row["avg_pnl"] >= 0 else "neg"
                     bars_html += f"""
 <div class="bar-row">
   <span class="bar-label">{str(reason)[:22]}</span>
   <span class="bar-fill">{bar}</span>
-  <span class="bar-stat"> {int(row['n'])}x <span class="{avg_cls}">avg ${row['avg_pnl']:+.0f}</span></span>
+  <span class="bar-stat"> {int(row["n"])}x <span class="{avg_cls}">avg ${row["avg_pnl"]:+.0f}</span></span>
 </div>"""
                 st.markdown(bars_html, unsafe_allow_html=True)
 
@@ -873,7 +930,7 @@ def render():
 
             # ── Summary strip ─────────────────────────────────────────────────
             start_bal: float | None = None
-            end_bal:   float | None = None
+            end_bal: float | None = None
             if "balance_before" in df.columns:
                 first_bb = df["balance_before"].dropna()
                 if not first_bb.empty:
@@ -882,11 +939,12 @@ def render():
                 last_ba = df["balance_after"].dropna()
                 if not last_ba.empty:
                     end_bal = float(last_ba.iloc[-1])
-            max_dd    = _max_drawdown(df)
-            dd_color  = "#00C853" if max_dd < 10 else ("#FF8C00" if max_dd < 20 else "#D50000")
+            max_dd = _max_drawdown(df)
+            dd_color = "#00C853" if max_dd < 10 else ("#FF8C00" if max_dd < 20 else "#D50000")
             start_str = f"${start_bal:,.2f}" if start_bal is not None else "—"
-            end_str   = f"${end_bal:,.2f}"   if end_bal   is not None else "—"
-            st.markdown(f"""
+            end_str = f"${end_bal:,.2f}" if end_bal is not None else "—"
+            st.markdown(
+                f"""
 <div class="mini-grid">
   <div class="mini-stat">
     <div class="lbl">START BALANCE</div>
@@ -898,14 +956,16 @@ def render():
   </div>
   <div class="mini-stat">
     <div class="lbl">TOTAL REALIZED</div>
-    <div class="val" style="color:{'#00C853' if total_pnl >= 0 else '#D50000'}">${total_pnl:+,.2f}</div>
+    <div class="val" style="color:{"#00C853" if total_pnl >= 0 else "#D50000"}">${total_pnl:+,.2f}</div>
   </div>
   <div class="mini-stat">
     <div class="lbl">MAX DRAWDOWN</div>
     <div class="val" style="color:{dd_color}">{max_dd:.1f}%</div>
   </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+                unsafe_allow_html=True,
+            )
 
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 3 — TRADES
@@ -920,41 +980,46 @@ def render():
                 st.plotly_chart(fig_scatter, use_container_width=True)
 
             # ── Full trade table (all, newest first) ─────────────────────────
-            st.markdown(f'<div class="bb-header">ALL TRADES  <span class="neu">({n_trades})</span></div>',
-                        unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="bb-header">ALL TRADES  <span class="neu">({n_trades})</span></div>',
+                unsafe_allow_html=True,
+            )
             all_sorted = df.sort_values("exit_time", ascending=False)
             trade_rows = ""
             for _, r in all_sorted.iterrows():
-                pnl      = r["pnl_usd"]
-                pct_cls  = "pos" if pnl >= 0 else "neg"
+                pnl = r["pnl_usd"]
+                pct_cls = "pos" if pnl >= 0 else "neg"
                 side_cls = "long-tag" if r["direction"] == "LONG" else "short-tag"
                 tag_cls, strat_label = _strat_tag(r["strategy_type"])
-                rsn_cls, rsn_label   = _reason_tag(r["exit_reason"])
-                t        = str(r["exit_time"])[:16]
+                rsn_cls, rsn_label = _reason_tag(r["exit_reason"])
+                t = str(r["exit_time"])[:16]
                 mfe_disp = _fmt_pct(r.get("mfe_pct"))
                 mae_disp = _fmt_pct(r.get("mae_pct"))
                 trade_rows += f"""
 <tr>
   <td class="neu">{t}</td>
-  <td class="sym">{r['symbol']}</td>
-  <td><span class="{side_cls}">{r['direction']}</span></td>
+  <td class="sym">{r["symbol"]}</td>
+  <td><span class="{side_cls}">{r["direction"]}</span></td>
   <td><span class="{tag_cls}">{strat_label}</span></td>
-  <td>${r['entry_price']:,.4f}</td>
-  <td>${r['exit_price']:,.4f}</td>
-  <td class="{pct_cls}">{r['pnl_pct']:+.2f}%</td>
+  <td>${r["entry_price"]:,.4f}</td>
+  <td>${r["exit_price"]:,.4f}</td>
+  <td class="{pct_cls}">{r["pnl_pct"]:+.2f}%</td>
   <td class="{pct_cls}">${pnl:+.2f}</td>
   <td class="neu">{mfe_disp}</td>
   <td class="neu">{mae_disp}</td>
-  <td class="neu">{r['bars_held']}</td>
+  <td class="neu">{r["bars_held"]}</td>
   <td><span class="{rsn_cls}">{rsn_label}</span></td>
 </tr>"""
-            st.markdown(f"""
+            st.markdown(
+                f"""
 <div class="tbl-wrap"><table class="bb-table">
 <tr><th>EXIT TIME</th><th>SYMBOL</th><th>DIR</th><th>STR</th>
 <th>ENTRY</th><th>EXIT</th><th>PnL%</th><th>PnL USD</th>
 <th>MFE</th><th>MAE</th><th>BARS</th><th>REASON</th></tr>
 {trade_rows}
-</table></div>""", unsafe_allow_html=True)
+</table></div>""",
+                unsafe_allow_html=True,
+            )
 
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 4 — ANALYTICS
@@ -963,19 +1028,20 @@ def render():
         if df.empty:
             st.markdown('<span class="neu">No trade data yet.</span>', unsafe_allow_html=True)
         else:
-            pf_val   = _pf(df)
-            sh_val   = _sharpe(df)
-            dd_val   = _max_drawdown(df)
-            avg_mfe  = df["mfe_pct"].mean() if "mfe_pct" in df.columns else None
-            avg_mae  = df["mae_pct"].mean() if "mae_pct" in df.columns else None
+            pf_val = _pf(df)
+            sh_val = _sharpe(df)
+            dd_val = _max_drawdown(df)
+            avg_mfe = df["mfe_pct"].mean() if "mfe_pct" in df.columns else None
+            avg_mae = df["mae_pct"].mean() if "mae_pct" in df.columns else None
             avg_hold = df["bars_held"].mean()
 
             pf_color = "#00C853" if pf_val >= 1.5 else ("#FF8C00" if pf_val >= 1.0 else "#D50000")
             sh_color = "#00C853" if sh_val >= 1.0 else ("#FF8C00" if sh_val >= 0 else "#D50000")
             dd_color = "#00C853" if dd_val < 10 else ("#FF8C00" if dd_val < 20 else "#D50000")
-            pf_str   = f"{pf_val:.2f}" if pf_val != float("inf") else "∞"
+            pf_str = f"{pf_val:.2f}" if pf_val != float("inf") else "∞"
 
-            st.markdown(f"""
+            st.markdown(
+                f"""
 <div class="mini-grid">
   <div class="mini-stat">
     <div class="lbl">PROFIT FACTOR</div>
@@ -1002,7 +1068,9 @@ def render():
     <div class="val">{avg_hold:.0f} bars</div>
   </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+                unsafe_allow_html=True,
+            )
 
             # ── Rolling WR ─────────────────────────────────────────────────
             col_wr, col_mfe = st.columns(2)
@@ -1020,37 +1088,53 @@ def render():
 
             # ── Exit reason breakdown (Plotly bar) ─────────────────────────
             st.markdown('<div class="bb-header">EXIT REASON  —  PnL BREAKDOWN</div>', unsafe_allow_html=True)
-            grp_exit = df.groupby("exit_reason").agg(
-                n=("pnl_usd", "count"),
-                avg_pnl=("pnl_usd", "mean"),
-                total_pnl=("pnl_usd", "sum"),
-                wr=("pnl_usd", lambda x: (x > 0).mean() * 100),
-            ).sort_values("total_pnl", ascending=False).reset_index()
+            grp_exit = (
+                df.groupby("exit_reason")
+                .agg(
+                    n=("pnl_usd", "count"),
+                    avg_pnl=("pnl_usd", "mean"),
+                    total_pnl=("pnl_usd", "sum"),
+                    wr=("pnl_usd", lambda x: (x > 0).mean() * 100),
+                )
+                .sort_values("total_pnl", ascending=False)
+                .reset_index()
+            )
 
             colors_exit = ["#00C853" if v >= 0 else "#D50000" for v in grp_exit["total_pnl"]]
             fig_exit = go.Figure()
-            fig_exit.add_trace(go.Bar(
-                x=grp_exit["exit_reason"], y=grp_exit["total_pnl"],
-                marker_color=colors_exit,
-                text=[f"{int(n)}T / WR {wr:.0f}%" for n, wr in zip(grp_exit["n"], grp_exit["wr"])],
-                textposition="outside",
-                textfont=dict(size=9, color="#888"),
-                hovertemplate="<b>%{x}</b><br>Total: $%{y:+.2f}<extra></extra>",
-            ))
+            fig_exit.add_trace(
+                go.Bar(
+                    x=grp_exit["exit_reason"],
+                    y=grp_exit["total_pnl"],
+                    marker_color=colors_exit,
+                    text=[f"{int(n)}T / WR {wr:.0f}%" for n, wr in zip(grp_exit["n"], grp_exit["wr"])],
+                    textposition="outside",
+                    textfont=dict(size=9, color="#888"),
+                    hovertemplate="<b>%{x}</b><br>Total: $%{y:+.2f}<extra></extra>",
+                )
+            )
             fig_exit.add_hline(y=0, line_color="#333", line_width=1)
-            fig_exit.update_layout(**PLOT_LAYOUT,
-                                   title=dict(text="TOTAL PnL BY EXIT REASON", font=dict(color="#FF8C00", size=11), x=0))
+            fig_exit.update_layout(
+                **PLOT_LAYOUT, title=dict(text="TOTAL PnL BY EXIT REASON", font=dict(color="#FF8C00", size=11), x=0)
+            )
             st.plotly_chart(fig_exit, use_container_width=True)
 
             # ── Strategy comparison ────────────────────────────────────────
             if df["strategy_type"].nunique() > 1:
                 st.markdown('<div class="bb-header">STRATEGY COMPARISON</div>', unsafe_allow_html=True)
-                grp_strat = df.groupby("strategy_type").agg(
-                    n=("pnl_usd", "count"),
-                    wr=("pnl_usd", lambda x: (x > 0).mean() * 100),
-                    pf=("pnl_usd", lambda x: x[x > 0].sum() / abs(x[x < 0].sum()) if (x < 0).any() else float("inf")),
-                    total=("pnl_usd", "sum"),
-                ).reset_index()
+                grp_strat = (
+                    df.groupby("strategy_type")
+                    .agg(
+                        n=("pnl_usd", "count"),
+                        wr=("pnl_usd", lambda x: (x > 0).mean() * 100),
+                        pf=(
+                            "pnl_usd",
+                            lambda x: x[x > 0].sum() / abs(x[x < 0].sum()) if (x < 0).any() else float("inf"),
+                        ),
+                        total=("pnl_usd", "sum"),
+                    )
+                    .reset_index()
+                )
 
                 strat_comp = ""
                 for _, r in grp_strat.iterrows():
@@ -1062,22 +1146,27 @@ def render():
                     strat_comp += f"""
 <tr>
   <td><span class="{tag_cls}">{label}</span></td>
-  <td>{int(r['n'])}</td>
-  <td>{r['wr']:.1f}%</td>
+  <td>{int(r["n"])}</td>
+  <td>{r["wr"]:.1f}%</td>
   <td>{pf_str2}</td>
-  <td class="{tot_cls}">${r['total']:+,.2f}</td>
+  <td class="{tot_cls}">${r["total"]:+,.2f}</td>
 </tr>"""
-                st.markdown(f"""
+                st.markdown(
+                    f"""
 <div class="tbl-wrap"><table class="bb-table">
 <tr><th style="text-align:left">STRATEGY</th><th>TRADES</th><th>WIN RATE</th>
 <th>PROFIT FACTOR</th><th>TOTAL PnL</th></tr>
 {strat_comp}
-</table></div>""", unsafe_allow_html=True)
+</table></div>""",
+                    unsafe_allow_html=True,
+                )
 
             # ── STRD monthly WR monitor (cliff sensitivity warning) ────────
             strd_df = df[df["strategy_type"].str.contains("straddle", na=False, case=False)]
             if len(strd_df) >= 5:
-                st.markdown('<div class="bb-header">STRD MONTHLY WIN RATE  —  CLIFF MONITOR</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="bb-header">STRD MONTHLY WIN RATE  —  CLIFF MONITOR</div>', unsafe_allow_html=True
+                )
                 st.markdown(
                     '<span class="neu" style="font-size:11px">'
                     "⚠️ r77: s_trail_activate=0.015 is a sharp cliff — ±0.003 → PF drops 60-75%. "
@@ -1099,14 +1188,15 @@ def render():
                     .sort_values("month")
                 )
 
-                STRD_WR_OOS = 65.0   # r77 OOS WR baseline
+                STRD_WR_OOS = 65.0  # r77 OOS WR baseline
                 STRD_WR_WARN = 55.0  # alert threshold
 
                 rows_html = ""
                 any_warn = False
                 for _, row in monthly.iterrows():
                     wr_color = (
-                        "#00C853" if row["wr"] >= STRD_WR_OOS
+                        "#00C853"
+                        if row["wr"] >= STRD_WR_OOS
                         else ("#FF8C00" if row["wr"] >= STRD_WR_WARN else "#D50000")
                     )
                     warn = " ⚠️" if row["wr"] < STRD_WR_WARN else ""
@@ -1114,10 +1204,10 @@ def render():
                         any_warn = True
                     tot_cls = "pos" if row["total"] >= 0 else "neg"
                     rows_html += (
-                        f'<tr><td>{row["month"]}</td>'
-                        f'<td>{int(row["n"])}</td>'
+                        f"<tr><td>{row['month']}</td>"
+                        f"<td>{int(row['n'])}</td>"
                         f'<td style="color:{wr_color};font-weight:bold">'
-                        f'{row["wr"]:.1f}%{warn}</td>'
+                        f"{row['wr']:.1f}%{warn}</td>"
                         f'<td class="{tot_cls}">${row["total"]:+,.2f}</td></tr>'
                     )
 

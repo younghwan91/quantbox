@@ -66,7 +66,8 @@ from quantbox.notifications.bot import (
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
-from quantbox.core.strategy_names import normalize_strategy_type
+from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, normalize_strategy_type
+from quantbox.core.types import to_api_symbol
 from quantbox.core.commands import CommandsMixin
 from quantbox.execution.algo_api import AlgoApiClient
 from quantbox.core.loop_mixin import LoopMixin
@@ -358,7 +359,8 @@ class RubberBandScalper(
             entry_price = pos.get("entry_price", 0)
             notional = pos.get("notional", 0)
             signal = pos.get("signal")
-            api_sym = pos.get("symbol", pos_key.split(":")[0] if ":" in pos_key else pos_key)
+            api_sym = to_api_symbol(pos_key, pos)
+            raw_symbol = pos.get("symbol", "")
 
             if not (0 < entry_price < 1e7):
                 violations.append(f"[{pos_key}] entry_price={entry_price!r} out of range")
@@ -368,6 +370,10 @@ class RubberBandScalper(
                 violations.append(f"[{pos_key}] invalid signal={signal!r}")
             if not re.match(r"^[A-Z]{2,12}USDT$", api_sym):
                 violations.append(f"[{pos_key}] malformed symbol={api_sym!r}")
+            if isinstance(raw_symbol, str) and ":" in raw_symbol:
+                violations.append(
+                    f"[{pos_key}] symbol contains colon (compound key leaked into pos dict): {raw_symbol!r}"
+                )
 
         if violations:
             self.discord.send(
@@ -652,7 +658,7 @@ class RubberBandScalper(
         if self._drawdown_halt:
             # Close any remaining positions
             for pos_key in list(self.strategy.active_positions):
-                api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
+                api_sym = to_api_symbol(pos_key)
                 close = self.download_klines(api_sym, 2)
                 price = float(close[-1]) if close is not None else 0.0
                 self._close_position(pos_key, "drawdown_halt", price)
@@ -712,11 +718,21 @@ class RubberBandScalper(
             self._reconcile_positions()
 
         # v12.5.1: Log position status AFTER sync (SL/TP verified)
+        # Batch fetch all mark prices (1 API call instead of N)
+        try:
+            _all_marks = {m["symbol"]: float(m["markPrice"]) for m in self.client.futures_mark_price()}
+        except Exception:
+            _all_marks = {}
+
         for pos_key, pos in self.strategy.active_positions.items():
-            api_sym = pos.get("symbol", pos_key.split(":")[0])
+            api_sym = to_api_symbol(pos_key, pos)
             try:
-                mark = self.client.futures_mark_price(symbol=api_sym)
-                cur_px = float(mark["markPrice"])
+                mark_price = _all_marks.get(api_sym, 0.0)
+                if mark_price <= 0:
+                    # Fallback to per-symbol call if batch missed it
+                    mark = self.client.futures_mark_price(symbol=api_sym)
+                    mark_price = float(mark["markPrice"])
+                cur_px = mark_price
             except Exception:
                 cur_px = pos.get("entry_price", 0)
             entry_px = pos.get("entry_price", 0)
@@ -733,7 +749,7 @@ class RubberBandScalper(
             direction = "L" if pos.get("signal") == 1 else "S"
             sl_id = pos.get("server_sl_order_id")
             tp_id = pos.get("server_tp_order_id")
-            strat = pos.get("strategy_type", "vr_directional")
+            strat = pos.get("strategy_type", VR_DIRECTIONAL)
             trail_info = ""
             if pos.get("trail_active"):
                 peak = pos.get("peak_gain", 0) * 100
@@ -750,7 +766,7 @@ class RubberBandScalper(
         """Process existing positions: update, exit, ratchet SL."""
         for pos_key in list(self.strategy.active_positions):
             # Extract Binance symbol from compound key (e.g., BTCUSDT:LONG → BTCUSDT)
-            api_sym = pos_key.split(":")[0] if ":" in pos_key else pos_key
+            api_sym = to_api_symbol(pos_key)
 
             # v12.3.2: Download full OHLC for active positions to compute fresh ATR.
             result_full = self.download_klines(api_sym, 200, full=True)
@@ -864,8 +880,8 @@ class RubberBandScalper(
                         and not self.paper_mode
                         and getattr(self.vs_config, "trail_server_native", False)
                     ):
-                        api_sym = pos_key.split(":")[0]
-                        strategy_type = pos.get("strategy_type", "vr_directional")
+                        api_sym = to_api_symbol(pos_key)
+                        strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
                         signal = pos.get("signal", 1)
                         entry_price = pos.get("entry_price", current_price)
                         pos_side = pos.get("position_side")
@@ -1060,7 +1076,7 @@ class RubberBandScalper(
                 signal == 1
                 and self.vs_config
                 and self.vs_config.ma_cluster_btc_gate_enabled
-                and getattr(self.strategy, "_last_signal_source", {}).get(sym) == "ma_cluster"
+                and getattr(self.strategy, "_last_signal_source", {}).get(sym) == MA_CLUSTER
                 and btc_close_4h is not None
                 and len(btc_close_4h) >= self.vs_config.ma_cluster_btc_ma_period_4h
             ):
@@ -1299,7 +1315,7 @@ class RubberBandScalper(
                     # CRITICAL (Rule #1): NO leverage parameter — avoids futures_change_leverage in close path
                     pos = self.strategy._positions.get(pos_key)
                     if pos is not None:
-                        api_sym = pos_key.split(":")[0]
+                        api_sym = to_api_symbol(pos_key)
                         close_side = "SELL"  # LONG → close with SELL
                         qty = self._round_qty(pos["notional"] / pos["entry_price"], api_sym)
                         fallback_ok = False
@@ -1460,8 +1476,7 @@ class RubberBandScalper(
                 pos = self.strategy._positions.get(pos_key)
                 if not pos:
                     continue
-                raw_sym = pos.get("symbol", pos_key)
-                api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+                api_sym = to_api_symbol(pos_key, pos)
                 pos_side = pos.get("position_side")
                 lookup_key = f"{api_sym}:{pos_side}" if pos_side in ("LONG", "SHORT") else api_sym
 
@@ -1517,8 +1532,7 @@ class RubberBandScalper(
                 pos = self.strategy._positions.get(pos_key)
                 if not pos:
                     continue
-                raw_sym = pos.get("symbol", pos_key)
-                api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+                api_sym = to_api_symbol(pos_key, pos)
                 pos_side = pos.get("position_side")
                 if pos_side in ("LONG", "SHORT"):
                     tracked_keys.add(f"{api_sym}:{pos_side}")
@@ -1546,7 +1560,7 @@ class RubberBandScalper(
 
                         self._recon_journal.record(
                             event_type=ReconEventType.REVERSE_GHOST,
-                            symbol=ex_key.split(":")[0],
+                            symbol=to_api_symbol(ex_key),
                             action="orphan_alert_only",
                             result="alert_sent",
                             details={"qty": abs(ex_amt), "position_key": ex_key},
@@ -1754,7 +1768,7 @@ class RubberBandScalper(
                 tp=pos.get("tp"),
                 tf=pos.get("tf"),
                 max_hold=pos.get("max_hold"),
-                strategy_type=normalize_strategy_type(pos.get("strategy_type", "vr_directional")),
+                strategy_type=normalize_strategy_type(pos.get("strategy_type", VR_DIRECTIONAL)),
                 is_straddle=pos.get("is_straddle", False),
                 server_trail_order_id=pos.get("server_trail_order_id"),
             )
@@ -1789,7 +1803,7 @@ class RubberBandScalper(
                 # Without this, crash recovery defaults to VR directional params
                 # for ALL positions — breaking MA cluster SL/TP/max_hold/exit routing.
                 self.strategy._positions[sym]["strategy_type"] = normalize_strategy_type(
-                    pos.get("strategy_type", "vr_directional")
+                    pos.get("strategy_type", VR_DIRECTIONAL)
                 )
                 self.strategy._positions[sym]["sl"] = pos.get("sl", self.strategy._positions[sym].get("sl"))
                 self.strategy._positions[sym]["tp"] = pos.get("tp", self.strategy._positions[sym].get("tp"))
@@ -1810,7 +1824,7 @@ class RubberBandScalper(
         # Step 3.2: 구 상태 포맷 스트래들 페어 재연결 (straddle_pair_id 없는 경우)
         for sym, pos in self.strategy._positions.items():
             if pos.get("is_straddle") and not pos.get("straddle_pair_id"):
-                api_sym = pos.get("symbol", sym.split(":")[0])
+                api_sym = to_api_symbol(sym, pos)
                 my_side = sym.split(":")[-1] if ":" in sym else None
                 opposite_side = "SHORT" if my_side == "LONG" else "LONG" if my_side == "SHORT" else None
                 if opposite_side:

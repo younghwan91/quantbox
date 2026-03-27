@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 
 from quantbox.core.bot_utils import GIT_COMMIT
+from quantbox.core.strategy_names import VR_DIRECTIONAL
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class TradeJournal:
         direction = "LONG" if trade.get("signal", 1) == 1 else "SHORT"
         row = (
             trade.get("symbol"),
-            trade.get("strategy_type", "vr_directional"),
+            trade.get("strategy_type", VR_DIRECTIONAL),
             direction,
             trade.get("entry_price"),
             trade.get("exit_price"),

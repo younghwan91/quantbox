@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 
 from pydantic import Field, model_validator
+from quantbox.core.strategy_names import VR_DIRECTIONAL
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -334,7 +335,7 @@ class VolStraddleConfig(BaseSettings):
     target_retrace: float = 1.5  # TP multiplier (shared code)
     partial_exit_enabled: bool = False  # VR uses trail, not partial exit
     breakeven_after_partial: bool = False
-    entry_mode: str = "vr_directional"
+    entry_mode: str = VR_DIRECTIONAL
     min_confidence: int = 0
     mtf_confirmation_enabled: bool = False  # VR has its own multi-TF via on_bar
     atr_stop_enabled: bool = False  # VR uses fixed SL

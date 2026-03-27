@@ -25,6 +25,7 @@ from typing import Any
 
 import numpy as np
 
+from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
     check_ma_cluster,
@@ -196,7 +197,7 @@ class VolStraddleStrategy:
                     "4h",
                 )
                 if sig_4h != 0:
-                    self._last_signal_source[symbol] = "vr_directional"
+                    self._last_signal_source[symbol] = VR_DIRECTIONAL
                     return sig_4h
 
         # 1h: resampled from 15m (completed bars only)
@@ -208,7 +209,7 @@ class VolStraddleStrategy:
                 if len(c1h) >= cfg.warmup_1h + 1:
                     sig_1h = self._check_tf_signal(c1h, h1h, l1h, "1h")
                     if sig_1h != 0:
-                        self._last_signal_source[symbol] = "vr_directional"
+                        self._last_signal_source[symbol] = VR_DIRECTIONAL
                         return sig_1h
 
         # 30m: resampled from 15m (completed bars only) — r57 A0
@@ -218,14 +219,14 @@ class VolStraddleStrategy:
                 if len(c30) >= cfg.warmup_30m + 1:
                     sig_30m = self._check_tf_signal(c30, h30, l30, "30m")
                     if sig_30m != 0:
-                        self._last_signal_source[symbol] = "vr_directional"
+                        self._last_signal_source[symbol] = VR_DIRECTIONAL
                         return sig_30m
 
         # 15m: direct from downloaded data
         if cfg.enable_15m:
             sig_15m = self._check_tf_signal(c15, h15, l15, "15m")
             if sig_15m != 0:
-                self._last_signal_source[symbol] = "vr_directional"
+                self._last_signal_source[symbol] = VR_DIRECTIONAL
                 return sig_15m
 
         # ── MA Cluster Squeeze (R44d V17, 4h-only) ──
@@ -241,7 +242,7 @@ class VolStraddleStrategy:
                     symbol,
                 )
                 if sig_ma != 0:
-                    self._last_signal_source[symbol] = "ma_cluster"
+                    self._last_signal_source[symbol] = MA_CLUSTER
                     return sig_ma
 
         self._last_signal_source[symbol] = "none"
@@ -344,7 +345,7 @@ class VolStraddleStrategy:
                         "vr": vr_val,
                         "momentum": 0.0,
                         "straddle": True,
-                        "strategy_type": "vr_straddle",
+                        "strategy_type": VR_STRADDLE,
                         "d_overlap": d_overlap,
                         "conviction_score": score,
                         "conviction_cond": cond,
@@ -590,7 +591,7 @@ class VolStraddleStrategy:
                 "max_hold": cfg.ma_cluster_max_hold_4h * _TF_TO_15M["4h"],
                 "vr": 0.0,  # Not a VR signal
                 "momentum": mom_val,
-                "strategy_type": "ma_cluster",
+                "strategy_type": MA_CLUSTER,
                 "ma_cluster_spread": spread,
                 "ma_cluster_duration": dur,
                 "leverage_override": cfg.ma_cluster_leverage,
@@ -839,12 +840,12 @@ class VolStraddleStrategy:
 
         # ── Select trail params based on position type ──
         is_straddle = pos.get("is_straddle", False)
-        strategy_type = pos.get("strategy_type", "vr_directional")
+        strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
         if is_straddle:
             # r53 Option A: per-leg trailing for S_d8 straddle
             trail_activate = self.config.s_trail_activate
             trail_distance = self.config.s_trail_distance
-        elif strategy_type == "ma_cluster":
+        elif strategy_type == MA_CLUSTER:
             trail_activate = self.config.ma_cluster_trail_activate
             trail_distance = self.config.ma_cluster_trail_distance
         else:
@@ -1038,7 +1039,7 @@ class VolStraddleStrategy:
             "max_hold": max_hold,
             "is_straddle": kwargs.get("is_straddle", False),
             "straddle_pair_id": kwargs.get("straddle_pair_id", None),
-            "strategy_type": kwargs.get("strategy_type", meta.get("strategy_type", "vr_directional")),
+            "strategy_type": kwargs.get("strategy_type", meta.get("strategy_type", VR_DIRECTIONAL)),
             # Balance at open time (for trade record accuracy)
             "balance_before": kwargs.get("balance_before"),
             # Entry timestamp (for trade journal)
@@ -1060,9 +1061,9 @@ class VolStraddleStrategy:
             "position_side": position_side,
         }
 
-        strategy_label = kwargs.get("strategy_type", meta.get("strategy_type", "vr_directional"))
+        strategy_label = kwargs.get("strategy_type", meta.get("strategy_type", VR_DIRECTIONAL))
         extra = ""
-        if strategy_label == "ma_cluster":
+        if strategy_label == MA_CLUSTER:
             spread = meta.get("ma_cluster_spread", 0)
             dur = meta.get("ma_cluster_duration", 0)
             extra = f" MA_spread={spread:.2f}% dur={dur}"

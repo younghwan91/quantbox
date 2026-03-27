@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.types import to_api_symbol
 from quantbox.core.terminal_ui import format_entry, format_exit
 from quantbox.utils.diagnostics import _diag_logger
 
@@ -115,7 +117,7 @@ class PositionMixin:
         tf_label = sig_meta.get("tf", "15m")
         max_hold = sig_meta.get("max_hold", vs.get_max_hold(tf_label))
         is_straddle = sig_meta.get("straddle", False)
-        strategy_type = sig_meta.get("strategy_type", "vr_directional")
+        strategy_type = sig_meta.get("strategy_type", VR_DIRECTIONAL)
 
         # ── R44d V17: MA Cluster uses different leverage ──
         # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
@@ -535,7 +537,7 @@ class PositionMixin:
                         "name": "Exit",
                         "value": (
                             "SL/TP"
-                            if (is_straddle or strategy_type == "ma_cluster")
+                            if (is_straddle or strategy_type == MA_CLUSTER)
                             else f"Trail({vs.d_trail_activate * 100:.0f}%/{vs.d_trail_distance * 100:.1f}%)"
                         ),
                         "inline": True,
@@ -611,7 +613,7 @@ class PositionMixin:
             return False
 
         # Extract Binance symbol from compound key
-        api_symbol = pos.get("symbol", symbol.split(":")[0])
+        api_symbol = to_api_symbol(symbol, pos)
 
         # v12.5 Race guard: If server already handled the partial close
         # intra-bar (_handle_server_partial_tp_fill sets this flag),
@@ -751,7 +753,7 @@ class PositionMixin:
                     "bars_held": closed_pos["bars_held"],
                     "reason": "server_fill_race",
                     "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", "vr_directional"),
+                    "strategy_type": closed_pos.get("strategy_type", VR_DIRECTIONAL),
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
@@ -848,7 +850,7 @@ class PositionMixin:
             "bars_held": pos["bars_held"],
             "reason": "partial_close",
             "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", "vr_directional"),
+            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
@@ -924,7 +926,7 @@ class PositionMixin:
             return False
 
         # Extract Binance symbol from compound key
-        api_symbol = pos.get("symbol", symbol.split(":")[0])
+        api_symbol = to_api_symbol(symbol, pos)
 
         quantity = pos["notional"] / pos["entry_price"]
         quantity = self._round_qty(quantity, api_symbol)
@@ -1018,7 +1020,7 @@ class PositionMixin:
                     "bars_held": closed_pos["bars_held"],
                     "reason": f"{reason}_no_position",
                     "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", "vr_directional"),
+                    "strategy_type": closed_pos.get("strategy_type", VR_DIRECTIONAL),
                     "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
                     "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
                     "entry_time": closed_pos.get("opened_at"),
@@ -1069,8 +1071,8 @@ class PositionMixin:
                 _reason_kr = reason.upper().replace("_", " ")
                 n_remaining = self.strategy.n_active
 
-                _strat = closed_pos.get("strategy_type", "vr_directional")
-                _strat_label = {"vr_directional": "VR-D", "vr_straddle": "VR-S", "ma_cluster": "MA"}.get(_strat, _strat)
+                _strat = closed_pos.get("strategy_type", VR_DIRECTIONAL)
+                _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA"}.get(_strat, _strat)
                 self.discord.send(
                     embed={
                         "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr} (서버체결)",
@@ -1161,7 +1163,7 @@ class PositionMixin:
                     )
             # Re-place trail if it was cancelled before the failed close
             if trail_oid and self.vs_config.trail_server_native and not self.paper_mode:
-                strategy_type = pos.get("strategy_type", "vr_directional")
+                strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
                 cr, ap, cs = self._get_trail_params(strategy_type, pos["signal"], pos["entry_price"])
                 new_trail_oid = self._place_trail_regular(
                     symbol=api_symbol,
@@ -1242,7 +1244,7 @@ class PositionMixin:
             "bars_held": pos["bars_held"],
             "reason": reason,
             "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", "vr_directional"),
+            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
             "mfe_pct": pos.get("best_pnl", 0) * 100,
             "mae_pct": pos.get("worst_pnl", 0) * 100,
             "entry_time": pos.get("opened_at"),
@@ -1294,8 +1296,8 @@ class PositionMixin:
             _pos_lines.append(f"{_sym} {_pd} ${_p['entry_price']:.4f}")
         _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
 
-        _strat = pos.get("strategy_type", "vr_directional")
-        _strat_label = {"vr_directional": "VR-D", "vr_straddle": "VR-S", "ma_cluster": "MA"}.get(_strat, _strat)
+        _strat = pos.get("strategy_type", VR_DIRECTIONAL)
+        _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA"}.get(_strat, _strat)
         self.discord.send(
             embed={
                 "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr}",
