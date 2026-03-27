@@ -18,10 +18,7 @@ from __future__ import annotations
 
 from typing import Literal, NewType
 
-try:
-    from typing import TypedDict
-except ImportError:  # Python < 3.8 fallback (not expected)
-    from typing_extensions import TypedDict  # type: ignore[assignment]
+from typing import TypedDict
 
 # ── Primitive domain types ────────────────────────────────────────────────────
 
@@ -41,7 +38,7 @@ PositionKey = NewType("PositionKey", str)
 One-way mode: ``"SUIUSDT"`` (same as ApiSymbol).
 Hedge mode:   ``"SUIUSDT:LONG"`` / ``"SUIUSDT:SHORT"``.
 
-Use ``pos_key.split(':')[0]`` to obtain the ``ApiSymbol`` for API calls.
+Use ``to_api_symbol(pos_key)`` to obtain the ``ApiSymbol`` for API calls.
 """
 
 Side = Literal["BUY", "SELL"]
@@ -65,6 +62,33 @@ StraddlePairId = NewType("StraddlePairId", str)
 Both legs of the same straddle share the same ``StraddlePairId``.
 ``None`` for directional (non-straddle) positions.
 """
+
+
+# ── Utility functions ─────────────────────────────────────────────────────────
+
+
+def to_api_symbol(key: str, pos: dict | None = None) -> str:
+    """Extract Binance API symbol from a position key or position dict.
+
+    Handles both one-way (``"BTCUSDT"``) and hedge-mode (``"BTCUSDT:LONG"``) keys.
+    If *pos* is provided and contains a ``"symbol"`` field, uses that first.
+
+    Incident #4 (2026-03-08): compound key sent to API → ``-1022`` error.
+    """
+    if pos and "symbol" in pos:
+        sym: str = str(pos["symbol"])
+        return sym.split(":")[0] if ":" in sym else sym
+    return key.split(":")[0] if ":" in key else key
+
+
+def round_to_tick(price: float, tick_size: float, price_precision: int) -> float:
+    """Round a price to the exchange tick size.
+
+    Binance rejects orders with prices that are not a multiple of tick_size.
+    Uses round-half-even to snap to the nearest tick, then rounds to the
+    symbol's price precision to avoid floating-point trailing digits.
+    """
+    return round(round(price / tick_size) * tick_size, price_precision)
 
 
 # ── TypedDict: symbol metadata (from exchange_info + leverage brackets) ───────

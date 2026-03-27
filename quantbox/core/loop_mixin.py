@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from quantbox.core.protocol import ScalperProtocol
 
 from quantbox.core.bot_utils import GIT_COMMIT
+from quantbox.core.strategy_names import VR_DIRECTIONAL
 from quantbox.core.sd_notify import sd_notify as _sd_notify
 from quantbox.core.settings import get_settings
 from quantbox.core.terminal_ui import (
@@ -70,7 +71,7 @@ class LoopMixin:
 
         # Active position MFE/MAE + trail (strategy_type + bars already shown in [POSITIONS])
         for sym, pos in positions.items():
-            strat = pos.get("strategy_type", "vr_directional")
+            strat = pos.get("strategy_type", VR_DIRECTIONAL)
             trail_info = ""
             if pos.get("trail_active"):
                 peak = pos.get("peak_gain", 0) * 100

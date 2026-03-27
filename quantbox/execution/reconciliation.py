@@ -17,6 +17,8 @@ import os
 import time
 from datetime import datetime, timezone
 
+from quantbox.core.strategy_names import VR_DIRECTIONAL
+from quantbox.core.types import to_api_symbol
 from quantbox.execution.recon_journal import ReconEventType
 
 logger = logging.getLogger("Scalper")
@@ -26,6 +28,28 @@ class ReconciliationMixin:
     """Mixin: Exchange reconciliation (sync server orders, detect ghosts)."""
 
     _cycle_balance: float | None
+
+    def _record_recon_event(
+        self: "ScalperProtocol",
+        event_type: "ReconEventType",
+        symbol: str,
+        action: str = "",
+        result: str = "",
+        details: "dict | None" = None,
+    ) -> None:
+        """Write to recon journal with silent fallback."""
+        try:
+            _rj = getattr(self, "_recon_journal", None)
+            if _rj is not None:
+                _rj.record(
+                    event_type=event_type,
+                    symbol=symbol,
+                    action=action,
+                    result=result,
+                    details=details,
+                )
+        except Exception:
+            pass
 
     def _sync_server_orders(self: "ScalperProtocol") -> None:
         """Check if any server-side TP/SL orders filled between cycles.
@@ -46,8 +70,7 @@ class ReconciliationMixin:
             # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT).
             # pos['symbol'] may itself be a compound key if loaded from a corrupted
             # state file — always strip the suffix defensively.
-            raw_sym = pos.get("symbol", sym)
-            api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+            api_sym = to_api_symbol(sym, pos)
 
             # ── Step 2.1: Re-attempt counterpart SL cancel if flagged from previous cycle ──
             if pos.get("counterpart_sl_cancel_failed") and pos.get("is_straddle"):
@@ -56,7 +79,7 @@ class ReconciliationMixin:
                     counterpart = self.strategy._positions.get(counterpart_key)
                     if counterpart:
                         retry_sl_oid = counterpart.get("server_sl_order_id")
-                        retry_api_sym = counterpart_key.split(":")[0]
+                        retry_api_sym = to_api_symbol(counterpart_key)
                         if retry_sl_oid:
                             cfg_vs = getattr(self, "vs_config", None)
                             retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
@@ -132,7 +155,7 @@ class ReconciliationMixin:
                         counterpart = self.strategy._positions.get(counterpart_key)
                         if counterpart:
                             counterpart_sl_oid = counterpart.get("server_sl_order_id")
-                            counterpart_api_sym = counterpart_key.split(":")[0]
+                            counterpart_api_sym = to_api_symbol(counterpart_key)
                             if counterpart_sl_oid:
                                 cfg_vs = getattr(self, "vs_config", None)
                                 retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
@@ -160,18 +183,13 @@ class ReconciliationMixin:
                                         )
                                     )
                     # ── ReconJournal: record server TP fill ──
-                    try:
-                        _rj = getattr(self, "_recon_journal", None)
-                        if _rj is not None:
-                            _rj.record(
-                                event_type=ReconEventType.SERVER_TP_FILL,
-                                symbol=api_sym,
-                                action=f"TP filled @ ${fill_price:.4f}",
-                                result="success",
-                                details={"fill_price": fill_price, "fill_qty": fill_qty},
-                            )
-                    except Exception:
-                        pass
+                    self._record_recon_event(
+                        ReconEventType.SERVER_TP_FILL,
+                        api_sym,
+                        action=f"TP filled @ ${fill_price:.4f}",
+                        result="success",
+                        details={"fill_price": fill_price, "fill_qty": fill_qty},
+                    )
                     self._record_server_fill(
                         sym,
                         fill_price,
@@ -207,7 +225,7 @@ class ReconciliationMixin:
                         counterpart = self.strategy._positions.get(counterpart_key)
                         if counterpart:
                             counterpart_sl_oid = counterpart.get("server_sl_order_id")
-                            counterpart_api_sym = counterpart_key.split(":")[0]
+                            counterpart_api_sym = to_api_symbol(counterpart_key)
                             if counterpart_sl_oid:
                                 cfg_vs = getattr(self, "vs_config", None)
                                 retry_count = cfg_vs.sl_cancel_retry_count if cfg_vs else 0
@@ -235,18 +253,13 @@ class ReconciliationMixin:
                                         )
                                     )
                     # ── ReconJournal: record server SL fill ──
-                    try:
-                        _rj = getattr(self, "_recon_journal", None)
-                        if _rj is not None:
-                            _rj.record(
-                                event_type=ReconEventType.SERVER_SL_FILL,
-                                symbol=api_sym,
-                                action=f"SL filled @ ${fill_price:.4f}",
-                                result="success",
-                                details={"fill_price": fill_price, "fill_qty": fill_qty},
-                            )
-                    except Exception:
-                        pass
+                    self._record_recon_event(
+                        ReconEventType.SERVER_SL_FILL,
+                        api_sym,
+                        action=f"SL filled @ ${fill_price:.4f}",
+                        result="success",
+                        details={"fill_price": fill_price, "fill_qty": fill_qty},
+                    )
                     self._record_server_fill(
                         sym,
                         fill_price,
@@ -281,23 +294,18 @@ class ReconciliationMixin:
                             counterpart = self.strategy._positions.get(counterpart_key)
                             if counterpart:
                                 c_sl = counterpart.get("server_sl_order_id")
-                                c_api = counterpart_key.split(":")[0]
+                                c_api = to_api_symbol(counterpart_key)
                                 if c_sl:
                                     self._cancel_server_stop_loss(c_api, c_sl)
                                     counterpart["server_sl_order_id"] = None
                     # ReconJournal
-                    try:
-                        _rj = getattr(self, "_recon_journal", None)
-                        if _rj is not None:
-                            _rj.record(
-                                event_type=ReconEventType.SERVER_SL_FILL,
-                                symbol=api_sym,
-                                action=f"Trail filled @ ${fill_price:.4f}",
-                                result="success",
-                                details={"fill_price": fill_price, "fill_qty": fill_qty, "type": "trail"},
-                            )
-                    except Exception:
-                        pass
+                    self._record_recon_event(
+                        ReconEventType.SERVER_SL_FILL,
+                        api_sym,
+                        action=f"Trail filled @ ${fill_price:.4f}",
+                        result="success",
+                        details={"fill_price": fill_price, "fill_qty": fill_qty, "type": "trail"},
+                    )
                     pos_side_val = pos.get("position_side")
                     # Guard: zero-fill trail (Algo API FINISHED but no actual execution)
                     # produces phantom -100% PnL. Skip recording and let residual check handle.
@@ -443,17 +451,12 @@ class ReconciliationMixin:
                             pos["_server_sl_pct"] = 0.0
                         logger.info(f"[{sym}] BRACKET REPAIR: SL placed algoId={new_sl}")
                         # ── ReconJournal: record bracket repair success ──
-                        try:
-                            _rj = getattr(self, "_recon_journal", None)
-                            if _rj is not None:
-                                _rj.record(
-                                    event_type=ReconEventType.BRACKET_REPAIR,
-                                    symbol=api_sym,
-                                    action=f"SL placed algoId={new_sl}",
-                                    result="success",
-                                )
-                        except Exception:
-                            pass
+                        self._record_recon_event(
+                            ReconEventType.BRACKET_REPAIR,
+                            api_sym,
+                            action=f"SL placed algoId={new_sl}",
+                            result="success",
+                        )
                     else:
                         # Track consecutive SL repair failures.
                         # After MAX_REPAIR_FAILS attempts the position is likely
@@ -467,17 +470,12 @@ class ReconciliationMixin:
                             f"Could not place SL — position UNPROTECTED"
                         )
                         # ── ReconJournal: record bracket repair failure ──
-                        try:
-                            _rj = getattr(self, "_recon_journal", None)
-                            if _rj is not None:
-                                _rj.record(
-                                    event_type=ReconEventType.BRACKET_REPAIR_FAIL,
-                                    symbol=api_sym,
-                                    action=f"SL placement failed ({fail_count}/{MAX_REPAIR_FAILS})",
-                                    result="failure",
-                                )
-                        except Exception:
-                            pass
+                        self._record_recon_event(
+                            ReconEventType.BRACKET_REPAIR_FAIL,
+                            api_sym,
+                            action=f"SL placement failed ({fail_count}/{MAX_REPAIR_FAILS})",
+                            result="failure",
+                        )
                         if fail_count >= MAX_REPAIR_FAILS:
                             logger.critical(
                                 f"[{sym}] BRACKET REPAIR EXHAUSTED ({MAX_REPAIR_FAILS} failures) — "
@@ -570,7 +568,7 @@ class ReconciliationMixin:
                     if quantity > 0:
                         signal = pos["signal"]
                         entry_price = pos["entry_price"]
-                        strategy_type = pos.get("strategy_type", "vr_directional")
+                        strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
                         cr, ap, cs = self._get_trail_params(strategy_type, signal, entry_price)
                         new_trail = self._place_trail_regular(
                             symbol=api_sym,
@@ -640,8 +638,7 @@ class ReconciliationMixin:
 
             # Build lookup key: compound (BTCUSDT:LONG) or plain (BTCUSDT).
             # Strip any compound suffix from pos['symbol'] defensively.
-            raw_sym = pos.get("symbol", sym)
-            api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+            api_sym = to_api_symbol(sym, pos)
             pos_side = pos.get("position_side")
             if pos_side in ("LONG", "SHORT"):
                 lookup_key = f"{api_sym}:{pos_side}"
@@ -662,22 +659,17 @@ class ReconciliationMixin:
                     )
                 )
                 # ── ReconJournal: record ghost detection ──
-                try:
-                    _rj = getattr(self, "_recon_journal", None)
-                    if _rj is not None:
-                        _rj.record(
-                            event_type=ReconEventType.GHOST_DETECTED,
-                            symbol=api_sym,
-                            action="removed from state",
-                            result="success",
-                            details={
-                                "entry_price": pos.get("entry_price"),
-                                "bars_held": pos.get("bars_held"),
-                                "position_side": pos.get("position_side"),
-                            },
-                        )
-                except Exception:
-                    pass
+                self._record_recon_event(
+                    ReconEventType.GHOST_DETECTED,
+                    api_sym,
+                    action="removed from state",
+                    result="success",
+                    details={
+                        "entry_price": pos.get("entry_price"),
+                        "bars_held": pos.get("bars_held"),
+                        "position_side": pos.get("position_side"),
+                    },
+                )
                 # ── Ghost Fill Audit (P1) ──────────────────────────
                 # Retrieve and log ALL closing fills so we can diagnose
                 # *why* _sync_server_orders missed the fill.
@@ -842,8 +834,7 @@ class ReconciliationMixin:
             pos = self.strategy._positions.get(sym)
             if not pos:
                 continue
-            raw_sym = pos.get("symbol", sym)
-            api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+            api_sym = to_api_symbol(sym, pos)
             pos_side = pos.get("position_side")
             if pos_side in ("LONG", "SHORT"):
                 tracked_keys.add(f"{api_sym}:{pos_side}")
@@ -875,18 +866,13 @@ class ReconciliationMixin:
                         f"`!adopt {ex_key}` 또는 `!close-orphan {ex_key}` 명령으로 처리해주세요."
                     )
                 )
-                try:
-                    _rj = getattr(self, "_recon_journal", None)
-                    if _rj is not None:
-                        _rj.record(
-                            event_type=ReconEventType.REVERSE_GHOST,
-                            symbol=api_sym,
-                            action="orphan_alert_only (no auto-close)",
-                            result="alert_sent",
-                            details={"position_side": pos_side_str, "qty": abs(ex_amt)},
-                        )
-                except Exception:
-                    pass
+                self._record_recon_event(
+                    ReconEventType.REVERSE_GHOST,
+                    api_sym,
+                    action="orphan_alert_only (no auto-close)",
+                    result="alert_sent",
+                    details={"position_side": pos_side_str, "qty": abs(ex_amt)},
+                )
                 continue
 
             # ORPHAN_AUTO_CLOSE=true: original auto-close behavior (escape hatch)
@@ -949,18 +935,13 @@ class ReconciliationMixin:
                 except Exception as _je:
                     logger.warning(f"[{ex_key}] Reverse ghost journal failed: {_je}")
                 # ── ReconJournal: record reverse ghost close ──
-                try:
-                    _rj = getattr(self, "_recon_journal", None)
-                    if _rj is not None:
-                        _rj.record(
-                            event_type=ReconEventType.REVERSE_GHOST_CLOSED,
-                            symbol=api_sym,
-                            action=f"auto-closed {close_side} qty={abs(ex_amt):.6f}",
-                            result="success",
-                            details={"position_side": pos_side_str},
-                        )
-                except Exception:
-                    pass
+                self._record_recon_event(
+                    ReconEventType.REVERSE_GHOST_CLOSED,
+                    api_sym,
+                    action=f"auto-closed {close_side} qty={abs(ex_amt):.6f}",
+                    result="success",
+                    details={"position_side": pos_side_str},
+                )
             except Exception as exc:
                 logger.error(f"[{ex_key}] Reverse ghost auto-close FAILED: {exc}. Manual intervention required!")
                 self.discord.send(
@@ -970,18 +951,13 @@ class ReconciliationMixin:
                     )
                 )
                 # ── ReconJournal: record failed reverse ghost close ──
-                try:
-                    _rj = getattr(self, "_recon_journal", None)
-                    if _rj is not None:
-                        _rj.record(
-                            event_type=ReconEventType.REVERSE_GHOST,
-                            symbol=api_sym,
-                            action=f"auto-close FAILED: {exc}",
-                            result="failure",
-                            details={"position_side": pos_side_str},
-                        )
-                except Exception:
-                    pass
+                self._record_recon_event(
+                    ReconEventType.REVERSE_GHOST,
+                    api_sym,
+                    action=f"auto-close FAILED: {exc}",
+                    result="failure",
+                    details={"position_side": pos_side_str},
+                )
 
         # ── Phase 3: Straddle pair integrity check ──
         # NOTE: 이 스트래들 고아 자동-청산 (VS_ORPHAN_AUTO_CLOSE_CYCLES)은 위의
@@ -1024,8 +1000,7 @@ class ReconciliationMixin:
                     )
                 )
                 # 현재 포지션의 마크 가격 추정 (entry_price 사용)
-                raw_sym = pos.get("symbol", sym)
-                api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+                api_sym = to_api_symbol(sym, pos)
                 close_price = pos.get("entry_price", 0.0)
                 try:
                     _book = self.client.futures_orderbook_ticker(symbol=api_sym)
@@ -1068,7 +1043,7 @@ class ReconciliationMixin:
             return
 
         # Extract Binance symbol from compound key
-        api_sym = pos.get("symbol", symbol.split(":")[0])
+        api_sym = to_api_symbol(symbol, pos)
 
         # 1. Cancel old SL (100% qty, no longer valid)
         sl_oid = pos.get("server_sl_order_id")
@@ -1135,7 +1110,7 @@ class ReconciliationMixin:
             "bars_held": pos["bars_held"],
             "reason": "server_partial_tp",
             "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", "vr_directional"),
+            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
             "mfe_pct": pos.get("best_pnl", 0.0) * 100,
             "mae_pct": pos.get("worst_pnl", 0.0) * 100,
             "entry_time": pos.get("opened_at"),
@@ -1204,7 +1179,7 @@ class ReconciliationMixin:
             return
 
         # Extract Binance symbol from compound key for trade records
-        api_sym = pos.get("symbol", symbol.split(":")[0])
+        api_sym = to_api_symbol(symbol, pos)
 
         # PnL calculation
         if pos["signal"] == 1:
@@ -1237,7 +1212,7 @@ class ReconciliationMixin:
             "bars_held": pos["bars_held"],
             "reason": reason,
             "time": _now,
-            "strategy_type": pos.get("strategy_type", "vr_directional"),
+            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
             "mfe_pct": pos.get("best_pnl", 0.0) * 100,
             "mae_pct": pos.get("worst_pnl", 0.0) * 100,
             "entry_time": pos.get("opened_at"),
