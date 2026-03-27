@@ -370,7 +370,7 @@ class VolStraddleConfig(BaseSettings):
     entry_retry_delay_s: float = 2.0  # VS_ENTRY_RETRY_DELAY_S: delay between second leg entry retries (s)
     rollback_retry_count: int = 2  # VS_ROLLBACK_RETRY_COUNT: max retries for rollback _close_position()
     rollback_retry_delay_s: float = 2.0  # VS_ROLLBACK_RETRY_DELAY_S: delay between rollback retries (s)
-    sl_cancel_retry_count: int = 2  # VS_SL_CANCEL_RETRY_COUNT: max retries for counterpart SL cancel
+    sl_cancel_retry_count: int = 2  # VS_SL_CANCEL_RETRY_COUNT: max retries for own SL cancel on TP fill
     sl_cancel_retry_delay_s: float = 1.0  # VS_SL_CANCEL_RETRY_DELAY_S: delay between SL cancel retries (s)
     orphan_auto_close_cycles: int = (
         4  # VS_ORPHAN_AUTO_CLOSE_CYCLES: cycles before orphaned leg auto-closes (~60min at 15m)
