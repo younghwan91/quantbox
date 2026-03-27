@@ -17,7 +17,6 @@ import logging
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from tests.conftest import _build_vs_scalper
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
@@ -427,3 +426,246 @@ class TestNormalIndependentExits:
         assert "TESTUSDT:SHORT" in scalper.strategy._positions, (
             "SHORT leg should remain open after LONG SL — backtest parity requires independent leg exits!"
         )
+
+
+# ─── Counterpart SL preservation after server-side fill ──────────────────────
+#
+# These tests verify that _sync_server_orders does NOT cancel the counterpart
+# leg's SL when one straddle leg exits via server SL, TP, or trail fill.
+#
+# The removed code previously called _cancel_server_stop_loss(counterpart_sym,
+# counterpart_sl_oid) after a fill, creating a 15-minute protection gap.
+# The counterpart's SL must be preserved intact so Binance continues
+# protecting the surviving leg without any parameter change or re-placement.
+
+
+def _live_scalper_for_straddle(balance: float = 1000.0):
+    """Live-mode scalper with mocked client, set up for straddle tests."""
+    from unittest.mock import MagicMock, patch
+
+    from quantbox.scalper import RubberBandScalper
+    from tests.conftest import _SYMBOL_INFO
+
+    vs_config = VolStraddleConfig()
+
+    with (
+        patch("quantbox.scalper.get_settings") as mock_settings,
+        patch("quantbox.scalper.Client"),
+        patch("quantbox.scalper.DiscordNotifier"),
+        patch("quantbox.scalper.DiscordBotRunner", None),
+    ):
+        mock_settings.return_value = MagicMock(
+            binance_api_key="k",
+            binance_api_secret="s",
+            binance_testnet=False,
+            discord_webhook_url="",
+            discord_bot_token="",
+            discord_channel_id="",
+            paper_balance=balance,
+        )
+        scalper = RubberBandScalper(
+            paper_mode=False,
+            strategy_name="vol_straddle",
+            vs_config=vs_config,
+        )
+
+    for sym in ("TESTUSDT",):
+        scalper._symbol_info_cache[sym] = _SYMBOL_INFO.copy()
+
+    scalper.client = MagicMock()
+    scalper.discord = MagicMock()
+    scalper._save_state = MagicMock()
+    return scalper
+
+
+def _straddle_pos_with_trail(sym: str, signal: int, pair_id: str, **overrides) -> dict:
+    """Straddle position with an active trail order."""
+    pos = _straddle_pos(sym, signal, pair_id, **overrides)
+    pos["trail_active"] = True
+    pos["server_trail_order_id"] = f"trail_{pos['position_side']}"
+    return pos
+
+
+class TestCounterpartSLPreservationAfterServerFill:
+    """Verify that _sync_server_orders never cancels the counterpart leg's SL.
+
+    The old code called _cancel_server_stop_loss(counterpart_sym, counterpart_sl_oid)
+    after a straddle leg fill — this was removed because it left the surviving leg
+    unprotected for ~15 minutes while the SL was being re-placed.
+    """
+
+    def test_straddle_sl_fill_preserves_counterpart_sl(self):
+        """When SHORT's SL fills, LONG's server_sl_order_id is NOT cleared
+        and _cancel_server_stop_loss is NOT called for the counterpart."""
+        scalper = _live_scalper_for_straddle()
+
+        pair_id = "pair_sl"
+        long_pos = _straddle_pos("TESTUSDT", 1, pair_id)
+        short_pos = _straddle_pos("TESTUSDT", -1, pair_id)
+        # Remove SHORT's TP so the SL branch is checked first
+        short_pos["server_tp_order_id"] = None
+
+        scalper.strategy._positions = {
+            "TESTUSDT:LONG": long_pos,
+            "TESTUSDT:SHORT": short_pos,
+        }
+
+        long_sl_oid = long_pos["server_sl_order_id"]  # "sl_LONG"
+        short_sl_oid = short_pos["server_sl_order_id"]  # "sl_SHORT"
+
+        # SHORT's SL fires; LONG's SL and TP are not touched
+        def _check_filled(sym, oid):
+            if oid == short_sl_oid:
+                return {"status": "FILLED", "avgPrice": "0.985", "executedQty": "1000.0"}
+            return {"status": "NEW", "avgPrice": "0.0", "executedQty": "0.0"}
+
+        scalper._check_order_filled = MagicMock(side_effect=_check_filled)
+        scalper._cancel_server_stop_loss = MagicMock(return_value=True)
+        scalper._cancel_server_take_profit = MagicMock(return_value=True)
+        scalper._cancel_trail_regular = MagicMock(return_value=True)
+        scalper._record_server_fill = MagicMock()
+
+        scalper._sync_server_orders()
+
+        # LONG's SL order id must be unchanged
+        assert long_pos["server_sl_order_id"] == long_sl_oid, (
+            "Counterpart (LONG) server_sl_order_id must NOT be cleared after SHORT SL fill"
+        )
+
+        # _cancel_server_stop_loss must NOT have been called with the counterpart's SL oid
+        cancel_calls = scalper._cancel_server_stop_loss.call_args_list
+        counterpart_cancel_calls = [c for c in cancel_calls if long_sl_oid in str(c)]
+        assert not counterpart_cancel_calls, (
+            f"_cancel_server_stop_loss was called with counterpart SL oid {long_sl_oid!r}: {cancel_calls}"
+        )
+
+    def test_straddle_tp_fill_preserves_counterpart_sl(self):
+        """When LONG's TP fills, SHORT's server_sl_order_id is NOT cleared
+        and _cancel_server_stop_loss is NOT called for the counterpart."""
+        scalper = _live_scalper_for_straddle()
+
+        pair_id = "pair_tp"
+        long_pos = _straddle_pos("TESTUSDT", 1, pair_id)
+        short_pos = _straddle_pos("TESTUSDT", -1, pair_id)
+
+        scalper.strategy._positions = {
+            "TESTUSDT:LONG": long_pos,
+            "TESTUSDT:SHORT": short_pos,
+        }
+
+        long_tp_oid = long_pos["server_tp_order_id"]  # "tp_LONG"
+        short_sl_oid = short_pos["server_sl_order_id"]  # "sl_SHORT"
+
+        # LONG's TP fires
+        def _check_filled(sym, oid):
+            if oid == long_tp_oid:
+                return {"status": "FILLED", "avgPrice": "1.05", "executedQty": "1000.0"}
+            return {"status": "NEW", "avgPrice": "0.0", "executedQty": "0.0"}
+
+        scalper._check_order_filled = MagicMock(side_effect=_check_filled)
+        scalper._cancel_server_stop_loss = MagicMock(return_value=True)
+        scalper._cancel_server_take_profit = MagicMock(return_value=True)
+        scalper._cancel_trail_regular = MagicMock(return_value=True)
+        scalper._record_server_fill = MagicMock()
+
+        scalper._sync_server_orders()
+
+        # SHORT's SL order id must be unchanged
+        assert short_pos["server_sl_order_id"] == short_sl_oid, (
+            "Counterpart (SHORT) server_sl_order_id must NOT be cleared after LONG TP fill"
+        )
+
+        # _cancel_server_stop_loss must NOT have been called with the counterpart's SL oid
+        cancel_calls = scalper._cancel_server_stop_loss.call_args_list
+        counterpart_cancel_calls = [c for c in cancel_calls if short_sl_oid in str(c)]
+        assert not counterpart_cancel_calls, (
+            f"_cancel_server_stop_loss was called with counterpart SL oid {short_sl_oid!r}: {cancel_calls}"
+        )
+
+    def test_straddle_trail_fill_preserves_counterpart_sl(self):
+        """When LONG's trail fills, SHORT's server_sl_order_id is NOT cleared
+        and _cancel_server_stop_loss is NOT called for the counterpart."""
+        scalper = _live_scalper_for_straddle()
+
+        pair_id = "pair_trail"
+        long_pos = _straddle_pos_with_trail("TESTUSDT", 1, pair_id)
+        short_pos = _straddle_pos("TESTUSDT", -1, pair_id)
+
+        scalper.strategy._positions = {
+            "TESTUSDT:LONG": long_pos,
+            "TESTUSDT:SHORT": short_pos,
+        }
+
+        long_trail_oid = long_pos["server_trail_order_id"]  # "trail_LONG"
+        short_sl_oid = short_pos["server_sl_order_id"]  # "sl_SHORT"
+
+        # TP and SL checks return NEW; trail check returns FILLED
+        def _check_filled(sym, oid):
+            return {"status": "NEW", "avgPrice": "0.0", "executedQty": "0.0"}
+
+        def _check_trail(sym, oid):
+            if oid == long_trail_oid:
+                return {"status": "FILLED", "avgPrice": "1.03", "executedQty": "1000.0"}
+            return {"status": "NEW", "avgPrice": "0.0", "executedQty": "0.0"}
+
+        scalper._check_order_filled = MagicMock(side_effect=_check_filled)
+        scalper._check_trail_regular = MagicMock(side_effect=_check_trail)
+        scalper._cancel_server_stop_loss = MagicMock(return_value=True)
+        scalper._cancel_server_take_profit = MagicMock(return_value=True)
+        scalper._cancel_trail_regular = MagicMock(return_value=True)
+        scalper._record_server_fill = MagicMock()
+
+        scalper._sync_server_orders()
+
+        # SHORT's SL order id must be unchanged
+        assert short_pos["server_sl_order_id"] == short_sl_oid, (
+            "Counterpart (SHORT) server_sl_order_id must NOT be cleared after LONG trail fill"
+        )
+
+        # _cancel_server_stop_loss must NOT have been called with the counterpart's SL oid
+        cancel_calls = scalper._cancel_server_stop_loss.call_args_list
+        counterpart_cancel_calls = [c for c in cancel_calls if short_sl_oid in str(c)]
+        assert not counterpart_cancel_calls, (
+            f"_cancel_server_stop_loss was called with counterpart SL oid {short_sl_oid!r}: {cancel_calls}"
+        )
+
+    def test_no_counterpart_sl_cancel_failed_flag_after_straddle_leg_exit(self):
+        """After a straddle leg exits via server fill, no counterpart position
+        should have counterpart_sl_cancel_failed set to True.
+
+        The removed cancel logic was the only code path that set this flag during
+        a server-side fill. With the code removed, the flag must never appear.
+        """
+        scalper = _live_scalper_for_straddle()
+
+        pair_id = "pair_flag"
+        long_pos = _straddle_pos("TESTUSDT", 1, pair_id)
+        short_pos = _straddle_pos("TESTUSDT", -1, pair_id)
+        short_pos["server_tp_order_id"] = None  # force SL-check path
+
+        scalper.strategy._positions = {
+            "TESTUSDT:LONG": long_pos,
+            "TESTUSDT:SHORT": short_pos,
+        }
+
+        short_sl_oid = short_pos["server_sl_order_id"]
+
+        def _check_filled(sym, oid):
+            if oid == short_sl_oid:
+                return {"status": "FILLED", "avgPrice": "0.985", "executedQty": "1000.0"}
+            return {"status": "NEW", "avgPrice": "0.0", "executedQty": "0.0"}
+
+        scalper._check_order_filled = MagicMock(side_effect=_check_filled)
+        scalper._cancel_server_stop_loss = MagicMock(return_value=True)
+        scalper._cancel_server_take_profit = MagicMock(return_value=True)
+        scalper._cancel_trail_regular = MagicMock(return_value=True)
+        scalper._record_server_fill = MagicMock()
+
+        scalper._sync_server_orders()
+
+        # Neither surviving position nor any position should carry this flag as True
+        for key, pos in scalper.strategy._positions.items():
+            assert not pos.get("counterpart_sl_cancel_failed"), (
+                f"[{key}] counterpart_sl_cancel_failed must not be set after server fill "
+                f"(removed cancel logic should never set this flag during _sync_server_orders)"
+            )
