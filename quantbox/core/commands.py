@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from quantbox.core.protocol import ScalperProtocol
 
+from quantbox.core.strategy_names import VR_DIRECTIONAL
+from quantbox.core.types import to_api_symbol
 from quantbox.notifications.bot import BotCommand, CommandType
 
 logger = logging.getLogger("Scalper")
@@ -115,9 +117,9 @@ class CommandsMixin:
                 direction = "L" if pos["signal"] == 1 else "S"
                 bars = pos.get("bars_held", 0)
                 max_hold = pos.get("max_hold", 192)
-                strat = pos.get("strategy_type", "vr_directional")
+                strat = pos.get("strategy_type", VR_DIRECTIONAL)
                 # Extract Binance symbol from compound key
-                api_sym = pos.get("symbol", sym.split(":")[0])
+                api_sym = to_api_symbol(sym, pos)
                 entry_px = pos["entry_price"]
                 # v12.5.2: Show real-time mark price uPnL
                 try:
@@ -160,7 +162,7 @@ class CommandsMixin:
         for sym in positions:
             # Extract Binance symbol from compound key for kline download
             pos = self.strategy._positions.get(sym, {})
-            api_sym = pos.get("symbol", sym.split(":")[0])
+            api_sym = to_api_symbol(sym, pos)
             price_arr = self.download_klines(api_sym, 2)
             price = float(price_arr[-1]) if price_arr is not None else 0.0
             if self._close_position(sym, "bot_close_all", price):
@@ -188,7 +190,7 @@ class CommandsMixin:
 
         sym, pos = positions[slot_id]
         # Extract Binance symbol from compound key for kline download
-        api_sym = pos.get("symbol", sym.split(":")[0])
+        api_sym = to_api_symbol(sym, pos)
         price_arr = self.download_klines(api_sym, 2)
         price = float(price_arr[-1]) if price_arr is not None else 0.0
         if self._close_position(sym, "bot_close", price):
@@ -221,7 +223,7 @@ class CommandsMixin:
         for sym in positions:
             # Extract Binance symbol from compound key for kline download
             pos = self.strategy._positions.get(sym, {})
-            api_sym = pos.get("symbol", sym.split(":")[0])
+            api_sym = to_api_symbol(sym, pos)
             price_arr = self.download_klines(api_sym, 2)
             price = float(price_arr[-1]) if price_arr is not None else 0.0
             if self._close_position(sym, "bot_stop", price):
