@@ -121,3 +121,4 @@ Output a concise report:
 3. If you find a bug or error, read the relevant source code to classify it.
 4. Reference incident rules #1-#8 from CLAUDE.md if an error matches.
 5. Keep output under 40 lines. This is a quick check, not a full audit.
+6. If any P0/P1 issue is found, recommend: "심화 분석 필요 → `/live-ops` 실행 권장"
