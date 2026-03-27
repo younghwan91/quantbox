@@ -58,7 +58,31 @@ Read `data/state/scalper_state.json`:
 - Is `daily_loss_blocked` true?
 - `restart_count` > 3?
 
-## Step 5: Report
+## Step 5: Health checks (parallel)
+
+### 5a. Bracket SL completeness
+From state JSON, check each position where `bars_held > 0`: is `server_sl_order_id` non-null?
+(TP and trail can legitimately be None — only SL must always exist.)
+
+### 5b. Stale ghost detection
+```bash
+grep -iE "ghost|orphan" "$LIVE_LOG" | grep -oE "\[[A-Z]+USDT:[A-Z]+\]" | sort | uniq -c | sort -rn | head -5
+```
+Flag any compound key appearing > 3 times (detected but never resolved).
+
+### 5c. Cycle timing
+```bash
+grep "Cycle #" "$LIVE_LOG" | tail -2
+```
+Parse timestamps of last 2 cycle lines, compute gap. Flag if > 300s (aligned with Heartbeat stall threshold).
+
+### 5d. Process CPU
+```bash
+ps -p {PID} -o %cpu,etime --no-headers 2>/dev/null
+```
+Use PID from Step 1. Flag if CPU < 0.5% (process may be stuck).
+
+## Step 6: Report
 
 Output a concise report:
 
@@ -67,6 +91,7 @@ Output a concise report:
 
 **Status:** HEALTHY / STALE / DEAD (PID {pid}, cycle #{n}, log age {s}s)
 **Balance:** ${balance} | DD: {dd}% | Positions: {n}/10
+**Health:** Brackets: OK/MISSING | Ghosts: Clean/N stale | Cycle: {gap}s | CPU: {cpu}% ({etime})
 
 ### Errors
 {list each unique error pattern with count and last occurrence}
@@ -74,12 +99,14 @@ Output a concise report:
 
 ### Ghosts / Reconciliation
 {any ghost or orphan alerts, or "Clean"}
+{if stale ghosts from Step 5b: list compound keys with repeat counts}
 
 ### API Issues
 {rate limits, timeouts, error codes, or "None"}
 
 ### Bracket Issues
 {repair failures, or "None"}
+{if missing SL from Step 5a: list positions with server_sl_order_id=None}
 
 ### State Anomalies
 {any issues, or "Clean"}
