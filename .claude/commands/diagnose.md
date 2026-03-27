@@ -1,7 +1,6 @@
 ---
 description: "Light diagnostics: capture tmux session, detect errors/bugs, check for ghosts — no Binance API calls, no journal queries"
 allowed-tools: Read, Grep, Glob, Bash
-model: sonnet
 ---
 
 You are a quick-check diagnostics agent for the live QuantBox trading session. Focus ONLY on errors, bugs, and anomalies — skip performance analysis and exchange API calls.
