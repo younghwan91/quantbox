@@ -1856,9 +1856,11 @@ class RubberBandScalper(
                         logger.warning(f"[{sym}] 스트래들 레그 카운터파트 없음 — 고아로 표시됨")
 
         # Restore DailyBreaker state (survives crash/restart within same UTC day)
-        self._daily_loss_blocked = state.get("daily_loss_blocked", False)
-        self._daily_realized_pnl = state.get("daily_realized_pnl", 0.0)
-        self._daily_loss_date = state.get("daily_loss_date", "")
+        # Skip if fresh session already cleared the breaker (no positions → clean slate)
+        if positions:
+            self._daily_loss_blocked = state.get("daily_loss_blocked", False)
+            self._daily_realized_pnl = state.get("daily_realized_pnl", 0.0)
+            self._daily_loss_date = state.get("daily_loss_date", "")
 
         # Restore restart tracking
         self._restart_count = state.get("restart_count", 0)
