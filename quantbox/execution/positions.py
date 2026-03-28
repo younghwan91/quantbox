@@ -119,6 +119,13 @@ class PositionMixin:
         is_straddle = sig_meta.get("straddle", False)
         strategy_type = sig_meta.get("strategy_type", VR_DIRECTIONAL)
 
+        # ── Straddle half-size: each leg = 0.5× notional ──
+        # A straddle pair (LONG+SHORT) is one trade idea using 2 slots.
+        # Without this, pair total = 2× directional exposure → double loss on dual SL.
+        if is_straddle:
+            notional *= 0.5
+            logger.info(f"[{symbol}] Straddle half-size: notional=${notional:.2f} (per leg)")
+
         # ── R44d V17: MA Cluster uses different leverage ──
         # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
         if "leverage_override" in sig_meta:

@@ -78,10 +78,10 @@ class TestStraddleTrailPriority:
         )
 
         assert len(pnl) == 1
-        # Both legs: trail fires at max(peak - trail_dist, -sl) = max(0.015, -0.015) = 0.015
+        # Half-size per leg: trail fires at max(peak - trail_dist, -sl) = 0.015
         long_trail = max(0.016 - self.TRAIL_DIST, -self.SL)  # 0.015
         short_trail = max(0.016 - self.TRAIL_DIST, -self.SL)  # 0.015
-        expected = long_trail + short_trail - self.COST
+        expected = 0.5 * long_trail + 0.5 * short_trail - self.COST
         assert abs(pnl[0] - expected) < 1e-10, f"Expected {expected}, got {pnl[0]}"
 
     def test_sl_fires_before_trail_activates(self):
@@ -204,9 +204,8 @@ class TestStraddleTrailPriority:
         )
 
         assert len(pnl) == 1
-        # Both legs trail at max(0.03-0.001, -0.015) = 0.029 each
-        # Net = 0.029 + 0.029 - cost ≈ +5.6%
-        assert pnl[0] > 0.05, f"Expected large positive from trail on both legs, got {pnl[0]}"
+        # Half-size: 0.5*0.029 + 0.5*0.029 - cost ≈ +2.7%
+        assert pnl[0] > 0.025, f"Expected positive from trail on both legs, got {pnl[0]}"
 
     def test_no_conflict_bars_produce_correct_results(self):
         """Normal scenario: trail activates and fires cleanly on separate bars."""
