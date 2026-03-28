@@ -1332,30 +1332,60 @@ class PositionMixin:
         )
 
         # ── Post-close residual check ──
-        # Same pattern as post-trail residual check (reconciliation.py).
         # LimitChaser may partially fill, leaving dust on exchange with no state entry.
-        if not self.paper_mode:
-            try:
-                ex_positions = self.client.futures_position_information(symbol=api_symbol)
-                for ep in ex_positions:
-                    if pos_side and ep.get("positionSide") != pos_side:
-                        continue
-                    residual = abs(float(ep.get("positionAmt", 0)))
-                    if residual > 0:
-                        logger.critical(
-                            f"[{symbol}] Close residual — {residual} {api_symbol} "
-                            f"{pos_side} still on exchange after close. Force-closing."
-                        )
-                        self._place_order(
-                            api_symbol,
-                            side,  # same close side as the main close order
-                            residual,
-                            reduce_only=(pos_side is None),  # One-Way: reduce only
-                            position_side=pos_side,
-                        )
-            except Exception as _e:
-                logger.error(f"[{symbol}] Post-close residual check failed: {_e}")
+        self._force_close_residual(
+            api_symbol,
+            close_side=side,
+            pos_side=pos_side,
+            context="Close residual",
+            reduce_only=(pos_side is None),  # One-Way: reduce only
+        )
 
         return True
+
+    # ==================== Shared Helpers ====================
+
+    def _force_close_residual(
+        self: "ScalperProtocol",
+        api_symbol: str,
+        close_side: str,
+        pos_side: str | None,
+        context: str,
+        reduce_only: bool = False,
+    ) -> None:
+        """Force-close any residual position dust left on exchange after a close/trail fill.
+
+        Both post-close (PositionMixin) and post-trail (ReconciliationMixin) share
+        this pattern: query exchange, detect leftover qty, market-close it.
+
+        Args:
+            api_symbol: Binance API symbol (no colon).
+            close_side: "BUY" or "SELL" — the side to close with.
+            pos_side: "LONG" / "SHORT" (Hedge Mode) or None (One-Way).
+            context: Human label for log messages (e.g. "Close residual", "Trail partial fill").
+            reduce_only: Whether to set reduce_only on the force-close order.
+        """
+        if self.paper_mode:
+            return
+        try:
+            ex_positions = self.client.futures_position_information(symbol=api_symbol)
+            for ep in ex_positions:
+                if pos_side and ep.get("positionSide") != pos_side:
+                    continue
+                residual = abs(float(ep.get("positionAmt", 0)))
+                if residual > 0:
+                    logger.critical(
+                        f"[{api_symbol}] {context} — {residual} {api_symbol} "
+                        f"{pos_side} still on exchange. Force-closing."
+                    )
+                    self._place_order(
+                        api_symbol,
+                        close_side,
+                        residual,
+                        reduce_only=reduce_only,
+                        position_side=pos_side,
+                    )
+        except Exception as _e:
+            logger.error(f"[{api_symbol}] {context} check failed: {_e}")
 
     # ==================== Main Cycle ====================

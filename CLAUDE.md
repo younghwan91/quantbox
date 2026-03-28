@@ -128,6 +128,7 @@ Atomic JSON persistence via `core/scalper_state.py`: tmpfile → `os.replace()`.
 | #6 | Config params always read from `VolStraddleConfig()`, never hardcoded |
 | #7 | `CANCELED` (US spelling, 1 L) — Binance Algo API uses American spelling, check both |
 | #8 | TRAILING_STOP_MARKET: Algo API only (`-4120` on regular API). `activationPrice=entry×(1±trail_activate)` — Binance keeps trail in NEW until price reaches activation (verified live 2026-03-19). `callbackRate≥0.5%` — tighter fires on tick noise (r104b: 0.1% has 81% bias) |
+| #9 | After every client-side close, verify zero exchange position before removing from state (`_force_close_residual`) |
 
 ## API Testing Policy
 
