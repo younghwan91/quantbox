@@ -656,11 +656,22 @@ class RubberBandScalper(
             logger.error(f"INVARIANT VIOLATIONS ({len(violations)}): " + "; ".join(violations))
 
         if self._drawdown_halt:
-            # Close any remaining positions
+            # Close losing positions; keep profitable ones (protected by trail/SL)
             for pos_key in list(self.strategy.active_positions):
+                pos = self.strategy.active_positions[pos_key]
                 api_sym = to_api_symbol(pos_key)
                 close = self.download_klines(api_sym, 2)
                 price = float(close[-1]) if close is not None else 0.0
+                # Check unrealized PnL — skip profitable positions
+                entry = pos["entry_price"]
+                signal = pos["signal"]
+                upnl_pct = (price / entry - 1.0) * signal if entry > 0 else 0.0
+                if upnl_pct > 0:
+                    logger.info(
+                        f"[{pos_key}] DD halt: KEEPING profitable pos "
+                        f"(uPnL={upnl_pct * 100:+.1f}%, trail/SL protection active)"
+                    )
+                    continue
                 self._close_position(pos_key, "drawdown_halt", price)
 
             # Post-halt reconciliation: catch any residuals left by partial fills
@@ -669,33 +680,30 @@ class RubberBandScalper(
                 self._reconcile_positions()
 
             # v14.0.1: Auto-recover when DD drops below threshold
-            if self.strategy.n_active == 0:
-                hwm = self._high_water_mark if self._high_water_mark > 0 else balance
-                dd = (hwm - balance) / hwm if hwm > 0 else 0.0
-                if dd < self._cfg.max_drawdown_pct:
-                    logger.info(
-                        f"DD recovered to {dd * 100:.1f}% "
-                        f"(threshold={self._cfg.max_drawdown_pct * 100:.0f}%) "
-                        f"— resuming trading"
+            hwm = self._high_water_mark if self._high_water_mark > 0 else balance
+            dd = (hwm - balance) / hwm if hwm > 0 else 0.0
+            if dd < self._cfg.max_drawdown_pct:
+                logger.info(
+                    f"DD recovered to {dd * 100:.1f}% "
+                    f"(threshold={self._cfg.max_drawdown_pct * 100:.0f}%) "
+                    f"— resuming trading (surviving positions: {self.strategy.n_active})"
+                )
+                self.discord.send(
+                    content=(
+                        f"\u2705 **DD Recovered** — "
+                        f"{dd * 100:.1f}% (below {self._cfg.max_drawdown_pct * 100:.0f}% threshold). "
+                        f"Resuming trading. ({self.strategy.n_active} positions kept)"
                     )
-                    self.discord.send(
-                        content=(
-                            f"\u2705 **DD Recovered** — "
-                            f"{dd * 100:.1f}% (below {self._cfg.max_drawdown_pct * 100:.0f}% threshold). "
-                            f"Resuming trading."
-                        )
-                    )
-                    self._drawdown_halt = False
-                    # Fall through — cycle continues normally after recovery
-                else:
-                    logger.info(
-                        f"DD halt active — {dd * 100:.1f}% DD "
-                        f"(need <{self._cfg.max_drawdown_pct * 100:.0f}% to resume). "
-                        f"All positions closed, waiting for HWM reset on restart."
-                    )
-                    self._save_state()
-                    return True, True
+                )
+                self._drawdown_halt = False
+                # Fall through — cycle continues normally after recovery
             else:
+                n_surviving = self.strategy.n_active
+                logger.info(
+                    f"DD halt active — {dd * 100:.1f}% DD "
+                    f"(need <{self._cfg.max_drawdown_pct * 100:.0f}% to resume). "
+                    f"Losing positions closed, {n_surviving} profitable survivors kept."
+                )
                 self._save_state()
                 return True, True
 
