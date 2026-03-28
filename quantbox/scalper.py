@@ -1723,7 +1723,11 @@ class RubberBandScalper(
             self._high_water_mark = balance
             self._initial_balance = balance
             self._trade_history = []
-            logger.info(f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history cleared")
+            self._daily_loss_blocked = False
+            self._daily_realized_pnl = 0.0
+            logger.info(
+                f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history + daily breaker cleared"
+            )
 
         # A2: Guard — HWM/initial_balance corrupt (0 or negative) → reset to current balance
         # Prevents ZeroDivisionError in (hwm - balance) / hwm and DD halt triggering immediately
@@ -1852,9 +1856,11 @@ class RubberBandScalper(
                         logger.warning(f"[{sym}] 스트래들 레그 카운터파트 없음 — 고아로 표시됨")
 
         # Restore DailyBreaker state (survives crash/restart within same UTC day)
-        self._daily_loss_blocked = state.get("daily_loss_blocked", False)
-        self._daily_realized_pnl = state.get("daily_realized_pnl", 0.0)
-        self._daily_loss_date = state.get("daily_loss_date", "")
+        # Skip if fresh session already cleared the breaker (no positions → clean slate)
+        if positions:
+            self._daily_loss_blocked = state.get("daily_loss_blocked", False)
+            self._daily_realized_pnl = state.get("daily_realized_pnl", 0.0)
+            self._daily_loss_date = state.get("daily_loss_date", "")
 
         # Restore restart tracking
         self._restart_count = state.get("restart_count", 0)
