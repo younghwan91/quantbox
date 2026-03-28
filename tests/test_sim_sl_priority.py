@@ -81,7 +81,7 @@ class TestStraddleTrailPriority:
         # Half-size per leg: trail fires at max(peak - trail_dist, -sl) = 0.015
         long_trail = max(0.016 - self.TRAIL_DIST, -self.SL)  # 0.015
         short_trail = max(0.016 - self.TRAIL_DIST, -self.SL)  # 0.015
-        expected = 0.5 * long_trail + 0.5 * short_trail - self.COST
+        expected = 0.5 * (long_trail + short_trail - self.COST)
         assert abs(pnl[0] - expected) < 1e-10, f"Expected {expected}, got {pnl[0]}"
 
     def test_sl_fires_before_trail_activates(self):
