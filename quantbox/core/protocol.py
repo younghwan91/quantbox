@@ -321,6 +321,17 @@ class ScalperProtocol(Protocol):
         """Close position by key (may be compound 'SYMBOL:SIDE'); return success flag."""
         ...
 
+    def _force_close_residual(
+        self,
+        api_symbol: str,
+        close_side: str,
+        pos_side: str | None,
+        context: str,
+        reduce_only: bool = False,
+    ) -> None:
+        """Force-close residual position dust left on exchange after close/trail fill."""
+        ...
+
     # ── Methods: reconciliation (cross-mixin) ─────────────────────────────
     def _record_server_fill(
         self,

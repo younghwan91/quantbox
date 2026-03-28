@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from quantbox.core.protocol import ScalperProtocol
 
 from quantbox.core.strategy_names import VR_DIRECTIONAL
-from quantbox.core.types import to_api_symbol
+from quantbox.core.types import calc_upnl_pct, to_api_symbol
 from quantbox.notifications.bot import BotCommand, CommandType
 
 logger = logging.getLogger("Scalper")
@@ -125,10 +125,7 @@ class CommandsMixin:
                 try:
                     mark = self.client.futures_mark_price(symbol=api_sym)
                     cur_px = float(mark["markPrice"])
-                    if pos["signal"] == 1:
-                        upnl_pct = (cur_px - entry_px) / entry_px * 100
-                    else:
-                        upnl_pct = (entry_px - cur_px) / entry_px * 100
+                    upnl_pct = calc_upnl_pct(entry_px, cur_px, pos["signal"]) * 100
                 except Exception:
                     cur_px = entry_px
                     upnl_pct = 0.0
