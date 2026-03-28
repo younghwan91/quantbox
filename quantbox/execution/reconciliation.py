@@ -220,27 +220,13 @@ class ReconciliationMixin:
                         self._save_state()
                     # Post-trail residual check: trail FINISHED ≠ guaranteed full fill.
                     # Partial fills leave dust on exchange with no state entry (reverse ghost).
-                    if not self.paper_mode:
-                        try:
-                            ex_pos = self.client.futures_position_information(symbol=api_sym)
-                            for ep in ex_pos:
-                                if pos_side_val and ep.get("positionSide") != pos_side_val:
-                                    continue
-                                residual = abs(float(ep.get("positionAmt", 0)))
-                                if residual > 0:
-                                    close_side = "BUY" if pos.get("signal") == -1 else "SELL"
-                                    logger.critical(
-                                        f"[{sym}] Trail partial fill — residual {residual} {api_sym} "
-                                        f"{pos_side_val} on exchange. Force-closing via market order."
-                                    )
-                                    self._place_order(
-                                        api_sym,
-                                        close_side,
-                                        residual,
-                                        position_side=pos_side_val,
-                                    )
-                        except Exception as _e:
-                            logger.error(f"[{sym}] Post-trail residual check failed: {_e}")
+                    close_side = "BUY" if pos.get("signal") == -1 else "SELL"
+                    self._force_close_residual(
+                        api_sym,
+                        close_side=close_side,
+                        pos_side=pos_side_val,
+                        context="Trail partial fill",
+                    )
                     continue
                 elif trail_status and trail_status.get("status") == "CANCELED":
                     pos["server_trail_order_id"] = None
