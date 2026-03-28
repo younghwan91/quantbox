@@ -663,6 +663,11 @@ class RubberBandScalper(
                 price = float(close[-1]) if close is not None else 0.0
                 self._close_position(pos_key, "drawdown_halt", price)
 
+            # Post-halt reconciliation: catch any residuals left by partial fills
+            # during the drawdown_halt close loop above.
+            if not self.paper_mode:
+                self._reconcile_positions()
+
             # v14.0.1: Auto-recover when DD drops below threshold
             if self.strategy.n_active == 0:
                 hwm = self._high_water_mark if self._high_water_mark > 0 else balance

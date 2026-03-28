@@ -1322,6 +1322,32 @@ class PositionMixin:
                 "footer": {"text": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")},
             }
         )
+
+        # ── Post-close residual check ──
+        # Same pattern as post-trail residual check (reconciliation.py).
+        # LimitChaser may partially fill, leaving dust on exchange with no state entry.
+        if not self.paper_mode:
+            try:
+                ex_positions = self.client.futures_position_information(symbol=api_symbol)
+                for ep in ex_positions:
+                    if pos_side and ep.get("positionSide") != pos_side:
+                        continue
+                    residual = abs(float(ep.get("positionAmt", 0)))
+                    if residual > 0:
+                        logger.critical(
+                            f"[{symbol}] Close residual — {residual} {api_symbol} "
+                            f"{pos_side} still on exchange after close. Force-closing."
+                        )
+                        self._place_order(
+                            api_symbol,
+                            side,  # same close side as the main close order
+                            residual,
+                            reduce_only=(pos_side is None),  # One-Way: reduce only
+                            position_side=pos_side,
+                        )
+            except Exception as _e:
+                logger.error(f"[{symbol}] Post-close residual check failed: {_e}")
+
         return True
 
     # ==================== Main Cycle ====================
