@@ -72,16 +72,16 @@ class TestGetTrailParams:
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100
-        # activationPrice = entry × (1 + trail_activate) = 100 × 1.030 = 103.0
-        assert ap == pytest.approx(103.0)
+        # activationPrice = entry × (1 + trail_activate) = 100 × 1.020 = 102.0
+        assert ap == pytest.approx(102.0)
         assert cs == "SELL"
 
     def test_straddle_short(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("vr_straddle", -1, 100.0)
         assert cr == pytest.approx(0.5)
-        # activationPrice = entry × (1 - trail_activate) = 100 × 0.970 = 97.0
-        assert ap == pytest.approx(97.0)
+        # activationPrice = entry × (1 - trail_activate) = 100 × 0.980 = 98.0
+        assert ap == pytest.approx(98.0)
         assert cs == "BUY"
 
     def test_vr_squeeze_long(self):
@@ -308,8 +308,8 @@ class TestTrailAtEntry:
         # We verify by checking the trail params calculation works correctly.
         cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
         assert cr == pytest.approx(0.5)
-        # activationPrice = entry × (1 + trail_activate) = 100 × 1.030 = 103.0
-        assert ap == pytest.approx(103.0)
+        # activationPrice = entry × (1 + trail_activate) = 100 × 1.020 = 102.0
+        assert ap == pytest.approx(102.0)
         assert cs == "SELL"
 
 
