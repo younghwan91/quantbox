@@ -119,13 +119,6 @@ class PositionMixin:
         is_straddle = sig_meta.get("straddle", False)
         strategy_type = sig_meta.get("strategy_type", VR_DIRECTIONAL)
 
-        # ── Straddle half-size: each leg = 0.5× notional ──
-        # A straddle pair (LONG+SHORT) is one trade idea using 2 slots.
-        # Without this, pair total = 2× directional exposure → double loss on dual SL.
-        if is_straddle:
-            notional *= 0.5
-            logger.info(f"[{symbol}] Straddle half-size: notional=${notional:.2f} (per leg)")
-
         # ── R44d V17: MA Cluster uses different leverage ──
         # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
         if "leverage_override" in sig_meta:
@@ -135,6 +128,14 @@ class PositionMixin:
                 logger.warning(f"[{symbol}] leverage_override clamped: {raw_lev} → {leverage:.0f} (must be [1, 125])")
             notional = per_slot_capital * leverage
             logger.info(f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x (override, SL={sl_pct * 100:.0f}%)")
+
+        # ── Straddle half-size: each leg = 0.5× notional ──
+        # Applied AFTER leverage_override to prevent silent overwrite.
+        # A straddle pair (LONG+SHORT) is one trade idea using 2 slots.
+        # Without this, pair total = 2× directional exposure → double loss on dual SL.
+        if is_straddle:
+            notional *= 0.5
+            logger.info(f"[{symbol}] Straddle half-size: notional=${notional:.2f} (per leg)")
 
         # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
         conviction_score = sig_meta.get("conviction_score", 0)

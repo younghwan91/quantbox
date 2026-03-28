@@ -661,7 +661,11 @@ class RubberBandScalper(
                 pos = self.strategy.active_positions[pos_key]
                 api_sym = to_api_symbol(pos_key)
                 close = self.download_klines(api_sym, 2)
-                price = float(close[-1]) if close is not None else 0.0
+                if close is None:
+                    logger.warning(f"[{pos_key}] DD halt: klines unavailable, closing as precaution")
+                    self._close_position(pos_key, "drawdown_halt", 0.0)
+                    continue
+                price = float(close[-1])
                 # Check unrealized PnL — skip profitable positions
                 entry = pos["entry_price"]
                 signal = pos["signal"]
