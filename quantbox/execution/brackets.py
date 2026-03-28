@@ -18,6 +18,9 @@ from datetime import datetime, timezone
 
 from binance.exceptions import BinanceAPIException
 
+from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.types import round_to_tick, to_api_symbol
+
 logger = logging.getLogger("Scalper")
 
 
@@ -158,8 +161,8 @@ class BracketMixin:
         price_precision = info.get("price_precision", 2)
 
         # Round prices to tick size
-        stop_price = round(round(stop_price / tick_size) * tick_size, price_precision)
-        limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
+        stop_price = round_to_tick(stop_price, tick_size, price_precision)
+        limit_price = round_to_tick(limit_price, tick_size, price_precision)
 
         # T2-1 runtime guard: sanity check stop price placement
         if entry_price <= 0:
@@ -276,8 +279,8 @@ class BracketMixin:
         price_precision = info.get("price_precision", 2)
 
         # Round prices to tick size
-        trigger_price = round(round(trigger_price / tick_size) * tick_size, price_precision)
-        limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
+        trigger_price = round_to_tick(trigger_price, tick_size, price_precision)
+        limit_price = round_to_tick(limit_price, tick_size, price_precision)
 
         # T2-1 runtime guard: sanity check TP price placement
         if entry_price <= 0:
@@ -394,10 +397,10 @@ class BracketMixin:
             close_side: 'SELL' for LONG, 'BUY' for SHORT.
         """
         vs = self.vs_config
-        if strategy_type == "vr_straddle":
+        if strategy_type == VR_STRADDLE:
             td = vs.s_trail_distance
             ta = vs.s_trail_activate
-        elif strategy_type == "ma_cluster":
+        elif strategy_type == MA_CLUSTER:
             td = vs.ma_cluster_trail_distance
             ta = vs.ma_cluster_trail_activate
         else:  # vr_directional
@@ -443,7 +446,7 @@ class BracketMixin:
         info = self.get_symbol_info(symbol)
         tick_size = info.get("tick_size", 0.01)
         price_precision = info.get("price_precision", 2)
-        activation_price = round(round(activation_price / tick_size) * tick_size, price_precision)
+        activation_price = round_to_tick(activation_price, tick_size, price_precision)
 
         params: dict = {
             "algoType": "CONDITIONAL",
@@ -726,8 +729,7 @@ class BracketMixin:
 
         # Extract Binance symbol from compound key (e.g. BTCUSDT:LONG → BTCUSDT).
         # Strip defensively in case pos['symbol'] was corrupted by old _load_state.
-        raw_sym = pos.get("symbol", symbol)
-        api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+        api_sym = to_api_symbol(symbol, pos)
 
         entry_price = pos["entry_price"]
         signal = pos["signal"]
@@ -748,8 +750,8 @@ class BracketMixin:
         tick_size = info.get("tick_size", 0.01)
         price_precision = info.get("price_precision", 2)
 
-        trigger_price = round(round(trigger_price / tick_size) * tick_size, price_precision)
-        limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
+        trigger_price = round_to_tick(trigger_price, tick_size, price_precision)
+        limit_price = round_to_tick(limit_price, tick_size, price_precision)
 
         # v12.3.3 SAFETY: Place new SL FIRST, then cancel old.
         # Reversing this order (cancel-then-place) leaves the runner
@@ -813,13 +815,13 @@ class BracketMixin:
         if not pos.get("trail_active") or self.paper_mode:
             return
 
-        strategy_type = pos.get("strategy_type", "vr_directional")
+        strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
         is_straddle = pos.get("is_straddle", False)
 
         vs = self.vs_config
         if is_straddle:
             trail_distance = vs.s_trail_distance
-        elif strategy_type == "ma_cluster":
+        elif strategy_type == MA_CLUSTER:
             trail_distance = vs.ma_cluster_trail_distance
         else:
             trail_distance = vs.d_trail_distance  # 0.002
@@ -831,8 +833,7 @@ class BracketMixin:
         if trail_stop_gain - last_ratcheted < 0.001:  # 0.1% minimum step
             return
 
-        raw_sym = pos.get("symbol", symbol)
-        api_sym = raw_sym.split(":")[0] if ":" in raw_sym else raw_sym
+        api_sym = to_api_symbol(symbol, pos)
 
         entry_price = pos["entry_price"]
         signal = pos["signal"]
@@ -852,8 +853,8 @@ class BracketMixin:
         tick_size = info.get("tick_size", 0.01)
         price_precision = info.get("price_precision", 2)
 
-        trigger_price = round(round(trigger_price / tick_size) * tick_size, price_precision)
-        limit_price = round(round(limit_price / tick_size) * tick_size, price_precision)
+        trigger_price = round_to_tick(trigger_price, tick_size, price_precision)
+        limit_price = round_to_tick(limit_price, tick_size, price_precision)
 
         # Place-first-cancel-after: position never left unprotected
         quantity = pos["notional"] / pos["entry_price"]
@@ -929,9 +930,7 @@ class BracketMixin:
             sl_oid = pos.get("server_sl_order_id")
             if not sl_oid or str(sl_oid).startswith("paper_"):
                 continue
-            api_sym = pos.get("symbol", sym.split(":")[0])
-            if ":" in api_sym:
-                api_sym = api_sym.split(":")[0]
+            api_sym = to_api_symbol(sym, pos)
             status = self._verify_algo_order_active(str(sl_oid), api_sym)
             if status in ("EXPIRED", "CANCELLED", "CANCELED", "USER_CANCELLED", "ERROR"):
                 logger.warning(f"[{sym}] SL algo order {sl_oid} is {status} — re-placing bracket")
@@ -963,9 +962,7 @@ class BracketMixin:
             self.discord.send(content=f"🚨 **[{sym}] SL 없음** — 강제 청산")
             return False
 
-        api_sym = pos.get("symbol", sym.split(":")[0])
-        if ":" in api_sym:
-            api_sym = api_sym.split(":")[0]
+        api_sym = to_api_symbol(sym, pos)
         status = self._verify_algo_order_active(str(sl_oid), api_sym)
         if status != "WORKING":
             # Ratchet failed — keep old SL, alert

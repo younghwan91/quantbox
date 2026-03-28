@@ -383,7 +383,8 @@ class TestSimStraddleTrades:
             5,
             cost,
         )
-        assert pnl[0] == pytest.approx(-cost, abs=1e-9)
+        # Half-size: 0.5 * (0 + 0 - cost) = -0.5 * cost
+        assert pnl[0] == pytest.approx(-0.5 * cost, abs=1e-9)
 
     def test_straddle_one_leg_tp(self):
         """One leg hits TP, other leg hits SL → net = TP - SL - cost."""
@@ -410,8 +411,8 @@ class TestSimStraddleTrades:
             0.0,
         )
         assert len(pnl) == 1
-        # Long TP = +5%, Short SL = -1.5%, net = 3.5%
-        assert pnl[0] == pytest.approx(tp - sl, abs=1e-9)
+        # Half-size per leg: Long TP = +5%, Short SL = -1.5%, net = 0.5*(+5%) + 0.5*(-1.5%) = 1.75%
+        assert pnl[0] == pytest.approx(0.5 * tp + 0.5 * (-sl), abs=1e-9)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

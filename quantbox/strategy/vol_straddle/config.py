@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 
 from pydantic import Field, model_validator
+from quantbox.core.strategy_names import VR_DIRECTIONAL
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -68,7 +69,7 @@ class VolStraddleConfig(BaseSettings):
     s_squeeze_dur: int = 3  # Min consecutive bars below S VR threshold (r58/r59: 4→3 +25%N +12%PF)
     s_sl: float = 0.015  # 1.5% stop loss (per leg)
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
-    s_trail_activate: float = 0.030  # r106: 1.5%→3.0% (headroom for 0.5% callbackRate floor; PF=1.238, Calmar=7.8)
+    s_trail_activate: float = 0.020  # r107: 3.0%→2.0% (PF=1.411>1.307, trail rate 87.6%>69.9%; ref: r106)
     s_trail_distance: float = 0.005  # r104b: 0.5% behind peak (noise floor — 0.1% fires on tick noise, 81% 1m/15m bias)
     straddle_enabled: bool = True  # S_d8 straddle mode — fixed bracket repair to wait for trail_active
     straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
@@ -334,7 +335,7 @@ class VolStraddleConfig(BaseSettings):
     target_retrace: float = 1.5  # TP multiplier (shared code)
     partial_exit_enabled: bool = False  # VR uses trail, not partial exit
     breakeven_after_partial: bool = False
-    entry_mode: str = "vr_directional"
+    entry_mode: str = VR_DIRECTIONAL
     min_confidence: int = 0
     mtf_confirmation_enabled: bool = False  # VR has its own multi-TF via on_bar
     atr_stop_enabled: bool = False  # VR uses fixed SL
@@ -369,7 +370,7 @@ class VolStraddleConfig(BaseSettings):
     entry_retry_delay_s: float = 2.0  # VS_ENTRY_RETRY_DELAY_S: delay between second leg entry retries (s)
     rollback_retry_count: int = 2  # VS_ROLLBACK_RETRY_COUNT: max retries for rollback _close_position()
     rollback_retry_delay_s: float = 2.0  # VS_ROLLBACK_RETRY_DELAY_S: delay between rollback retries (s)
-    sl_cancel_retry_count: int = 2  # VS_SL_CANCEL_RETRY_COUNT: max retries for counterpart SL cancel
+    sl_cancel_retry_count: int = 2  # VS_SL_CANCEL_RETRY_COUNT: max retries for own SL cancel on TP fill
     sl_cancel_retry_delay_s: float = 1.0  # VS_SL_CANCEL_RETRY_DELAY_S: delay between SL cancel retries (s)
     orphan_auto_close_cycles: int = (
         4  # VS_ORPHAN_AUTO_CLOSE_CYCLES: cycles before orphaned leg auto-closes (~60min at 15m)

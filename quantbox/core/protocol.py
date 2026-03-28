@@ -118,6 +118,15 @@ class ScalperProtocol(Protocol):
     # ── Recon journal (None when disabled) ────────────────────────────────
     _recon_journal: ReconJournal | None
 
+    def _record_recon_event(
+        self,
+        event_type: str,
+        symbol: str,
+        action: str = "",
+        result: str = "",
+        details: dict | None = None,
+    ) -> None: ...
+
     # ── Exchange notional cache (set by _reconcile_positions each cycle) ──
     _cached_exchange_notionals: dict[str, float]
 
