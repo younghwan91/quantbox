@@ -351,7 +351,7 @@ def sim_straddle_trades(
         if sa:
             se = (entry - close[eb]) / entry
         # Half-size per leg: straddle pair total = 1× slot notional
-        net = 0.5 * le + 0.5 * se - cost
+        net = 0.5 * (le + se - cost)
         if cnt < cap:
             pnl[cnt] = net
             ent[cnt] = i
@@ -668,7 +668,7 @@ def sim_straddle_trailing(
         if sa:
             se = (entry - close[eb]) / entry
         # Half-size per leg: straddle pair total = 1× slot notional
-        net = 0.5 * le + 0.5 * se - cost
+        net = 0.5 * (le + se - cost)
         if cnt < cap:
             pnl[cnt] = net
             ent[cnt] = i

@@ -383,7 +383,8 @@ class TestSimStraddleTrades:
             5,
             cost,
         )
-        assert pnl[0] == pytest.approx(-cost, abs=1e-9)
+        # Half-size: 0.5 * (0 + 0 - cost) = -0.5 * cost
+        assert pnl[0] == pytest.approx(-0.5 * cost, abs=1e-9)
 
     def test_straddle_one_leg_tp(self):
         """One leg hits TP, other leg hits SL → net = TP - SL - cost."""
