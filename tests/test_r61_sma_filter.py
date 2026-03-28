@@ -286,7 +286,7 @@ class TestConfigParity:
         assert cfg.s_vr_threshold == pytest.approx(0.57)
         assert cfg.d_vr_threshold == pytest.approx(0.5)
         assert cfg.s_squeeze_dur == 3
-        assert cfg.s_trail_activate == pytest.approx(0.030)
+        assert cfg.s_trail_activate == pytest.approx(0.020)
         assert cfg.d_trail_activate == pytest.approx(0.040)
         assert cfg.s_trail_distance == pytest.approx(0.005)  # r104b: 0.5% noise floor (was 0.001)
         assert cfg.d_trail_distance == pytest.approx(0.005)  # r106: 0.5% (rule #8)
