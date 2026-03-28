@@ -1723,7 +1723,11 @@ class RubberBandScalper(
             self._high_water_mark = balance
             self._initial_balance = balance
             self._trade_history = []
-            logger.info(f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history cleared")
+            self._daily_loss_blocked = False
+            self._daily_realized_pnl = 0.0
+            logger.info(
+                f"No positions to restore — fresh session: HWM reset to ${balance:.2f}, trade history + daily breaker cleared"
+            )
 
         # A2: Guard — HWM/initial_balance corrupt (0 or negative) → reset to current balance
         # Prevents ZeroDivisionError in (hwm - balance) / hwm and DD halt triggering immediately
