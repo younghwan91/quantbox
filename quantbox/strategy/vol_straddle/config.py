@@ -69,7 +69,7 @@ class VolStraddleConfig(BaseSettings):
     s_squeeze_dur: int = 3  # Min consecutive bars below S VR threshold (r58/r59: 4→3 +25%N +12%PF)
     s_sl: float = 0.015  # 1.5% stop loss (per leg)
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
-    s_trail_activate: float = 0.030  # r106: 1.5%→3.0% (headroom for 0.5% callbackRate floor; PF=1.238, Calmar=7.8)
+    s_trail_activate: float = 0.020  # r107: 3.0%→2.0% (PF=1.411>1.307, trail rate 87.6%>69.9%; ref: r106)
     s_trail_distance: float = 0.005  # r104b: 0.5% behind peak (noise floor — 0.1% fires on tick noise, 81% 1m/15m bias)
     straddle_enabled: bool = True  # S_d8 straddle mode — fixed bracket repair to wait for trail_active
     straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
