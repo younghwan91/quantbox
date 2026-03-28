@@ -161,9 +161,10 @@ class TestDailyBreakerPersistence:
                 with patch.object(sc2, "get_balance", return_value=1000.0):
                     sc2._load_state()
 
-        assert sc2._daily_loss_blocked is True
-        assert sc2._daily_realized_pnl == pytest.approx(-75.0)
-        assert sc2._daily_loss_date == "2026-03-15"
+        # Fresh session (no positions) → DailyBreaker cleared
+        assert sc2._daily_loss_blocked is False
+        assert sc2._daily_realized_pnl == pytest.approx(0.0)
+        assert sc2._daily_loss_date == ""
 
     def test_daily_breaker_defaults_when_missing_from_state(self, tmp_path):
         """Older state files without daily_loss_* fields load with safe defaults."""
@@ -219,5 +220,5 @@ class TestDailyBreakerPersistence:
                 with patch.object(sc, "get_balance", return_value=950.0):
                     sc._load_state()
 
-        assert sc._daily_loss_blocked is True
-        assert sc._daily_loss_date == "2026-03-15"
+        # Fresh session (no positions) → DailyBreaker cleared despite state having True
+        assert sc._daily_loss_blocked is False
