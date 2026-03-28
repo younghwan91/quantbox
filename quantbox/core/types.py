@@ -91,6 +91,16 @@ def round_to_tick(price: float, tick_size: float, price_precision: int) -> float
     return round(round(price / tick_size) * tick_size, price_precision)
 
 
+def calc_upnl_pct(entry: float, current: float, signal: int) -> float:
+    """Return unrealized PnL as a fraction (e.g., 0.025 = +2.5%).
+
+    Works for both LONG (signal=1) and SHORT (signal=-1).
+    """
+    if entry <= 0:
+        return 0.0
+    return (current / entry - 1.0) * signal
+
+
 # ── TypedDict: symbol metadata (from exchange_info + leverage brackets) ───────
 
 
