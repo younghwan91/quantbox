@@ -87,7 +87,7 @@ print(f"  S_trail: act={S_TRAIL_ACT*100:.1f}%  dist={S_TRAIL_DIST*100:.1f}%")
 print(f"  D_trail: act={D_TRAIL_ACT*100:.1f}%  dist={D_TRAIL_DIST*100:.1f}%")
 assert S_VR == 0.57, f"S_VR mismatch: {S_VR}"
 assert D_VR == 0.5, f"D_VR mismatch: {D_VR}"
-assert S_TRAIL_ACT == 0.030
+assert S_TRAIL_ACT == 0.020
 assert D_TRAIL_ACT == 0.040
 
 

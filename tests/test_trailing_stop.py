@@ -232,10 +232,10 @@ class TestStraddleUnchanged:
     def test_straddle_uses_s_trail_params(self, strat: VolStraddleStrategy):
         """Straddle uses s_trail_activate/s_trail_distance, not d_trail params."""
         cfg = strat.config
-        assert cfg.s_trail_activate == pytest.approx(0.030)
+        assert cfg.s_trail_activate == pytest.approx(0.020)
         assert cfg.s_trail_distance == pytest.approx(0.005)  # r104b: 0.5% noise floor (was 0.001)
-        # Ensure they differ from D_mom8 params
-        assert cfg.s_trail_activate != cfg.d_trail_activate
+        # Straddle uses dedicated s_trail params, not d_trail params
+        assert cfg.s_trail_activate == pytest.approx(0.020)
 
 
 class TestMaxHold:

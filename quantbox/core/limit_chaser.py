@@ -21,6 +21,8 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
+from quantbox.core.types import round_to_tick
+
 logger = logging.getLogger("LimitChaser")
 
 
@@ -137,8 +139,7 @@ class LimitOrderChaser:
         Returns:
             tick_size 배수로 반올림된 가격.
         """
-        rounded = round(price / tick_size) * tick_size
-        return round(rounded, price_precision)
+        return round_to_tick(price, tick_size, price_precision)
 
     def round_quantity(self, quantity: float, step_size: float, quantity_precision: int) -> float:
         """수량을 거래소 step_size에 맞게 내림 반올림.

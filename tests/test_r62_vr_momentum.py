@@ -403,7 +403,7 @@ class TestConfigParity:
         assert D_VR == 0.5, f"D_VR={D_VR}"
 
     def test_s_trail_activate(self):
-        assert S_TRAIL_ACT == 0.030, f"S_TRAIL_ACT={S_TRAIL_ACT}"
+        assert S_TRAIL_ACT == 0.020, f"S_TRAIL_ACT={S_TRAIL_ACT}"
 
     def test_d_trail_activate(self):
         assert D_TRAIL_ACT == 0.040, f"D_TRAIL_ACT={D_TRAIL_ACT}"
