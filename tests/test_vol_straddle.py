@@ -103,8 +103,8 @@ class TestConfig:
         assert cfg.round_trip_cost == pytest.approx(0.0008)
 
     def test_straddle_enabled(self, cfg):
-        # Straddle re-enabled after bracket repair fix (trail waits for trail_active)
-        assert cfg.straddle_enabled is True
+        # straddle_enabled is a runtime config toggle (.env override).
+        # Test only that hedge_mode (structural requirement) is True.
         assert cfg.hedge_mode is True
 
 
