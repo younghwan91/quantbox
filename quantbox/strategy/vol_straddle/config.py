@@ -71,7 +71,7 @@ class VolStraddleConfig(BaseSettings):
     s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
     s_trail_activate: float = 0.020  # r107: 3.0%→2.0% (PF=1.411>1.307, trail rate 87.6%>69.9%; ref: r106)
     s_trail_distance: float = 0.005  # r104b: 0.5% behind peak (noise floor — 0.1% fires on tick noise, 81% 1m/15m bias)
-    straddle_enabled: bool = True  # S_d8 straddle mode — fixed bracket repair to wait for trail_active
+    straddle_enabled: bool = False  # r108: disabled — PF=0.52 structural loss (4-leg cost drag, double-SL)
     straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
     # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR.
     # r82: strd_max=8 → Calmar +67% vs strd_max=6. VR 2슬롯 보험 유지.
@@ -132,7 +132,7 @@ class VolStraddleConfig(BaseSettings):
 
     # ── Direction Diversity ──
     dir_diversity_enabled: bool = True
-    max_same_direction: int = 2
+    max_same_direction: int = 5  # r108: 2→5 (Calmar +67%, MaxDD -2%p, 10슬롯 완전 활용)
 
     # ── Dynamic Capital ──
     # Disabled: vol_straddle uses fixed balance/max_concurrent (backtest parity).
