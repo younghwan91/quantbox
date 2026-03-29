@@ -786,14 +786,9 @@ class RubberBandScalper(
 
             current_price = close[-1]
 
-            # v12.3.2: Compute FRESH ATR for PBT runner trailing
-            # VolStraddle uses R43 trailing stop (client-side, no ATR needed).
-            current_atr = 0.02
-
             exit_reason = self.strategy.update_position(
                 pos_key,
                 current_price,
-                current_atr_pct=current_atr,
                 current_high=float(high[-1]),
                 current_low=float(low[-1]),
             )
