@@ -132,7 +132,7 @@ class VolStraddleConfig(BaseSettings):
 
     # ── Direction Diversity ──
     dir_diversity_enabled: bool = True
-    max_same_direction: int = 2
+    max_same_direction: int = 5  # r108: 2→5 (Calmar +67%, MaxDD -2%p, 10슬롯 완전 활용)
 
     # ── Dynamic Capital ──
     # Disabled: vol_straddle uses fixed balance/max_concurrent (backtest parity).
