@@ -64,6 +64,25 @@ Both legs of the same straddle share the same ``StraddlePairId``.
 """
 
 
+# ── Order status constants ────────────────────────────────────────────────────
+
+ALGO_ORDER_DEAD_STATUSES: frozenset[str] = frozenset(
+    {
+        "CANCELED",  # Binance US spelling (Rule #7)
+        "CANCELLED",  # Binance UK spelling variant
+        "USER_CANCELLED",
+        "EXPIRED",
+        "ERROR",
+        "REJECTED",
+    }
+)
+"""Algo order statuses that indicate the order is no longer active.
+
+Binance uses American spelling (CANCELED) but some endpoints return
+British spelling (CANCELLED). Always check both via this set (Rule #7).
+"""
+
+
 # ── Utility functions ─────────────────────────────────────────────────────────
 
 
