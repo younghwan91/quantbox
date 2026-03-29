@@ -39,6 +39,7 @@ import argparse
 import logging
 import logging.handlers
 import math
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -343,8 +344,6 @@ class RubberBandScalper(
         Logs violations and sends a single Discord alert if any found.
         Does NOT close positions automatically — alert and log only.
         """
-        import re
-
         violations: list[str] = []
 
         # 1. Position count
@@ -744,8 +743,8 @@ class RubberBandScalper(
         for pos_key, pos in self.strategy.active_positions.items():
             api_sym = to_api_symbol(pos_key, pos)
             try:
-                mark_price = _all_marks.get(api_sym, 0.0)
-                if mark_price <= 0:
+                mark_price = _all_marks.get(api_sym)
+                if mark_price is None:
                     # Fallback to per-symbol call if batch missed it
                     mark = self.client.futures_mark_price(symbol=api_sym)
                     mark_price = float(mark["markPrice"])
@@ -1112,8 +1111,7 @@ class RubberBandScalper(
             moves_seen.append((sym, abs_move))
 
             if signal != 0:
-                # Measure move strength for prioritization
-                move = abs(close[-1] / close[-_lb - 1] - 1.0)
+                move = abs_move
                 if signal == 2:
                     # Straddle: expand into LONG + SHORT candidates.
                     # is_straddle=True so G6 and DirDiversity filters are skipped

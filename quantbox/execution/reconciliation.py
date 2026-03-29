@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from quantbox.core.strategy_names import VR_DIRECTIONAL
-from quantbox.core.types import to_api_symbol
+from quantbox.core.types import ALGO_ORDER_DEAD_STATUSES, to_api_symbol
 from quantbox.execution.recon_journal import ReconEventType
 
 logger = logging.getLogger("Scalper")
@@ -139,11 +139,10 @@ class ReconciliationMixin:
                         "server_tp",
                     )
                     continue
-                elif filled and filled.get("status") == "CANCELLED":
-                    # v12.3.1: Externally cancelled — clear for bracket repair
+                elif filled and filled.get("status") in ALGO_ORDER_DEAD_STATUSES:
                     pos["server_tp_order_id"] = None
                     tp_oid = None
-                    logger.warning(f"[{sym}] Server TP was externally cancelled — cleared for bracket repair")
+                    logger.warning(f"[{sym}] Server TP {filled.get('status')} — cleared for bracket repair")
 
             # Check SL order
             if sl_oid:
@@ -176,11 +175,10 @@ class ReconciliationMixin:
                         "server_sl",
                     )
                     continue
-                elif filled and filled.get("status") == "CANCELLED":
-                    # v12.3.1: Externally cancelled — clear for bracket repair
+                elif filled and filled.get("status") in ALGO_ORDER_DEAD_STATUSES:
                     pos["server_sl_order_id"] = None
                     sl_oid = None
-                    logger.warning(f"[{sym}] Server SL was externally cancelled — cleared for bracket repair")
+                    logger.warning(f"[{sym}] Server SL {filled.get('status')} — cleared for bracket repair")
 
             # ── Check TRAILING_STOP_MARKET order (Algo API) ──
             trail_oid = pos.get("server_trail_order_id")
@@ -228,10 +226,10 @@ class ReconciliationMixin:
                         context="Trail partial fill",
                     )
                     continue
-                elif trail_status and trail_status.get("status") == "CANCELED":
+                elif trail_status and trail_status.get("status") in ALGO_ORDER_DEAD_STATUSES:
                     pos["server_trail_order_id"] = None
                     trail_oid = None
-                    logger.warning(f"[{sym}] Server trail was externally cancelled — cleared for repair")
+                    logger.warning(f"[{sym}] Server trail {trail_status.get('status')} — cleared for repair")
 
             # ═══ v11.4.2 BRACKET REPAIR: Place missing SL/TP for restored positions ═══
             # Positions restored from state may have None algoIds (e.g. old session
