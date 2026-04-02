@@ -1150,7 +1150,8 @@ class ReconciliationMixin:
             else:
                 logger.info(f"[{symbol}] 스트래들 페어 완전 청산 (pair_id={pair_id}): 양 다리 모두 청산됨")
 
-        emoji = "🎯" if reason == "server_tp" else "🛑"
+        _emoji_map = {"server_tp": "🎯", "server_trail": "🏃", "server_sl": "🛑"}
+        emoji = _emoji_map.get(reason, "🛑")
         logger.info(
             f"[{symbol}] {emoji} {reason.upper()} FILLED: "
             f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
@@ -1164,7 +1165,12 @@ class ReconciliationMixin:
         hold_time = pos["bars_held"] * 15
 
         _dir = "LONG ↑" if pos["signal"] == 1 else "SHORT ↓"
-        _fill_type = "서버 TP 체결 (바 중간 익절)" if reason == "server_tp" else "서버 SL 체결 (안전장치)"
+        _fill_type_map = {
+            "server_tp": "서버 TP 체결 (바 중간 익절)",
+            "server_trail": "서버 트레일 체결 (추적 익절)",
+            "server_sl": "서버 SL 체결 (안전장치)",
+        }
+        _fill_type = _fill_type_map.get(reason, f"서버 체결 ({reason})")
         n_remaining = self.strategy.n_active
         self.discord.send(
             embed={
