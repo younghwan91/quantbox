@@ -523,8 +523,8 @@ class TestMaClusterConfig:
     def test_defaults(self):
         cfg = VolStraddleConfig()
         assert cfg.ma_cluster_enabled is True  # r92 gate PASS: re-enabled 2026-03-18
-        assert cfg.ma_cluster_pct == 0.02  # r75: 3%→2%
-        assert cfg.ma_cluster_min_duration == 6  # r75: 8→6
+        assert cfg.ma_cluster_pct == 0.15  # autoresearch apr03: 2%→15% (33x N, PF +25%)
+        assert cfg.ma_cluster_min_duration == 1  # autoresearch apr03: 6→1 (N +2x, PF stable)
         assert cfg.ma_cluster_max_duration == 24
         assert cfg.ma_cluster_min_momentum == 0.01
         assert cfg.ma_cluster_sl == 0.02
@@ -676,20 +676,20 @@ class TestStrategyIntegration:
         key = "BTCUSDT:LONG"
         strategy._positions[key]["strategy_type"] = "ma_cluster"
 
-        trail_activate = cfg.ma_cluster_trail_activate  # 0.02
-        trail_distance = cfg.ma_cluster_trail_distance  # 0.003
+        trail_activate = cfg.ma_cluster_trail_activate  # 0.01
+        trail_distance = cfg.ma_cluster_trail_distance  # 0.005
 
-        # Phase 1: price below trail_activate (1%) — no trail yet
+        # Phase 1: price below trail_activate (0.5% < 1%) — no trail yet
         result = strategy.update_position(
             key,
-            101.0,
-            current_high=101.0,
-            current_low=100.8,
+            100.5,
+            current_high=100.5,
+            current_low=100.3,
         )
         assert result is None
         assert strategy._positions[key]["trail_active"] is False
 
-        # Phase 2: price past trail_activate (3% > 2%) — trail activates
+        # Phase 2: price past trail_activate (3% > 1%) — trail activates
         result = strategy.update_position(
             key,
             103.0,
@@ -857,12 +857,12 @@ class TestStrategyIntegration:
         key = "BNBUSDT:LONG"
         strategy._positions[key]["strategy_type"] = "ma_cluster"
 
-        # Simulate 11 bars — no exit (price flat)
+        # Simulate 11 bars — no exit (price flat, below trail_activate=1%)
         for _ in range(11):
             result = strategy.update_position(
                 key,
-                100.5,
-                current_high=101.0,
+                100.3,
+                current_high=100.5,
                 current_low=100.0,
             )
             assert result is None
@@ -870,8 +870,8 @@ class TestStrategyIntegration:
         # 12th bar — max hold
         result = strategy.update_position(
             key,
-            100.5,
-            current_high=101.0,
+            100.3,
+            current_high=100.5,
             current_low=100.0,
         )
         assert result == "max_hold"

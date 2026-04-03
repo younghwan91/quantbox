@@ -501,11 +501,11 @@ class TestStrategyTypeInPositionDict:
             f"D_mom8 4.1% 수익에서 trail_active=True 필요 (activate={cfg.d_trail_activate})"
         )
 
-        # MA cluster 포지션: 동일 1.1% 수익 → trail 미활성화 (MA는 4% 필요)
-        _tick(strategy, eth_key, 101.1, high=101.1, low=101.09)
+        # MA cluster 포지션: 0.5% 수익 → trail 미활성화 (MA는 1% 필요)
+        _tick(strategy, eth_key, 100.5, high=100.5, low=100.49)
         eth_pos = strategy._positions[eth_key]
         assert eth_pos.get("trail_active", False) is False, (
-            f"MA cluster 1.1% 수익에서 trail_active=False 필요 (activate={cfg.ma_cluster_trail_activate})"
+            f"MA cluster 0.5% 수익에서 trail_active=False 필요 (activate={cfg.ma_cluster_trail_activate})"
         )
 
 
@@ -564,9 +564,9 @@ class TestPastIncidentPrevention:
         assert cfg.d_trail_distance == 0.005, f"r106: trail_distance=0.005 (0.5%, rule #8). got={cfg.d_trail_distance}"
 
     def test_ma_cluster_trail_activate_not_zero(self, cfg):
-        """MA cluster trail은 1.5%/0.5% (r115: 2%→1.5%, ATR 절반화 대응)."""
-        assert cfg.ma_cluster_trail_activate == 0.015, (
-            f"MA cluster trail_activate=0.015 (r115). got={cfg.ma_cluster_trail_activate}"
+        """MA cluster trail은 1.0%/0.5% (autoresearch apr03: 1.5%→1.0%)."""
+        assert cfg.ma_cluster_trail_activate == 0.01, (
+            f"MA cluster trail_activate=0.01 (autoresearch apr03). got={cfg.ma_cluster_trail_activate}"
         )
         assert cfg.ma_cluster_trail_distance == 0.005, (
             f"MA cluster trail_distance=0.005 (r106: rule #8). got={cfg.ma_cluster_trail_distance}"
