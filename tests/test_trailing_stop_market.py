@@ -96,8 +96,8 @@ class TestGetTrailParams:
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("ma_cluster", -1, 50.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100 (r106: rule #8 floor)
-        # activationPrice = entry × (1 - trail_activate) = 50 × 0.985 = 49.25
-        assert ap == pytest.approx(49.25)
+        # activationPrice = entry × (1 - trail_activate) = 50 × 0.99 = 49.5
+        assert ap == pytest.approx(49.5)
         assert cs == "BUY"
 
     def test_callback_rate_clamp_min(self):
