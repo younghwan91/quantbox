@@ -523,8 +523,8 @@ class TestMaClusterConfig:
     def test_defaults(self):
         cfg = VolStraddleConfig()
         assert cfg.ma_cluster_enabled is True  # r92 gate PASS: re-enabled 2026-03-18
-        assert cfg.ma_cluster_pct == 0.15  # autoresearch apr03: 2%→15% (33x N, PF +25%)
-        assert cfg.ma_cluster_min_duration == 1  # autoresearch apr03: 6→1 (N +2x, PF stable)
+        assert cfg.ma_cluster_pct == 0.02  # r75: 3%→2%
+        assert cfg.ma_cluster_min_duration == 6  # r75: 8→6
         assert cfg.ma_cluster_max_duration == 24
         assert cfg.ma_cluster_min_momentum == 0.01
         assert cfg.ma_cluster_sl == 0.02
@@ -682,9 +682,9 @@ class TestStrategyIntegration:
         # Phase 1: price below trail_activate (0.5% < 1%) — no trail yet
         result = strategy.update_position(
             key,
-            100.5,
+            100.3,
             current_high=100.5,
-            current_low=100.3,
+            current_low=100.1,
         )
         assert result is None
         assert strategy._positions[key]["trail_active"] is False
@@ -863,7 +863,7 @@ class TestStrategyIntegration:
                 key,
                 100.3,
                 current_high=100.5,
-                current_low=100.0,
+                current_low=100.1,
             )
             assert result is None
 
