@@ -298,8 +298,8 @@ class VolStraddleConfig(BaseSettings):
     # Complementary strategy: 4 SMAs cluster → breakout.
     # Fires when VR squeeze is idle (93.7% non-overlapping).
     ma_cluster_enabled: bool = True  # r92 gate PASS: PF=2.749, MaxDD=17.7%, all 6yr profitable
-    ma_cluster_pct: float = 0.15  # autoresearch apr03: 2%→15% (PF 2.07→2.59, N 33x, 8-stress-test PASS)
-    ma_cluster_min_duration: int = 1  # autoresearch apr03: 6→1 (PF stable, N +2x, all 6yr profitable)
+    ma_cluster_pct: float = 0.02  # Max spread among 4 SMAs (r75: 3%→2%, tighter cluster)
+    ma_cluster_min_duration: int = 6  # Min 4h bars in cluster (r75: 8→6, ≈24h)
     ma_cluster_max_duration: int = 24  # Max 4h bars in cluster (R45: zombie filter)
     ma_cluster_min_momentum: float = 0.01  # Min |momentum| for entry (R45: was 0.003)
     ma_cluster_sl: float = 0.02  # 2% stop loss
