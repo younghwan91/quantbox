@@ -564,9 +564,9 @@ class TestPastIncidentPrevention:
         assert cfg.d_trail_distance == 0.005, f"r106: trail_distance=0.005 (0.5%, rule #8). got={cfg.d_trail_distance}"
 
     def test_ma_cluster_trail_activate_not_zero(self, cfg):
-        """MA cluster trail은 2%/0.3% (r75 최적화: 4%/0.5% → 2%/0.3%)."""
-        assert cfg.ma_cluster_trail_activate == 0.02, (
-            f"MA cluster trail_activate=0.02 (r75). got={cfg.ma_cluster_trail_activate}"
+        """MA cluster trail은 1.5%/0.5% (r115: 2%→1.5%, ATR 절반화 대응)."""
+        assert cfg.ma_cluster_trail_activate == 0.015, (
+            f"MA cluster trail_activate=0.015 (r115). got={cfg.ma_cluster_trail_activate}"
         )
         assert cfg.ma_cluster_trail_distance == 0.005, (
             f"MA cluster trail_distance=0.005 (r106: rule #8). got={cfg.ma_cluster_trail_distance}"
