@@ -304,7 +304,7 @@ class VolStraddleConfig(BaseSettings):
     ma_cluster_min_momentum: float = 0.01  # Min |momentum| for entry (R45: was 0.003)
     ma_cluster_sl: float = 0.02  # 2% stop loss
     ma_cluster_tp: float = 0.08  # 8% hard TP ceiling (safety; r47: trailing fires first)
-    ma_cluster_trail_activate: float = 0.02  # r75: 4%→2% (earlier trail activation)
+    ma_cluster_trail_activate: float = 0.015  # r115: 2%→1.5% (PF +12%, WR +7pp; ATR 절반화 대응)
     ma_cluster_trail_distance: float = 0.005  # r106: 0.3%→0.5% (Binance callbackRate floor, rule #8; pending sweep)
 
     # r65: Server-side trail SL ratchet — closes bar-close execution gap (ΔPF=-0.950)
