@@ -106,6 +106,8 @@ load_dotenv()
 
 logger = logging.getLogger("Scalper")
 
+_SYMBOL_RE = re.compile(r"^[A-Z]{2,12}USDT$")
+
 
 # ──────────────── Diagnostic Logger ─────────────────────
 from quantbox.utils.diagnostics import _diag_logger  # noqa: E402
@@ -367,7 +369,7 @@ class RubberBandScalper(
                 violations.append(f"[{pos_key}] notional={notional!r} out of range")
             if signal not in (-1, 0, 1, 2):
                 violations.append(f"[{pos_key}] invalid signal={signal!r}")
-            if not re.match(r"^[A-Z]{2,12}USDT$", api_sym):
+            if not _SYMBOL_RE.match(api_sym):
                 violations.append(f"[{pos_key}] malformed symbol={api_sym!r}")
             if isinstance(raw_symbol, str) and ":" in raw_symbol:
                 violations.append(

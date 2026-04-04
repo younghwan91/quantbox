@@ -139,7 +139,7 @@ class PositionMixin:
 
         # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
         conviction_score = sig_meta.get("conviction_score", 0)
-        if vs.cw_enabled and vs.cw_multipliers and "vr" in strategy_type:
+        if vs.cw_enabled and vs.cw_multipliers and strategy_type in (VR_DIRECTIONAL, VR_STRADDLE):
             idx = min(conviction_score, len(vs.cw_multipliers) - 1)
             cw_mult = vs.cw_multipliers[idx]
             notional *= cw_mult
@@ -548,7 +548,7 @@ class PositionMixin:
                             if (is_straddle or strategy_type == MA_CLUSTER)
                             else (
                                 f"Trail({vs.donchian_trail_activate * 100:.0f}%/{vs.donchian_trail_distance * 100:.1f}%)"
-                                if strategy_type == "donchian"
+                                if strategy_type == DONCHIAN
                                 else f"Trail({vs.d_trail_activate * 100:.0f}%/{vs.d_trail_distance * 100:.1f}%)"
                             )
                         ),
@@ -556,8 +556,10 @@ class PositionMixin:
                     },
                     {"name": "SL 방식", "value": _sl_tag, "inline": True},
                     {
-                        "name": "확신도" if strategy_type.startswith("vr_") else "전략타입",
-                        "value": (f"{conviction_score}/4" if strategy_type.startswith("vr_") else strategy_type),
+                        "name": "확신도" if strategy_type in (VR_DIRECTIONAL, VR_STRADDLE) else "전략타입",
+                        "value": (
+                            f"{conviction_score}/4" if strategy_type in (VR_DIRECTIONAL, VR_STRADDLE) else strategy_type
+                        ),
                         "inline": True,
                     },
                     {"name": "슬롯", "value": f"{n_active}/{self.vs_config.max_concurrent}", "inline": True},

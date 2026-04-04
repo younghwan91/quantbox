@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 
 from quantbox.core.bot_utils import GIT_COMMIT
-from quantbox.core.strategy_names import VR_DIRECTIONAL
+from quantbox.core.strategy_names import VR_DIRECTIONAL, VR_STRADDLE
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def migrate_strategy_types(db_path: str | Path) -> int:
     count = 0
     try:
         with conn:  # explicit transaction — atomic commit or rollback
-            for old, new in [("vr_squeeze", "vr_directional"), ("straddle", "vr_straddle")]:
+            for old, new in [("vr_squeeze", VR_DIRECTIONAL), ("straddle", VR_STRADDLE)]:
                 cursor = conn.execute("UPDATE trades SET strategy_type = ? WHERE strategy_type = ?", (new, old))
                 count += cursor.rowcount
     except sqlite3.OperationalError:
