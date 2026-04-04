@@ -1,40 +1,41 @@
 #!/usr/bin/env python3
-"""MetaScore: backtest 결과의 실전 생존 확률 측정.
+"""Autoresearch: Comprehensive Robustness Test for All Successful Strategies.
 
-4-metric composite score (0-1):
-1. Slippage Robustness — 비용 2x/3x에서도 PF>1?
-2. Temporal Stability — 매년 profitable?
-3. Parameter Plateau — ±20%에서도 안정?
-4. OOS Decay — 최근 2년 성능 감소율?
+Tests each strategy under a matrix of realistic conditions:
+  - Cost: 1x, 2x, 3x (fee + slippage)
+  - Entry slippage: 0%, 0.1%, 0.2% (adverse entry price on breakout bars)
+  - Combined worst-case: 3x cost + 0.2% slippage
 
-Validation: production config >= 0.7, pct=0.15 failure case < 0.5.
+Primary metric: PF at worst-case scenario.
 """
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
+import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (  # noqa: E402
+    G_4TF,
     build_resampled,
+    bootstrap_pf,
     collect_ma_cluster_trades,
     collect_trades,
     compute_metrics,
     portfolio_sim,
     precompute_all_vr,
-    G_4TF,
 )
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig  # noqa: E402
 from quantbox.strategy.vol_straddle.signals import compute_momentum  # noqa: E402
 
+
 # ══════════════════════════════════════════════════════════════════════════════
-#  FIXED: Data loading
+#  Data loading
 # ══════════════════════════════════════════════════════════════════════════════
 
 CACHE_DIR = ROOT / "data" / "cache_extended"
@@ -45,7 +46,8 @@ SLOT_LIMIT = 10
 def load_data():
     cfg = VolStraddleConfig()
     whitelist = set(cfg.symbol_whitelist)
-    data_15m, max_bars = {}, 0
+    data_15m: dict = {}
+    max_bars = 0
     for f in sorted(CACHE_DIR.glob("*_15m_2190d_*.npz")):
         if "numtrades" in f.name:
             continue
@@ -64,246 +66,26 @@ def load_data():
         }
     for sym in data_15m:
         data_15m[sym]["_offset"] = max_bars - len(data_15m[sym]["close"])
-        data_15m[sym]["mom_8"] = compute_momentum(data_15m[sym]["close"], cfg.momentum_period)
+        data_15m[sym]["mom_8"] = compute_momentum(data_15m[sym]["close"], 8)
     data_1h = build_resampled(data_15m, 4)
     data_4h = build_resampled(data_15m, 16)
-    for d in data_1h.values():
-        d["mom_8"] = compute_momentum(d["close"], cfg.momentum_period)
-    for d in data_4h.values():
-        d["mom_8"] = compute_momentum(d["close"], cfg.momentum_period)
-    precompute_all_vr([data_15m, data_1h, data_4h], [(cfg.vr_short, cfg.vr_long)])
+    for ds in [data_1h, data_4h]:
+        for d in ds.values():
+            d["mom_8"] = compute_momentum(d["close"], 8)
+    precompute_all_vr([data_15m, data_1h, data_4h], [(8, 56)])
     return data_15m, data_1h, data_4h, max_bars
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  EXPERIMENT: MetaScore implementation — agent hacks this section
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Weights for composite score
-W_SLIPPAGE = 0.20
-W_TEMPORAL = 0.20
-W_PLATEAU = 0.20
-W_DECAY = 0.20
-W_FILTER = 0.20  # filter effectiveness — penalizes disabled filters
-
-
-def score_slippage_robustness(
-    collect_fn, collect_kwargs: dict, base_cost: float = 0.0008
-) -> float:
-    """Test PF at 1x, 2x, 3x cost. Score = fraction of multipliers where PF > 1.0."""
-    multipliers = [1, 2, 3]
-    passes = 0
-    for mult in multipliers:
-        kwargs = {**collect_kwargs, "cost": base_cost * mult}
-        trades = collect_fn(**kwargs)
-        pnl = portfolio_sim(trades, max_concurrent=SLOT_LIMIT)
-        m = compute_metrics(pnl, DATA_YEARS)
-        if m.get("PF", 0) > 1.0:
-            passes += 1
-    return passes / len(multipliers)
-
-
-def score_temporal_stability(trades: list, max_bars: int) -> float:
-    """Score = fraction of years with PF > 1.0."""
-    if not trades:
-        return 0.0
-    bars_per_year = max_bars / DATA_YEARS
-    yearly: dict[int, list[float]] = {}
-    for sym, entry, exit_b, pnl_val in trades:
-        year = min(int(2020 + entry / bars_per_year), 2025)
-        yearly.setdefault(year, []).append(pnl_val)
-
-    profitable_years = 0
-    total_years = 0
-    for y in sorted(yearly):
-        pnls = np.array(yearly[y])
-        wins = pnls[pnls > 0]
-        losses = pnls[pnls <= 0]
-        pf = wins.sum() / abs(losses.sum()) if losses.sum() != 0 else 999
-        total_years += 1
-        if pf > 1.0:
-            profitable_years += 1
-    return profitable_years / total_years if total_years > 0 else 0.0
-
-
-def score_parameter_plateau(
-    collect_fn, collect_kwargs: dict, param_name: str, base_value: float
-) -> float:
-    """Test PF at param ±10%, ±20%. Score = fraction of variants with PF within 80% of base PF."""
-    # First get base PF
-    trades = collect_fn(**collect_kwargs)
-    pnl = portfolio_sim(trades, max_concurrent=SLOT_LIMIT)
-    base_m = compute_metrics(pnl, DATA_YEARS)
-    base_pf = base_m.get("PF", 0)
-    if base_pf <= 0:
-        return 0.0
-
-    offsets = [-0.20, -0.10, 0.10, 0.20]
-    stable = 0
-    for off in offsets:
-        test_val = base_value * (1 + off)
-        test_kwargs = {**collect_kwargs, param_name: test_val}
-        trades = collect_fn(**test_kwargs)
-        pnl = portfolio_sim(trades, max_concurrent=SLOT_LIMIT)
-        m = compute_metrics(pnl, DATA_YEARS)
-        test_pf = m.get("PF", 0)
-        if test_pf >= base_pf * 0.80:
-            stable += 1
-    return stable / len(offsets)
-
-
-def score_oos_decay(trades: list, max_bars: int) -> float:
-    """Compare PF of recent 2 years vs first 4 years. Score = 1 - decay_rate (clamped 0-1)."""
-    if not trades:
-        return 0.0
-    bars_per_year = max_bars / DATA_YEARS
-    cutoff_bar = int(4.0 * bars_per_year)  # first 4 years
-
-    early = [p for _, e, _, p in trades if e < cutoff_bar]
-    late = [p for _, e, _, p in trades if e >= cutoff_bar]
-
-    if not early or not late:
-        return 0.0
-
-    early_arr = np.array(early)
-    late_arr = np.array(late)
-
-    def pf(arr):
-        w = arr[arr > 0].sum()
-        l = abs(arr[arr <= 0].sum())
-        return w / l if l > 0 else 999
-
-    early_pf = pf(early_arr)
-    late_pf = pf(late_arr)
-
-    if early_pf <= 0:
-        return 0.0
-
-    decay_rate = max(0, 1 - late_pf / early_pf)  # 0 = no decay, 1 = total decay
-    return max(0, min(1, 1 - decay_rate))
-
-
-def score_filter_effectiveness(
-    collect_fn, collect_kwargs: dict, param_name: str, base_param_value: float,
-    max_bars: int,
-) -> float:
-    """Measure filter selectivity via trades per symbol per year.
-
-    A genuine squeeze/cluster filter should fire rarely per symbol.
-    If trades_per_sym_per_year > 30, the filter is too loose.
-
-    Score: <=10 → 1.0, 10-30 → linear decay, >30 → 0.0.
-    """
-    raw_trades = collect_fn(**collect_kwargs)
-    raw_n = len(raw_trades)
-    if raw_n == 0:
-        return 1.0
-
-    n_symbols = len(set(s for s, _, _, _ in raw_trades))
-    if n_symbols == 0:
-        return 1.0
-
-    tpsy = raw_n / n_symbols / DATA_YEARS  # trades per symbol per year
-
-    if tpsy <= 10:
-        return 1.0
-    elif tpsy <= 30:
-        return 1.0 - (tpsy - 10) / 20.0
-    else:
-        return 0.0
-
-
-def compute_meta_score(
-    collect_fn,
-    collect_kwargs: dict,
-    param_name: str,
-    base_param_value: float,
-    max_bars: int,
-) -> dict:
-    """Compute composite MetaScore."""
-    trades = collect_fn(**collect_kwargs)
-    pnl = portfolio_sim(trades, max_concurrent=SLOT_LIMIT)
-    base_metrics = compute_metrics(pnl, DATA_YEARS)
-
-    s1 = score_slippage_robustness(collect_fn, collect_kwargs)
-    s2 = score_temporal_stability(trades, max_bars)
-    s3 = score_parameter_plateau(collect_fn, collect_kwargs, param_name, base_param_value)
-    s4 = score_oos_decay(trades, max_bars)
-    s5 = score_filter_effectiveness(
-        collect_fn, collect_kwargs, param_name, base_param_value, max_bars
-    )
-
-    # Filter is a multiplicative gate — if filter is broken, nothing else matters
-    base_score = (
-        W_SLIPPAGE * s1 + W_TEMPORAL * s2 + W_PLATEAU * s3 + W_DECAY * s4
-    ) / (W_SLIPPAGE + W_TEMPORAL + W_PLATEAU + W_DECAY)
-    composite = base_score * s5
-
-    return {
-        "composite": composite,
-        "slippage_robustness": s1,
-        "temporal_stability": s2,
-        "parameter_plateau": s3,
-        "oos_decay": s4,
-        "filter_effectiveness": s5,
-        "base_pf": base_metrics.get("PF", 0),
-        "base_n": base_metrics.get("N", 0),
-    }
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Test harness
-# ══════════════════════════════════════════════════════════════════════════════
-
-def main():
-    print("Loading data...")
-    data_15m, data_1h, data_4h, max_bars = load_data()
-
-    # ── Test Case 1: Production MA Cluster config (should score >= 0.7) ──
-    print("\n" + "=" * 60)
-    print("  TEST 1: Production MA Cluster (pct=0.02, dur=6)")
-    print("=" * 60)
-    prod_kwargs = {
-        "data_15m": data_15m, "data_4h": data_4h,
-        "cluster_pct": 0.02, "min_duration": 6,
-        "trail_activate": 0.01, "trail_distance": 0.005, "sl": 0.02,
-    }
-    prod_score = compute_meta_score(
-        collect_ma_cluster_trades, prod_kwargs,
-        param_name="cluster_pct", base_param_value=0.02, max_bars=max_bars,
-    )
-    for k, v in prod_score.items():
-        print(f"  {k:25s}: {v:.3f}")
-    prod_pass = "PASS" if prod_score["composite"] >= 0.7 else "FAIL"
-    print(f"  VERDICT: {prod_pass} (target >= 0.7)")
-
-    # ── Test Case 2: Failed pct=0.15 config (should score < 0.5) ──
-    print("\n" + "=" * 60)
-    print("  TEST 2: Failed config (pct=0.15, dur=1)")
-    print("=" * 60)
-    bad_kwargs = {
-        "data_15m": data_15m, "data_4h": data_4h,
-        "cluster_pct": 0.15, "min_duration": 1,
-        "trail_activate": 0.01, "trail_distance": 0.005, "sl": 0.02,
-    }
-    bad_score = compute_meta_score(
-        collect_ma_cluster_trades, bad_kwargs,
-        param_name="cluster_pct", base_param_value=0.15, max_bars=max_bars,
-    )
-    for k, v in bad_score.items():
-        print(f"  {k:25s}: {v:.3f}")
-    bad_pass = "PASS" if bad_score["composite"] < 0.5 else "FAIL"
-    print(f"  VERDICT: {bad_pass} (target < 0.5)")
-
-    # ── Test Case 3: Production D_mom8 (should score >= 0.7) ──
-    print("\n" + "=" * 60)
-    print("  TEST 3: Production D_mom8 (d_vr=0.50)")
-    print("=" * 60)
+def collect_existing_trades(data_15m, data_1h, data_4h):
     cfg = VolStraddleConfig()
     d_cfg = {
-        "sp": cfg.vr_short, "lp": cfg.vr_long,
-        "d_vr": cfg.d_vr_threshold, "s_vr": cfg.s_vr_threshold,
-        "s_dur": cfg.s_squeeze_dur, "d_sl": cfg.d_sl, "s_sl": cfg.s_sl,
+        "sp": cfg.vr_short,
+        "lp": cfg.vr_long,
+        "d_vr": cfg.d_vr_threshold,
+        "s_vr": cfg.s_vr_threshold,
+        "s_dur": cfg.s_squeeze_dur,
+        "d_sl": cfg.d_sl,
+        "s_sl": cfg.s_sl,
         "tp": cfg.d_tp,
         "d_trail_activate": cfg.d_trail_activate,
         "d_trail_distance": cfg.d_trail_distance,
@@ -311,36 +93,386 @@ def main():
         "s_trail_distance": cfg.s_trail_distance,
         "funding_rate_8h": cfg.default_funding_rate_8h,
     }
+    vr_trades = collect_trades(
+        d_cfg, data_15m, data_1h, data_4h, "D_mom8", tf_group=G_4TF
+    )
+    ma_trades = collect_ma_cluster_trades(data_15m, data_4h)
+    return vr_trades + ma_trades
 
-    def collect_d_mom8(**kw):
-        c = {**d_cfg, **{k: v for k, v in kw.items() if k not in ("data_15m", "data_1h", "data_4h")}}
-        return collect_trades(
-            c, kw.get("data_15m", data_15m),
-            kw.get("data_1h", data_1h), kw.get("data_4h", data_4h),
-            strat="D_mom8", tf_group=G_4TF,
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Trade sim WITH entry slippage support
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def sim_with_slippage(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    sig: np.ndarray,
+    dire: np.ndarray,
+    sl: float,
+    tp: float,
+    max_hold: int,
+    cost: float,
+    trail_activate: float,
+    trail_distance: float,
+    warmup: int,
+    entry_slippage: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Trade sim with entry slippage — adverse entry price on signal bars.
+
+    entry_slippage: fraction of price added adversely.
+    LONG:  entry = close[i] * (1 + entry_slippage)  — pay more
+    SHORT: entry = close[i] * (1 - entry_slippage)  — get less
+    """
+    n = len(close)
+    cap = n // 2 + 1
+    pnl = np.empty(cap, dtype=np.float64)
+    ent = np.empty(cap, dtype=np.int64)
+    ext = np.empty(cap, dtype=np.int64)
+    cnt = 0
+    i = warmup
+    while i < n - 1:
+        if sig[i] == 0 or dire[i] == 0:
+            i += 1
+            continue
+        base_entry = close[i]
+        if base_entry <= 0:
+            i += 1
+            continue
+        d = dire[i]
+        # Apply adverse entry slippage
+        if d == 1:
+            entry = base_entry * (1.0 + entry_slippage)
+        else:
+            entry = base_entry * (1.0 - entry_slippage)
+
+        end = min(i + 1 + max_hold, n)
+        eb = end - 1
+        trade_pnl = 0.0
+        trailing_active = False
+        peak_gain = 0.0
+
+        for j in range(i + 1, end):
+            if d == 1:
+                cur_gain = (high[j] - entry) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+                if trailing_active:
+                    trail_level = entry * (1.0 + peak_gain - trail_distance)
+                    if low[j] <= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if low[j] <= entry * (1.0 - sl):
+                        trade_pnl = -sl
+                        eb = j
+                        break
+                if high[j] >= entry * (1.0 + tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+            else:
+                cur_gain = (entry - low[j]) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+                if trailing_active:
+                    trail_level = entry * (1.0 - peak_gain + trail_distance)
+                    if high[j] >= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if high[j] >= entry * (1.0 + sl):
+                        trade_pnl = -sl
+                        eb = j
+                        break
+                if low[j] <= entry * (1.0 - tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+        else:
+            if d == 1:
+                trade_pnl = (close[eb] - entry) / entry
+            else:
+                trade_pnl = (entry - close[eb]) / entry
+
+        if cnt < cap:
+            pnl[cnt] = trade_pnl - cost
+            ent[cnt] = i
+            ext[cnt] = eb
+            cnt += 1
+        i = eb + 1
+
+    return pnl[:cnt], ent[:cnt], ext[:cnt]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Signal generators for each strategy
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def compute_vol_sma(volume, period):
+    n = len(volume)
+    out = np.full(n, np.nan)
+    if n < period:
+        return out
+    s = 0.0
+    for i in range(period):
+        s += volume[i]
+    out[period - 1] = s / period
+    for i in range(period, n):
+        s += volume[i] - volume[i - period]
+        out[i] = s / period
+    return out
+
+
+@numba.jit(nopython=True, cache=True)
+def gen_donchian_vol(close, high, low, volume, period, mom_min, vol_sma, vol_mult):
+    n = len(close)
+    sig = np.zeros(n, dtype=np.int64)
+    dire = np.zeros(n, dtype=np.int64)
+    for i in range(period, n):
+        if np.isnan(vol_sma[i]) or vol_sma[i] <= 0:
+            continue
+        if volume[i] < vol_mult * vol_sma[i]:
+            continue
+        chan_high = -1e18
+        chan_low = 1e18
+        for j in range(i - period, i):
+            if high[j] > chan_high:
+                chan_high = high[j]
+            if low[j] < chan_low:
+                chan_low = low[j]
+        if close[i] <= 0:
+            continue
+        if close[i] > chan_high:
+            breakout_pct = (close[i] - chan_high) / close[i]
+            if breakout_pct > mom_min:
+                sig[i] = 1
+                dire[i] = 1
+        elif close[i] < chan_low:
+            breakout_pct = (chan_low - close[i]) / close[i]
+            if breakout_pct > mom_min:
+                sig[i] = 1
+                dire[i] = -1
+    return sig, dire
+
+
+@numba.jit(nopython=True, cache=True)
+def gen_high_vol_momentum(vr, momentum, vr_min, mom_min):
+    n = len(vr)
+    sig = np.zeros(n, dtype=np.int64)
+    dire = np.zeros(n, dtype=np.int64)
+    for i in range(n):
+        if np.isnan(vr[i]) or np.isnan(momentum[i]):
+            continue
+        if vr[i] > vr_min and abs(momentum[i]) > mom_min:
+            sig[i] = 1
+            dire[i] = 1 if momentum[i] > 0 else -1
+    return sig, dire
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Strategy definitions
+# ══════════════════════════════════════════════════════════════════════════════
+
+STRATEGIES = {
+    "donchian_vol": {
+        "tf": "4h",
+        "tf_ratio": 16,
+        "sl": 0.015,
+        "tp": 0.15,
+        "trail_activate": 0.02,
+        "trail_distance": 0.008,
+        "max_hold": 24,
+        "warmup": 55,
+    },
+    "high_vol_momentum": {
+        "tf": "1h",
+        "tf_ratio": 4,
+        "sl": 0.015,
+        "tp": 0.15,
+        "trail_activate": 0.03,
+        "trail_distance": 0.01,
+        "max_hold": 48,
+        "warmup": 60,
+    },
+}
+
+
+def collect_strategy_trades(
+    name: str,
+    cfg: dict,
+    data_tf: dict,
+    data_15m: dict,
+    cost: float,
+    entry_slippage: float,
+) -> list[tuple[str, int, int, float]]:
+    """Collect trades for a strategy with given cost and slippage."""
+    tf_ratio = cfg["tf_ratio"]
+    all_trades: list[tuple[str, int, int, float]] = []
+
+    for sym in sorted(data_tf.keys()):
+        d = data_tf[sym]
+
+        if name == "donchian_vol":
+            if "volume" not in d:
+                continue
+            vol_sma = compute_vol_sma(d["volume"], 20)
+            sig, dire = gen_donchian_vol(
+                d["close"], d["high"], d["low"], d["volume"],
+                50, 0.02, vol_sma, 2.5,
+            )
+        elif name == "high_vol_momentum":
+            vr_key = "vr_8_56"
+            if vr_key not in d or "mom_8" not in d:
+                continue
+            sig, dire = gen_high_vol_momentum(d[vr_key], d["mom_8"], 2.0, 0.03)
+        else:
+            continue
+
+        p, e, x = sim_with_slippage(
+            d["close"], d["high"], d["low"],
+            sig, dire,
+            cfg["sl"], cfg["tp"], cfg["max_hold"], cost,
+            cfg["trail_activate"], cfg["trail_distance"],
+            cfg["warmup"], entry_slippage,
         )
 
-    d_kwargs = {"data_15m": data_15m, "data_1h": data_1h, "data_4h": data_4h}
-    d_score = compute_meta_score(
-        collect_d_mom8, d_kwargs,
-        param_name="d_vr", base_param_value=cfg.d_vr_threshold, max_bars=max_bars,
-    )
-    for k, v in d_score.items():
-        print(f"  {k:25s}: {v:.3f}")
-    d_pass = "PASS" if d_score["composite"] >= 0.7 else "FAIL"
-    print(f"  VERDICT: {d_pass} (target >= 0.7)")
+        offset = int(data_15m[sym].get("_offset", 0))
+        for k in range(len(p)):
+            entry_bar = int(e[k]) * tf_ratio + offset
+            exit_bar = int(x[k]) * tf_ratio + tf_ratio - 1 + offset
+            all_trades.append((sym, entry_bar, exit_bar, float(p[k])))
 
-    # ── Summary ──
-    print("\n" + "=" * 60)
+    return all_trades
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Main — Robustness matrix
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def main():
+    print("=" * 72)
+    print("  COMPREHENSIVE ROBUSTNESS TEST — ALL SUCCESSFUL STRATEGIES")
+    print("=" * 72)
+    print("\nLoading data...")
+    data_15m, data_1h, data_4h, max_bars = load_data()
+
+    tf_data = {"1h": data_1h, "4h": data_4h}
+
+    print("Collecting existing strategy trades...")
+    existing_trades = collect_existing_trades(data_15m, data_1h, data_4h)
+    existing_pnl = portfolio_sim(existing_trades, SLOT_LIMIT)
+    existing_m = compute_metrics(existing_pnl, DATA_YEARS)
+    print(f"  Existing baseline: N={existing_m['N']}  PF={existing_m['PF']:.3f}\n")
+
+    # Test matrix
+    cost_levels = [
+        ("1x", 0.0008),
+        ("2x", 0.0016),
+        ("3x", 0.0024),
+    ]
+    slippage_levels = [
+        ("0%", 0.0),
+        ("0.1%", 0.001),
+        ("0.2%", 0.002),
+    ]
+
+    for strat_name, strat_cfg in STRATEGIES.items():
+        data_tf = tf_data[strat_cfg["tf"]]
+
+        print(f"\n{'=' * 72}")
+        print(f"  STRATEGY: {strat_name} ({strat_cfg['tf']})")
+        print(f"  SL={strat_cfg['sl']*100:.1f}%  Trail={strat_cfg['trail_activate']*100:.0f}%/{strat_cfg['trail_distance']*100:.1f}%")
+        print(f"{'=' * 72}")
+        print()
+
+        # Header
+        print(f"  {'Cost':>6} {'Slip':>6} | {'PF':>6} {'N':>6} {'WR':>6} {'MaxDD':>7} {'EV_bp':>7} | {'CombPF':>7} {'Delta':>7} | {'Boot':>5} {'P≥1':>5}")
+        print(f"  {'-'*6} {'-'*6} | {'-'*6} {'-'*6} {'-'*6} {'-'*7} {'-'*7} | {'-'*7} {'-'*7} | {'-'*5} {'-'*5}")
+
+        best_worst_pf = 0.0
+        for cost_label, cost_val in cost_levels:
+            for slip_label, slip_val in slippage_levels:
+                trades = collect_strategy_trades(
+                    strat_name, strat_cfg, data_tf, data_15m, cost_val, slip_val,
+                )
+                if not trades:
+                    print(f"  {cost_label:>6} {slip_label:>6} | NO TRADES")
+                    continue
+
+                pnl = portfolio_sim(trades, SLOT_LIMIT)
+                m = compute_metrics(pnl, DATA_YEARS)
+                boot = bootstrap_pf(pnl, 2000)
+
+                # Combined portfolio
+                combined_pnl = portfolio_sim(existing_trades + trades, SLOT_LIMIT)
+                cm = compute_metrics(combined_pnl, DATA_YEARS)
+                delta = cm["PF"] - existing_m["PF"]
+
+                marker = ""
+                if cost_label == "1x" and slip_label == "0%":
+                    marker = " ← base"
+                elif cost_label == "3x" and slip_label == "0.2%":
+                    marker = " ← WORST"
+
+                print(
+                    f"  {cost_label:>6} {slip_label:>6} | "
+                    f"{m['PF']:6.3f} {m['N']:6d} {m['WR']:5.1f}% {m['max_dd_pct']:6.1f}% {m['EV_bp']:7.1f} | "
+                    f"{cm['PF']:7.3f} {delta:+7.3f} | "
+                    f"[{boot.get('CI_lo', 0):.2f}] {boot.get('P_PF_ge_1', 0):4.0f}%{marker}"
+                )
+
+                if cost_label == "3x" and slip_label == "0.2%":
+                    best_worst_pf = m["PF"]
+
+        # Non-overlap (only need to compute once — signals don't change with cost)
+        base_trades = collect_strategy_trades(
+            strat_name, strat_cfg, data_tf, data_15m, 0.0008, 0.0,
+        )
+        non_overlap_raw = len(base_trades)
+        existing_intervals: dict[str, list[tuple[int, int]]] = {}
+        for sym, entry, exit_b, _ in existing_trades:
+            existing_intervals.setdefault(sym, []).append((entry, exit_b))
+        non_overlapping = 0
+        for sym, entry, exit_b, _ in base_trades:
+            intervals = existing_intervals.get(sym, [])
+            overlaps = False
+            for e_entry, e_exit in intervals:
+                if entry <= e_exit and exit_b >= e_entry:
+                    overlaps = True
+                    break
+            if not overlaps:
+                non_overlapping += 1
+        no_pct = non_overlapping / non_overlap_raw * 100 if non_overlap_raw > 0 else 0
+
+        print(f"\n  Non-overlap with existing: {no_pct:.1f}% ({non_overlapping}/{non_overlap_raw})")
+        print(f"  Worst-case PF (3x cost + 0.2% slip): {best_worst_pf:.3f}")
+        verdict = "PASS" if best_worst_pf > 1.3 else ("MARGINAL" if best_worst_pf > 1.0 else "FAIL")
+        print(f"  Verdict: {verdict}")
+
+    # Final summary
+    print(f"\n{'=' * 72}")
     print("  SUMMARY")
-    print("=" * 60)
-    print(f"---")
-    print(f"primary_metric: {prod_score['composite']:.3f}")
-    print(f"prod_ma:        {prod_score['composite']:.3f} [{prod_pass}]")
-    print(f"bad_ma:         {bad_score['composite']:.3f} [{bad_pass}]")
-    print(f"prod_d:         {d_score['composite']:.3f} [{d_pass}]")
-    all_pass = prod_pass == "PASS" and bad_pass == "PASS" and d_pass == "PASS"
-    print(f"all_tests:      {'PASS' if all_pass else 'FAIL'}")
+    print(f"{'=' * 72}")
+    print("  Strategies that survive worst-case (3x cost + 0.2% slippage):")
+    print("  with PF > 1.3 → PRODUCTION VIABLE")
+    print("  with PF > 1.0 → MARGINAL (needs more investigation)")
+    print("  with PF < 1.0 → FAIL (not robust)")
+    print()
+    print("---")
+    print(f"primary_metric: 0")
 
 
 if __name__ == "__main__":

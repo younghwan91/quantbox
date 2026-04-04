@@ -1,0 +1,25 @@
+commit	alpha_score	pf	n_trades	wr	non_overlap	boot_p	calmar	max_dd	combined_pf	pf_delta	status	description
+2341ca8	0.8528	1.192	76791	41.3	0.977	100.0	-	99.8	1.197	-0.446	keep	baseline: high_vol_mom VR>1.0 mom>2% 1h
+c00d94d	0.7743	1.749	24355	44.4	0.972	100.0	-	86.5	1.731	+0.088	keep	VR>1.5 mom>3% + MaxDD penalty scoring
+2406456	0.9327	2.456	4665	45.9	0.956	100.0	-	61.7	2.094	+0.451	keep	VR>2.0 mom>3% 1h
+8364406	0.9494	2.701	1277	45.0	0.947	100.0	-	58.0	1.913	+0.270	keep	VR>2.5 mom>3% 1h
+c467c63	0.9528	2.671	314	-	-	100.0	-	42.6	1.713	+0.070	discard	VR>3.0 — too few trades for portfolio impact
+e021aa9	0.9415	2.817	4867	42.0	0.958	100.0	-	60.0	2.248	+0.605	keep	VR>2.0 SL=1.5% mom>3% 1h
+7cd9ca7	0.9710	3.475	5074	-	-	100.0	-	54.2	2.476	+0.833	keep	VR>2.0 SL=1% mom>3% 1h
+0886fc5	0.9921	4.006	5172	-	-	100.0	-	45.4	2.626	+0.983	keep	VR>2.0 SL=0.8% mom>3% 1h
+d031461	0.9923	4.882	5241	-	-	100.0	-	32.0	2.821	+1.178	keep	VR>2.0 SL=0.6% mom>3% 1h
+a8033bc	0.9923	5.529	5287	-	-	100.0	-	27.4	2.935	+1.292	keep	VR>2.0 SL=0.5% mom>3% 1h
+579cdf9	0.9155	2.646	4867	42.0	0.958	100.0	-	65.2	2.173	+0.530	keep	VR>2.0 SL=1.5% 2x cost(0.0016) mom>3% 1h
+bd4659b	0.8838	2.049	20341	45.6	0.961	100.0	-	71.7	2.012	+0.369	keep	Donchian 20-bar 4h mom>1%
+84c9cd3	0.9870	2.744	9146	-	-	100.0	-	51.4	2.446	+0.803	keep	Donchian 50-bar 4h mom>2%
+0dd5aa6	0.9644	3.001	6797	-	-	100.0	-	56.1	2.534	+0.891	discard	Donchian 100-bar — MaxDD worse than 50-bar
+591dfe5	0.8110	1.811	8578	50.2	0.964	100.0	-	80.7	1.774	+0.131	discard	RSI extreme reversal — weak PF, high MaxDD
+f7ceb08	0.9884	2.887	7889	49.5	0.967	100.0	-	51.0	2.499	+0.856	keep	Donchian 50 + vol spike 1.5x 4h
+b849b2d	0.9919	3.046	6282	-	-	100.0	-	50.1	2.529	+0.886	keep	Donchian 50 + vol 2.0x 4h
+62ac2ae	0.9910	3.080	4720	-	-	100.0	-	42.1	2.480	+0.837	keep	Donchian 50 + vol 2.5x 4h
+e1e8fb8	0.9910	2.929	4720	-	-	100.0	-	43.4	2.409	+0.766	keep	Donchian 50 + vol 2.5x 2x_cost ROBUSTNESS
+82e4688	0.9913	3.611	4749	-	-	100.0	-	33.9	2.678	+1.035	keep	Donchian 50 vol 2.5x SL=1.5% 4h
+abfa234	0.9917	4.934	4780	-	-	100.0	-	27.6	3.122	+1.479	keep	Donchian 50 vol 2.5x SL1.5% trail 2%/0.8%
+4622bc8	0.9917	4.627	4780	58.8	0.959	100.0	-	29.1	3.026	+1.383	keep	BEST CONFIG 2x cost: PF 4.6 robust
+6bf34cc	-	4.795	5217	-	-	-	-	32.3	3.139	-	discard	plateau test period=40
+bedc01e	-	4.933	4478	-	-	-	-	25.2	3.058	-	discard	plateau test period=60
