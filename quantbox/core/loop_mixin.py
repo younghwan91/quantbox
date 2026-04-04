@@ -155,6 +155,14 @@ class LoopMixin:
             ma_cluster_trail_activate=vc.ma_cluster_trail_activate,
             ma_cluster_trail_distance=vc.ma_cluster_trail_distance,
             ma_cluster_leverage=vc.ma_cluster_leverage,
+            donchian_enabled=vc.donchian_enabled,
+            donchian_lookback=vc.donchian_lookback,
+            donchian_vol_mult=vc.donchian_vol_mult,
+            donchian_sl=vc.donchian_sl,
+            donchian_tp=vc.donchian_tp,
+            donchian_trail_activate=vc.donchian_trail_activate,
+            donchian_trail_distance=vc.donchian_trail_distance,
+            donchian_leverage=vc.donchian_leverage,
         )
         print_startup_complete(mode_str)
 
