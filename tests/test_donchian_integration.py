@@ -522,7 +522,7 @@ class TestConfigDisabledSkipsDonchian:
     """When donchian_enabled=False (default), on_bar never enters Donchian path."""
 
     def test_disabled_source_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # donchian_enabled defaults to False — do not set VS_DONCHIAN_ENABLED
+        # Explicitly disable donchian (.env may have VS_DONCHIAN_ENABLED=true)
         cfg = _make_config(
             monkeypatch,
             {
@@ -531,9 +531,10 @@ class TestConfigDisabledSkipsDonchian:
                 "VS_ENABLE_1H": "false",
                 "VS_ENABLE_4H": "false",
                 "VS_MA_CLUSTER_ENABLED": "false",
+                "VS_DONCHIAN_ENABLED": "false",
             },
         )
-        assert not cfg.donchian_enabled, "donchian_enabled must be False by default"
+        assert not cfg.donchian_enabled, "donchian_enabled must be False when explicitly disabled"
         strategy = VolStraddleStrategy(cfg)
 
         # Populate 4h data with a valid breakout
@@ -558,6 +559,7 @@ class TestConfigDisabledSkipsDonchian:
                 "VS_ENABLE_1H": "false",
                 "VS_ENABLE_4H": "false",
                 "VS_MA_CLUSTER_ENABLED": "false",
+                "VS_DONCHIAN_ENABLED": "false",
             },
         )
         strategy = VolStraddleStrategy(cfg)
