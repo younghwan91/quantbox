@@ -122,6 +122,7 @@ Each experiment runs a backtest or analysis. You launch it simply as: `uv run au
 - Modify production code in `quantbox/`. Your experiments stay in the train file.
 - Install new packages or add dependencies.
 - Use synthetic/random data. Real Binance data only.
+- **Reduce SL below production value.** Backtest executes SL at exact trigger price, but live server-side STOP orders fill via market order with tick rounding + slippage (observed: 1% SL → 1.23% actual on SKLUSDT). Tighter SL always looks better in backtest but the improvement is illusory. SL must stay >= production config value. Same applies to any parameter where backtest assumes perfect execution but live has slippage (e.g. trail_distance near the 0.5% Binance floor).
 
 **The goal is simple: optimize the target metric.** Everything in the train file is fair game.
 
