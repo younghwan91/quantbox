@@ -1,21 +1,6 @@
-"""VolStraddle strategy configuration dataclass.
+"""VolStraddle strategy configuration — pydantic-settings class.
 
-r47-Exit (2026-03-07): Exit param overhaul validated vs v14.3.0 (N=3713, PF=1.324).
-  Option D chosen: r47 best exits + TBR OFF (N=4097, PF=1.521, Sharpe=5.06, MaxDD=83.3%).
-  D_mom8: trail_activate 2%→0.5%, trail_distance 0.3%→0.2%→0.5% (r106: callbackRate floor), F5 TBR disabled.
-  MA Cluster: flat TP=8% → trailing stop (activate=4%, distance=0.5%).
-  All 6 years profitable. Bootstrap CI [1.418, 1.634], P(PF≥1)=100%.
-
-R43-Exit: VR compression detector with trailing stop exit (R43 validated).
-Full 6yr validated: N=2,336 @10 slots, PF=1.351, Calmar=9.4, DD=30.0%.
-6 consecutive profitable years (2020-2025). 0 losing years.
-
-v13.1 changes (R43): Directional TP 5%→12% + trailing stop (activate 2%, distance 0.3%).
-Straddle exit unchanged (SL=1.5%, TP=5%).
-
-R44d V17: MA Cluster Squeeze (4h-only) as complementary strategy.
-4 SMAs (20/50/100/200) cluster → breakout + momentum direction.
-Do NOT change without re-running backtest validation.
+All strategy parameters live here. .env values (prefix VS_) override defaults.
 
 Half-Kelly Leverage Derivation (20260304_ef55e2e strategy report):
   Kelly f* = WR - (1-WR)/RR,  Leverage = (f*/2) × N / SL
