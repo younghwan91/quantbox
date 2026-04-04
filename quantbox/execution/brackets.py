@@ -828,8 +828,10 @@ class BracketMixin:
             trail_distance = vs.s_trail_distance
         elif strategy_type == MA_CLUSTER:
             trail_distance = vs.ma_cluster_trail_distance
+        elif strategy_type == DONCHIAN:
+            trail_distance = vs.donchian_trail_distance
         else:
-            trail_distance = vs.d_trail_distance  # 0.002
+            trail_distance = vs.d_trail_distance
 
         trail_stop_gain = max(peak_gain - trail_distance, 0.0)
 

@@ -942,6 +942,9 @@ class VolStraddleStrategy:
         elif strategy_type == MA_CLUSTER:
             trail_activate = self.config.ma_cluster_trail_activate
             trail_distance = self.config.ma_cluster_trail_distance
+        elif strategy_type == DONCHIAN:
+            trail_activate = self.config.donchian_trail_activate
+            trail_distance = self.config.donchian_trail_distance
         else:
             trail_activate = self.config.d_trail_activate
             trail_distance = self.config.d_trail_distance
