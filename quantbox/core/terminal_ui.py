@@ -112,6 +112,14 @@ def print_system_info(
     ma_cluster_trail_activate: float = 0.02,
     ma_cluster_trail_distance: float = 0.005,
     ma_cluster_leverage: float = 12.0,
+    donchian_enabled: bool = False,
+    donchian_lookback: int = 50,
+    donchian_vol_mult: float = 2.5,
+    donchian_sl: float = 0.015,
+    donchian_tp: float = 0.20,
+    donchian_trail_activate: float = 0.02,
+    donchian_trail_distance: float = 0.008,
+    donchian_leverage: float = 15.0,
 ) -> None:
     """Print formatted system configuration table.
 
@@ -178,6 +186,10 @@ def print_system_info(
         _print_row("MA Cluster", f"{Color.GREEN}ENABLED{Color.RESET} ({ma_cluster_leverage:.0f}x)")
     else:
         _print_row("MA Cluster", f"{Color.RED}DISABLED{Color.RESET}")
+    if donchian_enabled:
+        _print_row("Donchian", f"{Color.GREEN}ENABLED{Color.RESET} ({donchian_leverage:.0f}x)")
+    else:
+        _print_row("Donchian", f"{Color.RED}DISABLED{Color.RESET}")
     print()
 
     _print_section("VR DIRECTIONAL")
@@ -210,6 +222,18 @@ def print_system_info(
             f"{ma_cluster_trail_activate * 100:.1f}%→{ma_cluster_trail_distance * 100:.1f}% (activate→distance)",
         )
         _print_row("Leverage", f"{ma_cluster_leverage:.0f}x")
+        print()
+
+    if donchian_enabled:
+        _print_section("DONCHIAN")
+        _print_row("Lookback", f"{donchian_lookback} bars (4h)")
+        _print_row("Vol Spike", f"{donchian_vol_mult}x SMA(20)")
+        _print_row("SL / TP", f"{donchian_sl * 100:.1f}% / {donchian_tp * 100:.0f}%")
+        _print_row(
+            "Trail",
+            f"{donchian_trail_activate * 100:.1f}%→{donchian_trail_distance * 100:.1f}% (activate→distance)",
+        )
+        _print_row("Leverage", f"{donchian_leverage:.0f}x")
         print()
 
 

@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-QuantBox is a production algorithmic trading system for Binance USDT-M perpetual futures. It runs a tri-axis squeeze strategy sharing a 10-slot portfolio:
+QuantBox is a production algorithmic trading system for Binance USDT-M perpetual futures. It runs a multi-strategy portfolio sharing 10 slots:
 - **VR Directional (D_mom8)** — VR < 0.50 → momentum direction entry, signal ±1, 30x leverage
-- **VR Straddle (S_d8)** — VR squeeze → simultaneous long+short, signal 2, 30x leverage
+- **VR Straddle (S_d8)** — VR squeeze → simultaneous long+short, signal 2, 30x leverage (disabled)
 - **MA Cluster Squeeze** — 4h SMA cluster breakout, 21x leverage
+- **Donchian (DC_vol50)** — 4h 50-bar channel breakout + volume spike 2.5×, 15x leverage (disabled by default)
 
 This is a live system managing real capital — all rules exist because of past losses or bugs.
 
@@ -20,6 +21,7 @@ This is a live system managing real capital — all rules exist because of past 
 | `vr_directional` | VR Directional | D_mom8 | 30x |
 | `vr_straddle` | VR Straddle | S_d8 | 30x |
 | `ma_cluster` | MA Cluster | — | 21x |
+| `donchian` | Donchian | DC_vol50 | 15x |
 
 All canonical names are defined in `core/strategy_names.py`. Use `normalize_strategy_type()` to resolve old names.
 

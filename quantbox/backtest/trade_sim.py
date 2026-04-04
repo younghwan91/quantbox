@@ -1667,3 +1667,304 @@ def collect_ma_cluster_trades(
             all_trades.append((sym, entry_bar, exit_bar, float(p[k])))
 
     return all_trades
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Donchian Channel Breakout + Volume Spike — Canonical Sim
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def sim_donchian_trailing(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    volume: np.ndarray,
+    lookback: int,
+    vol_sma_period: int,
+    vol_mult: float,
+    breakout_pct: float,
+    cooldown_bars: int,
+    sl: float,
+    tp: float,
+    trail_activate: float,
+    trail_distance: float,
+    max_hold: int,
+    cost: float,
+    warmup: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Donchian channel breakout + volume spike with trailing stop exit (numba-accelerated).
+
+    Signal detection (inlined from check_donchian_breakout):
+      - Donchian channel: chan_high = max(high[i-lookback:i]), chan_low = min(low[i-lookback:i])
+        using completed bars only (no lookahead).
+      - Volume spike: volume[i] > vol_mult * mean(volume[i-vol_sma_period:i]).
+      - LONG: close[i] > chan_high AND (close[i] - chan_high) / chan_high > breakout_pct AND spike.
+      - SHORT: close[i] < chan_low AND (chan_low - close[i]) / chan_low > breakout_pct AND spike.
+      - Cooldown: skip cooldown_bars after a signal fires.
+
+    Exit logic (matches sim_ma_cluster_trailing - G5 parity fix applies):
+      1. Peak gain updated from intra-bar high/low.
+      2. Trailing activates once peak_gain >= trail_activate.
+      3. When trailing active: trail checked first (tighter stop).
+         SL skipped since trail level is always above SL once activated.
+      4. When trailing NOT active: SL checked normally.
+      5. Hard TP cap: exit at tp.
+      6. Max hold: exit at close[max_hold_bar].
+
+    Args:
+        close: 4h close price array.
+        high: 4h high price array.
+        low: 4h low price array.
+        volume: 4h volume array.
+        lookback: Donchian channel period in bars (e.g. 50).
+        vol_sma_period: Volume SMA period for spike detection (e.g. 20).
+        vol_mult: Volume spike multiplier threshold (e.g. 2.5).
+        breakout_pct: Minimum breakout fraction beyond channel (e.g. 0.02 = 2%).
+        cooldown_bars: Bars to skip after a signal fires (e.g. 3).
+        sl: Stop-loss fraction (e.g. 0.015 = 1.5%).
+        tp: Hard TP cap fraction (e.g. 0.20 = 20%).
+        trail_activate: Peak gain to activate trailing (e.g. 0.02 = 2%).
+        trail_distance: Trail distance from peak (e.g. 0.008 = 0.8%).
+        max_hold: Maximum bars to hold (in 4h bar units).
+        cost: Round-trip transaction cost (e.g. 0.0008).
+        warmup: Skip first N bars.
+
+    Returns:
+        (pnl, entry_bars, exit_bars) - each 1-D array of length N_trades.
+        Bar indices are in 4h bar units.
+    """
+    n = len(close)
+    cap = n // 4 + 1
+    pnl = np.empty(cap, dtype=np.float64)
+    ent = np.empty(cap, dtype=np.int64)
+    ext = np.empty(cap, dtype=np.int64)
+    cnt = 0
+    i = warmup
+    cooldown = 0
+
+    while i < n - 1:
+        # Count down cooldown
+        if cooldown > 0:
+            cooldown -= 1
+            i += 1
+            continue
+
+        # Need enough bars for channel and volume SMA
+        if i < lookback or i < vol_sma_period:
+            i += 1
+            continue
+
+        # Donchian channel from completed bars (no lookahead)
+        chan_high = high[i - lookback]
+        chan_low = low[i - lookback]
+        for k in range(i - lookback + 1, i):
+            if high[k] > chan_high:
+                chan_high = high[k]
+            if low[k] < chan_low:
+                chan_low = low[k]
+
+        # Volume spike: volume[i] vs SMA of completed bars
+        vol_sum = 0.0
+        for k in range(i - vol_sma_period, i):
+            vol_sum += volume[k]
+        vol_sma = vol_sum / vol_sma_period
+        spike = volume[i] > vol_mult * vol_sma
+
+        if not spike:
+            i += 1
+            continue
+
+        # Breakout direction
+        d = 0
+        if close[i] > chan_high and (close[i] - chan_high) / chan_high > breakout_pct:
+            d = 1
+        elif close[i] < chan_low and chan_low > 0.0 and (chan_low - close[i]) / chan_low > breakout_pct:
+            d = -1
+
+        if d == 0:
+            i += 1
+            continue
+
+        # Signal fired - set cooldown
+        cooldown = cooldown_bars
+
+        entry = close[i]
+        end = min(i + 1 + max_hold, n)
+        eb = end - 1
+        trade_pnl = 0.0
+        trailing_active = False
+        peak_gain = 0.0
+
+        for j in range(i + 1, end):
+            if d == 1:
+                # Update peak gain from intra-bar high
+                cur_gain = (high[j] - entry) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+
+                if trailing_active:
+                    # G5 parity fix: trail first when active (tighter stop)
+                    trail_level = entry * (1.0 + peak_gain - trail_distance)
+                    if low[j] <= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if low[j] <= entry * (1.0 - sl):
+                        trade_pnl = -sl
+                        eb = j
+                        break
+
+                if high[j] >= entry * (1.0 + tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+            else:
+                # SHORT
+                cur_gain = (entry - low[j]) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+
+                if trailing_active:
+                    # G5 parity fix: trail first when active (tighter stop)
+                    trail_level = entry * (1.0 - peak_gain + trail_distance)
+                    if high[j] >= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if high[j] >= entry * (1.0 + sl):
+                        trade_pnl = -sl
+                        eb = j
+                        break
+
+                if low[j] <= entry * (1.0 - tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+        else:
+            # Max-hold exit at close
+            if d == 1:
+                trade_pnl = (close[eb] - entry) / entry
+            else:
+                trade_pnl = (entry - close[eb]) / entry
+
+        if cnt < cap:
+            pnl[cnt] = trade_pnl - cost
+            ent[cnt] = i
+            ext[cnt] = eb
+            cnt += 1
+
+        i = eb + 1
+
+    return pnl[:cnt], ent[:cnt], ext[:cnt]
+
+
+def collect_donchian_trades(
+    data_15m: dict,
+    data_4h: dict | None = None,
+    *,
+    lookback: int | None = None,
+    vol_sma_period: int | None = None,
+    vol_mult: float | None = None,
+    breakout_pct: float | None = None,
+    cooldown_bars: int | None = None,
+    sl: float | None = None,
+    tp: float | None = None,
+    trail_activate: float | None = None,
+    trail_distance: float | None = None,
+    max_hold: int | None = None,
+    cost: float = COST_DIRECTIONAL,
+) -> list[tuple[str, int, int, float]]:
+    """Collect Donchian channel breakout trades for all whitelist symbols (4h only).
+
+    Runs ``sim_donchian_trailing`` per symbol and converts 4h bar indices to
+    the 15m base timeline used by ``portfolio_sim``.
+
+    Parameters default to ``VolStraddleConfig`` values (single source of truth).
+    Pass explicit values only for parameter sweeps.
+
+    Args:
+        data_15m: {symbol: {close, high, low, volume, _offset, ...}} - 15m bars.
+        data_4h: Pre-resampled 4h data dict.  If None, resampled from data_15m.
+        lookback: Donchian channel period in 4h bars (default: cfg.donchian_lookback).
+        vol_sma_period: Volume SMA period (default: cfg.donchian_vol_sma).
+        vol_mult: Volume spike multiplier (default: cfg.donchian_vol_mult).
+        breakout_pct: Min breakout fraction beyond channel (default: cfg.donchian_breakout_pct).
+        cooldown_bars: Bars to skip after signal fires (default: cfg.donchian_cooldown_bars).
+        sl: Stop-loss fraction (default: cfg.donchian_sl).
+        tp: Hard TP cap fraction (default: cfg.donchian_tp).
+        trail_activate: Gain to activate trailing (default: cfg.donchian_trail_activate).
+        trail_distance: Trail distance from peak (default: cfg.donchian_trail_distance).
+        max_hold: Maximum bars to hold in 4h units (default: cfg.donchian_max_hold_4h).
+        cost: Round-trip transaction cost (default: COST_DIRECTIONAL = 0.0008).
+
+    Returns:
+        List of (symbol, entry_15m_bar, exit_15m_bar, pnl) sorted by symbol.
+        Compatible with ``portfolio_sim()``.
+    """
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+    cfg = VolStraddleConfig()
+
+    # Resolve params from config defaults
+    _lookback = lookback if lookback is not None else cfg.donchian_lookback
+    _vol_sma_period = vol_sma_period if vol_sma_period is not None else cfg.donchian_vol_sma
+    _vol_mult = vol_mult if vol_mult is not None else cfg.donchian_vol_mult
+    _breakout_pct = breakout_pct if breakout_pct is not None else cfg.donchian_breakout_pct
+    _cooldown_bars = cooldown_bars if cooldown_bars is not None else cfg.donchian_cooldown_bars
+    _sl = sl if sl is not None else cfg.donchian_sl
+    _tp = tp if tp is not None else cfg.donchian_tp
+    _trail_activate = trail_activate if trail_activate is not None else cfg.donchian_trail_activate
+    _trail_distance = trail_distance if trail_distance is not None else cfg.donchian_trail_distance
+    _max_hold = max_hold if max_hold is not None else cfg.donchian_max_hold_4h
+
+    ratio = 16  # 4h = 16 x 15m bars
+
+    # Resample to 4h if not provided
+    if data_4h is None:
+        data_4h = build_resampled(data_15m, ratio)
+
+    all_trades: list[tuple[str, int, int, float]] = []
+
+    for sym in sorted(data_15m.keys()):
+        d4 = data_4h.get(sym)
+        if d4 is None:
+            continue
+        if "volume" not in d4:
+            continue
+
+        offset = int(data_15m[sym].get("_offset", 0))
+
+        p, e, x = sim_donchian_trailing(
+            d4["close"],
+            d4["high"],
+            d4["low"],
+            d4["volume"],
+            _lookback,
+            _vol_sma_period,
+            _vol_mult,
+            _breakout_pct,
+            _cooldown_bars,
+            _sl,
+            _tp,
+            _trail_activate,
+            _trail_distance,
+            _max_hold,
+            cost,
+            WARMUP_4h,
+        )
+
+        for k in range(len(p)):
+            entry_bar = int(e[k]) * ratio + offset
+            exit_bar = int(x[k]) * ratio + ratio - 1 + offset
+            all_trades.append((sym, entry_bar, exit_bar, float(p[k])))
+
+    return all_trades
