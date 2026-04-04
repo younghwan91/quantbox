@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
 from quantbox.core.types import to_api_symbol
 from quantbox.core.terminal_ui import format_entry, format_exit
 from quantbox.utils.diagnostics import _diag_logger
@@ -533,7 +533,7 @@ class PositionMixin:
                 "fields": [
                     {
                         "name": "전략",
-                        "value": f"VolStraddle {'S' if strategy_type == 'vr_straddle' else ('MA' if strategy_type == 'ma_cluster' else 'D')} ({tf_label})",
+                        "value": f"VolStraddle {'S' if strategy_type == 'vr_straddle' else ('MA' if strategy_type == 'ma_cluster' else ('DC' if strategy_type == 'donchian' else 'D'))} ({tf_label})",
                         "inline": True,
                     },
                     {"name": "진입가", "value": f"${fill_price:.4f}", "inline": True},
@@ -546,7 +546,11 @@ class PositionMixin:
                         "value": (
                             "SL/TP"
                             if (is_straddle or strategy_type == MA_CLUSTER)
-                            else f"Trail({vs.d_trail_activate * 100:.0f}%/{vs.d_trail_distance * 100:.1f}%)"
+                            else (
+                                f"Trail({vs.donchian_trail_activate * 100:.0f}%/{vs.donchian_trail_distance * 100:.1f}%)"
+                                if strategy_type == "donchian"
+                                else f"Trail({vs.d_trail_activate * 100:.0f}%/{vs.d_trail_distance * 100:.1f}%)"
+                            )
                         ),
                         "inline": True,
                     },
@@ -1080,7 +1084,9 @@ class PositionMixin:
                 n_remaining = self.strategy.n_active
 
                 _strat = closed_pos.get("strategy_type", VR_DIRECTIONAL)
-                _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA"}.get(_strat, _strat)
+                _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA", DONCHIAN: "DC"}.get(
+                    _strat, _strat
+                )
                 self.discord.send(
                     embed={
                         "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr} (서버체결)",
@@ -1305,7 +1311,9 @@ class PositionMixin:
         _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
 
         _strat = pos.get("strategy_type", VR_DIRECTIONAL)
-        _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA"}.get(_strat, _strat)
+        _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA", DONCHIAN: "DC"}.get(
+            _strat, _strat
+        )
         self.discord.send(
             embed={
                 "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr}",
