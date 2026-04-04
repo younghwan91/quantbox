@@ -1650,6 +1650,8 @@ class RubberBandScalper(
             state["ma_cluster_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._ma_cluster_cooldown.items()}
         if hasattr(self.strategy, "_donchian_cooldown"):
             state["donchian_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._donchian_cooldown.items()}
+        if hasattr(self.strategy, "_donchian_last_4h_len"):
+            state["donchian_last_4h_len"] = dict(self.strategy._donchian_last_4h_len)
         if hasattr(self.strategy, "_straddle_rollback_cooldown"):
             active = {s: v for s, v in self.strategy._straddle_rollback_cooldown.items() if v > 0}
             if active:
@@ -1909,6 +1911,13 @@ class RubberBandScalper(
                 self.strategy._donchian_cooldown[sym] = arr_dc
             if cooldown_data:
                 logger.info(f"Restored Donchian cooldown for {len(cooldown_data)} symbols")
+
+        # Restore Donchian 4h bar gate to prevent duplicate signal on restart
+        if hasattr(self.strategy, "_donchian_last_4h_len"):
+            last_4h_data = state.get("donchian_last_4h_len", {})
+            self.strategy._donchian_last_4h_len.update(last_4h_data)
+            if last_4h_data:
+                logger.info(f"Restored Donchian 4h bar gate for {len(last_4h_data)} symbols")
 
         # v15.0: Restore straddle rollback cooldown
         if hasattr(self.strategy, "_straddle_rollback_cooldown"):
