@@ -519,8 +519,8 @@ class RubberBandScalper(
                         order_type="LIMIT",
                     )
                     _inflight_key = self._inflight.record_pending(_pending)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{symbol}] InFlight record_pending failed: {e}")
 
             result: ChaseResult = self._chaser.chase_limit_order(
                 symbol=symbol,
@@ -544,8 +544,8 @@ class RubberBandScalper(
             try:
                 if self._inflight is not None and _inflight_key:
                     self._inflight.confirm(_inflight_key)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{symbol}] InFlight confirm failed: {e}")
 
             if result.status == ChaseFillStatus.NO_POSITION:
                 logger.warning(f"[{symbol}] NO POSITION on exchange — reduceOnly rejected. Position already closed.")
@@ -566,8 +566,8 @@ class RubberBandScalper(
                     if self._rate_limiter is not None:
                         self._rate_limiter.record_request(weight=1)
                         self._rate_limiter.record_success()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[{symbol}] RateLimiter record failed: {e}")
                 return {
                     "avgPrice": str(result.avg_price),
                     "executedQty": str(result.filled_quantity),
@@ -587,8 +587,8 @@ class RubberBandScalper(
                         backoff = self._rate_limiter.record_failure(retry)
                         logger.warning(f"[{symbol}] Rate limit hit — backing off {backoff:.1f}s")
                         time.sleep(backoff)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[{symbol}] RateLimiter failure detection failed: {e}")
             logger.error(f"[{symbol}] Order error: {e}")
             return None
         except Exception as e:
