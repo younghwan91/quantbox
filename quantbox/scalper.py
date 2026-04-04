@@ -67,7 +67,7 @@ from quantbox.notifications.bot import (
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
-from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, normalize_strategy_type
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, normalize_strategy_type
 from quantbox.core.types import calc_upnl_pct, to_api_symbol
 from quantbox.core.commands import CommandsMixin
 from quantbox.execution.algo_api import AlgoApiClient
@@ -721,9 +721,13 @@ class RubberBandScalper(
         btc_close = self.download_klines("BTCUSDT", 200)
 
         btc_close_4h = None
-        # r92: Download BTC 4h data for MA cluster 4h BTC gate.
-        # Gate prevents MA cluster LONGs during multi-day BTC downtrends.
-        if self.vs_config and self.vs_config.ma_cluster_btc_gate_enabled:
+        # r92: Download BTC 4h data for MA cluster / Donchian 4h BTC gate.
+        # Gate prevents LONGs during multi-day BTC downtrends.
+        _need_btc_4h = self.vs_config and (
+            self.vs_config.ma_cluster_btc_gate_enabled
+            or (self.vs_config.donchian_enabled and self.vs_config.donchian_btc_gate_enabled)
+        )
+        if _need_btc_4h:
             btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
 
         # v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
@@ -1067,11 +1071,14 @@ class RubberBandScalper(
             # v7.0: Download 4h data for MTF confirmation
             # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
             # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
-            n_bars_4h = 300 if (self.vs_config and self.vs_config.ma_cluster_enabled) else 100
+            _need_4h_extended = self.vs_config and (
+                self.vs_config.ma_cluster_enabled or self.vs_config.donchian_enabled
+            )
+            n_bars_4h = 300 if _need_4h_extended else 100
             result_4h = self.download_klines(sym, n_bars_4h, interval="4h", full=True)
             if result_4h is not None:
-                c4h, h4h, l4h, _, _ = result_4h
-                self.strategy.update_htf_data(sym, c4h, h4h, l4h)
+                c4h, h4h, l4h, v4h, _ = result_4h
+                self.strategy.update_htf_data(sym, c4h, h4h, l4h, volume_4h=v4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
 
@@ -1091,6 +1098,25 @@ class RubberBandScalper(
                 if btc_4h_cur < btc_4h_ma:
                     logger.info(
                         f"[{sym}] MA 4h gate LONG suppressed: BTC 4h ${btc_4h_cur:.1f} < MA{period} ${btc_4h_ma:.1f}"
+                    )
+                    signal = 0
+
+            # Donchian 4h BTC gate — block Donchian LONGs during BTC downtrends
+            if (
+                signal == 1
+                and self.vs_config
+                and self.vs_config.donchian_enabled
+                and self.vs_config.donchian_btc_gate_enabled
+                and getattr(self.strategy, "_last_signal_source", {}).get(sym) == DONCHIAN
+                and btc_close_4h is not None
+                and len(btc_close_4h) >= self.vs_config.donchian_btc_ma_period_4h
+            ):
+                period = self.vs_config.donchian_btc_ma_period_4h
+                btc_4h_ma = float(np.mean(btc_close_4h[-period:]))
+                btc_4h_cur = float(btc_close_4h[-1])
+                if btc_4h_cur < btc_4h_ma:
+                    logger.info(
+                        f"[{sym}] Donchian 4h gate LONG suppressed: BTC 4h ${btc_4h_cur:.1f} < MA{period} ${btc_4h_ma:.1f}"
                     )
                     signal = 0
 
@@ -1622,6 +1648,8 @@ class RubberBandScalper(
         # re-fire a duplicate signal on the same cluster.
         if hasattr(self.strategy, "_ma_cluster_cooldown"):
             state["ma_cluster_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._ma_cluster_cooldown.items()}
+        if hasattr(self.strategy, "_donchian_cooldown"):
+            state["donchian_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._donchian_cooldown.items()}
         if hasattr(self.strategy, "_straddle_rollback_cooldown"):
             active = {s: v for s, v in self.strategy._straddle_rollback_cooldown.items() if v > 0}
             if active:
@@ -1871,6 +1899,16 @@ class RubberBandScalper(
                 self.strategy._ma_cluster_cooldown[sym] = arr
             if cooldown_data:
                 logger.info(f"Restored MA cluster cooldown for {len(cooldown_data)} symbols")
+
+        # Restore Donchian cooldown state
+        if hasattr(self.strategy, "_donchian_cooldown"):
+            cooldown_data = state.get("donchian_cooldown", {})
+            for sym, val in cooldown_data.items():
+                arr_dc: np.ndarray = np.zeros(1, dtype=np.int64)
+                arr_dc[0] = val
+                self.strategy._donchian_cooldown[sym] = arr_dc
+            if cooldown_data:
+                logger.info(f"Restored Donchian cooldown for {len(cooldown_data)} symbols")
 
         # v15.0: Restore straddle rollback cooldown
         if hasattr(self.strategy, "_straddle_rollback_cooldown"):

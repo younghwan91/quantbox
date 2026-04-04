@@ -322,6 +322,31 @@ class VolStraddleConfig(BaseSettings):
     ma_cluster_btc_gate_enabled: bool = True  # Block MA cluster LONGs when BTC below 4h MA50
     ma_cluster_btc_ma_period_4h: int = 50  # 50 × 4h = 200h ≈ 8.3 days
 
+    # ── Donchian Channel Breakout + Volume Spike (4h-only) ──
+    # Complementary strategy: 50-bar Donchian channel breakout with volume spike confirmation.
+    # Fires when VR and MA Cluster are idle (95.9% non-overlapping).
+    # Research: PF=4.934, WR=58.8%, MaxDD=27.6%, N=4780, 6yr all profitable.
+    # Robust to 3x cost + 0.2% slippage: PF=3.803. OOS no decay (test PF=5.20).
+    #
+    # Half-Kelly derivation: WR=58.8%, RR=3.46, f*=46.9%, L=f*/2*N/SL=156x.
+    # This is unrealistically high — likely caused by selection bias (59/59 symbols
+    # profitable is suspiciously clean) and backtest-optimistic PF. Using provisional
+    # 15x until live data validates actual WR/RR. Will re-derive after 50+ live trades.
+    donchian_enabled: bool = False  # Disabled until live validation
+    donchian_lookback: int = 50  # Channel period (4h bars = 200h ≈ 8.3 days)
+    donchian_vol_sma: int = 20  # Volume SMA period for spike detection
+    donchian_vol_mult: float = 2.5  # Volume must be > 2.5× SMA(20)
+    donchian_breakout_pct: float = 0.02  # 2% beyond channel for confirmation
+    donchian_sl: float = 0.015  # 1.5% stop loss
+    donchian_tp: float = 0.20  # 20% safety cap (trail exits first)
+    donchian_trail_activate: float = 0.02  # 2% to activate trailing stop
+    donchian_trail_distance: float = 0.008  # 0.8% trail distance (>= 0.5% rule #8)
+    donchian_max_hold_4h: int = 24  # 24 × 4h = 96h = 4 days
+    donchian_leverage: float = 15.0  # PROVISIONAL — see Half-Kelly note above
+    donchian_cooldown_bars: int = 3  # N 4h bars to skip after signal fires
+    donchian_btc_gate_enabled: bool = True  # Block LONG during BTC downtrend (same as MA Cluster)
+    donchian_btc_ma_period_4h: int = 50  # 50 × 4h = 200h ≈ 8.3 days
+
     # ── Compatibility fields (used by scalper internals) ──
     # These map vol straddle concepts to the scalper's existing interface
     # so that shared code (risk checks, brackets, logging) works unchanged.
@@ -455,6 +480,29 @@ class VolStraddleConfig(BaseSettings):
             errors.append(f"daily_loss_limit_pct must be positive, got {self.daily_loss_limit_pct}")
         if self.ma_cluster_sl <= 0:
             errors.append(f"ma_cluster_sl must be positive, got {self.ma_cluster_sl}")
+        # ── Donchian safety constraints (only when enabled) ──
+        if self.donchian_enabled:
+            if self.donchian_sl <= 0:
+                errors.append(f"donchian_sl must be positive, got {self.donchian_sl}")
+            if self.donchian_trail_distance < 0.005:
+                errors.append(
+                    f"donchian_trail_distance must be >= 0.005 (Binance callbackRate >= 0.5%, rule #8), "
+                    f"got {self.donchian_trail_distance}"
+                )
+            if self.donchian_trail_distance >= self.donchian_trail_activate:
+                errors.append(
+                    f"donchian_trail_distance must be < donchian_trail_activate, "
+                    f"got {self.donchian_trail_distance} >= {self.donchian_trail_activate}"
+                )
+            if self.donchian_leverage > 50:
+                errors.append(f"donchian_leverage cap exceeded (max 50x), got {self.donchian_leverage}")
+            if self.donchian_leverage < 1:
+                errors.append(f"donchian_leverage must be >= 1, got {self.donchian_leverage}")
+            if self.donchian_tp <= self.donchian_sl:
+                errors.append(
+                    f"donchian_tp must be > donchian_sl, "
+                    f"got donchian_tp={self.donchian_tp}, donchian_sl={self.donchian_sl}"
+                )
         if self.fee_rate < 0:
             errors.append(f"fee_rate must be non-negative, got {self.fee_rate}")
         if self.slippage_mode not in ("flat", "tiered", "conservative"):

@@ -410,3 +410,104 @@ def check_ma_cluster(
     if momentum[idx] > 0:
         return 1
     return -1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Donchian Channel Breakout + Volume Spike (4h)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def check_donchian_breakout(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    volume: np.ndarray,
+    lookback: int,
+    vol_sma_period: int,
+    vol_mult: float,
+    breakout_pct: float,
+    cooldown_arr: np.ndarray,
+    cooldown_bars: int,
+) -> int:
+    """Donchian Channel Breakout with volume spike confirmation.
+
+    Signal: price breaks above/below the N-bar high/low channel AND
+    current volume exceeds vol_mult × SMA(volume, vol_sma_period).
+
+    Breakout formula (no ambiguity):
+      LONG:  close > chan_high AND (close - chan_high) / chan_high > breakout_pct
+      SHORT: close < chan_low  AND (chan_low - close) / chan_low > breakout_pct
+      where chan_high/low = max(high)/min(low) of bars [idx-lookback, idx-1]
+      (completed bars only, current bar excluded = zero lookahead).
+
+    Cooldown: fixed N-bar countdown after signal fires.
+      cooldown_arr[0] tracks remaining bars (mutable, numba-compatible).
+      When > 0: decrement and return 0.
+      When signal fires: set cooldown_arr[0] = cooldown_bars.
+
+    Args:
+        close: 4h close prices.
+        high: 4h high prices.
+        low: 4h low prices.
+        volume: 4h volume.
+        lookback: Channel period (e.g., 50 bars).
+        vol_sma_period: Volume SMA lookback (e.g., 20).
+        vol_mult: Volume spike threshold (e.g., 2.5).
+        breakout_pct: Minimum breakout % beyond channel (e.g., 0.02).
+        cooldown_arr: 1-elem int64 array for cooldown state (mutable).
+        cooldown_bars: N bars to skip after signal fires.
+
+    Returns:
+        +1 (long breakout), -1 (short breakout), or 0 (no signal).
+    """
+    idx = len(close) - 1  # Last completed bar
+
+    # Need enough data for lookback + vol_sma
+    min_needed = max(lookback, vol_sma_period) + 1
+    if idx < min_needed:
+        return 0
+
+    # Cooldown: count down and skip
+    if cooldown_arr[0] > 0:
+        cooldown_arr[0] -= 1
+        return 0
+
+    if close[idx] <= 0:
+        return 0
+
+    # ── Volume spike check ──
+    # SMA of volume over past vol_sma_period bars (excluding current)
+    vol_sum = 0.0
+    for i in range(idx - vol_sma_period, idx):
+        vol_sum += volume[i]
+    vol_sma_val = vol_sum / vol_sma_period
+
+    if vol_sma_val <= 0 or volume[idx] < vol_mult * vol_sma_val:
+        return 0
+
+    # ── Donchian channel (completed bars only, exclude current) ──
+    chan_high = -1e18
+    chan_low = 1e18
+    for i in range(idx - lookback, idx):
+        h_val = float(high[i])
+        l_val = float(low[i])
+        if h_val > chan_high:
+            chan_high = h_val
+        if l_val < chan_low:
+            chan_low = l_val
+
+    # ── Breakout detection ──
+    if chan_high > 0 and close[idx] > chan_high:
+        bp = (close[idx] - chan_high) / chan_high
+        if bp > breakout_pct:
+            cooldown_arr[0] = cooldown_bars
+            return 1
+
+    if chan_low > 0 and close[idx] < chan_low:
+        bp = (chan_low - close[idx]) / chan_low
+        if bp > breakout_pct:
+            cooldown_arr[0] = cooldown_bars
+            return -1
+
+    return 0
