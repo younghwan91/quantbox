@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from binance.exceptions import BinanceAPIException
 
-from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
 from quantbox.core.types import ALGO_ORDER_DEAD_STATUSES, round_to_tick, to_api_symbol
 
 logger = logging.getLogger("Scalper")
@@ -403,9 +403,14 @@ class BracketMixin:
         elif strategy_type == MA_CLUSTER:
             td = vs.ma_cluster_trail_distance
             ta = vs.ma_cluster_trail_activate
-        else:  # vr_directional
+        elif strategy_type == DONCHIAN:
+            td = vs.donchian_trail_distance
+            ta = vs.donchian_trail_activate
+        elif strategy_type == VR_DIRECTIONAL:
             td = vs.d_trail_distance
             ta = vs.d_trail_activate
+        else:
+            raise ValueError(f"Unknown strategy_type for trail params: {strategy_type!r}")
 
         # trail_distance fraction → Binance callbackRate percentage
         # e.g. 0.005 (0.5%) → 0.5, clamped to [0.5, 5.0] (rule #8: callbackRate >= 0.5%)

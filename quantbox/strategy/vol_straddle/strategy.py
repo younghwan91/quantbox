@@ -25,9 +25,10 @@ from typing import Any
 
 import numpy as np
 
-from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
+    check_donchian_breakout,
     check_ma_cluster,
     compute_momentum,
     compute_sma,
@@ -97,6 +98,7 @@ class VolStraddleStrategy:
         # so only the cooldown flag needs per-symbol state.
         # in_cooldown: True after signal fired, reset when cluster dissolves.
         self._ma_cluster_cooldown: dict[str, np.ndarray] = {}  # 1-elem array for numba
+        self._donchian_cooldown: dict[str, np.ndarray] = {}  # 1-elem int64 array for numba (countdown)
 
         # ── MA Cluster scan state (populated every scan, even when no signal) ──
         # Used by scalper to produce "MA Cluster monitor" line parallel to
@@ -112,7 +114,7 @@ class VolStraddleStrategy:
 
         # ── Signal source tracking (populated by on_bar for each symbol) ──
         # Allows scalper to apply strategy-specific gates after on_bar returns.
-        # Values: 'vr_directional' | 'vr_straddle' | 'ma_cluster' | 'none'
+        # Values: 'vr_directional' | 'vr_straddle' | 'ma_cluster' | 'donchian' | 'none'
         self._last_signal_source: dict[str, str] = {}
 
     # ══════════════════════════════════════════════════════════════════
@@ -244,6 +246,15 @@ class VolStraddleStrategy:
                 if sig_ma != 0:
                     self._last_signal_source[symbol] = MA_CLUSTER
                     return sig_ma
+
+        # ── Donchian Channel Breakout (4h, lowest priority) ──
+        # Checked AFTER VR and MA Cluster: fires when both are idle.
+        # Uses directly-fetched 4h OHLCV data (including volume).
+        if cfg.donchian_enabled and symbol in self._htf_4h:
+            sig_don = self._check_donchian_signal(symbol)
+            if sig_don != 0:
+                self._last_signal_source[symbol] = DONCHIAN
+                return sig_don
 
         self._last_signal_source[symbol] = "none"
         return 0
@@ -603,6 +614,89 @@ class VolStraddleStrategy:
                 f"mom={mom_val:.6f} "
                 f"SL={cfg.ma_cluster_sl * 100:.0f}% TP={cfg.ma_cluster_tp * 100:.0f}% "
                 f"leverage={cfg.ma_cluster_leverage:.0f}x"
+            )
+        return sig
+
+    # ══════════════════════════════════════════════════════════════════
+    #  Donchian Channel Breakout + Volume Spike (4h)
+    # ══════════════════════════════════════════════════════════════════
+
+    def _check_donchian_signal(self, symbol: str) -> int:
+        """Check Donchian channel breakout signal on 4h data.
+
+        50-bar Donchian channel breakout with volume spike (2.5× SMA20)
+        confirmation. Fixed N-bar cooldown after signal fires.
+
+        ZERO LOOKAHEAD:
+          - Channel computed on completed 4h bars only (excludes current bar).
+          - Volume SMA excludes current bar.
+          - Signal fires on the LAST completed bar.
+
+        Args:
+            symbol: Trading symbol.
+
+        Returns:
+            +1 (long breakout), -1 (short breakout), or 0 (no signal).
+        """
+        cfg = self.config
+        data_4h = self._htf_4h.get(symbol)
+        if data_4h is None:
+            return 0
+
+        close_4h = data_4h.get("close")
+        high_4h = data_4h.get("high")
+        low_4h = data_4h.get("low")
+        volume_4h = data_4h.get("volume")
+
+        if close_4h is None or high_4h is None or low_4h is None or volume_4h is None:
+            return 0
+
+        min_needed = max(cfg.donchian_lookback, cfg.donchian_vol_sma) + 2
+        if len(close_4h) < min_needed:
+            return 0
+
+        # Initialize per-symbol cooldown if needed
+        if symbol not in self._donchian_cooldown:
+            self._donchian_cooldown[symbol] = np.zeros(1, dtype=np.int64)
+
+        cooldown_arr = self._donchian_cooldown[symbol]
+
+        sig = check_donchian_breakout(
+            close_4h,
+            high_4h,
+            low_4h,
+            volume_4h,
+            cfg.donchian_lookback,
+            cfg.donchian_vol_sma,
+            cfg.donchian_vol_mult,
+            cfg.donchian_breakout_pct,
+            cooldown_arr,
+            cfg.donchian_cooldown_bars,
+        )
+
+        if sig != 0:
+            mom_val = 0.0
+            if len(close_4h) > cfg.momentum_period:
+                mom = compute_momentum(close_4h, cfg.momentum_period)
+                if len(mom) > 0 and not np.isnan(mom[-1]):
+                    mom_val = float(mom[-1])
+
+            self._last_signal_meta[symbol] = {
+                "tf": "4h",
+                "sl": cfg.donchian_sl,
+                "tp": cfg.donchian_tp,
+                "max_hold": cfg.donchian_max_hold_4h * _TF_TO_15M["4h"],
+                "vr": 0.0,
+                "momentum": mom_val,
+                "strategy_type": DONCHIAN,
+                "leverage_override": cfg.donchian_leverage,
+            }
+            logger.info(
+                f"[{symbol}] DONCHIAN signal "
+                f"TF=4h {'LONG' if sig == 1 else 'SHORT'} "
+                f"lookback={cfg.donchian_lookback} vol_mult={cfg.donchian_vol_mult} "
+                f"SL={cfg.donchian_sl * 100:.1f}% "
+                f"leverage={cfg.donchian_leverage:.0f}x"
             )
         return sig
 
@@ -1129,6 +1223,7 @@ class VolStraddleStrategy:
         close_4h: np.ndarray,
         high_4h: np.ndarray | None = None,
         low_4h: np.ndarray | None = None,
+        volume_4h: np.ndarray | None = None,
     ) -> None:
         """Store 4h OHLCV data for multi-TF VR computation.
 
@@ -1141,6 +1236,7 @@ class VolStraddleStrategy:
             close_4h: 4h close prices.
             high_4h: 4h high prices (optional).
             low_4h: 4h low prices (optional).
+            volume_4h: 4h volume (optional, needed for Donchian volume spike).
         """
         if high_4h is not None and low_4h is not None:
             self._htf_4h[symbol] = {
@@ -1148,6 +1244,8 @@ class VolStraddleStrategy:
                 "high": high_4h,
                 "low": low_4h,
             }
+            if volume_4h is not None:
+                self._htf_4h[symbol]["volume"] = volume_4h
         else:
             # Without high/low, we can't compute VR on raw 4h data.
             # Fall back to resampled 15m data in on_bar.
