@@ -123,7 +123,10 @@ class TestPositionSizing:
     """Vol_straddle position sizing logic: flat, dynamic, SoftTight, CW-Tier."""
 
     def test_flat_sizing_baseline(self):
-        """Default: per_slot = balance/10, notional = per_slot × 30."""
+        """Default: per_slot = balance/10, notional = per_slot × leverage.
+        leverage = risk_per_trade * max_concurrent / sl_pct = 0.01*10/0.01 = 10x
+        notional = $100 * 10 = $1000, qty = $1000/$100 = 10
+        """
         cfg = VolStraddleConfig(
             dynamic_capital_enabled=False,
             soft_equity_scale=False,
@@ -138,8 +141,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # per_slot=$100, notional=$3000, qty=3000/100=30
-        assert abs(qty - 30.0) < 0.01, f"Expected qty≈30, got {qty}"
+        # per_slot=$100, leverage=10x (risk=1%*10slots/SL=1%), notional=$1000, qty=10
+        assert abs(qty - 10.0) < 0.01, f"Expected qty≈10, got {qty}"
 
     def test_flat_sizing_different_balance(self):
         """Flat sizing scales linearly with balance."""
@@ -158,8 +161,8 @@ class TestPositionSizing:
         _open(scalper, 2000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # per_slot=$200, notional=$6000, qty=60
-        assert abs(qty - 60.0) < 0.01, f"Expected qty≈60, got {qty}"
+        # per_slot=$200, leverage=10x, notional=$2000, qty=20
+        assert abs(qty - 20.0) < 0.01, f"Expected qty≈20, got {qty}"
 
     def test_dynamic_capital_disabled(self):
         """dynamic_capital_enabled=False → always flat balance/max_concurrent."""
@@ -175,8 +178,8 @@ class TestPositionSizing:
         _open(scalper)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # always flat: $100/slot
-        assert abs(qty - 30.0) < 0.01
+        # always flat: $100/slot, leverage=10x, notional=$1000, qty=10
+        assert abs(qty - 10.0) < 0.01
 
     def test_dynamic_capital_n0_capped_to_flat(self):
         """dynamic_capital n_active=0: balance/1=$1000 > flat $100 → capped."""
@@ -192,8 +195,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # Capped at flat=$100 → notional=$3000 → qty=30
-        assert abs(qty - 30.0) < 0.01
+        # Capped at flat=$100, leverage=10x, notional=$1000 → qty=10
+        assert abs(qty - 10.0) < 0.01
 
     def test_dynamic_capital_n9_capped_to_flat(self):
         """dynamic_capital n_active=9: balance/10=$100 = flat → no cap warning."""
@@ -214,7 +217,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        assert abs(qty - 30.0) < 0.01
+        # leverage=10x, notional=$1000, qty=10
+        assert abs(qty - 10.0) < 0.01
 
     # ── SoftTight DD Scaling ──────────────────────────────────────────────────
 
@@ -232,8 +236,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # No scaling → notional=$3000 → qty=30
-        assert abs(qty - 30.0) < 0.1
+        # No scaling → leverage=10x, notional=$1000 → qty=10
+        assert abs(qty - 10.0) < 0.1
 
     def test_softtight_dd1_80pct_scale(self):
         """DD=2% → 0.80x scaling on per_slot_capital."""
@@ -253,8 +257,8 @@ class TestPositionSizing:
         _open(scalper, balance)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # flat_per_slot=98, ×0.80=78.4, notional=78.4×30=2352, qty=23.52
-        expected_qty = (balance / 10 * 0.80 * 30) / PRICE
+        # flat_per_slot=98, ×0.80=78.4, leverage=10x, notional=78.4×10=784, qty=7.84
+        expected_qty = (balance / 10 * 0.80 * 10) / PRICE
         assert abs(qty - expected_qty) < 0.1, f"Expected ~{expected_qty:.2f}, got {qty:.3f}"
 
     def test_softtight_dd2_60pct_scale(self):
@@ -275,7 +279,8 @@ class TestPositionSizing:
         _open(scalper, balance)
 
         qty = float(scalper._place_order.call_args[0][2])
-        expected_qty = (balance / 10 * 0.60 * 30) / PRICE
+        # leverage=10x → notional = per_slot × 0.60 × 10
+        expected_qty = (balance / 10 * 0.60 * 10) / PRICE
         assert abs(qty - expected_qty) < 0.1
 
     def test_softtight_dd3_40pct_scale(self):
@@ -296,7 +301,8 @@ class TestPositionSizing:
         _open(scalper, balance)
 
         qty = float(scalper._place_order.call_args[0][2])
-        expected_qty = (balance / 10 * 0.40 * 30) / PRICE
+        # leverage=10x → notional = per_slot × 0.40 × 10
+        expected_qty = (balance / 10 * 0.40 * 10) / PRICE
         assert abs(qty - expected_qty) < 0.1
 
     def test_softtight_hwm_zero_uses_balance(self):
@@ -313,7 +319,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        assert abs(qty - 30.0) < 0.1
+        # leverage=10x, notional=$1000, qty=10
+        assert abs(qty - 10.0) < 0.1
 
     # ── CW-Tier Conviction Sizing ─────────────────────────────────────────────
 
@@ -331,8 +338,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # notional=$3000 × 0.5=$1500 → qty=15
-        assert abs(qty - 15.0) < 0.1, f"Expected ~15, got {qty}"
+        # leverage=10x, notional=$1000 × 0.5=$500 → qty=5
+        assert abs(qty - 5.0) < 0.1, f"Expected ~5, got {qty}"
 
     def test_cw_tier_score1_baseline(self):
         """CW score=1 → 1.0x (baseline notional)."""
@@ -347,7 +354,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        assert abs(qty - 30.0) < 0.1
+        # leverage=10x, notional=$1000 × 1.0=$1000 → qty=10
+        assert abs(qty - 10.0) < 0.1
 
     def test_cw_tier_score4_max(self):
         """CW score=4 → 2.5x notional."""
@@ -363,8 +371,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # $3000 × 2.5=$7500 → qty=75
-        assert abs(qty - 75.0) < 0.1, f"Expected ~75, got {qty}"
+        # leverage=10x, notional=$1000 × 2.5=$2500 → qty=25
+        assert abs(qty - 25.0) < 0.1, f"Expected ~25, got {qty}"
 
     def test_cw_tier_score_clamped_to_last(self):
         """CW score > len(multipliers) → clamped to last multiplier."""
@@ -380,7 +388,8 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        assert abs(qty - 75.0) < 0.1
+        # clamped to last (2.5x): leverage=10x, notional=$1000 × 2.5=$2500 → qty=25
+        assert abs(qty - 25.0) < 0.1
 
     def test_cw_disabled_for_ma_cluster(self):
         """CW multiplier NOT applied for ma_cluster strategy_type."""
@@ -396,13 +405,15 @@ class TestPositionSizing:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # CW not applied → baseline notional=$3000 → qty=30 (no 0.5x)
-        assert abs(qty - 30.0) < 0.1, f"Expected ~30 (no CW), got {qty}"
+        # CW not applied for ma_cluster → leverage=10x (SL=1%), notional=$1000 → qty=10
+        assert abs(qty - 10.0) < 0.1, f"Expected ~10 (no CW), got {qty}"
 
-    # ── MA Cluster Leverage Override ─────────────────────────────────────────
+    # ── MA Cluster Risk-Based Leverage ───────────────────────────────────────
 
     def test_ma_cluster_leverage_override(self):
-        """MA cluster: leverage_override=21 replaces base_leverage=30."""
+        """MA cluster with SL=2%: leverage = risk_per_trade*max_concurrent/sl = 0.01*10/0.02 = 5x.
+        leverage_override is no longer used; risk formula applies uniformly.
+        """
         cfg = VolStraddleConfig(
             dynamic_capital_enabled=False,
             soft_equity_scale=False,
@@ -414,17 +425,16 @@ class TestPositionSizing:
         _set_signal_meta(
             scalper,
             strategy_type="ma_cluster",
-            leverage_override=21,
             sl=0.02,
         )
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # per_slot=$100, notional=$100×21=$2100, qty=21
-        assert abs(qty - 21.0) < 0.1, f"Expected ~21, got {qty}"
+        # per_slot=$100, leverage=5x (0.01*10/0.02), notional=$500, qty=5
+        assert abs(qty - 5.0) < 0.1, f"Expected ~5, got {qty}"
 
     def test_leverage_override_zero_clamped_to_1(self, caplog):
-        """leverage_override=0 → clamped to 1.0 with WARNING (not ZeroDivision)."""
+        """Very high SL (100%) → leverage formula gives 0.01*10/1.0=0.1 → clamped to 1.0."""
         import logging
 
         cfg = VolStraddleConfig(
@@ -435,17 +445,16 @@ class TestPositionSizing:
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, strategy_type="ma_cluster", leverage_override=0, sl=0.02)
-        with caplog.at_level(logging.WARNING, logger="quantbox.execution.positions"):
-            _open(scalper, 1000.0)
+        # SL=100% → leverage=0.1 → clamped to min 1.0
+        _set_signal_meta(scalper, strategy_type="ma_cluster", sl=1.0)
+        _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # clamped to 1 → notional=$100×1=$100 → qty=1 (price=100)
+        # leverage clamped to 1 → notional=$100×1=$100 → qty=1 (price=100)
         assert qty >= 1.0, f"qty must be >= 1, got {qty}"
-        assert any("clamped" in r.message for r in caplog.records)
 
     def test_leverage_override_exceeds_max_clamped_to_125(self, caplog):
-        """leverage_override=200 → clamped to 125.0 with WARNING."""
+        """Very small SL (0.008%) → leverage formula gives 0.01*10/0.00008=1250 → clamped to max_leverage."""
         import logging
 
         cfg = VolStraddleConfig(
@@ -453,17 +462,17 @@ class TestPositionSizing:
             soft_equity_scale=False,
             cw_enabled=False,
             base_leverage=30.0,
+            max_leverage=125.0,
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
         _mock_open(scalper)
-        _set_signal_meta(scalper, strategy_type="ma_cluster", leverage_override=200, sl=0.02)
-        with caplog.at_level(logging.WARNING, logger="quantbox.execution.positions"):
-            _open(scalper, 1000.0)
+        # SL=0.008% → leverage=1250 → clamped to max_leverage=125
+        _set_signal_meta(scalper, strategy_type="ma_cluster", sl=0.00008)
+        _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
         # clamped to 125 → notional=$100×125=$12500 → qty=125 (price=100)
         assert abs(qty - 125.0) < 0.5, f"Expected ~125, got {qty}"
-        assert any("clamped" in r.message for r in caplog.records)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -946,8 +955,8 @@ class TestSteepXConfidence:
         _set_signal_meta(scalper)
         _open(scalper)
         qty = float(scalper._place_order.call_args[0][2])
-        # conf=0 skips multiplier → flat: $100/slot × 30x / $100 = 30
-        assert abs(qty - 30.0) < 1.0
+        # conf=0 skips multiplier → flat: leverage=10x (SL=1%), notional=$1000, qty=10
+        assert abs(qty - 10.0) < 1.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1258,16 +1267,16 @@ class TestMaxNotionalCap:
             max_concurrent=10,
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
-        # CW score=2 → 1.5x → notional = $3000 * 1.5 = $4500
-        # max_notional = $4000 → should cap to $4000
-        scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 4000.0
+        # CW score=2 → 1.5x → notional = $100 * 10x * 1.5 = $1500
+        # max_notional = $1200 → should cap to $1200 → qty=12
+        scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 1200.0
         _mock_open(scalper)
         _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # capped notional=$4000 @ price=100.0 → qty=40
-        assert abs(qty - 40.0) < 0.1, f"Expected ~40 (capped), got {qty}"
+        # capped notional=$1200 @ price=100.0 → qty=12
+        assert abs(qty - 12.0) < 0.1, f"Expected ~12 (capped), got {qty}"
 
     def test_notional_not_capped_when_within_limit(self):
         """max_notional 한도 내이면 캡핑 없이 그대로 사용."""
@@ -1280,15 +1289,15 @@ class TestMaxNotionalCap:
             max_concurrent=10,
         )
         scalper = _make_vs_scalper(vs_config=cfg, balance=1000.0)
-        # CW score=2 → 1.5x → notional = $4500, max_notional = $10000 → no cap
-        scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 10000.0
+        # CW score=2 → 1.5x → notional = $100 * 10x * 1.5 = $1500, max_notional=$5000 → no cap
+        scalper._symbol_info_cache["TESTUSDT"]["max_notional"] = 5000.0
         _mock_open(scalper)
         _set_signal_meta(scalper, conviction_score=2, strategy_type="vr_directional")
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # notional=$4500 @ price=100.0 → qty=45
-        assert abs(qty - 45.0) < 0.1, f"Expected ~45 (uncapped), got {qty}"
+        # notional=$1500 @ price=100.0 → qty=15
+        assert abs(qty - 15.0) < 0.1, f"Expected ~15 (uncapped), got {qty}"
 
     def test_no_cap_when_max_notional_absent(self):
         """max_notional=None (sentinel: fetch failed or unavailable) → 캡핑 없이 원래 notional 사용."""
@@ -1309,5 +1318,5 @@ class TestMaxNotionalCap:
         _open(scalper, 1000.0)
 
         qty = float(scalper._place_order.call_args[0][2])
-        # original notional=$4500 @ price=100.0 → qty=45
-        assert abs(qty - 45.0) < 0.1, f"Expected ~45 (no cap), got {qty}"
+        # original notional=$1500 @ price=100.0 → qty=15
+        assert abs(qty - 15.0) < 0.1, f"Expected ~15 (no cap), got {qty}"
