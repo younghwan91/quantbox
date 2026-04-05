@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from quantbox.strategy.protocol import TradingStrategy
 
 import argparse
+import concurrent.futures
 import logging
 import logging.handlers
 import math
@@ -1051,16 +1052,38 @@ class RubberBandScalper(
         moves_seen: list[tuple[str, float]] = []  # diagnostic: (symbol, abs_move)
         scan_diags: list[dict] = []  # v12.0: per-symbol diagnostics
 
-        for sym in symbols:
-            # Skip symbols we already have positions in
-            if self.strategy.has_position(sym):
-                continue
+        # ── Phase 1: Parallel kline download ──
+        # Download 15m + 4h data for all symbols concurrently.
+        # Network I/O is the bottleneck (~100-300ms per call); parallel
+        # reduces wall time from O(N×latency) to O(latency×ceil(N/workers)).
+        scan_symbols = [s for s in symbols if not self.strategy.has_position(s)]
+        n_bars = 500
+        _need_4h_extended = self.vs_config and (self.vs_config.ma_cluster_enabled or self.vs_config.donchian_enabled)
+        n_bars_4h = 300 if _need_4h_extended else 100
 
-            # v9.0: Download full klines (close + high + low + volume + taker)
-            # VolStraddle needs 500 bars: 15m warmup=200 needs ≥201 bars,
-            # 1h resampling needs ≥4×(warmup_1h+1)=204 bars. 500 covers both.
-            n_bars = 500
-            result = self.download_klines(sym, n_bars, full=True)
+        def _download_sym(sym: str) -> tuple:
+            r15 = self.download_klines(sym, n_bars, full=True)
+            r4h = self.download_klines(sym, n_bars_4h, interval="4h", full=True)
+            return sym, r15, r4h
+
+        kline_data: dict[str, tuple] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_download_sym, s): s for s in scan_symbols}
+            for fut in concurrent.futures.as_completed(futures):
+                try:
+                    sym, r15, r4h = fut.result()
+                    kline_data[sym] = (r15, r4h)
+                except Exception as e:
+                    sym = futures[fut]
+                    logger.debug(f"[{sym}] Kline download failed: {e}")
+
+        # ── Phase 2: Sequential signal processing ──
+        for sym in scan_symbols:
+            dl = kline_data.get(sym)
+            if dl is None:
+                continue
+            result, result_4h = dl
+
             if result is None:
                 continue
             close, high, low, volume, taker_buy = result
@@ -1070,14 +1093,6 @@ class RubberBandScalper(
             # Wire up volume/taker/high/low data for v9 confluence scoring
             self.strategy.update_market_data(sym, volume, taker_buy, high, low)
 
-            # v7.0: Download 4h data for MTF confirmation
-            # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
-            # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
-            _need_4h_extended = self.vs_config and (
-                self.vs_config.ma_cluster_enabled or self.vs_config.donchian_enabled
-            )
-            n_bars_4h = 300 if _need_4h_extended else 100
-            result_4h = self.download_klines(sym, n_bars_4h, interval="4h", full=True)
             if result_4h is not None:
                 c4h, h4h, l4h, v4h, _ = result_4h
                 self.strategy.update_htf_data(sym, c4h, h4h, l4h, volume_4h=v4h)
