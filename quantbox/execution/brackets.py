@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from binance.exceptions import BinanceAPIException
 
-from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.strategy_names import VR_DIRECTIONAL
 from quantbox.core.types import ALGO_ORDER_DEAD_STATUSES, round_to_tick, to_api_symbol
 
 logger = logging.getLogger("Scalper")
@@ -396,21 +396,7 @@ class BracketMixin:
                               entry × (1 - trail_activate) for SHORT.
             close_side: 'SELL' for LONG, 'BUY' for SHORT.
         """
-        vs = self.vs_config
-        if strategy_type == VR_STRADDLE:
-            td = vs.s_trail_distance
-            ta = vs.s_trail_activate
-        elif strategy_type == MA_CLUSTER:
-            td = vs.ma_cluster_trail_distance
-            ta = vs.ma_cluster_trail_activate
-        elif strategy_type == DONCHIAN:
-            td = vs.donchian_trail_distance
-            ta = vs.donchian_trail_activate
-        elif strategy_type == VR_DIRECTIONAL:
-            td = vs.d_trail_distance
-            ta = vs.d_trail_activate
-        else:
-            raise ValueError(f"Unknown strategy_type for trail params: {strategy_type!r}")
+        ta, td = self.vs_config.get_trail_params(strategy_type)
 
         # trail_distance fraction → Binance callbackRate percentage
         # e.g. 0.005 (0.5%) → 0.5, clamped to [0.5, 5.0] (rule #8: callbackRate >= 0.5%)
@@ -821,17 +807,7 @@ class BracketMixin:
             return
 
         strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
-        is_straddle = pos.get("is_straddle", False)
-
-        vs = self.vs_config
-        if is_straddle:
-            trail_distance = vs.s_trail_distance
-        elif strategy_type == MA_CLUSTER:
-            trail_distance = vs.ma_cluster_trail_distance
-        elif strategy_type == DONCHIAN:
-            trail_distance = vs.donchian_trail_distance
-        else:
-            trail_distance = vs.d_trail_distance
+        trail_distance = self.vs_config.get_trail_distance(strategy_type)
 
         trail_stop_gain = max(peak_gain - trail_distance, 0.0)
 
