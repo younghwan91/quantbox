@@ -62,6 +62,20 @@ class ReconciliationMixin:
         if self.paper_mode:
             return
 
+        # Batch optimization: fetch ALL open algo orders in one API call.
+        # Orders present in this set are still active (NEW/WORKING) — no need
+        # to call get_order() individually. Only absent orders (potentially
+        # FILLED/CANCELLED) require individual checks.
+        open_algo_ids: set[str] = set()
+        try:
+            resp = self._algo_api.list_open_orders()
+            orders = resp.get("orders", []) if isinstance(resp, dict) else resp
+            for o in orders:
+                open_algo_ids.add(str(o.get("algoId", "")))
+        except Exception as e:
+            # Fallback: if batch fetch fails, check every order individually
+            logger.warning(f"list_open_orders failed ({e}), falling back to per-order checks")
+
         for sym in list(self.strategy.active_positions):
             pos = self.strategy._positions.get(sym)
             if not pos:
@@ -82,7 +96,12 @@ class ReconciliationMixin:
 
             # Check TP order first (the happy path)
             if tp_oid:
-                filled = self._check_order_filled(api_sym, tp_oid)
+                # Skip individual API call if order is confirmed open
+                if str(tp_oid) in open_algo_ids:
+                    logger.info(f"[{api_sym}] Algo order check: algoId={tp_oid} status=NEW type=TAKE_PROFIT")
+                    filled = None
+                else:
+                    filled = self._check_order_filled(api_sym, tp_oid)
                 if filled and filled.get("status") == "FILLED":
                     fill_price = float(filled["avgPrice"])
                     fill_qty = float(filled["executedQty"])
@@ -146,7 +165,11 @@ class ReconciliationMixin:
 
             # Check SL order
             if sl_oid:
-                filled = self._check_order_filled(api_sym, sl_oid)
+                if str(sl_oid) in open_algo_ids:
+                    logger.info(f"[{api_sym}] Algo order check: algoId={sl_oid} status=NEW type=STOP")
+                    filled = None
+                else:
+                    filled = self._check_order_filled(api_sym, sl_oid)
                 if filled and filled.get("status") == "FILLED":
                     fill_price = float(filled["avgPrice"])
                     fill_qty = float(filled["executedQty"])
@@ -183,7 +206,13 @@ class ReconciliationMixin:
             # ── Check TRAILING_STOP_MARKET order (Algo API) ──
             trail_oid = pos.get("server_trail_order_id")
             if trail_oid and not str(trail_oid).startswith("paper_"):
-                trail_status = self._check_trail_regular(api_sym, str(trail_oid))
+                if str(trail_oid) in open_algo_ids:
+                    logger.info(
+                        f"[{api_sym}] Algo order check: algoId={trail_oid} status=NEW type=TRAILING_STOP_MARKET"
+                    )
+                    trail_status = None
+                else:
+                    trail_status = self._check_trail_regular(api_sym, str(trail_oid))
                 if trail_status and trail_status.get("status") == "FILLED":
                     fill_price = float(trail_status.get("avgPrice", 0))
                     fill_qty = float(trail_status.get("executedQty", 0))
