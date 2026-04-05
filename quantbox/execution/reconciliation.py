@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from quantbox.core.strategy_names import VR_DIRECTIONAL
-from quantbox.core.types import ALGO_ORDER_DEAD_STATUSES, to_api_symbol
+from quantbox.core.types import ALGO_ORDER_DEAD_STATUSES, build_trade_record, to_api_symbol
 from quantbox.execution.recon_journal import ReconEventType
 
 logger = logging.getLogger("Scalper")
@@ -934,15 +934,10 @@ class ReconciliationMixin:
             pos["server_sl_order_id"] = None
 
         # 2. PnL on the partial portion
-        if pos["signal"] == 1:
-            pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            pnl_pct = (pos["entry_price"] - fill_price) / pos["entry_price"]
+        from quantbox.core.types import calc_upnl_pct
 
+        pnl_pct = calc_upnl_pct(pos["entry_price"], fill_price, pos["signal"])
         partial_notional = fill_qty * pos["entry_price"]
-        pnl_usd = pnl_pct * partial_notional
-        cost = partial_notional * self.config.round_trip_cost
-        net_pnl = pnl_usd - cost
 
         # 3. Update position for runner mode
         full_quantity = pos["notional"] / pos["entry_price"]
@@ -977,29 +972,21 @@ class ReconciliationMixin:
 
         # Paper mode cost handling
         if self.paper_mode:
+            raw_pnl = pnl_pct * partial_notional
             paper_exit_cost = partial_notional * self.config.cost_per_side
-            self._paper_balance += pnl_usd - paper_exit_cost
+            self._paper_balance += raw_pnl - paper_exit_cost
 
         # 5. Trade record (partial)
-        trade = {
-            "symbol": api_sym,
-            "signal": pos["signal"],
-            "entry_price": pos["entry_price"],
-            "exit_price": fill_price,
-            "pnl_pct": pnl_pct * 100,
-            "pnl_usd": net_pnl,
-            "notional": partial_notional,
-            "bars_held": pos["bars_held"],
-            "reason": "server_partial_tp",
-            "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-            "mfe_pct": pos.get("best_pnl", 0.0) * 100,
-            "mae_pct": pos.get("worst_pnl", 0.0) * 100,
-            "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
-            "balance_after": self._get_cycle_balance(),
-            "straddle_pair_id": pos.get("straddle_pair_id"),
-        }
+        trade, _net_pnl = build_trade_record(
+            pos,
+            fill_price,
+            partial_notional,
+            "server_partial_tp",
+            self.config.round_trip_cost,
+            pos.get("balance_before") or self._get_cycle_balance(),
+            self._get_cycle_balance(),
+            symbol=api_sym,
+        )
         self._trade_history.append(trade)
 
         _tj = getattr(self, "_journal", None)
@@ -1015,7 +1002,7 @@ class ReconciliationMixin:
         logger.info(
             f"[{symbol}] SERVER PARTIAL TP ({fraction * 100:.0f}%): "
             f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
-            f"PnL={pnl_pct * 100:+.2f}% (${net_pnl:+.2f}) "
+            f"PnL={pnl_pct * 100:+.2f}% (${_net_pnl:+.2f}) "
             f"→ remaining ${pos['notional']:.2f}, BE stop active"
         )
         _dir = "LONG ↑" if pos["signal"] == 1 else "SHORT ↓"
@@ -1031,7 +1018,7 @@ class ReconciliationMixin:
                     {"name": "진입가", "value": f"${pos['entry_price']:.4f}", "inline": True},
                     {"name": "TP 체결가", "value": f"${fill_price:.4f}", "inline": True},
                     {"name": "수익률", "value": f"{pnl_pct * 100:+.2f}%", "inline": True},
-                    {"name": "확보금액", "value": f"${net_pnl:+.2f}", "inline": True},
+                    {"name": "확보금액", "value": f"${_net_pnl:+.2f}", "inline": True},
                     {"name": "남은 포지션", "value": f"${pos['notional']:.2f}", "inline": True},
                     {"name": "남은 SL", "value": _r_sl, "inline": True},
                 ],
@@ -1063,45 +1050,18 @@ class ReconciliationMixin:
         # Extract Binance symbol from compound key for trade records
         api_sym = to_api_symbol(symbol, pos)
 
-        # PnL calculation
-        if pos["signal"] == 1:
-            pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            pnl_pct = (pos["entry_price"] - fill_price) / pos["entry_price"]
-
-        # v12.3.2: Use entry-price-based notional for PnL, not exit-price.
-        # fill_qty * fill_price overstates winners and understates losers
-        # by a factor of fill_price/entry_price (~3-5% error per trade).
-        notional = pos["notional"]
-        pnl_usd = pnl_pct * notional
-        # v12.3.2: Always charge round_trip_cost for backtest parity.
-        # Both partial and runner portions must account for their share
-        # of entry + exit costs. The backtest delta model charges
-        # |delta| * cost_per_side per transition, totaling round_trip
-        # over the full lifecycle.
-        cost = notional * self.config.round_trip_cost
-        net_pnl = pnl_usd - cost
-
-        _now = datetime.now(timezone.utc).isoformat()
-        trade = {
-            "symbol": api_sym,
-            "signal": pos["signal"],
-            "entry_price": pos["entry_price"],
-            "exit_price": fill_price,
-            "pnl_pct": pnl_pct * 100,
-            "pnl_usd": net_pnl,
-            "notional": notional,
-            "bars_held": pos["bars_held"],
-            "reason": reason,
-            "time": _now,
-            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-            "mfe_pct": pos.get("best_pnl", 0.0) * 100,
-            "mae_pct": pos.get("worst_pnl", 0.0) * 100,
-            "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
-            "balance_after": self._get_cycle_balance(),
-            "straddle_pair_id": pair_id,
-        }
+        trade, net_pnl = build_trade_record(
+            pos,
+            fill_price,
+            pos["notional"],
+            reason,
+            self.config.round_trip_cost,
+            pos.get("balance_before") or self._get_cycle_balance(),
+            self._get_cycle_balance(),
+            symbol=api_sym,
+            pair_id=pair_id,
+        )
+        pnl_pct = trade["pnl_pct"] / 100  # fraction for logging
         self._trade_history.append(trade)
 
         # Write to persistent journal (dashboard reads from here)
