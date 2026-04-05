@@ -943,21 +943,8 @@ class VolStraddleStrategy:
             pos["worst_pnl"] = worst_gain
 
         # ── Select trail params based on position type ──
-        is_straddle = pos.get("is_straddle", False)
         strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
-        if is_straddle:
-            # r53 Option A: per-leg trailing for S_d8 straddle
-            trail_activate = self.config.s_trail_activate
-            trail_distance = self.config.s_trail_distance
-        elif strategy_type == MA_CLUSTER:
-            trail_activate = self.config.ma_cluster_trail_activate
-            trail_distance = self.config.ma_cluster_trail_distance
-        elif strategy_type == DONCHIAN:
-            trail_activate = self.config.donchian_trail_activate
-            trail_distance = self.config.donchian_trail_distance
-        else:
-            trail_activate = self.config.d_trail_activate
-            trail_distance = self.config.d_trail_distance
+        trail_activate, trail_distance = self.config.get_trail_params(strategy_type)
 
         # Update peak gain tracking
         peak_gain = pos.get("peak_gain", 0.0)

@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 
 from pydantic import Field, model_validator
-from quantbox.core.strategy_names import VR_DIRECTIONAL
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -536,6 +536,22 @@ class VolStraddleConfig(BaseSettings):
             "1h": self.max_hold_1h,
             "4h": self.max_hold_4h,
         }.get(tf, self.max_hold_15m)
+
+    def get_trail_params(self, strategy_type: str) -> tuple[float, float]:
+        """Return (trail_activate, trail_distance) for a strategy type."""
+        _map = {
+            VR_DIRECTIONAL: (self.d_trail_activate, self.d_trail_distance),
+            VR_STRADDLE: (self.s_trail_activate, self.s_trail_distance),
+            MA_CLUSTER: (self.ma_cluster_trail_activate, self.ma_cluster_trail_distance),
+            DONCHIAN: (self.donchian_trail_activate, self.donchian_trail_distance),
+        }
+        if strategy_type not in _map:
+            raise ValueError(f"Unknown strategy_type for trail params: {strategy_type!r}")
+        return _map[strategy_type]
+
+    def get_trail_distance(self, strategy_type: str) -> float:
+        """Return trail_distance for a strategy type (ratchet SL use)."""
+        return self.get_trail_params(strategy_type)[1]
 
     def get_warmup(self, tf: str) -> int:
         """Get warmup bars for a timeframe."""
