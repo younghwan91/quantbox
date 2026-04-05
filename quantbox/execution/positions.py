@@ -107,10 +107,7 @@ class PositionMixin:
                     f"→ {eq_scale:.2f}x → slot=${per_slot_capital:.2f}"
                 )
 
-        leverage = vs.base_leverage
-        notional = per_slot_capital * leverage
-
-        # Get signal metadata (SL/TP/TF from on_bar)
+        # Get signal metadata FIRST (need SL for risk-based leverage)
         sig_meta = self.strategy.get_last_signal_meta(symbol)
         sl_pct = sig_meta.get("sl", vs.d_sl)
         tp_pct = sig_meta.get("tp", vs.d_tp)
@@ -119,15 +116,16 @@ class PositionMixin:
         is_straddle = sig_meta.get("straddle", False)
         strategy_type = sig_meta.get("strategy_type", VR_DIRECTIONAL)
 
-        # ── R44d V17: MA Cluster uses different leverage ──
-        # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
-        if "leverage_override" in sig_meta:
-            raw_lev = sig_meta["leverage_override"]
-            leverage = max(1.0, min(125.0, float(raw_lev)))
-            if leverage != raw_lev:
-                logger.warning(f"[{symbol}] leverage_override clamped: {raw_lev} → {leverage:.0f} (must be [1, 125])")
-            notional = per_slot_capital * leverage
-            logger.info(f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x (override, SL={sl_pct * 100:.0f}%)")
+        # ── Risk-based leverage: 1 SL hit = risk_per_trade % of balance ──
+        # per_slot_capital × leverage × SL = balance × risk_per_trade
+        # ∴ leverage = risk_per_trade × max_concurrent / SL
+        leverage = vs.risk_per_trade * vs.max_concurrent / sl_pct
+        leverage = max(1.0, min(vs.max_leverage, leverage))
+        notional = per_slot_capital * leverage
+        logger.info(
+            f"[{symbol}] {strategy_type}: risk-based leverage={leverage:.1f}x "
+            f"(risk={vs.risk_per_trade * 100:.0f}% × N={vs.max_concurrent} / SL={sl_pct * 100:.1f}%)"
+        )
 
         # ── Straddle half-size: each leg = 0.5× notional ──
         # Applied AFTER leverage_override to prevent silent overwrite.
