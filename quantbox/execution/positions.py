@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
-from quantbox.core.types import to_api_symbol
+from quantbox.core.types import build_trade_record, to_api_symbol
 from quantbox.core.terminal_ui import format_entry, format_exit
 from quantbox.utils.diagnostics import _diag_logger
 
@@ -749,57 +749,36 @@ class PositionMixin:
                 except Exception:
                     pass
 
-                if closed_pos["signal"] == 1:
-                    pnl_pct = (fill_price - closed_pos["entry_price"]) / closed_pos["entry_price"]
-                else:
-                    pnl_pct = (closed_pos["entry_price"] - fill_price) / closed_pos["entry_price"]
-                pnl_usd = pnl_pct * closed_pos["notional"]
-                cost = closed_pos["notional"] * self.config.round_trip_cost
-                net_pnl = pnl_usd - cost
-                trade = {
-                    "symbol": api_symbol,
-                    "signal": closed_pos["signal"],
-                    "entry_price": closed_pos["entry_price"],
-                    "exit_price": fill_price,
-                    "pnl_pct": pnl_pct * 100,
-                    "pnl_usd": net_pnl,
-                    "notional": closed_pos["notional"],
-                    "bars_held": closed_pos["bars_held"],
-                    "reason": "server_fill_race",
-                    "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", VR_DIRECTIONAL),
-                    "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
-                    "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
-                    "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": closed_pos.get("balance_before") or self._get_cycle_balance(),
-                    "balance_after": self._get_cycle_balance(),
-                    "straddle_pair_id": closed_pos.get("straddle_pair_id"),
-                }
+                trade, net_pnl = build_trade_record(
+                    closed_pos,
+                    fill_price,
+                    closed_pos["notional"],
+                    "server_fill_race",
+                    self.config.round_trip_cost,
+                    closed_pos.get("balance_before") or self._get_cycle_balance(),
+                    self._get_cycle_balance(),
+                    symbol=api_symbol,
+                )
                 self._trade_history.append(trade)
                 self._journal.record(trade)
                 self._save_state()
-                logger.info(f"[{symbol}] NO_POSITION race recorded: PnL={pnl_pct * 100:+.2f}% (${net_pnl:+.2f})")
+                logger.info(f"[{symbol}] NO_POSITION race recorded: PnL={trade['pnl_pct']:+.2f}% (${net_pnl:+.2f})")
             return False
 
         fill_price = float(result["avgPrice"])
 
-        # PnL on the partial close
-        if pos["signal"] == 1:
-            pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            pnl_pct = (pos["entry_price"] - fill_price) / pos["entry_price"]
-
-        # v12.3.2: Use entry-price notional for PnL (not exit-price).
-        # exit-price notional (close_qty * fill_price) overstates winners
-        # and understates losers by fill_price/entry_price ratio.
+        # PnL on the partial close (entry-price notional, not exit-price)
         partial_notional = close_qty * pos["entry_price"]
-        pnl_usd = pnl_pct * partial_notional
-        # v12.3.2: Charge round_trip_cost (entry+exit) for backtest parity.
-        # Backtest _backtest_core_partial charges delta-based cost at each
-        # transition: 1.0*cps at entry + 0.5*cps at partial = 1.5*cps.
-        # For the partial portion, round_trip covers its share of entry+exit.
-        cost = partial_notional * self.config.round_trip_cost
-        net_pnl = pnl_usd - cost
+        _trade, net_pnl = build_trade_record(
+            pos,
+            fill_price,
+            partial_notional,
+            "partial_close",
+            self.config.round_trip_cost,
+            pos.get("balance_before") or self._get_cycle_balance(),
+            self._get_cycle_balance(),
+            symbol=symbol,
+        )
 
         # v12.3.2: Update remaining notional using ENTRY price, not fill price.
         # Using fill_price causes notional drift: remaining_qty computed as
@@ -846,34 +825,14 @@ class PositionMixin:
 
         # Paper mode — charge EXIT-side cost only.
         # Entry cost for the full position was already charged at _open_position.
-        # Using round_trip_cost here would double-count the entry fee for
-        # the partial portion (overcharge by 0.5 × cost_per_side per trade).
         if self.paper_mode:
+            raw_pnl = (_trade["pnl_pct"] / 100) * partial_notional
             paper_exit_cost = partial_notional * self.config.cost_per_side
-            self._paper_balance += pnl_usd - paper_exit_cost
+            self._paper_balance += raw_pnl - paper_exit_cost
 
         # Trade record (partial)
-        trade = {
-            "symbol": symbol,
-            "signal": pos["signal"],
-            "entry_price": pos["entry_price"],
-            "exit_price": fill_price,
-            "pnl_pct": pnl_pct * 100,
-            "pnl_usd": net_pnl,
-            "notional": partial_notional,
-            "bars_held": pos["bars_held"],
-            "reason": "partial_close",
-            "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-            "mfe_pct": pos.get("best_pnl", 0) * 100,
-            "mae_pct": pos.get("worst_pnl", 0) * 100,
-            "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
-            "balance_after": self._get_cycle_balance(),
-            "straddle_pair_id": pos.get("straddle_pair_id"),
-        }
-        self._trade_history.append(trade)
-        self._journal.record(trade)
+        self._trade_history.append(_trade)
+        self._journal.record(_trade)
 
         # v12.4.5: Save state immediately after partial close.
         # Without this, a crash before end-of-cycle _save_state() leaves
@@ -886,7 +845,7 @@ class PositionMixin:
         logger.info(
             f"[{symbol}] PARTIAL CLOSE ({fraction * 100:.0f}%): "
             f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
-            f"PnL={pnl_pct * 100:+.2f}% (${net_pnl:+.2f}) "
+            f"PnL={_trade['pnl_pct']:+.2f}% (${net_pnl:+.2f}) "
             f"→ remaining ${pos['notional']:.2f}, BE stop active"
         )
         _dir = "LONG ↑" if pos["signal"] == 1 else "SHORT ↓"
@@ -902,7 +861,7 @@ class PositionMixin:
                     {"name": "진입가", "value": f"${pos['entry_price']:.4f}", "inline": True},
                     {"name": "체결가", "value": f"${fill_price:.4f}", "inline": True},
                     {"name": "보유", "value": f"{pos['bars_held']}바", "inline": True},
-                    {"name": "수익률", "value": f"{pnl_pct * 100:+.2f}%", "inline": True},
+                    {"name": "수익률", "value": f"{_trade['pnl_pct']:+.2f}%", "inline": True},
                     {"name": "확보금액", "value": f"${net_pnl:+.2f}", "inline": True},
                     {"name": "남은포지션", "value": f"${pos['notional']:,.2f}", "inline": True},
                     {"name": "TP 방식", "value": _r_tp, "inline": True},
@@ -1011,37 +970,17 @@ class PositionMixin:
                         f"Using current_price=${current_price:.4f} as fallback."
                     )
 
-                # PnL calculation
-                if closed_pos["signal"] == 1:
-                    pnl_pct = (fill_price - closed_pos["entry_price"]) / closed_pos["entry_price"]
-                else:
-                    pnl_pct = (closed_pos["entry_price"] - fill_price) / closed_pos["entry_price"]
-
-                pnl_usd = pnl_pct * closed_pos["notional"]
-                # v12.3.2: Always charge round_trip_cost for parity.
-                cost = closed_pos["notional"] * self.config.round_trip_cost
-                net_pnl = pnl_usd - cost
-
-                # Trade record
-                trade = {
-                    "symbol": api_symbol,
-                    "signal": closed_pos["signal"],
-                    "entry_price": closed_pos["entry_price"],
-                    "exit_price": fill_price,
-                    "pnl_pct": pnl_pct * 100,
-                    "pnl_usd": net_pnl,
-                    "notional": closed_pos["notional"],
-                    "bars_held": closed_pos["bars_held"],
-                    "reason": f"{reason}_no_position",
-                    "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", VR_DIRECTIONAL),
-                    "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
-                    "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
-                    "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": closed_pos.get("balance_before") or self._get_cycle_balance(),
-                    "balance_after": self._get_cycle_balance(),
-                    "straddle_pair_id": closed_pos.get("straddle_pair_id"),
-                }
+                trade, net_pnl = build_trade_record(
+                    closed_pos,
+                    fill_price,
+                    closed_pos["notional"],
+                    f"{reason}_no_position",
+                    self.config.round_trip_cost,
+                    closed_pos.get("balance_before") or self._get_cycle_balance(),
+                    self._get_cycle_balance(),
+                    symbol=api_symbol,
+                )
+                pnl_pct = trade["pnl_pct"] / 100  # fraction for logging
                 self._trade_history.append(trade)
                 self._journal.record(trade)
 
@@ -1229,45 +1168,24 @@ class PositionMixin:
 
         fill_price = float(result["avgPrice"])
 
-        # PnL calculation
-        if pos["signal"] == 1:
-            pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            pnl_pct = (pos["entry_price"] - fill_price) / pos["entry_price"]
-
-        pnl_usd = pnl_pct * pos["notional"]
-        # v12.3.2: Always charge round_trip_cost for backtest parity.
-        # Each portion (partial and runner) accounts for its share
-        # of entry + exit costs. See _backtest_core_partial delta model.
-        cost = pos["notional"] * self.config.round_trip_cost
-        net_pnl = pnl_usd - cost
+        trade, net_pnl = build_trade_record(
+            pos,
+            fill_price,
+            pos["notional"],
+            reason,
+            self.config.round_trip_cost,
+            pos.get("balance_before") or self._get_cycle_balance(),
+            self._get_cycle_balance(),
+            symbol=api_symbol,
+        )
+        pnl_pct = trade["pnl_pct"] / 100  # fraction for logging
 
         # Paper balance
         if self.paper_mode:
-            self._paper_balance += pnl_usd
+            raw_pnl = pnl_pct * pos["notional"]
             close_cost = quantity * fill_price * self.config.cost_per_side
-            self._paper_balance -= close_cost
+            self._paper_balance += raw_pnl - close_cost
 
-        # Trade record
-        trade = {
-            "symbol": api_symbol,
-            "signal": pos["signal"],
-            "entry_price": pos["entry_price"],
-            "exit_price": fill_price,
-            "pnl_pct": pnl_pct * 100,
-            "pnl_usd": net_pnl,
-            "notional": pos["notional"],
-            "bars_held": pos["bars_held"],
-            "reason": reason,
-            "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-            "mfe_pct": pos.get("best_pnl", 0) * 100,
-            "mae_pct": pos.get("worst_pnl", 0) * 100,
-            "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
-            "balance_after": self._get_cycle_balance(),
-            "straddle_pair_id": pos.get("straddle_pair_id"),
-        }
         self._trade_history.append(trade)
         self._journal.record(trade)
 
