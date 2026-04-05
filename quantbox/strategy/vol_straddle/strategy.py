@@ -148,7 +148,6 @@ class VolStraddleStrategy:
         Returns:
             +1 (long), -1 (short), or 0 (no signal).
         """
-        self._current_symbol = symbol
         cfg = self.config
 
         # Store BTC close for C2 conviction condition
@@ -198,6 +197,7 @@ class VolStraddleStrategy:
                     data_4h["high"],
                     data_4h["low"],
                     "4h",
+                    symbol=symbol,
                 )
                 if sig_4h != 0:
                     self._last_signal_source[symbol] = VR_DIRECTIONAL
@@ -210,7 +210,7 @@ class VolStraddleStrategy:
             if min_len >= 4 * (cfg.warmup_1h + 1):
                 c1h, h1h, l1h, v1h = resample_ohlcv(c15, h15, l15, v15, 4)
                 if len(c1h) >= cfg.warmup_1h + 1:
-                    sig_1h = self._check_tf_signal(c1h, h1h, l1h, "1h")
+                    sig_1h = self._check_tf_signal(c1h, h1h, l1h, "1h", symbol=symbol)
                     if sig_1h != 0:
                         self._last_signal_source[symbol] = VR_DIRECTIONAL
                         return sig_1h
@@ -220,14 +220,14 @@ class VolStraddleStrategy:
             if min_len >= 2 * (cfg.warmup_30m + 1):
                 c30, h30, l30, v30 = resample_ohlcv(c15, h15, l15, v15, 2)
                 if len(c30) >= cfg.warmup_30m + 1:
-                    sig_30m = self._check_tf_signal(c30, h30, l30, "30m")
+                    sig_30m = self._check_tf_signal(c30, h30, l30, "30m", symbol=symbol)
                     if sig_30m != 0:
                         self._last_signal_source[symbol] = VR_DIRECTIONAL
                         return sig_30m
 
         # 15m: direct from downloaded data
         if cfg.enable_15m:
-            sig_15m = self._check_tf_signal(c15, h15, l15, "15m")
+            sig_15m = self._check_tf_signal(c15, h15, l15, "15m", symbol=symbol)
             if sig_15m != 0:
                 self._last_signal_source[symbol] = VR_DIRECTIONAL
                 return sig_15m
@@ -266,6 +266,7 @@ class VolStraddleStrategy:
         high: np.ndarray,
         low: np.ndarray,
         tf: str,
+        symbol: str = "",
     ) -> int:
         """Check VR compression signal for a single timeframe.
 
@@ -291,16 +292,16 @@ class VolStraddleStrategy:
 
         # Store last VR for debug logging (even if no signal)
         vr_val = float(vr[-1]) if len(vr) > 0 and not np.isnan(vr[-1]) else 999.0
-        self._last_vr[self._current_symbol] = vr_val
+        self._last_vr[symbol] = vr_val
         # Store per-TF VR
         if tf == "15m":
-            self._last_vr_15m[self._current_symbol] = vr_val
+            self._last_vr_15m[symbol] = vr_val
         elif tf == "30m":
-            self._last_vr_30m[self._current_symbol] = vr_val
+            self._last_vr_30m[symbol] = vr_val
         elif tf == "1h":
-            self._last_vr_1h[self._current_symbol] = vr_val
+            self._last_vr_1h[symbol] = vr_val
         elif tf == "4h":
-            self._last_vr_4h[self._current_symbol] = vr_val
+            self._last_vr_4h[symbol] = vr_val
 
         # ── S_d8 straddle check (higher priority) ──
         # Requires sustained VR compression for min_dur bars.
@@ -321,7 +322,7 @@ class VolStraddleStrategy:
                     mom = compute_momentum(close, cfg.momentum_period)
                     d_dir = int(make_direction_momentum(d_sig, mom)[-1])
                     logger.info(
-                        f"[{self._current_symbol}] PARITY: S_d8+D_mom8 overlap "
+                        f"[{symbol}] PARITY: S_d8+D_mom8 overlap "
                         f"TF={tf} VR={vr_val:.3f} — D would be "
                         f"{'LONG' if d_dir == 1 else 'SHORT'} "
                         f"(straddle takes priority)"
@@ -343,13 +344,13 @@ class VolStraddleStrategy:
                 # Min conviction filter (T3-Triple mode)
                 if cfg.cw_enabled and score < cfg.min_conviction_score:
                     logger.info(
-                        f"[{self._current_symbol}] S_d8 BLOCKED: "
+                        f"[{symbol}] S_d8 BLOCKED: "
                         f"conviction={score} < min={cfg.min_conviction_score} "
                         f"TF={tf} {cond} VR={vr_val:.3f}"
                     )
                     # Don't return — fall through to D_mom8 check
                 else:
-                    self._last_signal_meta[self._current_symbol] = {
+                    self._last_signal_meta[symbol] = {
                         "tf": tf,
                         "sl": cfg.s_sl,
                         "tp": cfg.s_tp,
@@ -363,7 +364,7 @@ class VolStraddleStrategy:
                         "conviction_cond": cond,
                     }
                     logger.info(
-                        f"[{self._current_symbol}] S_d8 straddle signal "
+                        f"[{symbol}] S_d8 straddle signal "
                         f"TF={tf} VR={vr_val:.3f} conviction={score}/4 "
                         f"{cond} "
                         f"(threshold={cfg.s_vr_threshold})"
@@ -387,14 +388,14 @@ class VolStraddleStrategy:
 
         # ── F5: TBR z-score Gate (R46 validated, D_mom8 only) ──
         if self.config.f5_tbr_enabled:
-            tbr_z = self._compute_tbr_zscore(self._current_symbol)
+            tbr_z = self._compute_tbr_zscore(symbol)
             is_long = direction == 1
             blocked = (is_long and tbr_z > self.config.f5_tbr_z_threshold) or (
                 not is_long and tbr_z < -self.config.f5_tbr_z_threshold
             )
             if blocked:
                 logger.info(
-                    f"[{self._current_symbol}] D_mom8 BLOCKED by F5-TBR: "
+                    f"[{symbol}] D_mom8 BLOCKED by F5-TBR: "
                     f"tbr_z={tbr_z:.3f} thresh={self.config.f5_tbr_z_threshold} "
                     f"dir={'LONG' if is_long else 'SHORT'} TF={tf}"
                 )
@@ -424,7 +425,7 @@ class VolStraddleStrategy:
         # Min conviction filter (T3-Triple mode)
         if cfg.cw_enabled and score < cfg.min_conviction_score:
             logger.info(
-                f"[{self._current_symbol}] D_mom8 BLOCKED: "
+                f"[{symbol}] D_mom8 BLOCKED: "
                 f"conviction={score} < min={cfg.min_conviction_score} "
                 f"TF={tf} {cond} VR={vr_val:.3f}"
             )
@@ -433,7 +434,7 @@ class VolStraddleStrategy:
         # Store metadata for scalper to query after on_bar
         # (which TF, SL/TP, max_hold for this specific signal)
         mom_val = float(mom[-1])
-        self._last_signal_meta[self._current_symbol] = {
+        self._last_signal_meta[symbol] = {
             "tf": tf,
             "sl": cfg.d_sl,
             "tp": cfg.d_tp,
@@ -444,15 +445,12 @@ class VolStraddleStrategy:
             "conviction_cond": cond,
         }
         logger.info(
-            f"[{self._current_symbol}] D_mom8 signal "
+            f"[{symbol}] D_mom8 signal "
             f"TF={tf} VR={vr_val:.3f} {'LONG' if direction == 1 else 'SHORT'} "
             f"mom={mom_val:.6f} conviction={score}/4 {cond} "
             f"(threshold={cfg.d_vr_threshold})"
         )
         return direction
-
-    # Track current symbol for signal metadata storage
-    _current_symbol: str = ""
 
     # ══════════════════════════════════════════════════════════════════
     #  MA Cluster Squeeze Signal (R44d V17)
