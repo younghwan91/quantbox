@@ -208,7 +208,7 @@ def collect_enhanced_trades(
     all_trades: list[tuple[str, int, int, float]] = []
     for sym in sorted(data_15m.keys()):
         sym_trades: list[tuple[int, int, float]] = []
-        for tf_label, ratio, warmup_base, mh_d, mh_s in G_3TF:
+        for tf_label, ratio, warmup_base, _mh in G_3TF:
             if tf_restriction is not None and ratio != tf_restriction:
                 continue
             d_tf = tf_data_map.get(ratio)

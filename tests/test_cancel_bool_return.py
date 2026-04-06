@@ -7,9 +7,8 @@ return True while unexpected errors return False.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 from binance.exceptions import BinanceAPIException
 
 from quantbox.execution.brackets import BracketMixin

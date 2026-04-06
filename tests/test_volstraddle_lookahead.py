@@ -7,7 +7,7 @@ Key invariants:
 1. VR is computed from past bars only (EMA-based ATR, backward-looking).
 2. Momentum is close[i] / close[i-lookback] — strictly past data.
 3. 1h resampling discards incomplete remainder bars (n // ratio).
-4. gen_vr_signal/gen_vr_dur_signal check warmup period.
+4. gen_vr_signal checks warmup period.
 5. Strategy.on_bar checks sig[-1] (last completed bar only).
 6. Truncating close to bar i produces the SAME signal as full array.
 """
@@ -22,7 +22,6 @@ from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
     compute_momentum,
     compute_vr,
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
     resample_ohlcv,
@@ -116,7 +115,7 @@ class TestMomentumNoLookahead:
 
 
 class TestSignalNoLookahead:
-    """gen_vr_signal/gen_vr_dur_signal must not use future data."""
+    """gen_vr_signal must not use future data."""
 
     def test_d_signal_truncated_equals_full(self):
         """D_mom8 direction at bar i from truncated data must match full."""
@@ -146,28 +145,6 @@ class TestSignalNoLookahead:
             )
             assert dire_trunc[-1] == dire_full[i], (
                 f"Direction lookahead at bar {i}: truncated={dire_trunc[-1]} vs full={dire_full[i]}"
-            )
-
-    def test_s_signal_truncated_equals_full(self):
-        """S_d8 signal at bar i from truncated data must match full."""
-        data = _load_real_data()
-        close = data["close"]
-        high = data["high"]
-        low = data["low"]
-
-        vr_full = compute_vr(close, high, low, 7, 50)
-        sig_full = gen_vr_dur_signal(vr_full, 0.55, 8, 200)
-
-        signal_bars = np.where(sig_full == 1)[0]
-        if len(signal_bars) == 0:
-            pytest.skip("No S_d8 signals in data")
-
-        for i in signal_bars[:10]:
-            vr_trunc = compute_vr(close[: i + 1], high[: i + 1], low[: i + 1], 7, 50)
-            sig_trunc = gen_vr_dur_signal(vr_trunc, 0.55, 8, 200)
-
-            assert sig_trunc[-1] == sig_full[i], (
-                f"S_d8 lookahead at bar {i}: truncated={sig_trunc[-1]} vs full={sig_full[i]}"
             )
 
 

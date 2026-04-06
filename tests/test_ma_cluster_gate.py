@@ -13,7 +13,6 @@ Validates:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy

@@ -1,5 +1,5 @@
 """
-Strategy module — Production strategy: vol_straddle (VR Squeeze).
+Strategy module — Production strategies: VR Directional, MA Cluster, Donchian.
 
 Infrastructure:
   - TradingStrategy: Protocol formalising the shared strategy interface.

@@ -8,12 +8,9 @@ on notional = material drag over 48h holds.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from quantbox.backtest.trade_sim import (
     collect_trades,
-    sim_directional_trades,
-    gen_vr_signal,
 )
 
 

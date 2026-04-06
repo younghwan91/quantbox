@@ -15,7 +15,6 @@ import pytest
 
 from research.active.r51_r60.r55_subtf_entry import (
     gen_vr_signal_with_subtf_vr,
-    gen_vr_dur_signal_with_subtf_vr,
     sim_directional_pullback,
 )
 
@@ -425,45 +424,6 @@ class TestPullbackEntry:
         assert len(p) == 1
         # TP pnl = 0.12 (exact, since SL not hit and TP is hit)
         assert abs(p[0] - 0.12) < 1e-6, f"Expected TP pnl=0.12, got {p[0]:.6f}"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  gen_vr_dur_signal_with_subtf_vr — S_d8 straddle version
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestSubTfDurSignal:
-    def test_requires_min_duration_and_lower_vr(self):
-        """S_d8 stackup requires BOTH duration AND 15m VR compression."""
-        n_4h = 30
-        ratio = 16
-        n_15m = n_4h * ratio
-
-        vr_4h = np.full(n_4h, 0.8, dtype=np.float64)
-        vr_15m = np.full(n_15m, 0.8, dtype=np.float64)
-
-        # 4h compressed for bars 10-14 (5 bars = min_dur=3 satisfied)
-        vr_4h[10:15] = 0.3
-
-        # 15m compressed for bars in 4h bar 12 only
-        vr_15m[12 * ratio : 13 * ratio] = 0.4
-
-        sig = gen_vr_dur_signal_with_subtf_vr(
-            vr_4h,
-            vr_15m,
-            0.5,
-            0.5,
-            min_dur=3,
-            warmup=5,
-            lower_ratio=ratio,
-        )
-
-        # bar 12: 4h compressed for 3 bars (10,11,12), 15m also compressed → signal
-        assert sig[12] == 1
-        # bar 10: only 1 bar compressed → min_dur not satisfied → no signal
-        assert sig[10] == 0
-        # bar 13: 15m NOT compressed → no signal despite duration
-        assert sig[13] == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

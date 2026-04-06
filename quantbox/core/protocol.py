@@ -106,7 +106,7 @@ class ScalperProtocol(Protocol):
 
     # ── Risk gate helper ──────────────────────────────────────────────────
     _risk_guard: RiskGuard
-    """Stateless pre-entry risk gate (G6, straddle cap, direction diversity, G7)."""
+    """Stateless pre-entry risk gate (G6, direction diversity, G7)."""
 
     # ── Symbol info cache (DataMixin) ─────────────────────────────────────
     _symbol_info_cache: dict[str, dict[str, Any]]
@@ -300,7 +300,7 @@ class ScalperProtocol(Protocol):
 
     # ── Methods: position lifecycle ───────────────────────────────────────
     def _get_pair_counterpart(self, pos_key: str) -> str | None:
-        """Find counterpart position key for a straddle pair."""
+        """Find counterpart position key (legacy, always returns None)."""
         ...
 
     def _calculate_sizing(self, symbol: str, signal: int, close_prices: np.ndarray, balance: float) -> dict | None: ...
@@ -314,7 +314,6 @@ class ScalperProtocol(Protocol):
         sizing: dict,
         brackets: dict,
         balance: float,
-        straddle_pair_id: str | None = None,
     ) -> bool: ...
 
     def _close_position(self, symbol: str, reason: str, current_price: float) -> bool:

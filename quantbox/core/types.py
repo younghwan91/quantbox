@@ -48,20 +48,12 @@ Side = Literal["BUY", "SELL"]
 PositionSide = Literal["LONG", "SHORT", "BOTH"]
 """Hedge-mode position side (``BOTH`` = one-way mode)."""
 
-SignalValue = Literal[-1, 0, 1, 2]
+SignalValue = Literal[-1, 0, 1]
 """Strategy signal value.
 
 -1 = short entry
  0 = no signal
 +1 = long entry
-+2 = straddle (vol_straddle strategy: open both LONG and SHORT)
-"""
-
-StraddlePairId = NewType("StraddlePairId", str)
-"""UUID string linking the LONG and SHORT legs of a straddle pair.
-
-Both legs of the same straddle share the same ``StraddlePairId``.
-``None`` for directional (non-straddle) positions.
 """
 
 
@@ -278,13 +270,10 @@ class PositionDict(TypedDict, total=False):
 
     # ── Strategy metadata ─────────────────────────────────────────────────
     strategy_type: str
-    """``'vr_directional'``, ``'vr_straddle'``, or ``'ma_cluster'``."""
+    """``'vr_directional'``, ``'ma_cluster'``, or ``'donchian'``."""
 
     tf: str
     """Signal timeframe label: ``'15m'``, ``'1h'``, ``'4h'``."""
-
-    is_straddle: bool
-    """True if this position is a leg of a vol_straddle pair (both LONG and SHORT legs are True)."""
 
     position_side: str | None
     """Hedge mode position side (``'LONG'`` / ``'SHORT'``).  None = one-way."""

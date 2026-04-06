@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 from pathlib import Path
 
-import pytest
 
 # research 스크립트를 직접 import하기 위해 sys.path 설정은 conftest에서 처리
 import sys
@@ -192,8 +190,8 @@ class TestLoadLiveTrades:
         result = load_live_trades(str(tmp_path / "nonexistent.sqlite"))
         assert result == []
 
-    def test_loads_straddle_trades(self, tmp_path: Path) -> None:
-        """strategy_type이 straddle/vol_straddle인 거래만 반환."""
+    def test_loads_vol_straddle_trades(self, tmp_path: Path) -> None:
+        """strategy_type이 vol_straddle인 거래만 반환."""
         db = tmp_path / "journal.sqlite"
         conn = sqlite3.connect(str(db))
         conn.execute("""
@@ -206,7 +204,7 @@ class TestLoadLiveTrades:
                 balance_after REAL, session TEXT, commit_sha TEXT
             )
         """)
-        # 스트래들 거래 2건 + 다른 전략 1건
+        # vol_straddle 거래 1건 + 다른 전략 1건
         conn.execute(
             "INSERT INTO trades VALUES (1,'BTCUSDT','vol_straddle','LONG',"
             "50000,52500,0.05,50,0.06,-0.005,1000,10,'2026-03-01T10:00:00',"
@@ -221,7 +219,6 @@ class TestLoadLiveTrades:
         conn.close()
 
         # load_live_trades는 절대경로를 받으므로 ROOT-relative가 아닌 직접 테스트
-        import importlib
         import research.active.r81_r85.r85_execution_quality as mod
 
         original_root = mod.ROOT
@@ -262,7 +259,6 @@ class TestLoadReconEvents:
 
     def test_loads_recon_events(self, tmp_path: Path) -> None:
         """recon.db에서 이벤트를 로드한다."""
-        import json
 
         db_dir = tmp_path / "journal"
         db_dir.mkdir()
@@ -386,7 +382,7 @@ class TestComputeExecutionGaps:
         """MFE가 trail_activate 초과 + max_hold 청산 → ratchet 미스로 감지."""
         from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
-        trail_activate = VolStraddleConfig().s_trail_activate
+        trail_activate = VolStraddleConfig().d_trail_activate
         trades = [
             {
                 "mfe_pct": trail_activate + 0.01,  # trail 활성화 수준 이상
@@ -400,7 +396,7 @@ class TestComputeExecutionGaps:
         """SL 청산은 ratchet 미스로 집계되지 않는다."""
         from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
-        trail_activate = VolStraddleConfig().s_trail_activate
+        trail_activate = VolStraddleConfig().d_trail_activate
         trades = [
             {
                 "mfe_pct": trail_activate + 0.01,

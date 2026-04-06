@@ -15,7 +15,6 @@ Plus PBT exit mode:
 
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
 
 from quantbox.strategy.rubberband import (
     RubberBandConfig,

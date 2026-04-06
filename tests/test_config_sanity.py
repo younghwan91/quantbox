@@ -7,13 +7,12 @@ will fail here at pre-commit time — before it reaches live trading.
 Rules encoded:
   - VR L/N = base_leverage / max_concurrent must be 3.0
   - MA L/N = ma_cluster_leverage / max_concurrent must be 2.1
-  - hedge_mode must be True (straddle requires Binance Hedge Mode)
+  - hedge_mode must be True (Binance Hedge Mode required for LONG/SHORT positionSide)
   - dynamic_capital_enabled must be False (causes -2019 margin errors)
   - max_concurrent must be 10
   - Delisted symbols (MKRUSDT/FTMUSDT/EOSUSDT) must not be in whitelist
   - Whitelist must have between 50 and 75 symbols
   - d_trail_distance < d_trail_activate (trail logic validity)
-  - s_trail_distance < s_trail_activate (straddle trail logic)
   - max_drawdown_pct >= 0.25 (r48 analysis: P99 session DD, must not be too tight)
 """
 
@@ -58,10 +57,10 @@ class TestVRLeverage:
 
 class TestRiskMode:
     def test_hedge_mode_enabled(self, cfg: VolStraddleConfig) -> None:
-        """Hedge mode must be True — straddle requires Binance dualSidePosition."""
+        """Hedge mode must be True — required for LONG/SHORT positionSide orders."""
         assert cfg.hedge_mode is True, (
-            "hedge_mode=False will break straddle (S_d8) position management. "
-            "Binance requires dualSidePosition=true for simultaneous LONG+SHORT."
+            "hedge_mode=False breaks positionSide=LONG/SHORT order management. "
+            "Binance requires dualSidePosition=true for hedge mode positions."
         )
 
     def test_dynamic_capital_disabled(self, cfg: VolStraddleConfig) -> None:
@@ -88,17 +87,8 @@ class TestTrailLogic:
             f"Trail would trigger at activation — effectively a fixed TP."
         )
 
-    def test_straddle_trail_distance_less_than_activate(self, cfg: VolStraddleConfig) -> None:
-        """Straddle trail distance must be less than straddle activation."""
-        assert cfg.s_trail_distance < cfg.s_trail_activate, (
-            f"s_trail_distance={cfg.s_trail_distance} >= s_trail_activate={cfg.s_trail_activate}."
-        )
-
     def test_vr_sl_is_positive(self, cfg: VolStraddleConfig) -> None:
         assert 0 < cfg.d_sl < 0.10, f"d_sl={cfg.d_sl} out of valid range (0, 0.10)"
-
-    def test_straddle_sl_is_positive(self, cfg: VolStraddleConfig) -> None:
-        assert 0 < cfg.s_sl < 0.10, f"s_sl={cfg.s_sl} out of valid range (0, 0.10)"
 
 
 class TestSymbolUniverse:

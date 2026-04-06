@@ -170,39 +170,6 @@ def gen_vr_signal(
 
 
 @numba.jit(nopython=True, cache=True)
-def gen_vr_dur_signal(
-    vr: np.ndarray,
-    threshold: float,
-    min_dur: int,
-    warmup: int,
-) -> np.ndarray:
-    """Generate S_d8 raw signal: 1 where VR < threshold AND squeeze ≥ min_dur.
-
-    For straddle mode (Phase 2).
-
-    Args:
-        vr: Volatility Ratio array.
-        threshold: VR threshold.
-        min_dur: Minimum consecutive bars below threshold.
-        warmup: Minimum bars before first signal.
-
-    Returns:
-        Binary signal array (0 or 1).
-    """
-    n = len(vr)
-    sig = np.zeros(n, dtype=np.int8)
-    cnt = 0
-    for i in range(n):
-        if not np.isnan(vr[i]) and vr[i] < threshold:
-            cnt += 1
-        else:
-            cnt = 0
-        if i >= warmup and cnt >= min_dur:
-            sig[i] = 1
-    return sig
-
-
-@numba.jit(nopython=True, cache=True)
 def make_direction_momentum(
     sig: np.ndarray,
     momentum: np.ndarray,

@@ -25,7 +25,7 @@ from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 @pytest.fixture(scope="module")
 def r60():
-    import importlib, sys
+    import sys
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
@@ -42,21 +42,9 @@ def r60():
 
 
 class TestConfigParity:
-    def test_s_vr_from_config(self, r60):
-        cfg = VolStraddleConfig()
-        assert r60.S_VR == pytest.approx(cfg.s_vr_threshold)
-
-    def test_s_dur_from_config(self, r60):
-        cfg = VolStraddleConfig()
-        assert r60.S_DUR == cfg.s_squeeze_dur
-
     def test_d_sl_from_config(self, r60):
         cfg = VolStraddleConfig()
         assert r60.D_SL == pytest.approx(cfg.d_sl)
-
-    def test_s_sl_from_config(self, r60):
-        cfg = VolStraddleConfig()
-        assert r60.S_SL == pytest.approx(cfg.s_sl)
 
     def test_vr_ln_from_config(self, r60):
         cfg = VolStraddleConfig()
@@ -147,16 +135,16 @@ class TestConvictionScore:
         assert conds["b3_confluence"] is True
         assert score >= 1
 
-    def test_a3_fires_for_straddle_long_squeeze(self, r60):
-        """A3 fires for straddle with squeeze_dur >= a3_long_squeeze_dur."""
+    def test_a3_fires_for_long_squeeze(self, r60):
+        """A3 fires when squeeze_dur >= a3_long_squeeze_dur."""
         cfg = VolStraddleConfig()
         close = np.ones(20) * 100.0
         vr = np.ones(20) * 0.5
         score, conds = r60.compute_conviction_at_bar(close, vr, None, 19, True, False, cfg.a3_long_squeeze_dur)
         assert conds["a3_quality"] is True
 
-    def test_a3_fails_for_straddle_short_squeeze(self, r60):
-        """A3 does not fire for straddle with short squeeze duration."""
+    def test_a3_fails_for_short_squeeze(self, r60):
+        """A3 does not fire with short squeeze duration."""
         close = np.ones(20) * 100.0
         vr = np.ones(20) * 0.5
         score, conds = r60.compute_conviction_at_bar(close, vr, None, 19, True, False, 1)
@@ -465,30 +453,30 @@ class TestReportGeneration:
 
     def test_report_contains_header(self, r60):
         sd, dd, sbd, cands = self._make_inputs(r60)
-        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "S_d8")
+        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "D_mom8")
         assert "r60" in report
         assert "N-WR Harmony" in report
 
     def test_report_contains_phase_a(self, r60):
         sd, dd, sbd, cands = self._make_inputs(r60)
-        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "S_d8")
+        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "D_mom8")
         assert "Phase A" in report
         assert "Score" in report
 
     def test_report_contains_best_candidate(self, r60):
         sd, dd, sbd, cands = self._make_inputs(r60)
-        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "S_d8")
+        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "D_mom8")
         assert "min_conv=1" in report
 
     def test_report_contains_parity_notes(self, r60):
         sd, dd, sbd, cands = self._make_inputs(r60)
-        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "S_d8")
+        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "D_mom8")
         assert "Parity Notes" in report
         assert "config.py" in report
 
     def test_report_no_hardcoded_thresholds(self, r60):
         """Report does not contain hardcoded param values that bypass config."""
         sd, dd, sbd, cands = self._make_inputs(r60)
-        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "S_d8")
+        report = r60.generate_report(sd, dd, sbd, cands, 6.0, "D_mom8")
         # Should not have outdated hardcoded s_vr values
         assert "s_vr=0.55" not in report or "s_vr=0.57" in report

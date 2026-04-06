@@ -2,7 +2,6 @@
 
 Covers:
   - sim_directional_trades: SL/TP/max_hold, long/short, edge cases
-  - sim_straddle_trades: dual-leg exit, cost deduction
   - collect_trades: multi-TF assembly, per-symbol dedup
   - portfolio_sim: slot contention, same-symbol block
   - compute_metrics: mathematical correctness on known data
@@ -14,9 +13,6 @@ import numpy as np
 import pytest
 
 from quantbox.backtest.trade_sim import (
-    COST_DIRECTIONAL,
-    COST_STRADDLE,
-    WARMUP_15m,
     bootstrap_pf,
     collect_trades,
     compute_metrics,
@@ -25,7 +21,6 @@ from quantbox.backtest.trade_sim import (
     portfolio_sim_with_details,
     sim_directional_trades,
     sim_directional_trailing,
-    sim_straddle_trades,
 )
 
 
@@ -322,100 +317,6 @@ class TestSimDirectionalTrades:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  sim_straddle_trades
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestSimStraddleTrades:
-    """Tests for straddle (long+short simultaneous) simulator."""
-
-    def test_no_signal_no_trades(self):
-        close, high, low = _flat_price(100)
-        sig = np.zeros(100, dtype=np.int8)
-        pnl, _, _ = sim_straddle_trades(
-            close,
-            high,
-            low,
-            sig,
-            0.015,
-            0.05,
-            50,
-            0.0,
-        )
-        assert len(pnl) == 0
-
-    def test_flat_price_both_legs_breakeven(self):
-        """Flat price → both legs close at max_hold → net ≈ 0."""
-        n = 20
-        close, high, low = _flat_price(n)
-        sig = np.zeros(n, dtype=np.int8)
-        sig[0] = 1
-
-        pnl, _, _ = sim_straddle_trades(
-            close,
-            high,
-            low,
-            sig,
-            0.015,
-            0.05,
-            5,
-            0.0,
-        )
-        assert len(pnl) == 1
-        # Both legs exit at same price → long = 0%, short = 0%, net = 0
-        assert abs(pnl[0]) < 1e-9
-
-    def test_straddle_cost_deducted(self):
-        """Straddle cost is properly deducted."""
-        n = 20
-        close, high, low = _flat_price(n)
-        sig = np.zeros(n, dtype=np.int8)
-        sig[0] = 1
-        cost = COST_STRADDLE
-
-        pnl, _, _ = sim_straddle_trades(
-            close,
-            high,
-            low,
-            sig,
-            0.015,
-            0.05,
-            5,
-            cost,
-        )
-        # Half-size: 0.5 * (0 + 0 - cost) = -0.5 * cost
-        assert pnl[0] == pytest.approx(-0.5 * cost, abs=1e-9)
-
-    def test_straddle_one_leg_tp(self):
-        """One leg hits TP, other leg hits SL → net = TP - SL - cost."""
-        n = 20
-        close = np.full(n, 100.0)
-        high = np.full(n, 100.0)
-        low = np.full(n, 100.0)
-        sig = np.zeros(n, dtype=np.int8)
-        sig[0] = 1
-        # Price goes up → long TP, short SL
-        high[3] = 106.0  # long TP at +5%
-        # Short SL triggers at entry*(1+sl) = 100*1.015 = 101.5
-        # high[3]=106 > 101.5 → short SL also fires
-
-        sl, tp = 0.015, 0.05
-        pnl, _, _ = sim_straddle_trades(
-            close,
-            high,
-            low,
-            sig,
-            sl,
-            tp,
-            50,
-            0.0,
-        )
-        assert len(pnl) == 1
-        # Half-size per leg: Long TP = +5%, Short SL = -1.5%, net = 0.5*(+5%) + 0.5*(-1.5%) = 1.75%
-        assert pnl[0] == pytest.approx(0.5 * tp + 0.5 * (-sl), abs=1e-9)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 #  portfolio_sim
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -498,38 +399,8 @@ class TestPortfolioSim:
         assert pnl[0] == 0.01
         assert pnl[1] == 0.02
 
-    def test_straddle_syms_consumes_2_slots(self):
-        """Straddle trades consume 2 slots, blocking a 3rd trade when max=2."""
-        # Straddle on ETCUSDT takes 2 of 2 slots → SOLUSDT blocked
-        trades = [
-            ("ETCUSDT", 0, 100, 0.05),  # straddle: uses 2 slots
-            ("SOLUSDT", 5, 50, 0.02),  # directional: needs 1 slot → blocked
-        ]
-        strd_syms = frozenset(["ETCUSDT"])
-        pnl = portfolio_sim(trades, 2, straddle_syms=strd_syms)
-        assert len(pnl) == 1
-        assert pnl[0] == pytest.approx(0.05)
-
-    def test_straddle_syms_allows_when_slots_available(self):
-        """Straddle + directional both accepted when enough slots exist."""
-        trades = [
-            ("ETCUSDT", 0, 100, 0.05),  # straddle: uses 2 slots (of 3)
-            ("SOLUSDT", 5, 50, 0.02),  # directional: uses 1 slot (of 3)
-        ]
-        strd_syms = frozenset(["ETCUSDT"])
-        pnl = portfolio_sim(trades, 3, straddle_syms=strd_syms)
-        assert len(pnl) == 2
-
-    def test_straddle_syms_mixed_with_vr(self):
-        """Mixed VR+STRD: straddle counts as 2, max_concurrent=10 → max 5 straddle."""
-        # 5 straddle = 10 slots exactly, 6th straddle blocked
-        strd_syms = frozenset([f"SYM{i}" for i in range(6)])
-        trades = [(f"SYM{i}", i, i + 50, 0.01) for i in range(6)]
-        pnl = portfolio_sim(trades, 10, straddle_syms=strd_syms)
-        assert len(pnl) == 5  # 6th blocked: would need 12 slots
-
-    def test_straddle_syms_none_backward_compat(self):
-        """Without straddle_syms, original single-slot behaviour is preserved."""
+    def test_default_single_slot_behaviour(self):
+        """Default single-slot behaviour is preserved."""
         trades = [
             ("ETCUSDT", 0, 100, 0.05),
             ("SOLUSDT", 5, 50, 0.02),

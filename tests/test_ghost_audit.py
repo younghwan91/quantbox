@@ -9,11 +9,8 @@ Verifies that when _reconcile_positions() detects a ghost position
 5. Falls back gracefully when API calls fail
 """
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import logging
-import pytest
-
-from quantbox.core.config import Config
 
 
 # ─────────────────────────── Fixtures ──────────────────────────────

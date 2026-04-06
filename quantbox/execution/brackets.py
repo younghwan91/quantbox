@@ -385,7 +385,7 @@ class BracketMixin:
         """Calculate TRAILING_STOP_MARKET parameters from config.
 
         Args:
-            strategy_type: 'vr_straddle', 'ma_cluster', or 'vr_directional'.
+            strategy_type: 'vr_directional', 'ma_cluster', or 'donchian'.
             signal: +1 (LONG) or -1 (SHORT).
             entry_price: Position entry price.
 

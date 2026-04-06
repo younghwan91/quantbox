@@ -17,10 +17,8 @@ Whitelist of legacy files that are allowed to import backtest_v14_3_0:
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
-import pytest
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Legacy files ALLOWED to import backtest_v14_3_0 (already documented, archived)
@@ -107,7 +105,7 @@ class TestNoStaleBacktestImports:
                 violators.append(rel)
 
         assert not violators, (
-            f"New research files importing stale backtest_v14_3_0:\n"
+            "New research files importing stale backtest_v14_3_0:\n"
             + "\n".join(f"  {v}" for v in sorted(violators))
             + "\n\nUse: from quantbox.backtest.trade_sim import collect_trades, portfolio_sim"
             + "\nSee backtesting.instructions.md Section 1."
@@ -161,7 +159,7 @@ class TestNoExcludeSymbolsInNewResearch:
                 violators.append(rel)
 
         assert not violators, (
-            f"Research files using exclude_symbols (must use symbol_whitelist):\n"
+            "Research files using exclude_symbols (must use symbol_whitelist):\n"
             + "\n".join(f"  {v}" for v in sorted(violators))
             + "\n\nCorrect pattern:"
             + "\n  whitelist = set(cfg.symbol_whitelist)"

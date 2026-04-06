@@ -16,7 +16,6 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,14 +43,6 @@ class TestConfigParity:
         cfg = VolStraddleConfig()
         assert r59.D_TRAIL_ACT == pytest.approx(cfg.d_trail_activate)
         assert r59.D_TRAIL_DIST == pytest.approx(cfg.d_trail_distance)
-
-    def test_s_vr_from_config(self):
-        cfg = VolStraddleConfig()
-        assert r59.S_VR == pytest.approx(cfg.s_vr_threshold)
-
-    def test_s_dur_from_config(self):
-        cfg = VolStraddleConfig()
-        assert r59.S_DUR == cfg.s_squeeze_dur
 
     def test_d_vr_from_config(self):
         cfg = VolStraddleConfig()
@@ -266,67 +257,6 @@ class TestPassCriteria:
 
     def test_oos_is_ratio_min(self):
         assert r59.OOS_IS_RATIO_MIN == pytest.approx(0.85, abs=0.01)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Candidate configuration
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-class TestCandidateConfig:
-    def setup_method(self):
-        cfg = VolStraddleConfig()
-        self.S_VR = cfg.s_vr_threshold
-        self.S_DUR = cfg.s_squeeze_dur
-        self.CANDIDATES = [
-            ("Baseline", self.S_VR, self.S_DUR),
-            ("B2_mid", 0.57, self.S_DUR),
-            ("B2_high", 0.59, self.S_DUR),
-            ("B3", self.S_VR, 2),
-            ("Combo1", 0.57, 2),
-            ("Combo2", 0.57, 3),
-            ("Combo3", 0.59, 2),
-        ]
-
-    def test_candidate_count(self):
-        assert len(self.CANDIDATES) == 7
-
-    def test_baseline_uses_config_values(self):
-        baseline = self.CANDIDATES[0]
-        assert baseline[0] == "Baseline"
-        assert baseline[1] == pytest.approx(self.S_VR)
-        assert baseline[2] == self.S_DUR
-
-    def test_b2_mid_s_vr_at_or_above_baseline(self):
-        # B2_mid was 0.57 at research time; baseline is now 0.57 after Combo2 adoption
-        b2 = next(c for c in self.CANDIDATES if c[0] == "B2_mid")
-        assert b2[1] >= self.S_VR
-
-    def test_b3_s_dur_below_baseline(self):
-        b3 = next(c for c in self.CANDIDATES if c[0] == "B3")
-        assert b3[2] < self.S_DUR
-
-    def test_combo1_both_modified(self):
-        # Combo1=(0.57, 2): s_vr at or above baseline, s_dur below baseline
-        c1 = next(c for c in self.CANDIDATES if c[0] == "Combo1")
-        assert c1[1] >= self.S_VR
-        assert c1[2] < self.S_DUR
-
-    def test_s_vr_candidates_in_valid_range(self):
-        for label, s_vr, _ in self.CANDIDATES:
-            assert 0.50 <= s_vr <= 0.70, f"{label}: s_vr={s_vr} out of range"
-
-    def test_s_dur_candidates_in_valid_range(self):
-        for label, _, s_dur in self.CANDIDATES:
-            assert 1 <= s_dur <= 8, f"{label}: s_dur={s_dur} out of range"
-
-    def test_no_hardcoded_baseline(self):
-        """Baseline must use config values, not literal 0.55 / 4."""
-        cfg = VolStraddleConfig()
-        baseline = self.CANDIDATES[0]
-        # Must equal config — will break if config changes
-        assert baseline[1] == pytest.approx(cfg.s_vr_threshold)
-        assert baseline[2] == cfg.s_squeeze_dur
 
 
 # ══════════════════════════════════════════════════════════════════════════════

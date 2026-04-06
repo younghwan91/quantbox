@@ -4,8 +4,6 @@ Verifies that each known failure mode is caught before any API call is made,
 and that valid orders pass through without modification.
 """
 
-import pytest
-
 from quantbox.execution.preflight import OrderPreflight, PreflightResult
 
 

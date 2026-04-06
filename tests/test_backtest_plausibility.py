@@ -30,7 +30,6 @@ from scripts.validate_backtest import (  # noqa: E402
     WR_MAX,
     WR_MIN,
     T_STAT_MIN,
-    MIN_TRADES_PER_YEAR,
 )
 
 

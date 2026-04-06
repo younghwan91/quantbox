@@ -9,12 +9,10 @@ Validates:
 """
 
 import numpy as np
-import pytest
 
 from quantbox.strategy.rubberband import (
     RubberBandConfig,
     RubberBandStrategy,
-    compute_signals,
     compute_signals_with_btc_directional,
 )
 

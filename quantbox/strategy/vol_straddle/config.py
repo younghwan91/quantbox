@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 
 from pydantic import Field, model_validator
-from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,17 +49,6 @@ class VolStraddleConfig(BaseSettings):
     d_trail_activate: float = 0.040  # r106: 1.0%→4.0% (headroom for 0.5% callbackRate floor; PF=1.395, Calmar=6.0)
     d_trail_distance: float = 0.005  # r106: 0.2%→0.5% (Binance callbackRate floor, rule #8)
 
-    # ── S_d8: Straddle (requires Binance Hedge Mode) ──
-    s_vr_threshold: float = 0.57  # S VR entry threshold (r58/r59: 0.55→0.57 +28%N +11%PF)
-    s_squeeze_dur: int = 3  # Min consecutive bars below S VR threshold (r58/r59: 4→3 +25%N +12%PF)
-    s_sl: float = 0.015  # 1.5% stop loss (per leg)
-    s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
-    s_trail_activate: float = 0.020  # r107: 3.0%→2.0% (PF=1.411>1.307, trail rate 87.6%>69.9%; ref: r106)
-    s_trail_distance: float = 0.005  # r104b: 0.5% behind peak (noise floor — 0.1% fires on tick noise, 81% 1m/15m bias)
-    straddle_enabled: bool = False  # r108: disabled — PF=0.52 structural loss (4-leg cost drag, double-SL)
-    straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
-    # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR.
-    # r82: strd_max=8 → Calmar +67% vs strd_max=6. VR 2슬롯 보험 유지.
     hedge_mode: bool = True  # Binance Hedge Mode (dualSidePosition=true)
 
     # ── Server-Side Trailing Stop (r90 migration) ──
@@ -67,7 +56,6 @@ class VolStraddleConfig(BaseSettings):
     # Binance tracks peak tick-by-tick and fires MARKET when price drops
     # callbackRate% from peak after activationPrice. Matches IDEAL sim model.
     # Server-side TRAILING_STOP_MARKET via regular API (POST /fapi/v1/order).
-    # Eliminates bar-close execution gap that made straddle unprofitable.
     trail_server_native: bool = True
 
     # ── Direction ──
@@ -171,15 +159,13 @@ class VolStraddleConfig(BaseSettings):
     c2_btc_mom_threshold: float = 0.01  # 1% max BTC momentum magnitude
 
     # ── B3: Confluence ──
-    # Both D_mom8 AND S_d8 would fire simultaneously (overlap)
     b3_enabled: bool = True
 
     # ── A3: Quality+ ──
     # D_mom8: VR < deep_vr_threshold (extra deep compression)
-    # S_d8: squeeze duration ≥ long_squeeze_dur (extended squeeze)
     a3_enabled: bool = True
     a3_deep_vr_threshold: float = 0.35  # D_mom8 deep compression
-    a3_long_squeeze_dur: int = 16  # S_d8 extended squeeze duration
+    a3_long_squeeze_dur: int = 16  # Legacy param (kept for config compat)
 
     # ── F5: TBR z-score Gate (R46 validated, D_mom8 only) ──
     # Taker Buy Ratio z-score computed over lookback 15m bars.
@@ -187,7 +173,6 @@ class VolStraddleConfig(BaseSettings):
     # skip SHORT if z < -thresh (retail panic selling).
     # Backtest result (6yr, 46 symbols): PF 1.306→1.348 (+0.042),
     # WR 42.6%→46.4% (+3.8%), N -14.8%, p=0.029.
-    # IMPORTANT: Applied to D_mom8 only. S_d8 straddle is direction-neutral.
     f5_tbr_enabled: bool = (
         False  # r47: disabled; r71: re-validated with trail_activate=1.0% → KEEP disabled (2024/2025 OOS degrade)
     )
@@ -244,7 +229,6 @@ class VolStraddleConfig(BaseSettings):
             "NEOUSDT",
             "ONTUSDT",
             "QTUMUSDT",
-            # RLCUSDT removed: Binance notional limit prevents straddle (2026-03-19)
             "RSRUSDT",
             "RUNEUSDT",
             "SANDUSDT",
@@ -374,20 +358,13 @@ class VolStraddleConfig(BaseSettings):
     # Resets at UTC midnight. Set to 0 to disable.
     daily_loss_limit_pct: float = 0.05  # 5% of account balance
 
-    # ── Straddle Pair Coordination ──
-    # Retry/delay params for Step 0 prerequisites (straddle-pair-coordination.md).
-    entry_retry_count: int = 2  # VS_ENTRY_RETRY_COUNT: max retries for second leg entry before rollback
-    entry_retry_delay_s: float = 2.0  # VS_ENTRY_RETRY_DELAY_S: delay between second leg entry retries (s)
+    # ── Entry Retry / SL Cancel (shared execution params) ──
+    entry_retry_count: int = 2  # VS_ENTRY_RETRY_COUNT: max retries for entry
+    entry_retry_delay_s: float = 2.0  # VS_ENTRY_RETRY_DELAY_S: delay between entry retries (s)
     rollback_retry_count: int = 2  # VS_ROLLBACK_RETRY_COUNT: max retries for rollback _close_position()
     rollback_retry_delay_s: float = 2.0  # VS_ROLLBACK_RETRY_DELAY_S: delay between rollback retries (s)
     sl_cancel_retry_count: int = 2  # VS_SL_CANCEL_RETRY_COUNT: max retries for own SL cancel on TP fill
     sl_cancel_retry_delay_s: float = 1.0  # VS_SL_CANCEL_RETRY_DELAY_S: delay between SL cancel retries (s)
-    orphan_auto_close_cycles: int = (
-        4  # VS_ORPHAN_AUTO_CLOSE_CYCLES: cycles before orphaned leg auto-closes (~60min at 15m)
-    )
-    straddle_rollback_cooldown_cycles: int = (
-        8  # VS_STRADDLE_ROLLBACK_COOLDOWN_CYCLES: skip symbol for N cycles after rollback (~2h at 15m)
-    )
 
     @model_validator(mode="after")
     def _validate_safety_constraints(self) -> "VolStraddleConfig":
@@ -400,8 +377,6 @@ class VolStraddleConfig(BaseSettings):
 
         if self.d_sl <= 0:
             errors.append(f"d_sl must be positive, got {self.d_sl}")
-        if self.s_sl <= 0:
-            errors.append(f"s_sl must be positive, got {self.s_sl}")
         if self.d_tp <= self.d_sl:
             errors.append(
                 f"d_tp must be greater than d_sl (can't TP before SL), got d_tp={self.d_tp}, d_sl={self.d_sl}"
@@ -415,11 +390,6 @@ class VolStraddleConfig(BaseSettings):
             )
         if self.max_concurrent < 1:
             errors.append(f"max_concurrent must be >= 1, got {self.max_concurrent}")
-        if self.straddle_max_slots < 2:
-            errors.append(f"straddle_max_slots must be >= 2 (at least 1 pair), got {self.straddle_max_slots}")
-        # Auto-cap: if max_concurrent is reduced (e.g. --max-slots 5), straddle cap adjusts silently.
-        if self.straddle_max_slots > self.max_concurrent:
-            object.__setattr__(self, "straddle_max_slots", self.max_concurrent)
         if self.d_trail_distance <= 0:
             errors.append(f"d_trail_distance must be positive, got {self.d_trail_distance}")
         if self.d_trail_distance < 0.005:
@@ -431,18 +401,6 @@ class VolStraddleConfig(BaseSettings):
             errors.append(
                 f"d_trail_distance must be less than d_trail_activate, "
                 f"got d_trail_distance={self.d_trail_distance}, d_trail_activate={self.d_trail_activate}"
-            )
-        if self.s_trail_distance <= 0:
-            errors.append(f"s_trail_distance must be positive, got {self.s_trail_distance}")
-        if self.s_trail_distance < 0.005:
-            errors.append(
-                f"s_trail_distance must be >= 0.005 (Binance callbackRate >= 0.5%, rule #8), "
-                f"got {self.s_trail_distance}"
-            )
-        if self.s_trail_distance >= self.s_trail_activate:
-            errors.append(
-                f"s_trail_distance must be less than s_trail_activate, "
-                f"got s_trail_distance={self.s_trail_distance}, s_trail_activate={self.s_trail_activate}"
             )
         if self.ma_cluster_trail_distance < 0.005:
             errors.append(
@@ -541,7 +499,6 @@ class VolStraddleConfig(BaseSettings):
         """Return (trail_activate, trail_distance) for a strategy type."""
         _map = {
             VR_DIRECTIONAL: (self.d_trail_activate, self.d_trail_distance),
-            VR_STRADDLE: (self.s_trail_activate, self.s_trail_distance),
             MA_CLUSTER: (self.ma_cluster_trail_activate, self.ma_cluster_trail_distance),
             DONCHIAN: (self.donchian_trail_activate, self.donchian_trail_distance),
         }

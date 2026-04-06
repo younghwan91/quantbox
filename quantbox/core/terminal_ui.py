@@ -95,13 +95,6 @@ def print_system_info(
     d_trail_distance: float = 0.005,
     min_confidence: int = 0,
     testnet: bool = False,
-    straddle_enabled: bool = True,
-    straddle_max_slots: int = 8,
-    straddle_vr_threshold: float = 0.57,
-    straddle_sl: float = 0.015,
-    straddle_tp: float = 0.05,
-    straddle_trail_activate: float = 0.03,
-    straddle_trail_distance: float = 0.005,
     ma_cluster_enabled: bool = False,
     ma_cluster_pct: float = 0.03,
     ma_cluster_min_duration: int = 8,
@@ -138,8 +131,6 @@ def print_system_info(
         max_hold: Max hold bars.
         min_confidence: Minimum confidence score.
         testnet: Whether using testnet.
-        straddle_enabled: Whether S_d8 straddle is active.
-        straddle_max_slots: Max slots for straddle pairs.
         ma_cluster_enabled: Whether MA cluster strategy is active.
         ma_cluster_pct: MA cluster spread threshold.
         ma_cluster_min_duration: Min bars in cluster.
@@ -176,12 +167,6 @@ def print_system_info(
 
     _print_section("STRATEGIES")
     _print_row("VR Directional", f"{Color.GREEN}ENABLED{Color.RESET} (D_mom8, {leverage_base}x)")
-    if straddle_enabled:
-        _print_row(
-            "VR Straddle", f"{Color.GREEN}ENABLED{Color.RESET} (S_d8, {leverage_base}x, max {straddle_max_slots} slots)"
-        )
-    else:
-        _print_row("VR Straddle", f"{Color.RED}DISABLED{Color.RESET}")
     if ma_cluster_enabled:
         _print_row("MA Cluster", f"{Color.GREEN}ENABLED{Color.RESET} ({ma_cluster_leverage:.0f}x)")
     else:
@@ -199,17 +184,6 @@ def print_system_info(
     _print_row("Max Hold", f"{max_hold} bars")
     _print_row("Leverage", f"{leverage_base}x")
     print()
-
-    if straddle_enabled:
-        _print_section("VR STRADDLE")
-        _print_row("VR Threshold", f"{straddle_vr_threshold * 100:.1f}%")
-        _print_row("SL / TP", f"{straddle_sl * 100:.1f}% / {straddle_tp * 100:.0f}%")
-        _print_row(
-            "Trail", f"{straddle_trail_activate * 100:.1f}%→{straddle_trail_distance * 100:.1f}% (activate→distance)"
-        )
-        _print_row("Max Slots", f"{straddle_max_slots} ({straddle_max_slots // 2} pairs)")
-        _print_row("Leverage", f"{leverage_base}x")
-        print()
 
     if ma_cluster_enabled:
         _print_section("MA CLUSTER")
@@ -278,7 +252,7 @@ def format_position_line(
 
     Args:
         pos_key: Position compound key (e.g. 'SUIUSDT:LONG').
-        strategy_type: Strategy name (e.g. 'vr_straddle').
+        strategy_type: Strategy name (e.g. 'vr_directional').
         direction: 'L' or 'S'.
         entry_price: Entry price.
         current_price: Current mark price.

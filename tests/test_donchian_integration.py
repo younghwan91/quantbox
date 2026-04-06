@@ -13,7 +13,7 @@ import os
 import numpy as np
 import pytest
 
-from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
+from quantbox.core.strategy_names import DONCHIAN, VR_DIRECTIONAL
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy
 
