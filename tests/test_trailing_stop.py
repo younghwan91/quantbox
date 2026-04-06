@@ -1,7 +1,6 @@
 """Tests for trailing stop exit logic.
 
-Validates that directional trades use trail (activate→distance→hard TP),
-straddle trades use s_trail params (r53 Option A: act=1.5%/dist=0.2%),
+Validates that directional trades use trail (activate→distance→hard TP)
 and MA cluster uses ma_cluster_trail params.
 """
 
@@ -21,8 +20,6 @@ def cfg() -> VolStraddleConfig:
         d_tp=0.12,  # 12% hard ceiling
         d_trail_activate=0.02,  # activate after +2%
         d_trail_distance=0.005,  # r106: 0.5% behind peak (rule #8: callbackRate >= 0.5%)
-        s_sl=0.015,  # straddle SL
-        s_tp=0.05,  # straddle TP (unchanged)
         trail_server_native=False,  # test client-side trail logic
     )
 
@@ -32,9 +29,7 @@ def strat(cfg: VolStraddleConfig) -> VolStraddleStrategy:
     return VolStraddleStrategy(cfg)
 
 
-def _open_long(
-    strat: VolStraddleStrategy, symbol: str = "BTCUSDT", entry: float = 100.0, is_straddle: bool = False
-) -> None:
+def _open_long(strat: VolStraddleStrategy, symbol: str = "BTCUSDT", entry: float = 100.0) -> None:
     strat.open_position(
         symbol=symbol,
         signal=1,
@@ -42,16 +37,13 @@ def _open_long(
         notional=1000.0,
         leverage=25,
         move_size=1.0,
-        sl=strat.config.d_sl if not is_straddle else strat.config.s_sl,
-        tp=strat.config.d_tp if not is_straddle else strat.config.s_tp,
+        sl=strat.config.d_sl,
+        tp=strat.config.d_tp,
         max_hold=192,
-        is_straddle=is_straddle,
     )
 
 
-def _open_short(
-    strat: VolStraddleStrategy, symbol: str = "BTCUSDT", entry: float = 100.0, is_straddle: bool = False
-) -> None:
+def _open_short(strat: VolStraddleStrategy, symbol: str = "BTCUSDT", entry: float = 100.0) -> None:
     strat.open_position(
         symbol=symbol,
         signal=-1,
@@ -59,10 +51,9 @@ def _open_short(
         notional=1000.0,
         leverage=25,
         move_size=1.0,
-        sl=strat.config.d_sl if not is_straddle else strat.config.s_sl,
-        tp=strat.config.d_tp if not is_straddle else strat.config.s_tp,
+        sl=strat.config.d_sl,
+        tp=strat.config.d_tp,
         max_hold=192,
-        is_straddle=is_straddle,
     )
 
 
@@ -183,63 +174,8 @@ class TestHardTP:
         assert result == "target"
 
 
-class TestStraddleUnchanged:
-    """Straddle legs use simple SL/TP exit (no trail)."""
-
-    def test_straddle_trail_activates(self, strat: VolStraddleStrategy):
-        """Straddle trailing stop activates at s_trail_activate (3.0%)."""
-        _open_long(strat, symbol="ETHUSDT", entry=100.0, is_straddle=True)
-        result = strat.update_position("ETHUSDT", 103.1, current_high=103.1, current_low=103.05)
-        pos = strat._positions["ETHUSDT"]
-        assert pos["trail_active"] is True
-        assert result is None  # activated but not yet hit
-
-    def test_straddle_trail_hits(self, strat: VolStraddleStrategy):
-        """Straddle trail exit: gain reaches 3.0%, then retraces past trail_distance."""
-        _open_long(strat, symbol="ETHUSDT", entry=100.0, is_straddle=True)
-        # Push to +3.5% to activate and set peak
-        strat.update_position("ETHUSDT", 103.5, current_high=103.5, current_low=103.3)
-        pos = strat._positions["ETHUSDT"]
-        assert pos["trail_active"] is True
-        assert pos["peak_gain"] == pytest.approx(0.035, abs=1e-4)
-        # Trail stop = peak(3.5%) - dist(0.5%) = 3.0% → retrace to 2.9% triggers
-        result = strat.update_position("ETHUSDT", 102.8, current_high=103.4, current_low=102.9)
-        assert result == "trailing_stop"
-
-    def test_straddle_no_trail_before_activate(self, strat: VolStraddleStrategy):
-        """Straddle trailing does NOT trigger before s_trail_activate threshold."""
-        _open_long(strat, symbol="ETHUSDT", entry=100.0, is_straddle=True)
-        # +1.0% — below activate threshold of 1.5%
-        result = strat.update_position("ETHUSDT", 101.0, current_high=101.0, current_low=100.8)
-        pos = strat._positions["ETHUSDT"]
-        assert pos.get("trail_active", False) is False
-        assert result is None
-
-    def test_straddle_sl_fires_without_trail(self, strat: VolStraddleStrategy):
-        """Straddle SL fires at s_sl when trail not active."""
-        _open_long(strat, symbol="ETHUSDT", entry=100.0, is_straddle=True)
-        result = strat.update_position("ETHUSDT", 98.0, current_high=100.2, current_low=98.4)
-        assert result == "stop_loss"
-
-    def test_straddle_hard_tp_ceiling(self, strat: VolStraddleStrategy):
-        """Straddle hard TP ceiling fires at s_tp=5% when trail doesn't retrace enough."""
-        _open_long(strat, symbol="ETHUSDT", entry=100.0, is_straddle=True)
-        # high=105.5 (+5.5%), low=105.4 (+5.4%) — trail_stop=5.5-0.2=5.3%, worst=5.4%>5.3%
-        # → trail NOT triggered; hard TP=5% fires via best_gain=5.5%
-        result = strat.update_position("ETHUSDT", 105.4, current_high=105.5, current_low=105.4)
-        assert result == "target"
-
-    def test_straddle_uses_s_trail_params(self, strat: VolStraddleStrategy):
-        """Straddle uses s_trail_activate/s_trail_distance, not d_trail params."""
-        cfg = strat.config
-        assert cfg.s_trail_activate == pytest.approx(0.020)
-        assert cfg.s_trail_distance == pytest.approx(0.005)  # r104b: 0.5% noise floor (was 0.001)
-        # Straddle uses dedicated s_trail params, not d_trail params
-        assert cfg.s_trail_activate == pytest.approx(0.020)
-
-
 class TestMaxHold:
-    """Max hold exit works for both directional and straddle."""
+    """Max hold exit works for directional positions."""
 
     def test_max_hold_directional(self, strat: VolStraddleStrategy):
         _open_long(strat)
@@ -279,9 +215,6 @@ class TestConfigDefaults:
         assert cfg.d_trail_activate == 0.040  # r69→current: 0.010→0.040
         assert cfg.d_trail_distance == 0.005  # r106: 0.5% (rule #8)
         assert cfg.d_sl == 0.01
-        # Straddle unchanged
-        assert cfg.s_tp == 0.05
-        assert cfg.s_sl == 0.015
         # Leverage production (half-Kelly)
         assert cfg.base_leverage == 30.0
         assert cfg.max_leverage == 30.0
@@ -299,11 +232,3 @@ class TestStateRestoreTrail:
         assert "peak_gain" in pos
         assert pos["trail_active"] is False
         assert pos["peak_gain"] == 0.0
-
-    def test_is_straddle_in_position(self, strat: VolStraddleStrategy):
-        """is_straddle flag is stored in position dict."""
-        _open_long(strat, is_straddle=True)
-        assert strat._positions["BTCUSDT"]["is_straddle"] is True
-
-        _open_long(strat, symbol="ETHUSDT", is_straddle=False)
-        assert strat._positions["ETHUSDT"]["is_straddle"] is False

@@ -9,9 +9,8 @@ Covers:
 6. Paper mode TP returns "paper_tp_" prefix string
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from tests.test_server_oco import _make_scalper
 

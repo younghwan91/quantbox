@@ -1,6 +1,5 @@
 """Tests for Discord bot reconnection and Heartbeat module."""
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest

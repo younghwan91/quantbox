@@ -16,9 +16,8 @@ The tests use heavy mocking to isolate _cycle() from external I/O:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 from tests.conftest import _build_vs_scalper
 

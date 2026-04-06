@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 import logging
 import os
-import time
 from datetime import datetime, timezone
 
 from quantbox.core.strategy_names import VR_DIRECTIONAL
@@ -122,21 +121,9 @@ class ReconciliationMixin:
                         continue
 
                     logger.info(f"[{sym}] Server TP TRIGGERED intra-bar: fill=${fill_price:.4f} qty={fill_qty:.6f}")
-                    # Cancel the counterpart SL (own leg's SL, with retry for straddle pairs)
+                    # Cancel the counterpart SL
                     if sl_oid:
-                        cfg_vs = getattr(self, "vs_config", None)
-                        if cfg_vs is not None and pos.get("is_straddle"):
-                            sl_cancelled = False
-                            for attempt in range(cfg_vs.sl_cancel_retry_count + 1):
-                                if self._cancel_server_stop_loss(api_sym, sl_oid):
-                                    sl_cancelled = True
-                                    break
-                                if attempt < cfg_vs.sl_cancel_retry_count:
-                                    time.sleep(cfg_vs.sl_cancel_retry_delay_s)
-                            if not sl_cancelled:
-                                logger.warning(f"[{sym}] 자체 SL 취소 실패 ({cfg_vs.sl_cancel_retry_count + 1}회 시도)")
-                        else:
-                            self._cancel_server_stop_loss(api_sym, sl_oid)
+                        self._cancel_server_stop_loss(api_sym, sl_oid)
 
                     # Cancel orphaned trail when TP fires
                     trail_oid_cross = pos.get("server_trail_order_id")
@@ -870,61 +857,7 @@ class ReconciliationMixin:
                     details={"position_side": pos_side_str},
                 )
 
-        # ── Phase 3: Straddle pair integrity check ──
-        # NOTE: 이 스트래들 고아 자동-청산 (VS_ORPHAN_AUTO_CLOSE_CYCLES)은 위의
-        # ORPHAN_AUTO_CLOSE (거래소-전용 reverse ghost 자동청산)와 별개입니다.
-        # 여기서는 내부 상태에서 카운터파트가 사라진 경우만 처리합니다.
-        _cfg_vs = getattr(self, "vs_config", None)
-        for sym in list(self.strategy.active_positions):
-            pos = self.strategy._positions.get(sym)
-            if not pos or not pos.get("is_straddle") or not pos.get("straddle_pair_id"):
-                continue
-
-            counterpart_key = self._get_pair_counterpart(sym)
-            if counterpart_key is not None:
-                # 페어 온전함 — 고아 추적 초기화
-                pos.pop("straddle_orphan_since_cycle", None)
-                continue
-
-            # 카운터파트 없음 — 합법적 청산 여부 확인
-            if pos.get("counterpart_legitimately_closed"):
-                # 카운터파트가 server SL/TP로 정상 청산됨 — 생존 레그는 추세를 타도록 놔둠
-                pos.pop("straddle_orphan_since_cycle", None)
-                continue
-
-            # 진짜 고아 — 카운터파트 없고 합법적 청산 기록도 없음
-            if pos.get("straddle_orphan_since_cycle") is None:
-                pos["straddle_orphan_since_cycle"] = self._cycle_count
-                grace = _cfg_vs.orphan_auto_close_cycles if _cfg_vs else 4
-                logger.warning(f"[{sym}] 스트래들 레그 고아 감지 — 카운터파트 없음. {grace}사이클 후 자동 청산 예정.")
-                self.discord.send(
-                    content=(f"🔍 **[{sym}] 스트래들 고아 감지** — 카운터파트 부재. {grace}사이클 후 자동 청산 예정.")
-                )
-
-            orphan_grace = _cfg_vs.orphan_auto_close_cycles if _cfg_vs else 4
-            orphan_cycles = self._cycle_count - pos["straddle_orphan_since_cycle"]
-            if orphan_cycles >= orphan_grace:
-                logger.warning(f"[{sym}] 고아 스트래들 레그 자동 청산 — {orphan_cycles}사이클 동안 헤지 없음.")
-                self.discord.send(
-                    content=(
-                        f"⚠️ **[{sym}] 고아 스트래들 자동 청산** — {orphan_cycles}사이클 동안 헤지 없음. 자동 청산 실행."
-                    )
-                )
-                # 현재 포지션의 마크 가격 추정 (entry_price 사용)
-                api_sym = to_api_symbol(sym, pos)
-                close_price = pos.get("entry_price", 0.0)
-                try:
-                    _book = self.client.futures_orderbook_ticker(symbol=api_sym)
-                    close_price = float(_book["bidPrice"] if pos["signal"] == 1 else _book["askPrice"])
-                except Exception:
-                    pass
-                closed = self._close_position(sym, "straddle_orphan_auto_close", close_price)
-                if not closed:
-                    logger.error(f"[{sym}] 고아 스트래들 자동 청산 실패 — 수동 개입 필요!")
-            else:
-                # 유예 기간 중 — SL 브라켓 확인
-                if not pos.get("server_sl_order_id"):
-                    logger.warning(f"[{sym}] 고아 스트래들 레그에 SL 브라켓 없음 — bracket repair 필요")
+        # Phase 3: reserved
 
     def _handle_server_partial_tp_fill(
         self: "ScalperProtocol",
@@ -1065,12 +998,7 @@ class ReconciliationMixin:
 
         Removes the position from internal tracking and logs the PnL.
         """
-        # ── Step 2.2: Straddle pair context before position is removed ──
-        pair_id = None
-        counterpart_key_before: str | None = None
-        if self.strategy._positions.get(symbol, {}).get("is_straddle"):
-            counterpart_key_before = self._get_pair_counterpart(symbol)
-            pair_id = self.strategy._positions.get(symbol, {}).get("straddle_pair_id")
+        pair_id = self.strategy._positions.get(symbol, {}).get("straddle_pair_id")
 
         pos = self.strategy.close_position(symbol)
         if not pos:
@@ -1106,38 +1034,6 @@ class ReconciliationMixin:
         # a ghost position on restart (position gone on exchange but
         # still in our state file).
         self._save_state()
-
-        # ── Step 2.2: Straddle pair context logging ──
-        if pair_id:
-            if counterpart_key_before:
-                # Counterpart still open — pair half-closed
-                counterpart_pos = self.strategy._positions.get(counterpart_key_before)
-                if counterpart_pos:
-                    # Verify counterpart brackets are intact after this leg's close
-                    counterpart_has_sl = bool(counterpart_pos.get("server_sl_order_id"))
-                    counterpart_has_tp = bool(counterpart_pos.get("server_tp_order_id"))
-                    if not counterpart_has_sl:
-                        logger.warning(
-                            f"[{symbol}] 스트래들 반-청산 후 카운터파트 SL 없음: "
-                            f"{counterpart_key_before} — bracket repair 필요"
-                        )
-                    logger.info(
-                        f"[{symbol}] 스트래들 페어 반-청산 (pair_id={pair_id}): "
-                        f"이 다리 PnL={net_pnl:+.2f}$, "
-                        f"카운터파트 {counterpart_key_before} 아직 오픈 "
-                        f"(SL={'OK' if counterpart_has_sl else '없음'} "
-                        f"TP={'OK' if counterpart_has_tp else '없음'})"
-                    )
-                    # 카운터파트에 합법적 청산 플래그 설정 — Phase 3에서 survivor로 인식
-                    counterpart_pos["counterpart_legitimately_closed"] = True
-                    logger.info(
-                        f"[{symbol}] 카운터파트 {counterpart_key_before}: "
-                        f"legitimate_closed 플래그 설정 (server fill로 청산됨)"
-                    )
-                else:
-                    logger.info(f"[{symbol}] 스트래들 페어 완전 청산 (pair_id={pair_id}): 양 다리 모두 청산됨")
-            else:
-                logger.info(f"[{symbol}] 스트래들 페어 완전 청산 (pair_id={pair_id}): 양 다리 모두 청산됨")
 
         _emoji_map = {"server_tp": "🎯", "server_trail": "🏃", "server_sl": "🛑"}
         emoji = _emoji_map.get(reason, "🛑")

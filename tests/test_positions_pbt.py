@@ -10,7 +10,6 @@ Install: pip install hypothesis (or uv pip install hypothesis)
 """
 
 import numpy as np
-import pytest
 from hypothesis import given, settings
 import hypothesis.strategies as st
 from unittest.mock import MagicMock
@@ -75,7 +74,6 @@ def test_entry_price_guard_prevents_zero_division() -> None:
     or returns inf (numpy float64) — both silent/crash failures in production.
     This test verifies the guard fires and logs an error.
     """
-    import logging
     from unittest.mock import patch
 
     sc = _build_vs_scalper()

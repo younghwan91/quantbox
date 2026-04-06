@@ -130,7 +130,7 @@ class TestSameBarTrailActivateAndFire:
 
     def test_short_same_bar_activate_fire(self, strategy, cfg):
         """SHORT: low=-0.6%, high=-0.3% → 활성화 후 즉시 trail 발동."""
-        pos_key = f"BTCUSDT:SHORT"
+        pos_key = "BTCUSDT:SHORT"
         strategy.open_position(
             symbol="BTCUSDT",
             signal=-1,

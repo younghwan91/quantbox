@@ -13,15 +13,14 @@ import asyncio
 import queue
 import time
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+from datetime import datetime, timezone
 
 from quantbox.notifications.bot import (
     BotCommand,
     CommandType,
     TradingBot,
     DiscordBotRunner,
-    HELP_TEXT,
 )
 
 

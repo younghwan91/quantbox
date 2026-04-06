@@ -18,8 +18,7 @@ Coverage targets (scalper.py 54% → 75%+):
 from __future__ import annotations
 
 import numpy as np
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from tests.conftest import _build_vs_scalper
 
@@ -254,8 +253,8 @@ class TestCyclePositionLoop:
 
         scalper.strategy.update_position.assert_not_called()
 
-    def test_straddle_other_leg_logged_on_exit(self):
-        """L606-615: vol_straddle LONG exit → other leg (SHORT) logged."""
+    def test_long_exit_calls_close_position(self):
+        """vol_straddle LONG exit → _close_position called."""
         scalper = _build_vs_scalper()
         scalper._drawdown_halt = False
         scalper._cycle_count = 0
@@ -679,7 +678,6 @@ class TestMainCLI:
 
     def _run_main(self, args: list[str]):
         """Invoke main() with patched sys.argv and mocked scalper."""
-        import sys
 
         with (
             patch("sys.argv", ["scalper"] + args),

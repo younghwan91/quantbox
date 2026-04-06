@@ -156,7 +156,7 @@ class TestFormatPositionLine:
     def test_long_position_positive_pnl(self):
         result = format_position_line(
             pos_key="SUIUSDT:LONG",
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
             direction="L",
             entry_price=1.2340,
             current_price=1.2380,
@@ -171,7 +171,7 @@ class TestFormatPositionLine:
             peak_gain=0.012,
         )
         assert "SUIUSDT:LONG" in result
-        assert "vr_straddle" in result
+        assert "vr_directional" in result
         assert "L" in result
         assert "1.2340" in result
         assert "1.2380" in result
@@ -252,8 +252,6 @@ class TestPrintSystemInfo:
             stop_mult=1.2,
             max_hold=6,
             min_confidence=3,
-            straddle_enabled=True,
-            straddle_max_slots=8,
             ma_cluster_enabled=True,
             ma_cluster_leverage=21.0,
         )

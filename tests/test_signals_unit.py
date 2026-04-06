@@ -15,7 +15,6 @@ from quantbox.strategy.vol_straddle.signals import (
     compute_squeeze_dur,
     compute_sma,
     compute_vr,
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
     resample_ohlcv,
@@ -214,49 +213,6 @@ class TestGenVRSignal:
         assert np.all(sig[:100] == 0)
         assert np.all(sig[100:150] == 1)
         assert np.all(sig[150:] == 0)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  gen_vr_dur_signal (S_d8 straddle)
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-class TestGenVRDurSignal:
-    def test_output_length_matches_input(self):
-        vr = np.full(200, 0.4)
-        sig = gen_vr_dur_signal(vr, threshold=0.5, min_dur=4, warmup=56)
-        assert len(sig) == 200
-
-    def test_requires_min_dur_consecutive_bars(self):
-        """Only fires after min_dur consecutive bars below threshold."""
-        vr = np.full(200, 0.8)
-        vr[100:110] = 0.3  # 10-bar squeeze
-        sig = gen_vr_dur_signal(vr, threshold=0.5, min_dur=4, warmup=56)
-        # First 3 bars of squeeze (100,101,102) → not enough duration
-        assert sig[102] == 0
-        # 4th bar and beyond → signal fires
-        assert sig[103] == 1
-        assert np.all(sig[103:110] == 1)
-
-    def test_counter_resets_after_break(self):
-        """After gap, counter resets. Need min_dur consecutive again."""
-        vr = np.full(200, 0.3)
-        vr[100] = 0.9  # single break
-        sig = gen_vr_dur_signal(vr, threshold=0.5, min_dur=4, warmup=56)
-        # After break, bars 101,102,103 don't have min_dur=4 yet
-        assert sig[100] == 0  # break bar itself
-        assert sig[103] == 0  # only 3 bars since break (101,102,103)
-        assert sig[104] == 1  # 4 consecutive (101-104)
-
-    def test_warmup_bars_always_zero(self):
-        vr = np.full(200, 0.3)
-        sig = gen_vr_dur_signal(vr, threshold=0.5, min_dur=1, warmup=56)
-        assert np.all(sig[:56] == 0)
-
-    def test_all_nan_gives_all_zero(self):
-        vr = np.full(200, np.nan)
-        sig = gen_vr_dur_signal(vr, threshold=0.5, min_dur=4, warmup=56)
-        assert np.all(sig == 0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

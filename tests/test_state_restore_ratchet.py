@@ -10,7 +10,7 @@ Feature: Pre-TP1 trail params configurable
 Feature: Server SL ratcheting for Phase 2 runners
 """
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 

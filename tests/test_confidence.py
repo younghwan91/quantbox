@@ -10,7 +10,6 @@ Validates:
 """
 
 import numpy as np
-import pytest
 
 from quantbox.strategy.rubberband import (
     RubberBandConfig,

@@ -15,7 +15,6 @@ from quantbox.strategy.rubberband import (
     RubberBandConfig,
     compute_confidence_leverage,
     apply_confidence_leverage,
-    compute_signals,
 )
 
 

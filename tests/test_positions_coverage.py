@@ -1,15 +1,15 @@
 """positions.py coverage tests — targeting uncovered sizing, bracket, and close paths.
 
 Coverage targets:
-  L57-291:  Vol_straddle position sizing (dynamic capital, SoftTight DD, CW-Tier, MA override)
-  L319-454: Vol_straddle bracket placement (SL/TP server orders, WOULD_TRIGGER)
+  L57-291:  Position sizing (dynamic capital, SoftTight DD, CW-Tier, MA override)
+  L319-454: Bracket placement (SL/TP server orders, WOULD_TRIGGER)
   L1377-1461: Close path (trade record, journal.record(), balance fields)
 """
 
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import numpy as np
 
 from quantbox.scalper import RubberBandScalper
@@ -83,7 +83,6 @@ def _set_signal_meta(scalper: RubberBandScalper, **meta) -> None:
         "sl": scalper.vs_config.d_sl,
         "tp": scalper.vs_config.d_tp,
         "tf": "15m",
-        "straddle": False,
         "strategy_type": "vr_directional",
         "conviction_score": 1,
     }
@@ -120,7 +119,7 @@ def _open(scalper: RubberBandScalper, balance: float = 1000.0) -> bool:
 
 
 class TestPositionSizing:
-    """Vol_straddle position sizing logic: flat, dynamic, SoftTight, CW-Tier."""
+    """Position sizing logic: flat, dynamic, SoftTight, CW-Tier."""
 
     def test_flat_sizing_baseline(self):
         """Default: per_slot = balance/10, notional = per_slot × leverage.
@@ -435,7 +434,6 @@ class TestPositionSizing:
 
     def test_leverage_override_zero_clamped_to_1(self, caplog):
         """Very high SL (100%) → leverage formula gives 0.01*10/1.0=0.1 → clamped to 1.0."""
-        import logging
 
         cfg = VolStraddleConfig(
             dynamic_capital_enabled=False,
@@ -455,7 +453,6 @@ class TestPositionSizing:
 
     def test_leverage_override_exceeds_max_clamped_to_125(self, caplog):
         """Very small SL (0.008%) → leverage formula gives 0.01*10/0.00008=1250 → clamped to max_leverage."""
-        import logging
 
         cfg = VolStraddleConfig(
             dynamic_capital_enabled=False,

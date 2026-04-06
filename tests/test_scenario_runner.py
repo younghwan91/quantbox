@@ -16,7 +16,6 @@ pytest로 실행 가능. 바이낸스 API 불필요.
   7. MFE/MAE tracking: 생애 극값 정확성
 """
 
-import numpy as np
 import pytest
 
 from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy

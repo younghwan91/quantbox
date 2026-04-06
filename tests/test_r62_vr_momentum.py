@@ -269,7 +269,7 @@ class TestCollectTagged:
 
 class TestBucketAnalysis:
     def _make_trades(self) -> list[tuple]:
-        """Fake S_d8 tagged trades: (sym, entry, exit, pnl, sq_dur, dvr, bsm)"""
+        """Tagged trades: (sym, entry, exit, pnl, sq_dur, dvr, bsm)"""
         return [
             ("A", 0, 10, 0.02, 3, -0.025, 0),  # strong falling, win
             ("A", 0, 10, -0.015, 5, -0.010, 0),  # weak falling, loss

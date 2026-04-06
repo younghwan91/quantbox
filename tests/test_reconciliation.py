@@ -333,7 +333,6 @@ class TestStateValidation:
 
     def test_nan_entry_price_rejected(self):
         from quantbox.scalper import RubberBandScalper
-        import math
 
         pos = {"entry_price": float("nan"), "notional": 3000.0, "leverage": 30, "signal": 1}
         ok, reason = RubberBandScalper._validate_restored_position("TESTUSDT:LONG", pos)
@@ -411,8 +410,6 @@ class TestStateValidation:
                 }
             )
         )
-
-        from quantbox.core.scalper_state import load_scalper_state
 
         with patch("quantbox.scalper.load_scalper_state", return_value=json.loads(state_file.read_text())):
             scalper._load_state()

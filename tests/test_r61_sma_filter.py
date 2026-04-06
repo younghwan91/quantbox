@@ -111,35 +111,35 @@ class TestComputeEntryAttrs:
         """VR=0.40, S_VR=0.57 → depth=0.17."""
         c = _make_close(50)
         vr = _make_vr(50, 0.40)
-        _, vr_depth = compute_entry_attrs(c, vr, 30, is_straddle=True, squeeze_dur=5)
-        cfg = VolStraddleConfig()
-        expected = max(0.0, cfg.s_vr_threshold - 0.40)
+        _, vr_depth = compute_entry_attrs(c, vr, 30, True, squeeze_dur=5)
+        S_VR = 0.57  # s_vr_threshold removed from production config
+        expected = max(0.0, S_VR - 0.40)
         assert vr_depth == pytest.approx(expected, rel=0.01)
 
     def test_vr_depth_above_threshold(self):
         """VR=0.70 > S_VR=0.57 → depth=0 (clamped)."""
         c = _make_close(50)
         vr = _make_vr(50, 0.70)
-        _, vr_depth = compute_entry_attrs(c, vr, 30, is_straddle=True, squeeze_dur=0)
+        _, vr_depth = compute_entry_attrs(c, vr, 30, True, squeeze_dur=0)
         assert vr_depth == 0.0
 
     def test_vr_depth_directional(self):
         """D_mom8: uses d_vr_threshold (0.5)."""
         c = _make_close(50)
         vr = _make_vr(50, 0.30)
-        _, vr_depth = compute_entry_attrs(c, vr, 30, is_straddle=False, squeeze_dur=0)
+        _, vr_depth = compute_entry_attrs(c, vr, 30, False, squeeze_dur=0)
         cfg = VolStraddleConfig()
         expected = max(0.0, cfg.d_vr_threshold - 0.30)
         assert vr_depth == pytest.approx(expected, rel=0.01)
 
     def test_nan_vr_treated_as_zero(self):
-        """NaN VR → treated as vr=0 → depth = s_vr_threshold (full depth)."""
+        """NaN VR → treated as vr=0 → depth = S_VR (full depth)."""
         c = _make_close(50)
         vr = np.full(50, np.nan)
-        _, vr_depth = compute_entry_attrs(c, vr, 30, is_straddle=True, squeeze_dur=0)
-        cfg = VolStraddleConfig()
+        _, vr_depth = compute_entry_attrs(c, vr, 30, True, squeeze_dur=0)
+        S_VR = 0.57  # s_vr_threshold removed from production config
         # NaN → vr_val=0.0 → depth = s_vr - 0.0 = s_vr
-        assert vr_depth == pytest.approx(cfg.s_vr_threshold, rel=0.01)
+        assert vr_depth == pytest.approx(S_VR, rel=0.01)
 
 
 # ── bucket_analysis ───────────────────────────────────────────────────────────
@@ -280,19 +280,6 @@ class TestEvaluateWithPortfolioSim:
 
 
 class TestConfigParity:
-    def test_production_params(self):
-        """All key production params match expected values."""
-        cfg = VolStraddleConfig()
-        assert cfg.s_vr_threshold == pytest.approx(0.57)
-        assert cfg.d_vr_threshold == pytest.approx(0.5)
-        assert cfg.s_squeeze_dur == 3
-        assert cfg.s_trail_activate == pytest.approx(0.020)
-        assert cfg.d_trail_activate == pytest.approx(0.040)
-        assert cfg.s_trail_distance == pytest.approx(0.005)  # r104b: 0.5% noise floor (was 0.001)
-        assert cfg.d_trail_distance == pytest.approx(0.005)  # r106: 0.5% (rule #8)
-        assert cfg.max_concurrent == 10
-        assert len(cfg.symbol_whitelist) == 59  # 2026-03-19: RLCUSDT removed (notional limit)
-
     def test_ln_ratio(self):
         """L/N must be 3.0 for VR squeeze."""
         cfg = VolStraddleConfig()

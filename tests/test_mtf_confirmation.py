@@ -20,8 +20,6 @@ from quantbox.strategy.rubberband import (
     apply_mtf_confirmation,
     apply_mtf_leverage,
     compute_signals_4h_independent,
-    compute_signals_confidence,
-    _compute_sma_inline,
 )
 
 

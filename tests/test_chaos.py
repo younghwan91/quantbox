@@ -14,8 +14,6 @@ Tests:
 6. All APIs fail simultaneously → full _cycle() completes without exception
 """
 
-import numpy as np
-import pytest
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import _build_vs_scalper

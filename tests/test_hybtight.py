@@ -16,7 +16,6 @@ Tests:
 """
 
 import numpy as np
-import pytest
 from quantbox.strategy.rubberband import (
     compute_signals_with_partial_exit,
     RubberBandConfig,

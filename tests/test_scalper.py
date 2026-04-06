@@ -7,7 +7,6 @@ and cycle logic. Uses paper mode to avoid API calls.
 
 import json
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from quantbox.strategy.rubberband import RubberBandConfig, RubberBandStrategy

@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-from quantbox.strategy.vol_straddle.signals import compute_vr
 from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy
 
 
@@ -74,7 +73,6 @@ class TestE2SMAProximity:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["e2_sma"] is True
@@ -89,7 +87,6 @@ class TestE2SMAProximity:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["e2_sma"] is False
@@ -103,7 +100,6 @@ class TestE2SMAProximity:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["e2_sma"] is True
@@ -117,7 +113,6 @@ class TestE2SMAProximity:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["e2_sma"] is False
@@ -131,7 +126,6 @@ class TestE2SMAProximity:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["e2_sma"] is False
@@ -154,7 +148,6 @@ class TestC2BTCNeutral:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["c2_btc"] is True
@@ -170,7 +163,6 @@ class TestC2BTCNeutral:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["c2_btc"] is False
@@ -186,7 +178,6 @@ class TestC2BTCNeutral:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["c2_btc"] is True
@@ -200,43 +191,28 @@ class TestC2BTCNeutral:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["c2_btc"] is False
 
 
 # ══════════════════════════════════════════════════════════════════
-#  B3: Confluence (both D_mom8 and S_d8 fire)
+#  B3: Confluence (reserved — always False)
 # ══════════════════════════════════════════════════════════════════
 
 
 class TestB3Confluence:
-    """B3 condition: both D and S would fire simultaneously."""
+    """B3 condition: always False (reserved, never fires)."""
 
-    def test_overlap_passes(self, strategy: VolStraddleStrategy):
-        """d_overlap=True → B3 passes."""
+    def test_b3_always_false(self, strategy: VolStraddleStrategy):
+        """B3 is always False."""
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
             close,
             vr,
             "15m",
-            is_straddle=True,
             d_overlap=True,
-        )
-        assert cond["b3_confluence"] is True
-
-    def test_no_overlap_fails(self, strategy: VolStraddleStrategy):
-        """d_overlap=False → B3 fails."""
-        close = _make_flat_price(300)
-        vr = np.full(300, 0.40)
-        score, cond = strategy._compute_conviction_score(
-            close,
-            vr,
-            "15m",
-            is_straddle=True,
-            d_overlap=False,
         )
         assert cond["b3_confluence"] is False
 
@@ -257,7 +233,6 @@ class TestA3Quality:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["a3_quality"] is True
@@ -270,34 +245,18 @@ class TestA3Quality:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert cond["a3_quality"] is False
 
-    def test_s_long_squeeze_passes(self, strategy: VolStraddleStrategy):
-        """S_d8 with squeeze_dur=20 ≥ 16 → A3 passes."""
+    def test_short_squeeze_dur_fails(self, strategy: VolStraddleStrategy):
+        """squeeze_dur=10 < 16 → A3 fails (VR=0.40 above deep threshold)."""
         close = _make_flat_price(300)
         vr = np.full(300, 0.40)
         score, cond = strategy._compute_conviction_score(
             close,
             vr,
             "15m",
-            is_straddle=True,
-            d_overlap=False,
-            squeeze_dur=20,
-        )
-        assert cond["a3_quality"] is True
-
-    def test_s_short_squeeze_fails(self, strategy: VolStraddleStrategy):
-        """S_d8 with squeeze_dur=10 < 16 → A3 fails."""
-        close = _make_flat_price(300)
-        vr = np.full(300, 0.40)
-        score, cond = strategy._compute_conviction_score(
-            close,
-            vr,
-            "15m",
-            is_straddle=True,
             d_overlap=False,
             squeeze_dur=10,
         )
@@ -312,24 +271,25 @@ class TestA3Quality:
 class TestScoreAggregation:
     """Combined conviction score and CW-Tier multiplier."""
 
-    def test_all_conditions_met_score_4(self, strategy: VolStraddleStrategy):
-        """All 4 conditions pass → score=4."""
+    def test_all_conditions_met_score_3(self, strategy: VolStraddleStrategy):
+        """E2+C2+A3 pass → score=3 (B3 is always False, never fires)."""
         # E2: flat price → near SMA
         close = _make_flat_price(300)
         # C2: flat BTC
         strategy._btc_close = np.full(200, 50000.0)
         # A3: deep VR for D_mom8
         vr = np.full(300, 0.30)
-        # B3: both D and S overlap
         score, cond = strategy._compute_conviction_score(
             close,
             vr,
             "15m",
-            is_straddle=False,
-            d_overlap=True,
+            d_overlap=False,
         )
-        assert score == 4
-        assert all(cond.values())
+        assert score == 3
+        assert cond["e2_sma"] is True
+        assert cond["c2_btc"] is True
+        assert cond["a3_quality"] is True
+        assert cond["b3_confluence"] is False
 
     def test_zero_conditions_score_0(self, strategy: VolStraddleStrategy):
         """No conditions pass → score=0."""
@@ -343,7 +303,6 @@ class TestScoreAggregation:
             close,
             vr,
             "15m",
-            is_straddle=False,
             d_overlap=False,
         )
         assert score == 0
@@ -369,7 +328,6 @@ class TestMinConvictionFilter:
         """T3 mode (min=3) blocks score=2 signal."""
         cfg = VolStraddleConfig(
             min_conviction_score=3,
-            straddle_enabled=False,
             enable_1h=False,
             enable_4h=False,
         )
@@ -407,7 +365,6 @@ class TestMinConvictionFilter:
         """Conviction score stored in signal metadata when signal fires."""
         cfg = VolStraddleConfig(
             min_conviction_score=0,
-            straddle_enabled=False,
             enable_1h=False,
             enable_4h=False,
         )

@@ -3,7 +3,6 @@
 import time
 from unittest.mock import patch
 
-import pytest
 
 from quantbox.core.rate_limiter import RateLimiter
 

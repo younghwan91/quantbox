@@ -9,7 +9,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, PropertyMock
 
 
 # ─── G6: BTC Trend Gate ────────────────────────────────────────────────────
@@ -200,91 +199,3 @@ class TestDailyLossBreakerLogic:
         triggered = daily_pnl < -limit_usd
         assert not triggered
         assert daily_pnl == pytest.approx(-40.0)
-
-
-# ─── G6: Straddle Exemption ────────────────────────────────────────────────
-
-
-class TestG6StraddleExemption:
-    """Straddle candidates must bypass G6 BTC Trend Gate even when BTC < MA.
-
-    Straddle is direction-neutral (LONG+SHORT simultaneously).  Blocking its
-    LONG leg via G6 would cause an asymmetric SHORT-only open, which defeats
-    the strategy entirely.  The fix adds is_straddle=True to straddle
-    candidates so G6 logic is skipped for them.
-    """
-
-    def test_straddle_long_leg_not_blocked_by_g6(self):
-        """Straddle LONG candidate passes through G6 even when BTC < MA."""
-        # Simulate G6 condition evaluation — this is the guard in scalper.py:
-        #   if signal == 1 and not is_straddle and btc_ma is not None and btc_cur < btc_ma:
-        btc_cur = 50_000.0
-        btc_ma = 60_000.0  # BTC below MA (would normally block LONG)
-        signal = 1
-
-        for is_straddle in [True, False]:
-            blocked = signal == 1 and not is_straddle and btc_cur < btc_ma
-            if is_straddle:
-                assert not blocked, "Straddle LONG leg must NOT be blocked by G6"
-            else:
-                assert blocked, "Directional LONG must be blocked when BTC < MA"
-
-    def test_straddle_short_leg_not_blocked_by_g6(self):
-        """Straddle SHORT candidate is never blocked (G6 only targets signal==1)."""
-        btc_cur = 50_000.0
-        btc_ma = 60_000.0
-        signal = -1
-        is_straddle = True
-
-        # signal == -1 → G6 condition is False regardless of is_straddle
-        blocked = signal == 1 and not is_straddle and btc_cur < btc_ma
-        assert not blocked
-
-    def test_directional_long_still_blocked_by_g6(self):
-        """Non-straddle LONG is still blocked when BTC < MA (regression guard)."""
-        btc_cur = 50_000.0
-        btc_ma = 60_000.0
-        signal = 1
-        is_straddle = False
-
-        blocked = signal == 1 and not is_straddle and btc_cur < btc_ma
-        assert blocked, "Directional LONG must still be blocked by G6"
-
-    def test_straddle_candidate_tuple_has_5_elements(self):
-        """Straddle candidates are 5-element tuples with is_straddle=True."""
-        # Simulate what scalper.py appends for a straddle signal
-        sym = "BTCUSDT"
-        move = 0.025
-        close = np.ones(200)
-
-        straddle_candidates: list[tuple[str, int, float, np.ndarray, bool]] = []
-        signal = 2  # straddle
-        if signal == 2:
-            straddle_candidates.append((sym, 1, move, close, True))
-            straddle_candidates.append((sym, -1, move, close, True))
-        else:
-            straddle_candidates.append((sym, signal, move, close, False))
-
-        assert len(straddle_candidates) == 2
-        long_cand = straddle_candidates[0]
-        short_cand = straddle_candidates[1]
-
-        assert long_cand[1] == 1 and long_cand[4] is True, "LONG straddle leg: is_straddle must be True"
-        assert short_cand[1] == -1 and short_cand[4] is True, "SHORT straddle leg: is_straddle must be True"
-
-    def test_directional_candidate_tuple_has_false_flag(self):
-        """Non-straddle candidates have is_straddle=False."""
-        sym = "ETHUSDT"
-        move = 0.01
-        close = np.ones(200)
-        signal = 1  # directional LONG
-
-        candidates: list[tuple[str, int, float, np.ndarray, bool]] = []
-        if signal == 2:
-            candidates.append((sym, 1, move, close, True))
-            candidates.append((sym, -1, move, close, True))
-        else:
-            candidates.append((sym, signal, move, close, False))
-
-        assert len(candidates) == 1
-        assert candidates[0][4] is False, "Directional candidate must have is_straddle=False"
