@@ -20,7 +20,6 @@ from pathlib import Path
 
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
-    _atr_pct,
     compute_momentum,
     compute_vr,
     gen_vr_signal,
@@ -102,9 +101,8 @@ class TestConfig:
     def test_round_trip_cost(self, cfg):
         assert cfg.round_trip_cost == pytest.approx(0.0008)
 
-    def test_straddle_enabled(self, cfg):
-        # straddle_enabled is a runtime config toggle (.env override).
-        # Test only that hedge_mode (structural requirement) is True.
+    def test_hedge_mode_enabled(self, cfg):
+        # hedge_mode is a structural requirement for LONG/SHORT positionSide orders.
         assert cfg.hedge_mode is True
 
 
@@ -347,9 +345,8 @@ class TestStrategySignal:
                 assert "max_hold" in meta
                 assert "vr" in meta
                 cfg_check = VolStraddleConfig()
-                # sl/tp depend on signal type: VR squeeze uses d_sl, straddle uses s_sl
-                assert meta["sl"] in (cfg_check.d_sl, cfg_check.s_sl)
-                assert meta["tp"] in (cfg_check.d_tp, cfg_check.s_tp)
+                assert meta["sl"] == cfg_check.d_sl
+                assert meta["tp"] == cfg_check.d_tp
                 assert meta["vr"] > 0
                 break
         else:

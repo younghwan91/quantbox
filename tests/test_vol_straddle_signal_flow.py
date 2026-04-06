@@ -13,14 +13,11 @@ Commit: fix(v2.0.1) vol_straddle signal flow
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
-    compute_momentum,
     compute_vr,
     gen_vr_signal,
-    make_direction_momentum,
     resample_ohlcv,
 )
 from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy

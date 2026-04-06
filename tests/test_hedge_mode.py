@@ -6,7 +6,7 @@ CRITICAL #2: _reconcile_positions() must handle LONG+SHORT for same symbol
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from binance.exceptions import BinanceAPIException
 
@@ -238,7 +238,6 @@ class TestLoadStateCompoundKeyBug:
                     "tp": 0.12,
                     "tf": "15m",
                     "max_hold": 48,
-                    "is_straddle": False,
                     "position_side": None,  # also corrupted (pre-fix)
                     "trail_active": False,
                     "peak_gain": 0.0,
@@ -292,7 +291,6 @@ class TestLoadStateCompoundKeyBug:
                     "tp": 0.12,
                     "tf": "15m",
                     "max_hold": 48,
-                    "is_straddle": False,
                     "position_side": None,
                     "trail_active": False,
                     "peak_gain": 0.0,

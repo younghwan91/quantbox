@@ -3,7 +3,7 @@
 Extracted from scalper.py to reduce file size and isolate concerns.
 Methods in this mixin rely on instance attributes set by RubberBandScalper.__init__:
     self.strategy         — active strategy instance
-    self.strategy_name    — 'vol_straddle' / 'rubberband'
+    self.strategy_name    — 'vol_straddle'
     self.config           — RubberBandConfig
     self.vs_config        — VolStraddleConfig
     self._cfg             — active config (vs_config or config)
@@ -137,13 +137,6 @@ class LoopMixin:
             d_trail_activate=vc.d_trail_activate,
             d_trail_distance=vc.d_trail_distance,
             min_confidence=0,
-            straddle_enabled=vc.straddle_enabled,
-            straddle_max_slots=vc.straddle_max_slots,
-            straddle_vr_threshold=vc.s_vr_threshold,
-            straddle_sl=vc.s_sl,
-            straddle_tp=vc.s_tp,
-            straddle_trail_activate=vc.s_trail_activate,
-            straddle_trail_distance=vc.s_trail_distance,
             testnet=settings.binance_testnet,
             ma_cluster_enabled=vc.ma_cluster_enabled,
             ma_cluster_pct=vc.ma_cluster_pct,

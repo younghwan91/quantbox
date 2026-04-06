@@ -18,7 +18,6 @@ from quantbox.strategy.rubberband import (
     compute_signals_partial_exit_btc_directional,
     compute_rr_gated_leverage,
     apply_rr_gated_leverage,
-    apply_confidence_leverage,
     RubberBandConfig,
     RubberBandStrategy,
 )

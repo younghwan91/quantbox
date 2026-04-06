@@ -9,13 +9,11 @@ BUG-E: Partial close failure left position unprotected for 15 min
 BUG-F: Runner trailing used stale ATR from entry time
 """
 
-from unittest.mock import MagicMock, patch, PropertyMock
-from datetime import datetime, timezone
+from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
 from tests.test_server_oco import _make_scalper
-from quantbox.strategy.rubberband import RubberBandConfig, RubberBandStrategy
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -269,7 +267,7 @@ class TestPBTCostParity:
         pnl_pct = (103.0 - 100.0) / 100.0  # 3%
         expected_net = pnl_pct * partial_notional - expected_cost
 
-        assert trade["pnl_usd"] == pytest.approx(expected_net, abs=0.01), f"Cost must be round_trip, not cost_per_side"
+        assert trade["pnl_usd"] == pytest.approx(expected_net, abs=0.01), "Cost must be round_trip, not cost_per_side"
 
     def test_runner_close_charges_round_trip(self):
         """Runner close trade records round_trip_cost, not cost_per_side."""
@@ -325,7 +323,7 @@ class TestPBTCostParity:
         pnl_pct = (110.0 - 100.0) / 100.0
         expected_net = pnl_pct * runner_notional - expected_cost
 
-        assert trade["pnl_usd"] == pytest.approx(expected_net, abs=0.01), f"Runner must charge round_trip_cost"
+        assert trade["pnl_usd"] == pytest.approx(expected_net, abs=0.01), "Runner must charge round_trip_cost"
 
 
 # ═══════════════════════════════════════════════════════════════════

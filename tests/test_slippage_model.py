@@ -7,7 +7,6 @@ import pytest
 
 from quantbox.backtest.trade_sim import (
     COST_DIRECTIONAL,
-    COST_STRADDLE,
     _COST_HIGH_LIQ,
     _COST_LOW_LIQ,
     _COST_MED_LIQ,
@@ -118,10 +117,10 @@ class TestSimulateWithTieredSlippage:
             "sp": cfg_obj.vr_short,
             "lp": cfg_obj.vr_long,
             "d_vr": cfg_obj.d_vr_threshold,
-            "s_vr": cfg_obj.s_vr_threshold,
-            "s_dur": cfg_obj.s_squeeze_dur,
+            "s_vr": 0.55,  # s_vr_threshold removed from production config
+            "s_dur": 4,  # s_squeeze_dur removed from production config
             "d_sl": cfg_obj.d_sl,
-            "s_sl": cfg_obj.s_sl,
+            "s_sl": 0.015,  # s_sl removed from production config
             "tp": cfg_obj.d_tp,
         }
 
@@ -202,13 +201,6 @@ class TestSimulateWithTieredSlippage:
         sym_cost = get_symbol_slippage("ICXUSDT")
         expected_delta = sym_cost - COST_DIRECTIONAL  # 0.0008
         assert expected_delta == pytest.approx(_COST_LOW_LIQ - _COST_HIGH_LIQ)
-
-    def test_straddle_pnl_adjustment_arithmetic(self) -> None:
-        """Verify straddle cost adjustment: 2×sym_cost − COST_STRADDLE."""
-        sym_cost = get_symbol_slippage("ICXUSDT")  # 0.0016
-        straddle_tiered = 2 * sym_cost  # 0.0032
-        delta = straddle_tiered - COST_STRADDLE  # 0.0032 - 0.0016 = 0.0016
-        assert delta == pytest.approx(2 * (_COST_LOW_LIQ - _COST_HIGH_LIQ))
 
 
 # ══════════════════════════════════════════════════════════════════════════════

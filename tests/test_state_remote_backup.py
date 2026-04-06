@@ -5,13 +5,10 @@ primary save, and must create/copy the file when the env-var is configured.
 """
 
 import json
-import os
-from pathlib import Path
 
 import pytest
 
 from quantbox.core.scalper_state import (
-    STATE_FILE,
     _try_remote_backup,
     save_scalper_state,
 )

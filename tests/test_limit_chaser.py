@@ -4,8 +4,7 @@ Tests for LimitOrderChaser — maker-only 체결 로직.
 Mock을 사용하여 바이낸스 API 호출 없이 순수 로직만 검증한다.
 """
 
-import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -891,7 +890,6 @@ class TestExceedMaxPosition:
 
     def test_2027_returns_failed_immediately(self, chaser_with_fallback: LimitOrderChaser, mock_client: MagicMock):
         """-2027 에러 발생 시 MARKET fallback 없이 즉시 FAILED 반환."""
-        from binance.exceptions import BinanceAPIException
 
         mock_client.futures_create_order.side_effect = Exception(
             "APIError(code=-2027): Exceeded the maximum allowable position at current leverage."

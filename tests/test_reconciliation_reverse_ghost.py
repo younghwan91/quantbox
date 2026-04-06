@@ -9,9 +9,8 @@ NOT exchange→state (reverse ghost detection).
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
-import pytest
 
 from tests.conftest import _build_vs_scalper
 
@@ -302,7 +301,6 @@ class TestReverseGhostJournaling:
 
     def test_reverse_ghost_no_journal_in_alert_only_mode(self):
         """In alert-only mode (default), journal.record() is NOT called (no auto-close)."""
-        from unittest.mock import MagicMock
 
         scalper = _build_vs_scalper()
         scalper.paper_mode = False
@@ -323,7 +321,6 @@ class TestReverseGhostJournaling:
 
     def test_reverse_ghost_calls_journal_record_with_auto_close(self, monkeypatch):
         """_journal.record() is called when reverse ghost is auto-closed (ORPHAN_AUTO_CLOSE=true)."""
-        from unittest.mock import MagicMock
 
         monkeypatch.setenv("ORPHAN_AUTO_CLOSE", "true")
         scalper = _build_vs_scalper()
@@ -349,7 +346,6 @@ class TestReverseGhostJournaling:
 
     def test_reverse_ghost_journal_not_called_on_api_failure(self, monkeypatch):
         """If auto-close order fails, journal.record() must NOT be called with garbage data."""
-        from unittest.mock import MagicMock
 
         monkeypatch.setenv("ORPHAN_AUTO_CLOSE", "true")
         scalper = _build_vs_scalper()

@@ -3,8 +3,6 @@ Tests for core configuration module.
 """
 
 import pytest
-import tempfile
-import os
 
 from quantbox.core.config import (
     Config,
@@ -12,8 +10,6 @@ from quantbox.core.config import (
     DataConfig,
     StrategyConfig,
     RiskConfig,
-    BacktestConfig,
-    OptimizationConfig,
     TradingMode,
 )
 

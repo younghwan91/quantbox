@@ -7,8 +7,7 @@ On restart: bracket repair uses wrong qty, PnL is double-counted on the
 runner leg, and the partial close trade is lost from history.
 """
 
-from unittest.mock import MagicMock, patch, call
-import pytest
+from unittest.mock import MagicMock, patch
 
 
 def _make_scalper(**config_overrides):

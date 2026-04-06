@@ -14,7 +14,6 @@ These tests ensure:
 """
 
 import numpy as np
-import pytest
 from quantbox.strategy.rubberband import apply_mtf_confirmation
 
 

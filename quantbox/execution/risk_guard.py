@@ -65,9 +65,6 @@ class RiskGuard:
     def allow_long(self, btc_close: np.ndarray | None, btc_ma: float | None) -> bool:
         """G6: return False when BTC is below MA and gate is active.
 
-        Should only be called for non-straddle LONG signals (signal == 1).
-        Straddle is direction-neutral — G6 does not apply.
-
         Args:
             btc_close: Array of BTC close prices (used for current price).
             btc_ma: MA value returned by compute_btc_gate(). When None the
@@ -80,36 +77,6 @@ class RiskGuard:
             return True
         btc_cur = float(btc_close[-1])
         return btc_cur >= btc_ma
-
-    # ── Straddle slot cap ─────────────────────────────────────────────────
-
-    def allow_straddle(self, active_straddle_pairs: int, remaining_slots: int) -> tuple[bool, str]:
-        """Check whether opening a new straddle pair is allowed.
-
-        Applies two sub-checks:
-        1. At least 2 remaining slot budget for LONG + SHORT legs.
-        2. Active straddle pairs have not reached straddle_max_slots cap.
-
-        Args:
-            active_straddle_pairs: Number of open LONG straddle positions
-                (each pair counts once).
-            remaining_slots: Slots left in the current scan budget
-                (max_entries - entries_made).
-
-        Returns:
-            (allowed, reason) — allowed=True when entry is permitted;
-            reason is a human-readable explanation when blocked.
-        """
-        if remaining_slots < 2:
-            return False, f"only {remaining_slots} slot(s) remaining (need 2 for LONG+SHORT pair)"
-        cfg_strd_max = self.cfg.straddle_max_slots
-        if active_straddle_pairs * 2 >= cfg_strd_max:
-            return (
-                False,
-                f"{active_straddle_pairs} pairs active "
-                f"({active_straddle_pairs * 2}/{cfg_strd_max} slots) — cap reached",
-            )
-        return True, ""
 
     # ── Direction diversity filter ────────────────────────────────────────
 

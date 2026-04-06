@@ -44,16 +44,6 @@ class TestDirectionalSL:
             _make_config(monkeypatch, {"VS_D_SL": "-0.01"})
 
 
-class TestStraddleSL:
-    def test_s_sl_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        with pytest.raises(ValidationError, match="s_sl must be positive"):
-            _make_config(monkeypatch, {"VS_S_SL": "0"})
-
-    def test_s_sl_negative(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        with pytest.raises(ValidationError, match="s_sl must be positive"):
-            _make_config(monkeypatch, {"VS_S_SL": "-0.5"})
-
-
 class TestTPGreaterThanSL:
     def test_tp_equal_sl(self, monkeypatch: pytest.MonkeyPatch) -> None:
         with pytest.raises(ValidationError, match="d_tp must be greater than d_sl"):
@@ -124,24 +114,6 @@ class TestDTrailDistanceLessThanActivate:
                 {
                     "VS_D_TRAIL_DISTANCE": "0.02",
                     "VS_D_TRAIL_ACTIVATE": "0.01",
-                },
-            )
-
-
-class TestSTrailDistance:
-    def test_s_trail_distance_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        with pytest.raises(ValidationError, match="s_trail_distance must be positive"):
-            _make_config(monkeypatch, {"VS_S_TRAIL_DISTANCE": "0"})
-
-
-class TestSTrailDistanceLessThanActivate:
-    def test_s_distance_exceeds_activate(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        with pytest.raises(ValidationError, match="s_trail_distance must be less than s_trail_activate"):
-            _make_config(
-                monkeypatch,
-                {
-                    "VS_S_TRAIL_DISTANCE": "0.02",
-                    "VS_S_TRAIL_ACTIVATE": "0.015",
                 },
             )
 
@@ -234,11 +206,9 @@ class TestMultipleViolations:
                 monkeypatch,
                 {
                     "VS_D_SL": "0",
-                    "VS_S_SL": "-1",
                     "VS_FEE_RATE": "-0.01",
                 },
             )
         msg = str(exc_info.value)
         assert "d_sl must be positive" in msg
-        assert "s_sl must be positive" in msg
         assert "fee_rate must be non-negative" in msg

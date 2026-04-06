@@ -12,7 +12,7 @@ These tests exist because parity violations = silent money loss.
 """
 
 import math
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -20,8 +20,6 @@ import pytest
 from quantbox.strategy.rubberband import (
     RubberBandConfig,
     RubberBandStrategy,
-    apply_mtf_confirmation,
-    apply_mtf_leverage,
     compute_confidence_leverage,
     compute_signals_v9,
 )

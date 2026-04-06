@@ -6,7 +6,6 @@ import pytest
 import tempfile
 import time
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta, timezone
 
 from quantbox.data.cache import MemoryCache, DiskCache, DataCache, TimeframedCache, CacheEntry

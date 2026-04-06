@@ -15,7 +15,6 @@ from quantbox.notifications.discord import (
     COLOR_RED,
     COLOR_YELLOW,
     COLOR_BLUE,
-    COLOR_GRAY,
     _now_str,
 )
 

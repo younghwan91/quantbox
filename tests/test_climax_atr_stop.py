@@ -13,7 +13,6 @@ No synthetic backtest data — unit tests only.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from quantbox.strategy.rubberband import RubberBandConfig, RubberBandStrategy
 

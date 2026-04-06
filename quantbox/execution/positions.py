@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
 from quantbox.core.types import build_trade_record, to_api_symbol
 from quantbox.core.terminal_ui import format_entry, format_exit
 from quantbox.utils.diagnostics import _diag_logger
@@ -30,17 +30,7 @@ class PositionMixin:
     """Mixin: Position lifecycle (open, partial close, close, pyramid)."""
 
     def _get_pair_counterpart(self: "ScalperProtocol", pos_key: str) -> str | None:
-        """Find the counterpart position key for a straddle pair.
-
-        Scans _positions for the position sharing the same straddle_pair_id.
-        Returns None if no counterpart found or position is not a straddle.
-        """
-        pair_id = self.strategy._positions.get(pos_key, {}).get("straddle_pair_id")
-        if not pair_id:
-            return None
-        for key, pos in self.strategy._positions.items():
-            if key != pos_key and pos.get("straddle_pair_id") == pair_id:
-                return key
+        """Legacy: Find counterpart position key. Always returns None."""
         return None
 
     # ── _open_position sub-methods ──────────────────────────────────────
@@ -113,7 +103,6 @@ class PositionMixin:
         tp_pct = sig_meta.get("tp", vs.d_tp)
         tf_label = sig_meta.get("tf", "15m")
         max_hold = sig_meta.get("max_hold", vs.get_max_hold(tf_label))
-        is_straddle = sig_meta.get("straddle", False)
         strategy_type = sig_meta.get("strategy_type", VR_DIRECTIONAL)
 
         # ── Risk-based leverage: 1 SL hit = risk_per_trade % of balance ──
@@ -127,17 +116,9 @@ class PositionMixin:
             f"(risk={vs.risk_per_trade * 100:.0f}% × N={vs.max_concurrent} / SL={sl_pct * 100:.1f}%)"
         )
 
-        # ── Straddle half-size: each leg = 0.5× notional ──
-        # Applied AFTER leverage_override to prevent silent overwrite.
-        # A straddle pair (LONG+SHORT) is one trade idea using 2 slots.
-        # Without this, pair total = 2× directional exposure → double loss on dual SL.
-        if is_straddle:
-            notional *= 0.5
-            logger.info(f"[{symbol}] Straddle half-size: notional=${notional:.2f} (per leg)")
-
         # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
         conviction_score = sig_meta.get("conviction_score", 0)
-        if vs.cw_enabled and vs.cw_multipliers and strategy_type in (VR_DIRECTIONAL, VR_STRADDLE):
+        if vs.cw_enabled and vs.cw_multipliers and strategy_type == VR_DIRECTIONAL:
             idx = min(conviction_score, len(vs.cw_multipliers) - 1)
             cw_mult = vs.cw_multipliers[idx]
             notional *= cw_mult
@@ -225,7 +206,6 @@ class PositionMixin:
             "tp_pct": tp_pct,
             "tf_label": tf_label,
             "max_hold": max_hold,
-            "is_straddle": is_straddle,
             "strategy_type": strategy_type,
             "conviction_score": conviction_score,
             "per_slot_capital": per_slot_capital,
@@ -444,7 +424,6 @@ class PositionMixin:
         sizing: dict,
         brackets: dict,
         balance: float,
-        straddle_pair_id: str | None = None,
     ) -> bool:
         """Record position in strategy state and send notifications.
 
@@ -459,7 +438,6 @@ class PositionMixin:
         tp_pct = sizing["tp_pct"]
         tf_label = sizing["tf_label"]
         max_hold = sizing["max_hold"]
-        is_straddle = sizing["is_straddle"]
         strategy_type = sizing["strategy_type"]
         conviction_score = sizing["conviction_score"]
         move_size = sizing["move_size"]
@@ -482,8 +460,6 @@ class PositionMixin:
             tf=tf_label,
             max_hold=max_hold,
             position_side=pos_side,
-            is_straddle=is_straddle,
-            straddle_pair_id=straddle_pair_id,
             strategy_type=strategy_type,
             balance_before=balance_before,
         )
@@ -531,7 +507,7 @@ class PositionMixin:
                 "fields": [
                     {
                         "name": "전략",
-                        "value": f"VolStraddle {'S' if strategy_type == 'vr_straddle' else ('MA' if strategy_type == 'ma_cluster' else ('DC' if strategy_type == 'donchian' else 'D'))} ({tf_label})",
+                        "value": f"VolStraddle {'MA' if strategy_type == 'ma_cluster' else ('DC' if strategy_type == 'donchian' else 'D')} ({tf_label})",
                         "inline": True,
                     },
                     {"name": "진입가", "value": f"${fill_price:.4f}", "inline": True},
@@ -543,7 +519,7 @@ class PositionMixin:
                         "name": "Exit",
                         "value": (
                             "SL/TP"
-                            if (is_straddle or strategy_type == MA_CLUSTER)
+                            if strategy_type == MA_CLUSTER
                             else (
                                 f"Trail({vs.donchian_trail_activate * 100:.0f}%/{vs.donchian_trail_distance * 100:.1f}%)"
                                 if strategy_type == DONCHIAN
@@ -554,10 +530,8 @@ class PositionMixin:
                     },
                     {"name": "SL 방식", "value": _sl_tag, "inline": True},
                     {
-                        "name": "확신도" if strategy_type in (VR_DIRECTIONAL, VR_STRADDLE) else "전략타입",
-                        "value": (
-                            f"{conviction_score}/4" if strategy_type in (VR_DIRECTIONAL, VR_STRADDLE) else strategy_type
-                        ),
+                        "name": "확신도" if strategy_type == VR_DIRECTIONAL else "전략타입",
+                        "value": (f"{conviction_score}/4" if strategy_type == VR_DIRECTIONAL else strategy_type),
                         "inline": True,
                     },
                     {"name": "슬롯", "value": f"{n_active}/{self.vs_config.max_concurrent}", "inline": True},
@@ -577,7 +551,6 @@ class PositionMixin:
         signal: "SignalValue",
         close_prices: np.ndarray,
         balance: float,
-        straddle_pair_id: str | None = None,
     ) -> bool:
         """Open a new position.
 
@@ -586,8 +559,6 @@ class PositionMixin:
             signal: +1 (long) or -1 (short).
             close_prices: Recent close prices.
             balance: Current balance.
-            straddle_pair_id: UUID linking LONG+SHORT legs of same straddle pair.
-                Both legs receive the same ID. None for directional positions.
 
         Returns:
             True if position was opened.
@@ -602,7 +573,7 @@ class PositionMixin:
 
         brackets = self._setup_brackets(symbol, signal, fill, sizing)
 
-        return self._register_position(symbol, signal, fill, sizing, brackets, balance, straddle_pair_id)
+        return self._register_position(symbol, signal, fill, sizing, brackets, balance)
 
     def _partial_close_position(
         self: "ScalperProtocol",
@@ -1023,9 +994,7 @@ class PositionMixin:
                 n_remaining = self.strategy.n_active
 
                 _strat = closed_pos.get("strategy_type", VR_DIRECTIONAL)
-                _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA", DONCHIAN: "DC"}.get(
-                    _strat, _strat
-                )
+                _strat_label = {VR_DIRECTIONAL: "VR-D", MA_CLUSTER: "MA", DONCHIAN: "DC"}.get(_strat, _strat)
                 self.discord.send(
                     embed={
                         "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr} (서버체결)",
@@ -1229,9 +1198,7 @@ class PositionMixin:
         _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
 
         _strat = pos.get("strategy_type", VR_DIRECTIONAL)
-        _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA", DONCHIAN: "DC"}.get(
-            _strat, _strat
-        )
+        _strat_label = {VR_DIRECTIONAL: "VR-D", MA_CLUSTER: "MA", DONCHIAN: "DC"}.get(_strat, _strat)
         self.discord.send(
             embed={
                 "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr}",

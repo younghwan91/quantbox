@@ -1,11 +1,8 @@
 """Tests for quantbox.core.sd_notify."""
 
 import socket
-import threading
-import unittest.mock as mock
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from quantbox.core.sd_notify import sd_notify
 

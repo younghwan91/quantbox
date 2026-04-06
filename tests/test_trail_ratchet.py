@@ -6,8 +6,7 @@ STOP order at trail_stop_gain price whenever trail is active.
 
 from __future__ import annotations
 
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from tests.conftest import _build_vs_scalper
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
@@ -23,7 +22,6 @@ def _make_pos(
     signal: int = 1,
     sl_order_id: str = "sl_111",
     trail_sl_ratcheted: float = -999.0,
-    is_straddle: bool = False,
 ) -> dict:
     pos = {
         "symbol": "TESTUSDT",
@@ -35,7 +33,6 @@ def _make_pos(
         "peak_gain": peak_gain,
         "server_sl_order_id": sl_order_id,
         "strategy_type": strategy_type,
-        "is_straddle": is_straddle,
         "_trail_sl_ratcheted": trail_sl_ratcheted,
     }
     return pos
