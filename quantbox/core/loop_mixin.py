@@ -156,6 +156,7 @@ class LoopMixin:
             donchian_trail_activate=vc.donchian_trail_activate,
             donchian_trail_distance=vc.donchian_trail_distance,
             donchian_leverage=vc.donchian_leverage,
+            risk_per_trade=vc.risk_per_trade,
         )
         print_startup_complete(mode_str)
 

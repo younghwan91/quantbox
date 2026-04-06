@@ -113,6 +113,7 @@ def print_system_info(
     donchian_trail_activate: float = 0.02,
     donchian_trail_distance: float = 0.008,
     donchian_leverage: float = 15.0,
+    risk_per_trade: float = 0.01,
 ) -> None:
     """Print formatted system configuration table.
 
@@ -166,13 +167,17 @@ def print_system_info(
     print()
 
     _print_section("STRATEGIES")
-    _print_row("VR Directional", f"{Color.GREEN}ENABLED{Color.RESET} (D_mom8, {leverage_base}x)")
+    # Show risk-based leverage: L = risk_per_trade × max_concurrent / SL
+    _vr_lev = risk_per_trade * max_slots / stop_mult if stop_mult > 0 else leverage_base
+    _print_row("VR Directional", f"{Color.GREEN}ENABLED{Color.RESET} (D_mom8, {_vr_lev:.0f}x)")
     if ma_cluster_enabled:
-        _print_row("MA Cluster", f"{Color.GREEN}ENABLED{Color.RESET} ({ma_cluster_leverage:.0f}x)")
+        _ma_lev = risk_per_trade * max_slots / ma_cluster_sl if ma_cluster_sl > 0 else ma_cluster_leverage
+        _print_row("MA Cluster", f"{Color.GREEN}ENABLED{Color.RESET} ({_ma_lev:.0f}x)")
     else:
         _print_row("MA Cluster", f"{Color.RED}DISABLED{Color.RESET}")
     if donchian_enabled:
-        _print_row("Donchian", f"{Color.GREEN}ENABLED{Color.RESET} ({donchian_leverage:.0f}x)")
+        _dc_lev = risk_per_trade * max_slots / donchian_sl if donchian_sl > 0 else donchian_leverage
+        _print_row("Donchian", f"{Color.GREEN}ENABLED{Color.RESET} ({_dc_lev:.0f}x)")
     else:
         _print_row("Donchian", f"{Color.RED}DISABLED{Color.RESET}")
     print()
@@ -182,7 +187,7 @@ def print_system_info(
     _print_row("SL / TP", f"{stop_mult * 100:.0f}% / {target * 100:.0f}%")
     _print_row("Trail", f"{d_trail_activate * 100:.1f}%→{d_trail_distance * 100:.1f}% (activate→distance)")
     _print_row("Max Hold", f"{max_hold} bars")
-    _print_row("Leverage", f"{leverage_base}x")
+    _print_row("Leverage", f"{_vr_lev:.0f}x (risk={risk_per_trade * 100:.0f}%×N={max_slots}/SL={stop_mult * 100:.0f}%)")
     print()
 
     if ma_cluster_enabled:
