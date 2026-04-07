@@ -514,7 +514,7 @@ class TestForceCloseRecursionGuard:
             server_tp_order_id=None,
         )
 
-        result = scalper._close_position("BNBUSDT", "stop_loss", 290.0)
+        scalper._close_position("BNBUSDT", "stop_loss", 290.0)
 
         # Should have recursed and eventually closed
         assert call_count[0] == 2
@@ -586,7 +586,6 @@ class TestLimitChaserPartialFillNoPosition:
         mock_client.futures_cancel_order.return_value = {}
 
         # Market fallback → NO_POSITION (position closed between orders)
-        original_market_fallback = chaser._market_fallback
         chaser._market_fallback = MagicMock(return_value="NO_POSITION")
 
         result = chaser.chase_limit_order(
