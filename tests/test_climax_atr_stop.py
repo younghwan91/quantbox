@@ -178,7 +178,6 @@ def _make_confidence_data(n: int = 200, vol_spike_mult: float = 1.0):
 
     # Volume: base=100, last bar spiked
     volume = np.full(n, 100.0, dtype=np.float64)
-    vol_period = 20
     # vol_SMA_val ≈ 100 (uniform). Last bar = vol_spike_mult × 100
     volume[-1] = 100.0 * vol_spike_mult
 
