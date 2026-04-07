@@ -226,7 +226,7 @@ def fetch_positions() -> list[dict]:
             entry = float(p["entryPrice"])
             mark = float(p["markPrice"])
             upnl = float(p["unRealizedProfit"])
-            leverage = int(p.get("leverage", 30))
+            leverage = int(p.get("leverage", 10))
             pct = (mark - entry) / entry * 100 if amt > 0 else (entry - mark) / entry * 100
             roi_pct = pct * leverage
             rows.append(
@@ -610,7 +610,7 @@ def _fetch_positions_paper() -> list[dict]:
     for sym, pos in s.get("positions", {}).items():
         entry = pos.get("entry_price", 0)
         signal = pos.get("signal", 1)
-        leverage = pos.get("leverage", 30)
+        leverage = pos.get("leverage", 10)
         rows.append(
             {
                 "symbol": sym.split(":")[0],
