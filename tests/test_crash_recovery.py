@@ -326,7 +326,7 @@ class TestFullCrashRecoveryLifecycle:
                 order_type="MARKET",
                 created_at=t0,
             )
-            key = tracker.record_pending(entry)
+            tracker.record_pending(entry)
 
             # Also record a bracket SL
             bracket = PendingOrder(
