@@ -1,21 +1,6 @@
-"""VolStraddle strategy configuration dataclass.
+"""VolStraddle strategy configuration — pydantic-settings class.
 
-r47-Exit (2026-03-07): Exit param overhaul validated vs v14.3.0 (N=3713, PF=1.324).
-  Option D chosen: r47 best exits + TBR OFF (N=4097, PF=1.521, Sharpe=5.06, MaxDD=83.3%).
-  D_mom8: trail_activate 2%→0.5%, trail_distance 0.3%→0.2%→0.5% (r106: callbackRate floor), F5 TBR disabled.
-  MA Cluster: flat TP=8% → trailing stop (activate=4%, distance=0.5%).
-  All 6 years profitable. Bootstrap CI [1.418, 1.634], P(PF≥1)=100%.
-
-R43-Exit: VR compression detector with trailing stop exit (R43 validated).
-Full 6yr validated: N=2,336 @10 slots, PF=1.351, Calmar=9.4, DD=30.0%.
-6 consecutive profitable years (2020-2025). 0 losing years.
-
-v13.1 changes (R43): Directional TP 5%→12% + trailing stop (activate 2%, distance 0.3%).
-Straddle exit unchanged (SL=1.5%, TP=5%).
-
-R44d V17: MA Cluster Squeeze (4h-only) as complementary strategy.
-4 SMAs (20/50/100/200) cluster → breakout + momentum direction.
-Do NOT change without re-running backtest validation.
+All strategy parameters live here. .env values (prefix VS_) override defaults.
 
 Half-Kelly Leverage Derivation (20260304_ef55e2e strategy report):
   Kelly f* = WR - (1-WR)/RR,  Leverage = (f*/2) × N / SL
@@ -29,7 +14,7 @@ from __future__ import annotations
 import os
 
 from pydantic import Field, model_validator
-from quantbox.core.strategy_names import VR_DIRECTIONAL
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -61,20 +46,11 @@ class VolStraddleConfig(BaseSettings):
     # Once unrealized gain reaches trail_activate, a trailing stop
     # follows at trail_distance below peak. Hard TP at d_tp (20% safety cap, rarely hit).
     # Mechanism: lets VR squeeze explosive releases run beyond fixed TP.
-    d_trail_activate: float = 0.040  # r106: 1.0%→4.0% (headroom for 0.5% callbackRate floor; PF=1.395, Calmar=6.0)
+    d_trail_activate: float = (
+        0.015  # r106→live: 4.0%→1.5% (bar-close MFE avg 1.04%, 4% unreachable; 10x lev → 1.5% raw = 15% pos)
+    )
     d_trail_distance: float = 0.005  # r106: 0.2%→0.5% (Binance callbackRate floor, rule #8)
 
-    # ── S_d8: Straddle (requires Binance Hedge Mode) ──
-    s_vr_threshold: float = 0.57  # S VR entry threshold (r58/r59: 0.55→0.57 +28%N +11%PF)
-    s_squeeze_dur: int = 3  # Min consecutive bars below S VR threshold (r58/r59: 4→3 +25%N +12%PF)
-    s_sl: float = 0.015  # 1.5% stop loss (per leg)
-    s_tp: float = 0.05  # 5% hard TP ceiling (per leg, safety)
-    s_trail_activate: float = 0.020  # r107: 3.0%→2.0% (PF=1.411>1.307, trail rate 87.6%>69.9%; ref: r106)
-    s_trail_distance: float = 0.005  # r104b: 0.5% behind peak (noise floor — 0.1% fires on tick noise, 81% 1m/15m bias)
-    straddle_enabled: bool = False  # r108: disabled — PF=0.52 structural loss (4-leg cost drag, double-SL)
-    straddle_max_slots: int = 8  # Max slots consumed by STRD (1 pair = 2 slots → max 4 pairs)
-    # Remaining slots (max_concurrent - straddle_max_slots) are reserved for VR.
-    # r82: strd_max=8 → Calmar +67% vs strd_max=6. VR 2슬롯 보험 유지.
     hedge_mode: bool = True  # Binance Hedge Mode (dualSidePosition=true)
 
     # ── Server-Side Trailing Stop (r90 migration) ──
@@ -82,7 +58,6 @@ class VolStraddleConfig(BaseSettings):
     # Binance tracks peak tick-by-tick and fires MARKET when price drops
     # callbackRate% from peak after activationPrice. Matches IDEAL sim model.
     # Server-side TRAILING_STOP_MARKET via regular API (POST /fapi/v1/order).
-    # Eliminates bar-close execution gap that made straddle unprofitable.
     trail_server_native: bool = True
 
     # ── Direction ──
@@ -186,15 +161,13 @@ class VolStraddleConfig(BaseSettings):
     c2_btc_mom_threshold: float = 0.01  # 1% max BTC momentum magnitude
 
     # ── B3: Confluence ──
-    # Both D_mom8 AND S_d8 would fire simultaneously (overlap)
     b3_enabled: bool = True
 
     # ── A3: Quality+ ──
     # D_mom8: VR < deep_vr_threshold (extra deep compression)
-    # S_d8: squeeze duration ≥ long_squeeze_dur (extended squeeze)
     a3_enabled: bool = True
     a3_deep_vr_threshold: float = 0.35  # D_mom8 deep compression
-    a3_long_squeeze_dur: int = 16  # S_d8 extended squeeze duration
+    a3_long_squeeze_dur: int = 16  # Legacy param (kept for config compat)
 
     # ── F5: TBR z-score Gate (R46 validated, D_mom8 only) ──
     # Taker Buy Ratio z-score computed over lookback 15m bars.
@@ -202,7 +175,6 @@ class VolStraddleConfig(BaseSettings):
     # skip SHORT if z < -thresh (retail panic selling).
     # Backtest result (6yr, 46 symbols): PF 1.306→1.348 (+0.042),
     # WR 42.6%→46.4% (+3.8%), N -14.8%, p=0.029.
-    # IMPORTANT: Applied to D_mom8 only. S_d8 straddle is direction-neutral.
     f5_tbr_enabled: bool = (
         False  # r47: disabled; r71: re-validated with trail_activate=1.0% → KEEP disabled (2024/2025 OOS degrade)
     )
@@ -259,7 +231,6 @@ class VolStraddleConfig(BaseSettings):
             "NEOUSDT",
             "ONTUSDT",
             "QTUMUSDT",
-            # RLCUSDT removed: Binance notional limit prevents straddle (2026-03-19)
             "RSRUSDT",
             "RUNEUSDT",
             "SANDUSDT",
@@ -298,20 +269,20 @@ class VolStraddleConfig(BaseSettings):
     # Complementary strategy: 4 SMAs cluster → breakout.
     # Fires when VR squeeze is idle (93.7% non-overlapping).
     ma_cluster_enabled: bool = True  # r92 gate PASS: PF=2.749, MaxDD=17.7%, all 6yr profitable
-    ma_cluster_pct: float = 0.02  # Max spread among 4 SMAs (r75: 3%→2%, tighter cluster)
+    ma_cluster_pct: float = 0.03  # autoresearch: 2%→3% (PFxN +145%, MS=0.891, filter=0.956, 6yr profitable)
     ma_cluster_min_duration: int = 6  # Min 4h bars in cluster (r75: 8→6, ≈24h)
     ma_cluster_max_duration: int = 24  # Max 4h bars in cluster (R45: zombie filter)
     ma_cluster_min_momentum: float = 0.01  # Min |momentum| for entry (R45: was 0.003)
     ma_cluster_sl: float = 0.02  # 2% stop loss
     ma_cluster_tp: float = 0.08  # 8% hard TP ceiling (safety; r47: trailing fires first)
-    ma_cluster_trail_activate: float = 0.02  # r75: 4%→2% (earlier trail activation)
+    ma_cluster_trail_activate: float = 0.01  # autoresearch apr03: 1.5%→1.0% (earlier trail, PF +2%)
     ma_cluster_trail_distance: float = 0.005  # r106: 0.3%→0.5% (Binance callbackRate floor, rule #8; pending sweep)
 
     # r65: Server-side trail SL ratchet — closes bar-close execution gap (ΔPF=-0.950)
     # When True, places/updates Binance STOP order at trail_stop_gain price after
     # trail activation, ensuring intrabar execution matching backtest assumption.
     trail_server_ratchet_enabled: bool = True
-    ma_cluster_max_hold_4h: int = 12  # 12 × 4h = 48h
+    ma_cluster_max_hold_4h: int = 6  # 6 × 4h = 24h (avg loss held 10h; cut lingering losers earlier)
     ma_cluster_leverage: float = 21.0  # Half-Kelly: f*/2=4.33%, L=0.0433×10/0.02≈21
     ma_cluster_sma_periods: list[int] = Field(
         default_factory=lambda: [20, 50, 100, 200],
@@ -321,6 +292,31 @@ class VolStraddleConfig(BaseSettings):
     # 4h MA50 = 50 bars × 4h = 200h ≈ 8.3 days — matches MA cluster's strategic timeframe.
     ma_cluster_btc_gate_enabled: bool = True  # Block MA cluster LONGs when BTC below 4h MA50
     ma_cluster_btc_ma_period_4h: int = 50  # 50 × 4h = 200h ≈ 8.3 days
+
+    # ── Donchian Channel Breakout + Volume Spike (4h-only) ──
+    # Complementary strategy: 50-bar Donchian channel breakout with volume spike confirmation.
+    # Fires when VR and MA Cluster are idle (95.9% non-overlapping).
+    # Research: PF=4.934, WR=58.8%, MaxDD=27.6%, N=4780, 6yr all profitable.
+    # Robust to 3x cost + 0.2% slippage: PF=3.803. OOS no decay (test PF=5.20).
+    #
+    # Half-Kelly derivation: WR=58.8%, RR=3.46, f*=46.9%, L=f*/2*N/SL=156x.
+    # This is unrealistically high — likely caused by selection bias (59/59 symbols
+    # profitable is suspiciously clean) and backtest-optimistic PF. Using provisional
+    # 15x until live data validates actual WR/RR. Will re-derive after 50+ live trades.
+    donchian_enabled: bool = False  # Disabled until live validation
+    donchian_lookback: int = 50  # Channel period (4h bars = 200h ≈ 8.3 days)
+    donchian_vol_sma: int = 20  # Volume SMA period for spike detection
+    donchian_vol_mult: float = 2.5  # Volume must be > 2.5× SMA(20)
+    donchian_breakout_pct: float = 0.02  # 2% beyond channel for confirmation
+    donchian_sl: float = 0.015  # 1.5% stop loss
+    donchian_tp: float = 0.20  # 20% safety cap (trail exits first)
+    donchian_trail_activate: float = 0.02  # 2% to activate trailing stop
+    donchian_trail_distance: float = 0.008  # 0.8% trail distance (>= 0.5% rule #8)
+    donchian_max_hold_4h: int = 24  # 24 × 4h = 96h = 4 days
+    donchian_leverage: float = 15.0  # PROVISIONAL — see Half-Kelly note above
+    donchian_cooldown_bars: int = 3  # N 4h bars to skip after signal fires
+    donchian_btc_gate_enabled: bool = True  # Block LONG during BTC downtrend (same as MA Cluster)
+    donchian_btc_ma_period_4h: int = 50  # 50 × 4h = 200h ≈ 8.3 days
 
     # ── Compatibility fields (used by scalper internals) ──
     # These map vol straddle concepts to the scalper's existing interface
@@ -364,20 +360,13 @@ class VolStraddleConfig(BaseSettings):
     # Resets at UTC midnight. Set to 0 to disable.
     daily_loss_limit_pct: float = 0.05  # 5% of account balance
 
-    # ── Straddle Pair Coordination ──
-    # Retry/delay params for Step 0 prerequisites (straddle-pair-coordination.md).
-    entry_retry_count: int = 2  # VS_ENTRY_RETRY_COUNT: max retries for second leg entry before rollback
-    entry_retry_delay_s: float = 2.0  # VS_ENTRY_RETRY_DELAY_S: delay between second leg entry retries (s)
+    # ── Entry Retry / SL Cancel (shared execution params) ──
+    entry_retry_count: int = 2  # VS_ENTRY_RETRY_COUNT: max retries for entry
+    entry_retry_delay_s: float = 2.0  # VS_ENTRY_RETRY_DELAY_S: delay between entry retries (s)
     rollback_retry_count: int = 2  # VS_ROLLBACK_RETRY_COUNT: max retries for rollback _close_position()
     rollback_retry_delay_s: float = 2.0  # VS_ROLLBACK_RETRY_DELAY_S: delay between rollback retries (s)
     sl_cancel_retry_count: int = 2  # VS_SL_CANCEL_RETRY_COUNT: max retries for own SL cancel on TP fill
     sl_cancel_retry_delay_s: float = 1.0  # VS_SL_CANCEL_RETRY_DELAY_S: delay between SL cancel retries (s)
-    orphan_auto_close_cycles: int = (
-        4  # VS_ORPHAN_AUTO_CLOSE_CYCLES: cycles before orphaned leg auto-closes (~60min at 15m)
-    )
-    straddle_rollback_cooldown_cycles: int = (
-        8  # VS_STRADDLE_ROLLBACK_COOLDOWN_CYCLES: skip symbol for N cycles after rollback (~2h at 15m)
-    )
 
     @model_validator(mode="after")
     def _validate_safety_constraints(self) -> "VolStraddleConfig":
@@ -390,8 +379,6 @@ class VolStraddleConfig(BaseSettings):
 
         if self.d_sl <= 0:
             errors.append(f"d_sl must be positive, got {self.d_sl}")
-        if self.s_sl <= 0:
-            errors.append(f"s_sl must be positive, got {self.s_sl}")
         if self.d_tp <= self.d_sl:
             errors.append(
                 f"d_tp must be greater than d_sl (can't TP before SL), got d_tp={self.d_tp}, d_sl={self.d_sl}"
@@ -405,11 +392,6 @@ class VolStraddleConfig(BaseSettings):
             )
         if self.max_concurrent < 1:
             errors.append(f"max_concurrent must be >= 1, got {self.max_concurrent}")
-        if self.straddle_max_slots < 2:
-            errors.append(f"straddle_max_slots must be >= 2 (at least 1 pair), got {self.straddle_max_slots}")
-        # Auto-cap: if max_concurrent is reduced (e.g. --max-slots 5), straddle cap adjusts silently.
-        if self.straddle_max_slots > self.max_concurrent:
-            object.__setattr__(self, "straddle_max_slots", self.max_concurrent)
         if self.d_trail_distance <= 0:
             errors.append(f"d_trail_distance must be positive, got {self.d_trail_distance}")
         if self.d_trail_distance < 0.005:
@@ -421,18 +403,6 @@ class VolStraddleConfig(BaseSettings):
             errors.append(
                 f"d_trail_distance must be less than d_trail_activate, "
                 f"got d_trail_distance={self.d_trail_distance}, d_trail_activate={self.d_trail_activate}"
-            )
-        if self.s_trail_distance <= 0:
-            errors.append(f"s_trail_distance must be positive, got {self.s_trail_distance}")
-        if self.s_trail_distance < 0.005:
-            errors.append(
-                f"s_trail_distance must be >= 0.005 (Binance callbackRate >= 0.5%, rule #8), "
-                f"got {self.s_trail_distance}"
-            )
-        if self.s_trail_distance >= self.s_trail_activate:
-            errors.append(
-                f"s_trail_distance must be less than s_trail_activate, "
-                f"got s_trail_distance={self.s_trail_distance}, s_trail_activate={self.s_trail_activate}"
             )
         if self.ma_cluster_trail_distance < 0.005:
             errors.append(
@@ -455,6 +425,29 @@ class VolStraddleConfig(BaseSettings):
             errors.append(f"daily_loss_limit_pct must be positive, got {self.daily_loss_limit_pct}")
         if self.ma_cluster_sl <= 0:
             errors.append(f"ma_cluster_sl must be positive, got {self.ma_cluster_sl}")
+        # ── Donchian safety constraints (only when enabled) ──
+        if self.donchian_enabled:
+            if self.donchian_sl <= 0:
+                errors.append(f"donchian_sl must be positive, got {self.donchian_sl}")
+            if self.donchian_trail_distance < 0.005:
+                errors.append(
+                    f"donchian_trail_distance must be >= 0.005 (Binance callbackRate >= 0.5%, rule #8), "
+                    f"got {self.donchian_trail_distance}"
+                )
+            if self.donchian_trail_distance >= self.donchian_trail_activate:
+                errors.append(
+                    f"donchian_trail_distance must be < donchian_trail_activate, "
+                    f"got {self.donchian_trail_distance} >= {self.donchian_trail_activate}"
+                )
+            if self.donchian_leverage > 50:
+                errors.append(f"donchian_leverage cap exceeded (max 50x), got {self.donchian_leverage}")
+            if self.donchian_leverage < 1:
+                errors.append(f"donchian_leverage must be >= 1, got {self.donchian_leverage}")
+            if self.donchian_tp <= self.donchian_sl:
+                errors.append(
+                    f"donchian_tp must be > donchian_sl, "
+                    f"got donchian_tp={self.donchian_tp}, donchian_sl={self.donchian_sl}"
+                )
         if self.fee_rate < 0:
             errors.append(f"fee_rate must be non-negative, got {self.fee_rate}")
         if self.slippage_mode not in ("flat", "tiered", "conservative"):
@@ -503,6 +496,21 @@ class VolStraddleConfig(BaseSettings):
             "1h": self.max_hold_1h,
             "4h": self.max_hold_4h,
         }.get(tf, self.max_hold_15m)
+
+    def get_trail_params(self, strategy_type: str) -> tuple[float, float]:
+        """Return (trail_activate, trail_distance) for a strategy type."""
+        _map = {
+            VR_DIRECTIONAL: (self.d_trail_activate, self.d_trail_distance),
+            MA_CLUSTER: (self.ma_cluster_trail_activate, self.ma_cluster_trail_distance),
+            DONCHIAN: (self.donchian_trail_activate, self.donchian_trail_distance),
+        }
+        if strategy_type not in _map:
+            raise ValueError(f"Unknown strategy_type for trail params: {strategy_type!r}")
+        return _map[strategy_type]
+
+    def get_trail_distance(self, strategy_type: str) -> float:
+        """Return trail_distance for a strategy type (ratchet SL use)."""
+        return self.get_trail_params(strategy_type)[1]
 
     def get_warmup(self, tf: str) -> int:
         """Get warmup bars for a timeframe."""

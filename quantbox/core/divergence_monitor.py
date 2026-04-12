@@ -20,7 +20,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ── r73 canonical backtest baseline ──────────────────────────────────────────
-# r73 3-strat trail: D_mom8 + S_d8 + MA Cluster, 60 syms, 5.67yr, commit 33c8487
+# r73 3-strat trail: D_mom8 + MA Cluster, 60 syms, 5.67yr, commit 33c8487
 _BASELINE_PF: float = 2.002
 _BASELINE_WR: float = 0.461  # 46.1%
 _BASELINE_EV_BP: float = 40.1  # basis points per trade

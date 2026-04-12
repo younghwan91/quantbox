@@ -9,9 +9,7 @@ Validates three critical fixes:
 
 from unittest.mock import MagicMock, patch
 import numpy as np
-import pytest
 
-from quantbox.core.config import Config
 from quantbox.strategy.rubberband import RubberBandConfig, RubberBandStrategy
 
 

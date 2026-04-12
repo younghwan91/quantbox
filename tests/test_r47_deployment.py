@@ -130,7 +130,7 @@ class TestSameBarTrailActivateAndFire:
 
     def test_short_same_bar_activate_fire(self, strategy, cfg):
         """SHORT: low=-0.6%, high=-0.3% → 활성화 후 즉시 trail 발동."""
-        pos_key = f"BTCUSDT:SHORT"
+        pos_key = "BTCUSDT:SHORT"
         strategy.open_position(
             symbol="BTCUSDT",
             signal=-1,
@@ -501,11 +501,11 @@ class TestStrategyTypeInPositionDict:
             f"D_mom8 4.1% 수익에서 trail_active=True 필요 (activate={cfg.d_trail_activate})"
         )
 
-        # MA cluster 포지션: 동일 1.1% 수익 → trail 미활성화 (MA는 4% 필요)
-        _tick(strategy, eth_key, 101.1, high=101.1, low=101.09)
+        # MA cluster 포지션: 0.5% 수익 → trail 미활성화 (MA는 1% 필요)
+        _tick(strategy, eth_key, 100.5, high=100.5, low=100.49)
         eth_pos = strategy._positions[eth_key]
         assert eth_pos.get("trail_active", False) is False, (
-            f"MA cluster 1.1% 수익에서 trail_active=False 필요 (activate={cfg.ma_cluster_trail_activate})"
+            f"MA cluster 0.5% 수익에서 trail_active=False 필요 (activate={cfg.ma_cluster_trail_activate})"
         )
 
 
@@ -560,13 +560,13 @@ class TestPastIncidentPrevention:
 
         r47에서 0.5%로 단축된 후, r69 연도별 검증으로 1.0%가 최적으로 확인됨.
         """
-        assert cfg.d_trail_activate == 0.040, f"r69→current: trail_activate=0.040 (4.0%). got={cfg.d_trail_activate}"
+        assert cfg.d_trail_activate == 0.015, f"live tuning: trail_activate=0.015 (1.5%). got={cfg.d_trail_activate}"
         assert cfg.d_trail_distance == 0.005, f"r106: trail_distance=0.005 (0.5%, rule #8). got={cfg.d_trail_distance}"
 
     def test_ma_cluster_trail_activate_not_zero(self, cfg):
-        """MA cluster trail은 2%/0.3% (r75 최적화: 4%/0.5% → 2%/0.3%)."""
-        assert cfg.ma_cluster_trail_activate == 0.02, (
-            f"MA cluster trail_activate=0.02 (r75). got={cfg.ma_cluster_trail_activate}"
+        """MA cluster trail은 1.0%/0.5% (autoresearch apr03: 1.5%→1.0%)."""
+        assert cfg.ma_cluster_trail_activate == 0.01, (
+            f"MA cluster trail_activate=0.01 (autoresearch apr03). got={cfg.ma_cluster_trail_activate}"
         )
         assert cfg.ma_cluster_trail_distance == 0.005, (
             f"MA cluster trail_distance=0.005 (r106: rule #8). got={cfg.ma_cluster_trail_distance}"

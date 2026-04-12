@@ -36,11 +36,12 @@ if TYPE_CHECKING:
     from quantbox.strategy.protocol import TradingStrategy
 
 import argparse
+import concurrent.futures
 import logging
 import logging.handlers
 import math
+import re
 import time
-import uuid
 from datetime import datetime, timezone
 
 import numpy as np
@@ -66,7 +67,7 @@ from quantbox.notifications.bot import (
 from quantbox.notifications.discord import DiscordNotifier
 from quantbox.strategy.vol_straddle import VolStraddleConfig, VolStraddleStrategy
 from quantbox.core.bot_utils import GIT_COMMIT, setup_logging
-from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, normalize_strategy_type
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL, normalize_strategy_type
 from quantbox.core.types import calc_upnl_pct, to_api_symbol
 from quantbox.core.commands import CommandsMixin
 from quantbox.execution.algo_api import AlgoApiClient
@@ -104,6 +105,8 @@ load_dotenv()
 # ──────────────────────── Logging ──────────────────────────────────────
 
 logger = logging.getLogger("Scalper")
+
+_SYMBOL_RE = re.compile(r"^[A-Z]{2,12}USDT$")
 
 
 # ──────────────── Diagnostic Logger ─────────────────────
@@ -343,8 +346,6 @@ class RubberBandScalper(
         Logs violations and sends a single Discord alert if any found.
         Does NOT close positions automatically — alert and log only.
         """
-        import re
-
         violations: list[str] = []
 
         # 1. Position count
@@ -368,7 +369,7 @@ class RubberBandScalper(
                 violations.append(f"[{pos_key}] notional={notional!r} out of range")
             if signal not in (-1, 0, 1, 2):
                 violations.append(f"[{pos_key}] invalid signal={signal!r}")
-            if not re.match(r"^[A-Z]{2,12}USDT$", api_sym):
+            if not _SYMBOL_RE.match(api_sym):
                 violations.append(f"[{pos_key}] malformed symbol={api_sym!r}")
             if isinstance(raw_symbol, str) and ":" in raw_symbol:
                 violations.append(
@@ -518,8 +519,8 @@ class RubberBandScalper(
                         order_type="LIMIT",
                     )
                     _inflight_key = self._inflight.record_pending(_pending)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{symbol}] InFlight record_pending failed: {e}")
 
             result: ChaseResult = self._chaser.chase_limit_order(
                 symbol=symbol,
@@ -543,8 +544,8 @@ class RubberBandScalper(
             try:
                 if self._inflight is not None and _inflight_key:
                     self._inflight.confirm(_inflight_key)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{symbol}] InFlight confirm failed: {e}")
 
             if result.status == ChaseFillStatus.NO_POSITION:
                 logger.warning(f"[{symbol}] NO POSITION on exchange — reduceOnly rejected. Position already closed.")
@@ -565,8 +566,8 @@ class RubberBandScalper(
                     if self._rate_limiter is not None:
                         self._rate_limiter.record_request(weight=1)
                         self._rate_limiter.record_success()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[{symbol}] RateLimiter record failed: {e}")
                 return {
                     "avgPrice": str(result.avg_price),
                     "executedQty": str(result.filled_quantity),
@@ -586,8 +587,8 @@ class RubberBandScalper(
                         backoff = self._rate_limiter.record_failure(retry)
                         logger.warning(f"[{symbol}] Rate limit hit — backing off {backoff:.1f}s")
                         time.sleep(backoff)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[{symbol}] RateLimiter failure detection failed: {e}")
             logger.error(f"[{symbol}] Order error: {e}")
             return None
         except Exception as e:
@@ -722,9 +723,13 @@ class RubberBandScalper(
         btc_close = self.download_klines("BTCUSDT", 200)
 
         btc_close_4h = None
-        # r92: Download BTC 4h data for MA cluster 4h BTC gate.
-        # Gate prevents MA cluster LONGs during multi-day BTC downtrends.
-        if self.vs_config and self.vs_config.ma_cluster_btc_gate_enabled:
+        # r92: Download BTC 4h data for MA cluster / Donchian 4h BTC gate.
+        # Gate prevents LONGs during multi-day BTC downtrends.
+        _need_btc_4h = self.vs_config and (
+            self.vs_config.ma_cluster_btc_gate_enabled
+            or (self.vs_config.donchian_enabled and self.vs_config.donchian_btc_gate_enabled)
+        )
+        if _need_btc_4h:
             btc_close_4h = self.download_klines("BTCUSDT", 100, interval="4h")
 
         # v11.2: Sync server-side TP/SL orders (check if filled intra-bar)
@@ -744,8 +749,8 @@ class RubberBandScalper(
         for pos_key, pos in self.strategy.active_positions.items():
             api_sym = to_api_symbol(pos_key, pos)
             try:
-                mark_price = _all_marks.get(api_sym, 0.0)
-                if mark_price <= 0:
+                mark_price = _all_marks.get(api_sym)
+                if mark_price is None:
                     # Fallback to per-symbol call if batch missed it
                     mark = self.client.futures_mark_price(symbol=api_sym)
                     mark_price = float(mark["markPrice"])
@@ -787,52 +792,19 @@ class RubberBandScalper(
 
             current_price = close[-1]
 
-            # v12.3.2: Compute FRESH ATR for PBT runner trailing
-            # VolStraddle uses R43 trailing stop (client-side, no ATR needed).
-            current_atr = 0.02
-
             exit_reason = self.strategy.update_position(
                 pos_key,
                 current_price,
-                current_atr_pct=current_atr,
                 current_high=float(high[-1]),
                 current_low=float(low[-1]),
             )
             if exit_reason:
                 logger.info(f"  [{pos_key}] Exit signal: {exit_reason} @ ${current_price:.4f}")
-                # Straddle leg tracking: log which leg exits first
-                if ":" in pos_key:
-                    api_sym, side = pos_key.split(":", 1)
-                    other_side = "SHORT" if side == "LONG" else "LONG"
-                    other_key = f"{api_sym}:{other_side}"
-                    other_pos = self.strategy._positions.get(other_key)
-                    if other_pos:
-                        entry_o = other_pos.get("entry_price", 0)
-                        if entry_o > 0:
-                            if other_pos["signal"] == 1:
-                                o_gain = (current_price - entry_o) / entry_o
-                            else:
-                                o_gain = (entry_o - current_price) / entry_o
-                            logger.info(
-                                f"  [STRADDLE] {side} leg closed ({exit_reason}), "
-                                f"{other_side} still open "
-                                f"uPnL={o_gain * 100:+.2f}% "
-                                f"bars={other_pos.get('bars_held', 0)}"
-                            )
-                    else:
-                        logger.info(f"  [STRADDLE] Last leg ({side}) closed ({exit_reason}) — straddle fully unwound")
                 if exit_reason == "partial_close":
                     self._partial_close_position(pos_key, current_price)
                 elif exit_reason in ("confirm_entry", "pyramid", "cancel_exploration"):
                     self._close_position(pos_key, exit_reason, current_price)
                 else:
-                    # ── Step 2.3: Capture counterpart before close (straddle pair context) ──
-                    counterpart_key_pre_close = None
-                    if ":" in pos_key:
-                        pos_pre = self.strategy._positions.get(pos_key)
-                        if pos_pre and pos_pre.get("is_straddle"):
-                            counterpart_key_pre_close = self._get_pair_counterpart(pos_key)
-
                     # Compute SL/TP trigger fill price for all modes.
                     # Live: _place_order ignores this (exchange fills at real price).
                     # Paper: _place_order uses this as the simulated fill price.
@@ -850,17 +822,6 @@ class RubberBandScalper(
                                 close_price = entry * (1 + tp_pct) if sig == 1 else entry * (1 - tp_pct)
 
                     self._close_position(pos_key, exit_reason, close_price)
-
-                    # ── Step 2.3: Verify counterpart brackets after straddle leg close ──
-                    if counterpart_key_pre_close:
-                        cpart = self.strategy._positions.get(counterpart_key_pre_close)
-                        if cpart:
-                            if not cpart.get("server_sl_order_id"):
-                                logger.warning(
-                                    f"[{counterpart_key_pre_close}] 스트래들 다리 청산 후 SL 없음 — bracket repair 필요"
-                                )
-                                # Trigger next-cycle bracket repair by ensuring the flag is clear
-                                cpart["_repair_fail_count"] = 0
             else:
                 pos = self.strategy._positions.get(pos_key)
                 if pos:
@@ -1051,16 +1012,38 @@ class RubberBandScalper(
         moves_seen: list[tuple[str, float]] = []  # diagnostic: (symbol, abs_move)
         scan_diags: list[dict] = []  # v12.0: per-symbol diagnostics
 
-        for sym in symbols:
-            # Skip symbols we already have positions in
-            if self.strategy.has_position(sym):
-                continue
+        # ── Phase 1: Parallel kline download ──
+        # Download 15m + 4h data for all symbols concurrently.
+        # Network I/O is the bottleneck (~100-300ms per call); parallel
+        # reduces wall time from O(N×latency) to O(latency×ceil(N/workers)).
+        scan_symbols = [s for s in symbols if not self.strategy.has_position(s)]
+        n_bars = 500
+        _need_4h_extended = self.vs_config and (self.vs_config.ma_cluster_enabled or self.vs_config.donchian_enabled)
+        n_bars_4h = 300 if _need_4h_extended else 100
 
-            # v9.0: Download full klines (close + high + low + volume + taker)
-            # VolStraddle needs 500 bars: 15m warmup=200 needs ≥201 bars,
-            # 1h resampling needs ≥4×(warmup_1h+1)=204 bars. 500 covers both.
-            n_bars = 500
-            result = self.download_klines(sym, n_bars, full=True)
+        def _download_sym(sym: str) -> tuple:
+            r15 = self.download_klines(sym, n_bars, full=True)
+            r4h = self.download_klines(sym, n_bars_4h, interval="4h", full=True)
+            return sym, r15, r4h
+
+        kline_data: dict[str, tuple] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(_download_sym, s): s for s in scan_symbols}
+            for fut in concurrent.futures.as_completed(futures):
+                try:
+                    sym, r15, r4h = fut.result()
+                    kline_data[sym] = (r15, r4h)
+                except Exception as e:
+                    sym = futures[fut]
+                    logger.debug(f"[{sym}] Kline download failed: {e}")
+
+        # ── Phase 2: Sequential signal processing ──
+        for sym in scan_symbols:
+            dl = kline_data.get(sym)
+            if dl is None:
+                continue
+            result, result_4h = dl
+
             if result is None:
                 continue
             close, high, low, volume, taker_buy = result
@@ -1070,14 +1053,9 @@ class RubberBandScalper(
             # Wire up volume/taker/high/low data for v9 confluence scoring
             self.strategy.update_market_data(sym, volume, taker_buy, high, low)
 
-            # v7.0: Download 4h data for MTF confirmation
-            # VolStraddle needs full 4h OHLCV for VR + MA Cluster.
-            # MA Cluster uses SMA(200) → need ≥201 bars; 300 for safe warmup.
-            n_bars_4h = 300 if (self.vs_config and self.vs_config.ma_cluster_enabled) else 100
-            result_4h = self.download_klines(sym, n_bars_4h, interval="4h", full=True)
             if result_4h is not None:
-                c4h, h4h, l4h, _, _ = result_4h
-                self.strategy.update_htf_data(sym, c4h, h4h, l4h)
+                c4h, h4h, l4h, v4h, _ = result_4h
+                self.strategy.update_htf_data(sym, c4h, h4h, l4h, volume_4h=v4h)
 
             signal = self.strategy.on_bar(sym, close, btc_close)
 
@@ -1100,6 +1078,25 @@ class RubberBandScalper(
                     )
                     signal = 0
 
+            # Donchian 4h BTC gate — block Donchian LONGs during BTC downtrends
+            if (
+                signal == 1
+                and self.vs_config
+                and self.vs_config.donchian_enabled
+                and self.vs_config.donchian_btc_gate_enabled
+                and getattr(self.strategy, "_last_signal_source", {}).get(sym) == DONCHIAN
+                and btc_close_4h is not None
+                and len(btc_close_4h) >= self.vs_config.donchian_btc_ma_period_4h
+            ):
+                period = self.vs_config.donchian_btc_ma_period_4h
+                btc_4h_ma = float(np.mean(btc_close_4h[-period:]))
+                btc_4h_cur = float(btc_close_4h[-1])
+                if btc_4h_cur < btc_4h_ma:
+                    logger.info(
+                        f"[{sym}] Donchian 4h gate LONG suppressed: BTC 4h ${btc_4h_cur:.1f} < MA{period} ${btc_4h_ma:.1f}"
+                    )
+                    signal = 0
+
             # v12.0: Collect full diagnostic context (read-only, after on_bar)
             if hasattr(self.strategy, "diagnose_bar"):
                 diag = self.strategy.diagnose_bar(sym, close, btc_close)
@@ -1112,18 +1109,8 @@ class RubberBandScalper(
             moves_seen.append((sym, abs_move))
 
             if signal != 0:
-                # Measure move strength for prioritization
-                move = abs(close[-1] / close[-_lb - 1] - 1.0)
-                if signal == 2:
-                    # Straddle: expand into LONG + SHORT candidates.
-                    # is_straddle=True so G6 and DirDiversity filters are skipped
-                    # (straddle is direction-neutral — BTC trend gate does not apply).
-                    # Generate pair ID now so both legs share it at entry time.
-                    pair_id = str(uuid.uuid4())[:8]
-                    candidates.append((sym, 1, move, close, True, pair_id))
-                    candidates.append((sym, -1, move, close, True, pair_id))
-                else:
-                    candidates.append((sym, signal, move, close, False, None))
+                move = abs_move
+                candidates.append((sym, signal, move, close, False, None))
 
         # Prioritize strongest moves
         candidates.sort(key=lambda x: x[2], reverse=True)
@@ -1151,7 +1138,6 @@ class RubberBandScalper(
 
                 # Count symbols near squeeze thresholds for strategy health
                 near_d = 0  # VR < d_threshold + 0.05
-                near_s = 0  # VR < s_threshold + 0.05
                 in_squeeze = 0  # VR < d_threshold
                 global_min_vr = 999.0
                 closest_sym = ""
@@ -1165,11 +1151,9 @@ class RubberBandScalper(
                         in_squeeze += 1
                     elif min_vr < self.vs_config.d_vr_threshold + 0.05:
                         near_d += 1
-                    if min_vr < self.vs_config.s_vr_threshold + 0.05:
-                        near_s += 1
                 logger.info(
                     f"Squeeze monitor: {in_squeeze} in squeeze, "
-                    f"{near_d} near D threshold, {near_s} near S threshold "
+                    f"{near_d} near D threshold "
                     f"(of {len(moves_seen)} symbols) "
                     f"min_vr={global_min_vr:.3f} ({closest_sym})"
                 )
@@ -1215,33 +1199,12 @@ class RubberBandScalper(
         btc_ma = self._risk_guard.compute_btc_gate(btc_close)
 
         entries_made = 0
-        straddle_opened: dict[str, set[int]] = {}  # {sym: {signals opened}} for rollback
-        straddle_blocked: set[str] = set()  # symbols blocked by straddle slot cap
         for sym, signal, move, close, is_straddle, straddle_pair_id in candidates:
             if entries_made >= max_entries:
                 break
 
-            # ── Straddle slot cap — skip both legs if cap reached ──
-            if is_straddle:
-                if sym in straddle_blocked:
-                    continue  # second leg of an already-blocked pair
-                if sym not in straddle_opened:
-                    # First leg: upfront check via RiskGuard
-                    remaining_slots = max_entries - entries_made
-                    active_straddle_pairs = sum(
-                        1 for k, p in self.strategy._positions.items() if ":LONG" in k and p.get("is_straddle", False)
-                    )
-                    straddle_ok, straddle_reason = self._risk_guard.allow_straddle(
-                        active_straddle_pairs, remaining_slots
-                    )
-                    if not straddle_ok:
-                        straddle_blocked.add(sym)
-                        logger.info(f"[{sym}] Straddle BLOCKED: {straddle_reason}")
-                        continue
-
             # ── G6: BTC Trend Gate — block directional LONG when BTC below MA ──
-            # Straddle is direction-neutral (LONG+SHORT) → G6 does not apply.
-            if signal == 1 and not is_straddle and not self._risk_guard.allow_long(btc_close, btc_ma):
+            if signal == 1 and not self._risk_guard.allow_long(btc_close, btc_ma):
                 # btc_close is not None here: allow_long returns False only when both args are set
                 btc_cur_log = float(btc_close[-1]) if btc_close is not None else 0.0
                 logger.info(
@@ -1251,154 +1214,14 @@ class RubberBandScalper(
                 continue
 
             # ═══ v12.3 PARITY: Direction Diversity Filter ═══
-            # Straddle is direction-neutral → diversity filter does not apply.
-            if not is_straddle:
-                dir_ok, dir_reason = self._risk_guard.allow_direction(signal, self.strategy.active_positions)
-                if not dir_ok:
-                    logger.info(f"[{sym}] DirDiversity blocked: {dir_reason}")
-                    continue
-
-            # ── Straddle: pair-aware entry with retry for second leg ──
-            if is_straddle and sym not in straddle_opened:
-                # LONG leg is always first (signal=1 candidate appears before signal=-1)
-                if self._open_position(sym, signal, close, balance, straddle_pair_id=straddle_pair_id):
-                    entries_made += 1
-                    straddle_opened.setdefault(sym, set()).add(signal)
-                # LONG failed — second leg (SHORT) skipped when LONG not in straddle_opened
+            dir_ok, dir_reason = self._risk_guard.allow_direction(signal, self.strategy.active_positions)
+            if not dir_ok:
+                logger.info(f"[{sym}] DirDiversity blocked: {dir_reason}")
                 continue
 
-            if is_straddle and sym in straddle_opened and 1 in straddle_opened[sym]:
-                # Second leg (SHORT): attempt with retry
-                cfg_vs = self.vs_config
-                short_opened = False
-                for retry in range(cfg_vs.entry_retry_count + 1):
-                    if self._open_position(sym, signal, close, balance, straddle_pair_id=straddle_pair_id):
-                        entries_made += 1
-                        straddle_opened[sym].add(signal)
-                        short_opened = True
-                        break
-                    if retry < cfg_vs.entry_retry_count:
-                        logger.warning(
-                            f"[{sym}] SHORT 진입 실패, 재시도 {retry + 1}/{cfg_vs.entry_retry_count} "
-                            f"({cfg_vs.entry_retry_delay_s}s 후)"
-                        )
-                        time.sleep(cfg_vs.entry_retry_delay_s)
-                if not short_opened:
-                    # All retries failed — SHORT never opened, straddle incomplete
-                    # Mark LONG as needing rollback
-                    straddle_opened[sym].discard(-1)  # ensure only LONG is in set
-                continue
-
-            # Directional entry (non-straddle)
+            # Directional entry
             if self._open_position(sym, signal, close, balance):
                 entries_made += 1
-
-        # ── Straddle half-open rollback ──
-        # If only LONG opened and SHORT never succeeded, rollback LONG immediately.
-        for sym, signals_opened in straddle_opened.items():
-            if len(signals_opened) == 1 and 1 in signals_opened:
-                # Only LONG opened — SHORT failed all retries
-                pos_key = f"{sym}:LONG"
-                logger.error(f"[{sym}] Straddle incomplete: LONG 진입됐으나 SHORT 실패. LONG 롤백 — 단방향 노출 방지.")
-                self.discord.send(
-                    content=(
-                        f"⚠️ **[{sym}] Straddle half-open** — LONG 진입됐으나 SHORT 실패. LONG 롤백 중 (재시도 소진)."
-                    )
-                )
-                # Use last close price as rollback price
-                close_arr = next((c for s, sig, _, c, is_s, _ in candidates if s == sym and is_s), None)
-                rollback_price = float(close_arr[-1]) if close_arr is not None else 0.0
-                cfg_vs = self.vs_config
-                pos = self.strategy._positions.get(pos_key)
-
-                # Rollback via _close_position with retry
-                rollback_ok = False
-                for attempt in range(cfg_vs.rollback_retry_count + 1):
-                    if self._close_position(pos_key, "straddle_rollback", rollback_price):
-                        rollback_ok = True
-                        break
-                    if attempt < cfg_vs.rollback_retry_count:
-                        logger.warning(f"[{pos_key}] 롤백 실패, 재시도 {attempt + 1}/{cfg_vs.rollback_retry_count}")
-                        time.sleep(cfg_vs.rollback_retry_delay_s)
-
-                if not rollback_ok:
-                    # All _close_position attempts failed — market order fallback
-                    # CRITICAL (Rule #1): NO leverage parameter — avoids futures_change_leverage in close path
-                    pos = self.strategy._positions.get(pos_key)
-                    if pos is not None:
-                        api_sym = to_api_symbol(pos_key)
-                        close_side = "SELL"  # LONG → close with SELL
-                        qty = self._round_qty(pos["notional"] / pos["entry_price"], api_sym)
-                        fallback_ok = False
-                        if qty > 0 and not self.paper_mode:
-                            try:
-                                order_kwargs: dict = {
-                                    "symbol": api_sym,
-                                    "side": close_side,
-                                    "type": "MARKET",
-                                    "quantity": qty,
-                                    "positionSide": "LONG",
-                                }
-                                self.client.futures_create_order(**order_kwargs)
-                                fallback_ok = True
-                                logger.info(f"[{pos_key}] 롤백 시장가 주문 성공 (fallback)")
-                                # Clean up internal state
-                                self.strategy.close_position(pos_key)
-                                self._save_state()
-                            except Exception as e:
-                                logger.critical(f"[{pos_key}] 롤백 완전 실패: {e}")
-                        elif self.paper_mode:
-                            # Paper mode: just clean up state
-                            self.strategy.close_position(pos_key)
-                            self._save_state()
-                            fallback_ok = True
-
-                        if not fallback_ok:
-                            logger.critical(f"[{pos_key}] 롤백 완전 실패 — 수동 청산 필요!")
-                            pos["rollback_failed"] = True
-                            self._save_state()
-                            self.discord.send(
-                                content=(f"🚨 **[{pos_key}] 롤백 완전 실패** — 시장가 주문도 실패. 수동 청산 필요!")
-                            )
-                    else:
-                        logger.warning(f"[{pos_key}] 롤백 시도 중 포지션이 이미 없음 — 무시")
-
-                entries_made -= 1
-
-                # ── Set rollback cooldown to prevent re-entry loop ──
-                cooldown_cycles = self.vs_config.straddle_rollback_cooldown_cycles
-                self.strategy._straddle_rollback_cooldown[sym] = cooldown_cycles
-                self._save_state()  # Persist immediately — crash before save restarts the loop
-                logger.info(
-                    f"[{sym}] Straddle rollback cooldown set: {cooldown_cycles} cycles (~{cooldown_cycles * 15}min)"
-                )
-
-                # ── Close orphaned counterpart on exchange (reverse ghost prevention) ──
-                # The SHORT leg from a prior straddle may still be open on exchange
-                # without internal state tracking it, causing perpetual rollback loops.
-                if not self.paper_mode:
-                    try:
-                        ex_positions = self.client.futures_position_information(symbol=sym)
-                        for ep in ex_positions:
-                            if ep.get("positionSide") == "SHORT" and abs(float(ep.get("positionAmt", 0))) > 0:
-                                orphan_qty = abs(float(ep["positionAmt"]))
-                                logger.warning(
-                                    f"[{sym}] Orphaned SHORT on exchange "
-                                    f"(qty={orphan_qty}) — closing to prevent rollback loop"
-                                )
-                                self.client.futures_create_order(
-                                    symbol=sym,
-                                    side="BUY",
-                                    type="MARKET",
-                                    quantity=orphan_qty,
-                                    positionSide="SHORT",
-                                )
-                                logger.info(f"[{sym}] Orphaned SHORT closed successfully")
-                                self.discord.send(
-                                    content=(f"🧹 **[{sym}] Orphaned SHORT 청산** — qty={orphan_qty}, 롤백 루프 방지")
-                                )
-                    except Exception as e:
-                        logger.error(f"[{sym}] Failed to close orphaned counterpart: {e}")
 
         if entries_made > 0:
             logger.info(f"Opened {entries_made} new positions (from {len(candidates)} candidates)")
@@ -1629,10 +1452,10 @@ class RubberBandScalper(
         # re-fire a duplicate signal on the same cluster.
         if hasattr(self.strategy, "_ma_cluster_cooldown"):
             state["ma_cluster_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._ma_cluster_cooldown.items()}
-        if hasattr(self.strategy, "_straddle_rollback_cooldown"):
-            active = {s: v for s, v in self.strategy._straddle_rollback_cooldown.items() if v > 0}
-            if active:
-                state["straddle_rollback_cooldown"] = active
+        if hasattr(self.strategy, "_donchian_cooldown"):
+            state["donchian_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._donchian_cooldown.items()}
+        if hasattr(self.strategy, "_donchian_last_4h_epoch"):
+            state["donchian_last_4h_epoch"] = dict(self.strategy._donchian_last_4h_epoch)
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
         try:
             save_scalper_state(state, filepath=filepath)
@@ -1660,8 +1483,8 @@ class RubberBandScalper(
             return False, f"leverage={leverage!r} must be in [1, 125]"
 
         signal = pos.get("signal")
-        if signal not in (-1, 0, 1, 2):
-            return False, f"signal={signal!r} must be in {{-1, 0, 1, 2}}"
+        if signal not in (-1, 0, 1):
+            return False, f"signal={signal!r} must be in {{-1, 0, 1}}"
 
         # T1-5: Warn on corrupt compound-key symbol fields (Incident #4 guard).
         # Sanitization already happens via api_sym extraction in _load_state;
@@ -1784,7 +1607,6 @@ class RubberBandScalper(
                 tf=pos.get("tf"),
                 max_hold=pos.get("max_hold"),
                 strategy_type=normalize_strategy_type(pos.get("strategy_type", VR_DIRECTIONAL)),
-                is_straddle=pos.get("is_straddle", False),
                 server_trail_order_id=pos.get("server_trail_order_id"),
             )
             # Restore bars_held and PBT runner state
@@ -1808,12 +1630,8 @@ class RubberBandScalper(
                 # R43: Trailing stop state for directional trades
                 self.strategy._positions[sym]["trail_active"] = pos.get("trail_active", False)
                 self.strategy._positions[sym]["peak_gain"] = pos.get("peak_gain", 0.0)
-                self.strategy._positions[sym]["is_straddle"] = pos.get("is_straddle", False)
-                # Restore straddle pair linkage (Step 3 — pair coordination)
                 if pos.get("straddle_pair_id"):
                     self.strategy._positions[sym]["straddle_pair_id"] = pos["straddle_pair_id"]
-                if pos.get("straddle_orphan_since_cycle") is not None:
-                    self.strategy._positions[sym]["straddle_orphan_since_cycle"] = pos["straddle_orphan_since_cycle"]
                 # v14.0: Restore per-signal fields (sl/tp/tf/max_hold/strategy_type).
                 # Without this, crash recovery defaults to VR directional params
                 # for ALL positions — breaking MA cluster SL/TP/max_hold/exit routing.
@@ -1835,25 +1653,6 @@ class RubberBandScalper(
                     _backfill_balance = self.get_balance()
                 pos["balance_before"] = _backfill_balance
                 logger.info(f"[{sym}] balance_before backfilled: ${_backfill_balance:,.2f}")
-
-        # Step 3.2: 구 상태 포맷 스트래들 페어 재연결 (straddle_pair_id 없는 경우)
-        for sym, pos in self.strategy._positions.items():
-            if pos.get("is_straddle") and not pos.get("straddle_pair_id"):
-                api_sym = to_api_symbol(sym, pos)
-                my_side = sym.split(":")[-1] if ":" in sym else None
-                opposite_side = "SHORT" if my_side == "LONG" else "LONG" if my_side == "SHORT" else None
-                if opposite_side:
-                    counterpart_key = f"{api_sym}:{opposite_side}"
-                    counterpart = self.strategy._positions.get(counterpart_key)
-                    if counterpart and counterpart.get("is_straddle"):
-                        pair_id = str(uuid.uuid4())[:8]
-                        pos["straddle_pair_id"] = pair_id
-                        counterpart["straddle_pair_id"] = pair_id
-                        logger.info(f"[{sym}] 스트래들 페어 재연결: {counterpart_key} (pair_id={pair_id})")
-                    else:
-                        # 카운터파트 없음 — 즉시 고아 타이머 시작
-                        pos["straddle_orphan_since_cycle"] = 0
-                        logger.warning(f"[{sym}] 스트래들 레그 카운터파트 없음 — 고아로 표시됨")
 
         # Restore DailyBreaker state (survives crash/restart within same UTC day)
         # Skip if fresh session already cleared the breaker (no positions → clean slate)
@@ -1879,13 +1678,22 @@ class RubberBandScalper(
             if cooldown_data:
                 logger.info(f"Restored MA cluster cooldown for {len(cooldown_data)} symbols")
 
-        # v15.0: Restore straddle rollback cooldown
-        if hasattr(self.strategy, "_straddle_rollback_cooldown"):
-            rb_cooldown = state.get("straddle_rollback_cooldown", {})
-            for sym, val in rb_cooldown.items():
-                self.strategy._straddle_rollback_cooldown[sym] = val
-            if rb_cooldown:
-                logger.info(f"Restored straddle rollback cooldown for {len(rb_cooldown)} symbols: {rb_cooldown}")
+        # Restore Donchian cooldown state
+        if hasattr(self.strategy, "_donchian_cooldown"):
+            cooldown_data = state.get("donchian_cooldown", {})
+            for sym, val in cooldown_data.items():
+                arr_dc: np.ndarray = np.zeros(1, dtype=np.int64)
+                arr_dc[0] = val
+                self.strategy._donchian_cooldown[sym] = arr_dc
+            if cooldown_data:
+                logger.info(f"Restored Donchian cooldown for {len(cooldown_data)} symbols")
+
+        # Restore Donchian 4h epoch gate to prevent duplicate signal on restart
+        if hasattr(self.strategy, "_donchian_last_4h_epoch"):
+            last_4h_data = state.get("donchian_last_4h_epoch", {})
+            self.strategy._donchian_last_4h_epoch.update(last_4h_data)
+            if last_4h_data:
+                logger.info(f"Restored Donchian 4h epoch gate for {len(last_4h_data)} symbols")
 
         # Startup exchange cross-check: warn immediately if exchange has
         # positions not present in restored state (reverse ghost candidates).
@@ -1947,8 +1755,7 @@ class RubberBandScalper(
         """Ensure Binance account position mode matches config.
 
         Hedge mode (dualSidePosition=true) is REQUIRED for VolStraddle
-        S_d8 straddle to open simultaneous LONG+SHORT on the same symbol.
-        Without this, all positionSide=LONG/SHORT orders fail with -4059.
+        (positionSide=LONG/SHORT orders). Without this, all orders fail with -4059.
 
         One-Way mode is required for RubberBand (uses reduceOnly).
         """

@@ -44,7 +44,6 @@ sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (
     COST_DIRECTIONAL,
-    COST_STRADDLE,
     G_3TF,
     bootstrap_pf,
     build_resampled,
@@ -52,15 +51,29 @@ from quantbox.backtest.trade_sim import (
     portfolio_sim,
     precompute,
     precompute_all_vr,
+    sim_directional_trailing,
 )
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
     compute_momentum,
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
 )
-from quantbox.backtest.trade_sim import sim_directional_trailing, sim_straddle_trailing
+
+# ── Straddle stubs (S_d8 removed from production) ────────────────────────────
+COST_STRADDLE = 0.0016
+
+
+def gen_vr_dur_signal(vr, threshold, min_dur, warmup):  # type: ignore[override]
+    """Stub: S_d8 straddle signal removed from production."""
+    import numpy as np
+    return np.zeros(len(vr), dtype=np.int8)
+
+
+def sim_straddle_trailing(*args, **kwargs):  # type: ignore[override]
+    """Stub: straddle simulator removed from production."""
+    import numpy as np
+    return np.array([]), np.array([]), np.array([])
 from research.active.r41_r45.r44c_ma_confluence import precompute_mas
 from research.active.r41_r45.r45_param_sweep import collect_enhanced_trades
 
@@ -71,10 +84,10 @@ D_SL             = cfg.d_sl                        # 0.01
 D_TP             = cfg.d_tp                        # 0.12
 D_TRAIL_ACTIVATE = cfg.d_trail_activate             # 0.005
 D_TRAIL_DISTANCE = cfg.d_trail_distance             # 0.002
-S_SL             = cfg.s_sl
-S_TP             = cfg.s_tp
-S_TRAIL_ACTIVATE = cfg.s_trail_activate
-S_TRAIL_DISTANCE = cfg.s_trail_distance
+S_SL             = 0.015   # s_sl removed from production config
+S_TP             = 0.05    # s_tp removed from production config
+S_TRAIL_ACTIVATE = 0.015   # s_trail_activate removed from production config
+S_TRAIL_DISTANCE = 0.002   # s_trail_distance removed from production config
 MAX_CONC         = cfg.max_concurrent               # 10
 VR_SHORT         = cfg.vr_short                     # 8
 VR_LONG          = cfg.vr_long                      # 56
@@ -83,7 +96,7 @@ print("[PHASE 0] Config 검증")
 print(f"  D_TRAIL: activate={D_TRAIL_ACTIVATE:.3f} / distance={D_TRAIL_DISTANCE:.3f}")
 print(f"  S_TRAIL: activate={S_TRAIL_ACTIVATE:.3f} / distance={S_TRAIL_DISTANCE:.3f}")
 print(f"  D_TP={D_TP:.2f}, D_SL={D_SL:.3f}, L/N={cfg.base_leverage / MAX_CONC:.1f}")
-assert D_TRAIL_ACTIVATE == 0.040, f"D trail activate mismatch: {D_TRAIL_ACTIVATE}"
+assert D_TRAIL_ACTIVATE == 0.015, f"D trail activate mismatch: {D_TRAIL_ACTIVATE}"
 assert D_TRAIL_DISTANCE == 0.005, f"D trail distance mismatch: {D_TRAIL_DISTANCE}"  # r106: 0.002→0.005 (rule #8)
 print("  ✅ All params match production config.py\n")
 
@@ -291,11 +304,11 @@ def collect_vr_with_subtf(
             if use_stackup:
                 sig_s = gen_vr_dur_signal_with_subtf_vr(
                     vr_upper, vr_lower,
-                    cfg.s_vr_threshold, lower_threshold,
-                    cfg.s_squeeze_dur, warmup, ratio,
+                    0.55, lower_threshold,
+                    4, warmup, ratio,
                 )
             else:
-                sig_s = gen_vr_dur_signal(vr_upper, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup)
+                sig_s = gen_vr_dur_signal(vr_upper, 0.55, 4, warmup)
 
             p_s, e_s, x_s = sim_straddle_trailing(
                 c, h, lo, sig_s, S_SL, S_TP, mh_s, COST_STRADDLE,
@@ -504,7 +517,7 @@ def collect_vr_with_pullback(
                 all_trades.append((sym, int(e_d[k]) * ratio, int(x_d[k]) * ratio + ratio - 1, float(p_d[k])))
 
             # S_d8 straddle — no pullback (straddle enters long+short, pullback less meaningful)
-            sig_s = gen_vr_dur_signal(vr, cfg.s_vr_threshold, cfg.s_squeeze_dur, warmup)
+            sig_s = gen_vr_dur_signal(vr, 0.55, 4, warmup)
             p_s, e_s, x_s = sim_straddle_trailing(
                 c, h, lo, sig_s, S_SL, S_TP, mh_s, COST_STRADDLE,
                 S_TRAIL_ACTIVATE, S_TRAIL_DISTANCE,

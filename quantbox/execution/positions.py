@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
-from quantbox.core.types import to_api_symbol
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
+from quantbox.core.types import build_trade_record, to_api_symbol
 from quantbox.core.terminal_ui import format_entry, format_exit
 from quantbox.utils.diagnostics import _diag_logger
 
@@ -30,17 +30,7 @@ class PositionMixin:
     """Mixin: Position lifecycle (open, partial close, close, pyramid)."""
 
     def _get_pair_counterpart(self: "ScalperProtocol", pos_key: str) -> str | None:
-        """Find the counterpart position key for a straddle pair.
-
-        Scans _positions for the position sharing the same straddle_pair_id.
-        Returns None if no counterpart found or position is not a straddle.
-        """
-        pair_id = self.strategy._positions.get(pos_key, {}).get("straddle_pair_id")
-        if not pair_id:
-            return None
-        for key, pos in self.strategy._positions.items():
-            if key != pos_key and pos.get("straddle_pair_id") == pair_id:
-                return key
+        """Legacy: Find counterpart position key. Always returns None."""
         return None
 
     # ── _open_position sub-methods ──────────────────────────────────────
@@ -107,39 +97,28 @@ class PositionMixin:
                     f"→ {eq_scale:.2f}x → slot=${per_slot_capital:.2f}"
                 )
 
-        leverage = vs.base_leverage
-        notional = per_slot_capital * leverage
-
-        # Get signal metadata (SL/TP/TF from on_bar)
+        # Get signal metadata FIRST (need SL for risk-based leverage)
         sig_meta = self.strategy.get_last_signal_meta(symbol)
         sl_pct = sig_meta.get("sl", vs.d_sl)
         tp_pct = sig_meta.get("tp", vs.d_tp)
         tf_label = sig_meta.get("tf", "15m")
         max_hold = sig_meta.get("max_hold", vs.get_max_hold(tf_label))
-        is_straddle = sig_meta.get("straddle", False)
         strategy_type = sig_meta.get("strategy_type", VR_DIRECTIONAL)
 
-        # ── R44d V17: MA Cluster uses different leverage ──
-        # Risk parity: 12x × 2% SL ≈ 25x × 1% SL
-        if "leverage_override" in sig_meta:
-            raw_lev = sig_meta["leverage_override"]
-            leverage = max(1.0, min(125.0, float(raw_lev)))
-            if leverage != raw_lev:
-                logger.warning(f"[{symbol}] leverage_override clamped: {raw_lev} → {leverage:.0f} (must be [1, 125])")
-            notional = per_slot_capital * leverage
-            logger.info(f"[{symbol}] {strategy_type}: leverage={leverage:.0f}x (override, SL={sl_pct * 100:.0f}%)")
-
-        # ── Straddle half-size: each leg = 0.5× notional ──
-        # Applied AFTER leverage_override to prevent silent overwrite.
-        # A straddle pair (LONG+SHORT) is one trade idea using 2 slots.
-        # Without this, pair total = 2× directional exposure → double loss on dual SL.
-        if is_straddle:
-            notional *= 0.5
-            logger.info(f"[{symbol}] Straddle half-size: notional=${notional:.2f} (per leg)")
+        # ── Risk-based leverage: 1 SL hit = risk_per_trade % of balance ──
+        # per_slot_capital × leverage × SL = balance × risk_per_trade
+        # ∴ leverage = risk_per_trade × max_concurrent / SL
+        leverage = vs.risk_per_trade * vs.max_concurrent / sl_pct
+        leverage = max(1.0, min(vs.max_leverage, leverage))
+        notional = per_slot_capital * leverage
+        logger.info(
+            f"[{symbol}] {strategy_type}: risk-based leverage={leverage:.1f}x "
+            f"(risk={vs.risk_per_trade * 100:.0f}% × N={vs.max_concurrent} / SL={sl_pct * 100:.1f}%)"
+        )
 
         # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
         conviction_score = sig_meta.get("conviction_score", 0)
-        if vs.cw_enabled and vs.cw_multipliers and "vr" in strategy_type:
+        if vs.cw_enabled and vs.cw_multipliers and strategy_type == VR_DIRECTIONAL:
             idx = min(conviction_score, len(vs.cw_multipliers) - 1)
             cw_mult = vs.cw_multipliers[idx]
             notional *= cw_mult
@@ -227,7 +206,6 @@ class PositionMixin:
             "tp_pct": tp_pct,
             "tf_label": tf_label,
             "max_hold": max_hold,
-            "is_straddle": is_straddle,
             "strategy_type": strategy_type,
             "conviction_score": conviction_score,
             "per_slot_capital": per_slot_capital,
@@ -446,7 +424,6 @@ class PositionMixin:
         sizing: dict,
         brackets: dict,
         balance: float,
-        straddle_pair_id: str | None = None,
     ) -> bool:
         """Record position in strategy state and send notifications.
 
@@ -461,7 +438,6 @@ class PositionMixin:
         tp_pct = sizing["tp_pct"]
         tf_label = sizing["tf_label"]
         max_hold = sizing["max_hold"]
-        is_straddle = sizing["is_straddle"]
         strategy_type = sizing["strategy_type"]
         conviction_score = sizing["conviction_score"]
         move_size = sizing["move_size"]
@@ -484,8 +460,6 @@ class PositionMixin:
             tf=tf_label,
             max_hold=max_hold,
             position_side=pos_side,
-            is_straddle=is_straddle,
-            straddle_pair_id=straddle_pair_id,
             strategy_type=strategy_type,
             balance_before=balance_before,
         )
@@ -533,7 +507,7 @@ class PositionMixin:
                 "fields": [
                     {
                         "name": "전략",
-                        "value": f"VolStraddle {'S' if strategy_type == 'vr_straddle' else ('MA' if strategy_type == 'ma_cluster' else 'D')} ({tf_label})",
+                        "value": f"VolStraddle {'MA' if strategy_type == 'ma_cluster' else ('DC' if strategy_type == 'donchian' else 'D')} ({tf_label})",
                         "inline": True,
                     },
                     {"name": "진입가", "value": f"${fill_price:.4f}", "inline": True},
@@ -545,15 +519,19 @@ class PositionMixin:
                         "name": "Exit",
                         "value": (
                             "SL/TP"
-                            if (is_straddle or strategy_type == MA_CLUSTER)
-                            else f"Trail({vs.d_trail_activate * 100:.0f}%/{vs.d_trail_distance * 100:.1f}%)"
+                            if strategy_type == MA_CLUSTER
+                            else (
+                                f"Trail({vs.donchian_trail_activate * 100:.0f}%/{vs.donchian_trail_distance * 100:.1f}%)"
+                                if strategy_type == DONCHIAN
+                                else f"Trail({vs.d_trail_activate * 100:.0f}%/{vs.d_trail_distance * 100:.1f}%)"
+                            )
                         ),
                         "inline": True,
                     },
                     {"name": "SL 방식", "value": _sl_tag, "inline": True},
                     {
-                        "name": "확신도" if strategy_type.startswith("vr_") else "전략타입",
-                        "value": (f"{conviction_score}/4" if strategy_type.startswith("vr_") else strategy_type),
+                        "name": "확신도" if strategy_type == VR_DIRECTIONAL else "전략타입",
+                        "value": (f"{conviction_score}/4" if strategy_type == VR_DIRECTIONAL else strategy_type),
                         "inline": True,
                     },
                     {"name": "슬롯", "value": f"{n_active}/{self.vs_config.max_concurrent}", "inline": True},
@@ -573,7 +551,6 @@ class PositionMixin:
         signal: "SignalValue",
         close_prices: np.ndarray,
         balance: float,
-        straddle_pair_id: str | None = None,
     ) -> bool:
         """Open a new position.
 
@@ -582,8 +559,6 @@ class PositionMixin:
             signal: +1 (long) or -1 (short).
             close_prices: Recent close prices.
             balance: Current balance.
-            straddle_pair_id: UUID linking LONG+SHORT legs of same straddle pair.
-                Both legs receive the same ID. None for directional positions.
 
         Returns:
             True if position was opened.
@@ -598,7 +573,7 @@ class PositionMixin:
 
         brackets = self._setup_brackets(symbol, signal, fill, sizing)
 
-        return self._register_position(symbol, signal, fill, sizing, brackets, balance, straddle_pair_id)
+        return self._register_position(symbol, signal, fill, sizing, brackets, balance)
 
     def _partial_close_position(
         self: "ScalperProtocol",
@@ -743,57 +718,36 @@ class PositionMixin:
                 except Exception:
                     pass
 
-                if closed_pos["signal"] == 1:
-                    pnl_pct = (fill_price - closed_pos["entry_price"]) / closed_pos["entry_price"]
-                else:
-                    pnl_pct = (closed_pos["entry_price"] - fill_price) / closed_pos["entry_price"]
-                pnl_usd = pnl_pct * closed_pos["notional"]
-                cost = closed_pos["notional"] * self.config.round_trip_cost
-                net_pnl = pnl_usd - cost
-                trade = {
-                    "symbol": api_symbol,
-                    "signal": closed_pos["signal"],
-                    "entry_price": closed_pos["entry_price"],
-                    "exit_price": fill_price,
-                    "pnl_pct": pnl_pct * 100,
-                    "pnl_usd": net_pnl,
-                    "notional": closed_pos["notional"],
-                    "bars_held": closed_pos["bars_held"],
-                    "reason": "server_fill_race",
-                    "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", VR_DIRECTIONAL),
-                    "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
-                    "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
-                    "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": closed_pos.get("balance_before") or self._get_cycle_balance(),
-                    "balance_after": self._get_cycle_balance(),
-                    "straddle_pair_id": closed_pos.get("straddle_pair_id"),
-                }
+                trade, net_pnl = build_trade_record(
+                    closed_pos,
+                    fill_price,
+                    closed_pos["notional"],
+                    "server_fill_race",
+                    self.config.round_trip_cost,
+                    closed_pos.get("balance_before") or self._get_cycle_balance(),
+                    self._get_cycle_balance(),
+                    symbol=api_symbol,
+                )
                 self._trade_history.append(trade)
                 self._journal.record(trade)
                 self._save_state()
-                logger.info(f"[{symbol}] NO_POSITION race recorded: PnL={pnl_pct * 100:+.2f}% (${net_pnl:+.2f})")
+                logger.info(f"[{symbol}] NO_POSITION race recorded: PnL={trade['pnl_pct']:+.2f}% (${net_pnl:+.2f})")
             return False
 
         fill_price = float(result["avgPrice"])
 
-        # PnL on the partial close
-        if pos["signal"] == 1:
-            pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            pnl_pct = (pos["entry_price"] - fill_price) / pos["entry_price"]
-
-        # v12.3.2: Use entry-price notional for PnL (not exit-price).
-        # exit-price notional (close_qty * fill_price) overstates winners
-        # and understates losers by fill_price/entry_price ratio.
+        # PnL on the partial close (entry-price notional, not exit-price)
         partial_notional = close_qty * pos["entry_price"]
-        pnl_usd = pnl_pct * partial_notional
-        # v12.3.2: Charge round_trip_cost (entry+exit) for backtest parity.
-        # Backtest _backtest_core_partial charges delta-based cost at each
-        # transition: 1.0*cps at entry + 0.5*cps at partial = 1.5*cps.
-        # For the partial portion, round_trip covers its share of entry+exit.
-        cost = partial_notional * self.config.round_trip_cost
-        net_pnl = pnl_usd - cost
+        _trade, net_pnl = build_trade_record(
+            pos,
+            fill_price,
+            partial_notional,
+            "partial_close",
+            self.config.round_trip_cost,
+            pos.get("balance_before") or self._get_cycle_balance(),
+            self._get_cycle_balance(),
+            symbol=symbol,
+        )
 
         # v12.3.2: Update remaining notional using ENTRY price, not fill price.
         # Using fill_price causes notional drift: remaining_qty computed as
@@ -840,34 +794,14 @@ class PositionMixin:
 
         # Paper mode — charge EXIT-side cost only.
         # Entry cost for the full position was already charged at _open_position.
-        # Using round_trip_cost here would double-count the entry fee for
-        # the partial portion (overcharge by 0.5 × cost_per_side per trade).
         if self.paper_mode:
+            raw_pnl = (_trade["pnl_pct"] / 100) * partial_notional
             paper_exit_cost = partial_notional * self.config.cost_per_side
-            self._paper_balance += pnl_usd - paper_exit_cost
+            self._paper_balance += raw_pnl - paper_exit_cost
 
         # Trade record (partial)
-        trade = {
-            "symbol": symbol,
-            "signal": pos["signal"],
-            "entry_price": pos["entry_price"],
-            "exit_price": fill_price,
-            "pnl_pct": pnl_pct * 100,
-            "pnl_usd": net_pnl,
-            "notional": partial_notional,
-            "bars_held": pos["bars_held"],
-            "reason": "partial_close",
-            "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-            "mfe_pct": pos.get("best_pnl", 0) * 100,
-            "mae_pct": pos.get("worst_pnl", 0) * 100,
-            "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
-            "balance_after": self._get_cycle_balance(),
-            "straddle_pair_id": pos.get("straddle_pair_id"),
-        }
-        self._trade_history.append(trade)
-        self._journal.record(trade)
+        self._trade_history.append(_trade)
+        self._journal.record(_trade)
 
         # v12.4.5: Save state immediately after partial close.
         # Without this, a crash before end-of-cycle _save_state() leaves
@@ -880,7 +814,7 @@ class PositionMixin:
         logger.info(
             f"[{symbol}] PARTIAL CLOSE ({fraction * 100:.0f}%): "
             f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
-            f"PnL={pnl_pct * 100:+.2f}% (${net_pnl:+.2f}) "
+            f"PnL={_trade['pnl_pct']:+.2f}% (${net_pnl:+.2f}) "
             f"→ remaining ${pos['notional']:.2f}, BE stop active"
         )
         _dir = "LONG ↑" if pos["signal"] == 1 else "SHORT ↓"
@@ -896,7 +830,7 @@ class PositionMixin:
                     {"name": "진입가", "value": f"${pos['entry_price']:.4f}", "inline": True},
                     {"name": "체결가", "value": f"${fill_price:.4f}", "inline": True},
                     {"name": "보유", "value": f"{pos['bars_held']}바", "inline": True},
-                    {"name": "수익률", "value": f"{pnl_pct * 100:+.2f}%", "inline": True},
+                    {"name": "수익률", "value": f"{_trade['pnl_pct']:+.2f}%", "inline": True},
                     {"name": "확보금액", "value": f"${net_pnl:+.2f}", "inline": True},
                     {"name": "남은포지션", "value": f"${pos['notional']:,.2f}", "inline": True},
                     {"name": "TP 방식", "value": _r_tp, "inline": True},
@@ -1005,37 +939,17 @@ class PositionMixin:
                         f"Using current_price=${current_price:.4f} as fallback."
                     )
 
-                # PnL calculation
-                if closed_pos["signal"] == 1:
-                    pnl_pct = (fill_price - closed_pos["entry_price"]) / closed_pos["entry_price"]
-                else:
-                    pnl_pct = (closed_pos["entry_price"] - fill_price) / closed_pos["entry_price"]
-
-                pnl_usd = pnl_pct * closed_pos["notional"]
-                # v12.3.2: Always charge round_trip_cost for parity.
-                cost = closed_pos["notional"] * self.config.round_trip_cost
-                net_pnl = pnl_usd - cost
-
-                # Trade record
-                trade = {
-                    "symbol": api_symbol,
-                    "signal": closed_pos["signal"],
-                    "entry_price": closed_pos["entry_price"],
-                    "exit_price": fill_price,
-                    "pnl_pct": pnl_pct * 100,
-                    "pnl_usd": net_pnl,
-                    "notional": closed_pos["notional"],
-                    "bars_held": closed_pos["bars_held"],
-                    "reason": f"{reason}_no_position",
-                    "time": datetime.now(timezone.utc).isoformat(),
-                    "strategy_type": closed_pos.get("strategy_type", VR_DIRECTIONAL),
-                    "mfe_pct": closed_pos.get("best_pnl", 0) * 100,
-                    "mae_pct": closed_pos.get("worst_pnl", 0) * 100,
-                    "entry_time": closed_pos.get("opened_at"),
-                    "balance_before": closed_pos.get("balance_before") or self._get_cycle_balance(),
-                    "balance_after": self._get_cycle_balance(),
-                    "straddle_pair_id": closed_pos.get("straddle_pair_id"),
-                }
+                trade, net_pnl = build_trade_record(
+                    closed_pos,
+                    fill_price,
+                    closed_pos["notional"],
+                    f"{reason}_no_position",
+                    self.config.round_trip_cost,
+                    closed_pos.get("balance_before") or self._get_cycle_balance(),
+                    self._get_cycle_balance(),
+                    symbol=api_symbol,
+                )
+                pnl_pct = trade["pnl_pct"] / 100  # fraction for logging
                 self._trade_history.append(trade)
                 self._journal.record(trade)
 
@@ -1080,7 +994,7 @@ class PositionMixin:
                 n_remaining = self.strategy.n_active
 
                 _strat = closed_pos.get("strategy_type", VR_DIRECTIONAL)
-                _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA"}.get(_strat, _strat)
+                _strat_label = {VR_DIRECTIONAL: "VR-D", MA_CLUSTER: "MA", DONCHIAN: "DC"}.get(_strat, _strat)
                 self.discord.send(
                     embed={
                         "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr} (서버체결)",
@@ -1221,45 +1135,24 @@ class PositionMixin:
 
         fill_price = float(result["avgPrice"])
 
-        # PnL calculation
-        if pos["signal"] == 1:
-            pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            pnl_pct = (pos["entry_price"] - fill_price) / pos["entry_price"]
-
-        pnl_usd = pnl_pct * pos["notional"]
-        # v12.3.2: Always charge round_trip_cost for backtest parity.
-        # Each portion (partial and runner) accounts for its share
-        # of entry + exit costs. See _backtest_core_partial delta model.
-        cost = pos["notional"] * self.config.round_trip_cost
-        net_pnl = pnl_usd - cost
+        trade, net_pnl = build_trade_record(
+            pos,
+            fill_price,
+            pos["notional"],
+            reason,
+            self.config.round_trip_cost,
+            pos.get("balance_before") or self._get_cycle_balance(),
+            self._get_cycle_balance(),
+            symbol=api_symbol,
+        )
+        pnl_pct = trade["pnl_pct"] / 100  # fraction for logging
 
         # Paper balance
         if self.paper_mode:
-            self._paper_balance += pnl_usd
+            raw_pnl = pnl_pct * pos["notional"]
             close_cost = quantity * fill_price * self.config.cost_per_side
-            self._paper_balance -= close_cost
+            self._paper_balance += raw_pnl - close_cost
 
-        # Trade record
-        trade = {
-            "symbol": api_symbol,
-            "signal": pos["signal"],
-            "entry_price": pos["entry_price"],
-            "exit_price": fill_price,
-            "pnl_pct": pnl_pct * 100,
-            "pnl_usd": net_pnl,
-            "notional": pos["notional"],
-            "bars_held": pos["bars_held"],
-            "reason": reason,
-            "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-            "mfe_pct": pos.get("best_pnl", 0) * 100,
-            "mae_pct": pos.get("worst_pnl", 0) * 100,
-            "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
-            "balance_after": self._get_cycle_balance(),
-            "straddle_pair_id": pos.get("straddle_pair_id"),
-        }
         self._trade_history.append(trade)
         self._journal.record(trade)
 
@@ -1305,7 +1198,7 @@ class PositionMixin:
         _pos_summary = "\n".join(_pos_lines) if _pos_lines else "없음"
 
         _strat = pos.get("strategy_type", VR_DIRECTIONAL)
-        _strat_label = {VR_DIRECTIONAL: "VR-D", VR_STRADDLE: "VR-S", MA_CLUSTER: "MA"}.get(_strat, _strat)
+        _strat_label = {VR_DIRECTIONAL: "VR-D", MA_CLUSTER: "MA", DONCHIAN: "DC"}.get(_strat, _strat)
         self.discord.send(
             embed={
                 "title": f"{'✅' if net_pnl > 0 else '❌'} {symbol} {_dir_kr} | {_reason_kr}",

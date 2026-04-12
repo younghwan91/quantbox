@@ -708,4 +708,4 @@ class TestMTFEnhanced:
 
         # Price 98.0 → loss of 2% < stop of 3% → should NOT stop
         reason = strat.update_position("TESTUSDT", 98.0)
-        assert reason is None, f"Should not stop at 98.0 with stop_mult=1.0"
+        assert reason is None, "Should not stop at 98.0 with stop_mult=1.0"

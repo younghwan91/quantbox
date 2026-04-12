@@ -42,7 +42,6 @@ sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (
     COST_DIRECTIONAL,
-    COST_STRADDLE,
     G_3TF,
     WARMUP_15m,
     bootstrap_pf,
@@ -51,14 +50,28 @@ from quantbox.backtest.trade_sim import (
     portfolio_sim,
     precompute,
     precompute_all_vr,
+    sim_directional_trailing,
 )
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
 )
-from quantbox.backtest.trade_sim import sim_directional_trailing, sim_straddle_trailing
+
+# ── Straddle stubs (S_d8 removed from production) ────────────────────────────
+COST_STRADDLE = 0.0016
+
+
+def gen_vr_dur_signal(vr, threshold, min_dur, warmup):  # type: ignore[override]
+    """Stub: S_d8 straddle signal removed from production."""
+    import numpy as np
+    return np.zeros(len(vr), dtype=np.int8)
+
+
+def sim_straddle_trailing(*args, **kwargs):  # type: ignore[override]
+    """Stub: straddle simulator removed from production."""
+    import numpy as np
+    return np.array([]), np.array([]), np.array([])
 from research.active.r41_r45.r44c_ma_confluence import precompute_mas
 from research.active.r41_r45.r45_param_sweep import collect_enhanced_trades
 
@@ -68,16 +81,16 @@ cfg = VolStraddleConfig()
 VR_SHORT = cfg.vr_short  # 8
 VR_LONG = cfg.vr_long  # 56
 D_VR = cfg.d_vr_threshold  # 0.50
-S_VR = cfg.s_vr_threshold  # 0.55
-S_DUR = cfg.s_squeeze_dur  # 4
+S_VR = 0.55    # s_vr_threshold removed from production config
+S_DUR = 4      # s_squeeze_dur removed from production config
 D_SL = cfg.d_sl  # 0.01
 D_TP = cfg.d_tp  # 0.12
 D_TRAIL_ACT = cfg.d_trail_activate  # 0.005
 D_TRAIL_DIST = cfg.d_trail_distance  # 0.002
-S_SL = cfg.s_sl
-S_TP = cfg.s_tp
-S_TRAIL_ACT = cfg.s_trail_activate
-S_TRAIL_DIST = cfg.s_trail_distance
+S_SL = 0.015   # s_sl removed from production config
+S_TP = 0.05    # s_tp removed from production config
+S_TRAIL_ACT = 0.015  # s_trail_activate removed from production config
+S_TRAIL_DIST = 0.002  # s_trail_distance removed from production config
 MAX_CONC = cfg.max_concurrent  # 10
 VR_LN = cfg.base_leverage / MAX_CONC  # 3.0
 
@@ -103,7 +116,7 @@ BL_N_EXPECTED = 6207
 BL_PF_EXPECTED = 1.563
 
 # Config guards
-assert D_TRAIL_ACT == 0.040, f"d_trail_activate mismatch: {D_TRAIL_ACT}"
+assert D_TRAIL_ACT == 0.015, f"d_trail_activate mismatch: {D_TRAIL_ACT}"
 assert D_TRAIL_DIST == 0.005, f"d_trail_distance mismatch: {D_TRAIL_DIST}"  # r106: 0.002→0.005 (rule #8)
 
 print("\n[Config] 검증")
@@ -310,7 +323,7 @@ def collect_d_trailing(
     for sym in sorted(data_15m.keys()):
         offset = int(data_15m[sym].get("_offset", 0))
         sym_trades: list = []
-        for _lbl, ratio, warmup, mh_d, _mh_s in tfs:
+        for _lbl, ratio, warmup, mh_d in tfs:
             d_tf = tf_data_map.get(ratio)
             if d_tf is None or sym not in d_tf:
                 continue
@@ -366,7 +379,7 @@ def collect_s_trailing(
     for sym in sorted(data_15m.keys()):
         offset = int(data_15m[sym].get("_offset", 0))
         sym_trades: list = []
-        for _lbl, ratio, warmup, _mh_d, mh_s in tfs:
+        for _lbl, ratio, warmup, mh_s in tfs:
             d_tf = tf_data_map.get(ratio)
             if d_tf is None or sym not in d_tf:
                 continue

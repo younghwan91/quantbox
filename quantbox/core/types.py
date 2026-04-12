@@ -16,6 +16,7 @@ Usage example::
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Literal, NewType
 
 from typing import TypedDict
@@ -47,20 +48,31 @@ Side = Literal["BUY", "SELL"]
 PositionSide = Literal["LONG", "SHORT", "BOTH"]
 """Hedge-mode position side (``BOTH`` = one-way mode)."""
 
-SignalValue = Literal[-1, 0, 1, 2]
+SignalValue = Literal[-1, 0, 1]
 """Strategy signal value.
 
 -1 = short entry
  0 = no signal
 +1 = long entry
-+2 = straddle (vol_straddle strategy: open both LONG and SHORT)
 """
 
-StraddlePairId = NewType("StraddlePairId", str)
-"""UUID string linking the LONG and SHORT legs of a straddle pair.
 
-Both legs of the same straddle share the same ``StraddlePairId``.
-``None`` for directional (non-straddle) positions.
+# ── Order status constants ────────────────────────────────────────────────────
+
+ALGO_ORDER_DEAD_STATUSES: frozenset[str] = frozenset(
+    {
+        "CANCELED",  # Binance US spelling (Rule #7)
+        "CANCELLED",  # Binance UK spelling variant
+        "USER_CANCELLED",
+        "EXPIRED",
+        "ERROR",
+        "REJECTED",
+    }
+)
+"""Algo order statuses that indicate the order is no longer active.
+
+Binance uses American spelling (CANCELED) but some endpoints return
+British spelling (CANCELLED). Always check both via this set (Rule #7).
 """
 
 
@@ -99,6 +111,53 @@ def calc_upnl_pct(entry: float, current: float, signal: int) -> float:
     if entry <= 0:
         return 0.0
     return (current / entry - 1.0) * signal
+
+
+def build_trade_record(
+    pos: dict,
+    fill_price: float,
+    notional: float,
+    reason: str,
+    round_trip_cost: float,
+    balance_before: float,
+    balance_after: float,
+    *,
+    symbol: str = "",
+    pair_id: str | None = None,
+) -> tuple[dict, float]:
+    """Build a normalized trade record dict.
+
+    Returns (trade_dict, net_pnl_usd). Uses calc_upnl_pct for PnL.
+    Caller provides symbol (api_symbol or compound key) and notional
+    (full for normal close, partial for partial close).
+    """
+    pnl_frac = calc_upnl_pct(pos["entry_price"], fill_price, pos["signal"])
+    pnl_usd = pnl_frac * notional
+    cost = notional * round_trip_cost
+    net_pnl = pnl_usd - cost
+
+    from quantbox.core.strategy_names import VR_DIRECTIONAL  # avoid circular
+
+    trade = {
+        "symbol": symbol,
+        "signal": pos["signal"],
+        "entry_price": pos["entry_price"],
+        "exit_price": fill_price,
+        "pnl_pct": pnl_frac * 100,
+        "pnl_usd": net_pnl,
+        "notional": notional,
+        "bars_held": pos["bars_held"],
+        "reason": reason,
+        "time": datetime.now(timezone.utc).isoformat(),
+        "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
+        "mfe_pct": pos.get("best_pnl", 0.0) * 100,
+        "mae_pct": pos.get("worst_pnl", 0.0) * 100,
+        "entry_time": pos.get("opened_at"),
+        "balance_before": balance_before,
+        "balance_after": balance_after,
+        "straddle_pair_id": pair_id or pos.get("straddle_pair_id"),
+    }
+    return trade, net_pnl
 
 
 # ── TypedDict: symbol metadata (from exchange_info + leverage brackets) ───────
@@ -211,13 +270,10 @@ class PositionDict(TypedDict, total=False):
 
     # ── Strategy metadata ─────────────────────────────────────────────────
     strategy_type: str
-    """``'vr_directional'``, ``'vr_straddle'``, or ``'ma_cluster'``."""
+    """``'vr_directional'``, ``'ma_cluster'``, or ``'donchian'``."""
 
     tf: str
     """Signal timeframe label: ``'15m'``, ``'1h'``, ``'4h'``."""
-
-    is_straddle: bool
-    """True if this position is a leg of a vol_straddle pair (both LONG and SHORT legs are True)."""
 
     position_side: str | None
     """Hedge mode position side (``'LONG'`` / ``'SHORT'``).  None = one-way."""

@@ -38,15 +38,28 @@ from quantbox.backtest.trade_sim import (
     bootstrap_pf,
     build_resampled,
     compute_metrics,
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
     portfolio_sim,
     precompute,
     precompute_all_vr,
+    sim_directional_trailing,
 )
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-from quantbox.backtest.trade_sim import sim_directional_trailing, sim_straddle_trailing
+
+# ── Straddle stubs (S_d8 removed from production) ────────────────────────────
+
+
+def gen_vr_dur_signal(vr, threshold, min_dur, warmup):  # type: ignore[override]
+    """Stub: S_d8 straddle signal removed from production."""
+    import numpy as np
+    return np.zeros(len(vr), dtype=np.int8)
+
+
+def sim_straddle_trailing(*args, **kwargs):  # type: ignore[override]
+    """Stub: straddle simulator removed from production."""
+    import numpy as np
+    return np.array([]), np.array([]), np.array([])
 
 # ── Config (all from production config.py) ────────────────────────────────────
 cfg = VolStraddleConfig()
@@ -55,19 +68,19 @@ SP = cfg.vr_short  # 8
 LP = cfg.vr_long  # 56
 VR_KEY = f"vr_{SP}_{LP}"
 
-S_VR = cfg.s_vr_threshold  # 0.57
-S_DUR = cfg.s_squeeze_dur  # 3
+S_VR = 0.57   # s_vr_threshold removed from production config
+S_DUR = 3     # s_squeeze_dur removed from production config
 D_VR = cfg.d_vr_threshold  # 0.5
 
 D_SL = cfg.d_sl  # 0.01
-S_SL = cfg.s_sl  # 0.015
+S_SL = 0.015     # s_sl removed from production config
 D_TP = cfg.d_tp  # 0.12
-S_TP = cfg.s_tp  # 0.05
+S_TP = 0.05      # s_tp removed from production config
 
 D_TRAIL_ACT = cfg.d_trail_activate  # 0.005
 D_TRAIL_DIST = cfg.d_trail_distance  # 0.002
-S_TRAIL_ACT = cfg.s_trail_activate  # 0.015
-S_TRAIL_DIST = cfg.s_trail_distance  # 0.002
+S_TRAIL_ACT = 0.020   # s_trail_activate removed from production config
+S_TRAIL_DIST = 0.002  # s_trail_distance removed from production config
 
 MAX_CONCURRENT = cfg.max_concurrent  # 10
 COST_DIRECTIONAL = 0.0008
@@ -89,7 +102,7 @@ print(f"  SMA period={E2_SMA_PERIOD}  MOM period={MOM_PERIOD}")
 assert S_VR == 0.57, f"S_VR mismatch: {S_VR}"
 assert D_VR == 0.5, f"D_VR mismatch: {D_VR}"
 assert S_TRAIL_ACT == 0.020
-assert D_TRAIL_ACT == 0.040
+assert D_TRAIL_ACT == 0.015
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────

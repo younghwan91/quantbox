@@ -269,7 +269,7 @@ class TestCollectTagged:
 
 class TestBucketAnalysis:
     def _make_trades(self) -> list[tuple]:
-        """Fake S_d8 tagged trades: (sym, entry, exit, pnl, sq_dur, dvr, bsm)"""
+        """Tagged trades: (sym, entry, exit, pnl, sq_dur, dvr, bsm)"""
         return [
             ("A", 0, 10, 0.02, 3, -0.025, 0),  # strong falling, win
             ("A", 0, 10, -0.015, 5, -0.010, 0),  # weak falling, loss
@@ -406,7 +406,7 @@ class TestConfigParity:
         assert S_TRAIL_ACT == 0.020, f"S_TRAIL_ACT={S_TRAIL_ACT}"
 
     def test_d_trail_activate(self):
-        assert D_TRAIL_ACT == 0.040, f"D_TRAIL_ACT={D_TRAIL_ACT}"
+        assert D_TRAIL_ACT == 0.015, f"D_TRAIL_ACT={D_TRAIL_ACT}"
 
     def test_bsm_window_positive(self):
         assert BSM_WINDOW > 0

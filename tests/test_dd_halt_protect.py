@@ -9,8 +9,7 @@ Tests for the selective close behavior added in v14.40.0:
 from __future__ import annotations
 
 import numpy as np
-import pytest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from tests.conftest import _build_vs_scalper
 

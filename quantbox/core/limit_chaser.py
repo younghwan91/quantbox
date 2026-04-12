@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
-from quantbox.core.types import round_to_tick
+from quantbox.core.types import ALGO_ORDER_DEAD_STATUSES, round_to_tick
 
 logger = logging.getLogger("LimitChaser")
 
@@ -639,7 +639,7 @@ class LimitOrderChaser:
                     )
                     return None
 
-                if order_status in ("CANCELED", "REJECTED", "EXPIRED"):
+                if order_status in ALGO_ORDER_DEAD_STATUSES:
                     logger.error(f"[{symbol}] Market order {order_status}: orderId={order_id}")
                     return None
 

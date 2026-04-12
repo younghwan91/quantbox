@@ -88,18 +88,6 @@ class CommandsMixin:
         if self._drawdown_halt:
             status = "🛑 DD HALT"
 
-        # 스트래들 페어 통계
-        all_pos = self.strategy._positions
-        straddle_legs = [p for p in all_pos.values() if p.get("is_straddle")]
-        seen_pairs: set[str] = set()
-        n_pairs = 0
-        for p in straddle_legs:
-            pid = p.get("straddle_pair_id")
-            if pid and pid not in seen_pairs:
-                seen_pairs.add(pid)
-                n_pairs += 1
-        n_orphans = sum(1 for p in straddle_legs if p.get("straddle_orphan_since_cycle") is not None)
-
         lines = [
             "```",
             f"📊 QuantBox Status — {status}",
@@ -107,7 +95,6 @@ class CommandsMixin:
             f"Balance:    ${balance:,.2f}",
             f"Session PnL: ${total_pnl:+,.2f} ({n_trades} trades)",
             f"Positions:  {len(positions)}/{self.config.max_concurrent}",
-            f"Straddle:   {n_pairs}쌍 | 고아={n_orphans}",
             f"Cycle:      #{self._cycle_count}",
             f"{'─' * 40}",
         ]

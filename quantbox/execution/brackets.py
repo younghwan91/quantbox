@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 
 from binance.exceptions import BinanceAPIException
 
-from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
-from quantbox.core.types import round_to_tick, to_api_symbol
+from quantbox.core.strategy_names import VR_DIRECTIONAL
+from quantbox.core.types import ALGO_ORDER_DEAD_STATUSES, round_to_tick, to_api_symbol
 
 logger = logging.getLogger("Scalper")
 
@@ -385,7 +385,7 @@ class BracketMixin:
         """Calculate TRAILING_STOP_MARKET parameters from config.
 
         Args:
-            strategy_type: 'vr_straddle', 'ma_cluster', or 'vr_directional'.
+            strategy_type: 'vr_directional', 'ma_cluster', or 'donchian'.
             signal: +1 (LONG) or -1 (SHORT).
             entry_price: Position entry price.
 
@@ -396,16 +396,7 @@ class BracketMixin:
                               entry × (1 - trail_activate) for SHORT.
             close_side: 'SELL' for LONG, 'BUY' for SHORT.
         """
-        vs = self.vs_config
-        if strategy_type == VR_STRADDLE:
-            td = vs.s_trail_distance
-            ta = vs.s_trail_activate
-        elif strategy_type == MA_CLUSTER:
-            td = vs.ma_cluster_trail_distance
-            ta = vs.ma_cluster_trail_activate
-        else:  # vr_directional
-            td = vs.d_trail_distance
-            ta = vs.d_trail_activate
+        ta, td = self.vs_config.get_trail_params(strategy_type)
 
         # trail_distance fraction → Binance callbackRate percentage
         # e.g. 0.005 (0.5%) → 0.5, clamped to [0.5, 5.0] (rule #8: callbackRate >= 0.5%)
@@ -694,7 +685,7 @@ class BracketMixin:
             # Without this, a cancelled order keeps its algoId in our state,
             # _sync_server_orders skips bracket repair (oid is not None),
             # and the position silently loses server-side protection.
-            if algo_status in ("CANCELLED", "CANCELED", "EXPIRED", "USER_CANCELLED", "ERROR"):
+            if algo_status in ALGO_ORDER_DEAD_STATUSES:
                 logger.warning(f"[{symbol}] Algo order {algo_status}: algoId={order_id} — will trigger bracket repair")
                 return {"status": "CANCELLED", "algoId": order_id}
         except Exception as e:
@@ -816,15 +807,7 @@ class BracketMixin:
             return
 
         strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
-        is_straddle = pos.get("is_straddle", False)
-
-        vs = self.vs_config
-        if is_straddle:
-            trail_distance = vs.s_trail_distance
-        elif strategy_type == MA_CLUSTER:
-            trail_distance = vs.ma_cluster_trail_distance
-        else:
-            trail_distance = vs.d_trail_distance  # 0.002
+        trail_distance = self.vs_config.get_trail_distance(strategy_type)
 
         trail_stop_gain = max(peak_gain - trail_distance, 0.0)
 
@@ -932,7 +915,7 @@ class BracketMixin:
                 continue
             api_sym = to_api_symbol(sym, pos)
             status = self._verify_algo_order_active(str(sl_oid), api_sym)
-            if status in ("EXPIRED", "CANCELLED", "CANCELED", "USER_CANCELLED", "ERROR"):
+            if status in ALGO_ORDER_DEAD_STATUSES:
                 logger.warning(f"[{sym}] SL algo order {sl_oid} is {status} — re-placing bracket")
                 pos["server_sl_order_id"] = None
                 # Bracket will be re-placed by the normal bracket repair logic

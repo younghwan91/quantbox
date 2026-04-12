@@ -67,6 +67,7 @@ class TradingStrategy(Protocol):
         close_4h: np.ndarray,
         high_4h: np.ndarray | None = None,
         low_4h: np.ndarray | None = None,
+        volume_4h: np.ndarray | None = None,
     ) -> None:
         """Store 4h candle data for multi-TF analysis."""
         ...
@@ -82,7 +83,7 @@ class TradingStrategy(Protocol):
         """Generate a trading signal for *symbol*.
 
         Returns:
-            -1 (short), 0 (no signal), 1 (long), or 2 (straddle).
+            -1 (short), 0 (no signal), or 1 (long).
         """
         ...
 

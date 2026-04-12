@@ -55,7 +55,11 @@ def migrate_strategy_types(db_path: str | Path) -> int:
     count = 0
     try:
         with conn:  # explicit transaction — atomic commit or rollback
-            for old, new in [("vr_squeeze", "vr_directional"), ("straddle", "vr_straddle")]:
+            for old, new in [
+                ("vr_squeeze", VR_DIRECTIONAL),
+                ("straddle", VR_DIRECTIONAL),
+                ("vr_straddle", VR_DIRECTIONAL),
+            ]:
                 cursor = conn.execute("UPDATE trades SET strategy_type = ? WHERE strategy_type = ?", (new, old))
                 count += cursor.rowcount
     except sqlite3.OperationalError:
@@ -93,7 +97,7 @@ class TradeJournal:
                 conn.commit()
             except Exception:
                 pass  # 이미 존재하는 컬럼
-        # Naming migration: vr_squeeze→vr_directional, straddle→vr_straddle (멱등)
+        # Naming migration: legacy strategy types → canonical (멱등)
         n = migrate_strategy_types(self.db_path)
         if n > 0:
             logger.info(f"Migrated {n} trade records to canonical strategy names")

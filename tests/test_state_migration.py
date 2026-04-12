@@ -46,7 +46,6 @@ def _make_v14_27_state_with_position() -> dict:
             "_trail_sl_ratcheted": -999.0,
             "trail_active": False,
             "peak_gain": 0.0,
-            "is_straddle": False,
             "strategy_type": "vr_directional",
             "sl": 0.03,
             "tp": 0.06,

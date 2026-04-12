@@ -14,11 +14,10 @@ if TYPE_CHECKING:
 
 import logging
 import os
-import time
 from datetime import datetime, timezone
 
 from quantbox.core.strategy_names import VR_DIRECTIONAL
-from quantbox.core.types import to_api_symbol
+from quantbox.core.types import ALGO_ORDER_DEAD_STATUSES, build_trade_record, to_api_symbol
 from quantbox.execution.recon_journal import ReconEventType
 
 logger = logging.getLogger("Scalper")
@@ -62,6 +61,20 @@ class ReconciliationMixin:
         if self.paper_mode:
             return
 
+        # Batch optimization: fetch ALL open algo orders in one API call.
+        # Orders present in this set are still active (NEW/WORKING) — no need
+        # to call get_order() individually. Only absent orders (potentially
+        # FILLED/CANCELLED) require individual checks.
+        open_algo_ids: set[str] = set()
+        try:
+            resp = self._algo_api.list_open_orders()
+            orders = resp.get("orders", []) if isinstance(resp, dict) else resp
+            for o in orders:
+                open_algo_ids.add(str(o.get("algoId", "")))
+        except Exception as e:
+            # Fallback: if batch fetch fails, check every order individually
+            logger.warning(f"list_open_orders failed ({e}), falling back to per-order checks")
+
         for sym in list(self.strategy.active_positions):
             pos = self.strategy._positions.get(sym)
             if not pos:
@@ -82,7 +95,12 @@ class ReconciliationMixin:
 
             # Check TP order first (the happy path)
             if tp_oid:
-                filled = self._check_order_filled(api_sym, tp_oid)
+                # Skip individual API call if order is confirmed open
+                if str(tp_oid) in open_algo_ids:
+                    logger.info(f"[{api_sym}] Algo order check: algoId={tp_oid} status=NEW type=TAKE_PROFIT")
+                    filled = None
+                else:
+                    filled = self._check_order_filled(api_sym, tp_oid)
                 if filled and filled.get("status") == "FILLED":
                     fill_price = float(filled["avgPrice"])
                     fill_qty = float(filled["executedQty"])
@@ -103,21 +121,9 @@ class ReconciliationMixin:
                         continue
 
                     logger.info(f"[{sym}] Server TP TRIGGERED intra-bar: fill=${fill_price:.4f} qty={fill_qty:.6f}")
-                    # Cancel the counterpart SL (own leg's SL, with retry for straddle pairs)
+                    # Cancel the counterpart SL
                     if sl_oid:
-                        cfg_vs = getattr(self, "vs_config", None)
-                        if cfg_vs is not None and pos.get("is_straddle"):
-                            sl_cancelled = False
-                            for attempt in range(cfg_vs.sl_cancel_retry_count + 1):
-                                if self._cancel_server_stop_loss(api_sym, sl_oid):
-                                    sl_cancelled = True
-                                    break
-                                if attempt < cfg_vs.sl_cancel_retry_count:
-                                    time.sleep(cfg_vs.sl_cancel_retry_delay_s)
-                            if not sl_cancelled:
-                                logger.warning(f"[{sym}] 자체 SL 취소 실패 ({cfg_vs.sl_cancel_retry_count + 1}회 시도)")
-                        else:
-                            self._cancel_server_stop_loss(api_sym, sl_oid)
+                        self._cancel_server_stop_loss(api_sym, sl_oid)
 
                     # Cancel orphaned trail when TP fires
                     trail_oid_cross = pos.get("server_trail_order_id")
@@ -139,15 +145,18 @@ class ReconciliationMixin:
                         "server_tp",
                     )
                     continue
-                elif filled and filled.get("status") == "CANCELLED":
-                    # v12.3.1: Externally cancelled — clear for bracket repair
+                elif filled and filled.get("status") in ALGO_ORDER_DEAD_STATUSES:
                     pos["server_tp_order_id"] = None
                     tp_oid = None
-                    logger.warning(f"[{sym}] Server TP was externally cancelled — cleared for bracket repair")
+                    logger.warning(f"[{sym}] Server TP {filled.get('status')} — cleared for bracket repair")
 
             # Check SL order
             if sl_oid:
-                filled = self._check_order_filled(api_sym, sl_oid)
+                if str(sl_oid) in open_algo_ids:
+                    logger.info(f"[{api_sym}] Algo order check: algoId={sl_oid} status=NEW type=STOP")
+                    filled = None
+                else:
+                    filled = self._check_order_filled(api_sym, sl_oid)
                 if filled and filled.get("status") == "FILLED":
                     fill_price = float(filled["avgPrice"])
                     fill_qty = float(filled["executedQty"])
@@ -176,16 +185,21 @@ class ReconciliationMixin:
                         "server_sl",
                     )
                     continue
-                elif filled and filled.get("status") == "CANCELLED":
-                    # v12.3.1: Externally cancelled — clear for bracket repair
+                elif filled and filled.get("status") in ALGO_ORDER_DEAD_STATUSES:
                     pos["server_sl_order_id"] = None
                     sl_oid = None
-                    logger.warning(f"[{sym}] Server SL was externally cancelled — cleared for bracket repair")
+                    logger.warning(f"[{sym}] Server SL {filled.get('status')} — cleared for bracket repair")
 
             # ── Check TRAILING_STOP_MARKET order (Algo API) ──
             trail_oid = pos.get("server_trail_order_id")
             if trail_oid and not str(trail_oid).startswith("paper_"):
-                trail_status = self._check_trail_regular(api_sym, str(trail_oid))
+                if str(trail_oid) in open_algo_ids:
+                    logger.info(
+                        f"[{api_sym}] Algo order check: algoId={trail_oid} status=NEW type=TRAILING_STOP_MARKET"
+                    )
+                    trail_status = None
+                else:
+                    trail_status = self._check_trail_regular(api_sym, str(trail_oid))
                 if trail_status and trail_status.get("status") == "FILLED":
                     fill_price = float(trail_status.get("avgPrice", 0))
                     fill_qty = float(trail_status.get("executedQty", 0))
@@ -228,10 +242,10 @@ class ReconciliationMixin:
                         context="Trail partial fill",
                     )
                     continue
-                elif trail_status and trail_status.get("status") == "CANCELED":
+                elif trail_status and trail_status.get("status") in ALGO_ORDER_DEAD_STATUSES:
                     pos["server_trail_order_id"] = None
                     trail_oid = None
-                    logger.warning(f"[{sym}] Server trail was externally cancelled — cleared for repair")
+                    logger.warning(f"[{sym}] Server trail {trail_status.get('status')} — cleared for repair")
 
             # ═══ v11.4.2 BRACKET REPAIR: Place missing SL/TP for restored positions ═══
             # Positions restored from state may have None algoIds (e.g. old session
@@ -843,61 +857,7 @@ class ReconciliationMixin:
                     details={"position_side": pos_side_str},
                 )
 
-        # ── Phase 3: Straddle pair integrity check ──
-        # NOTE: 이 스트래들 고아 자동-청산 (VS_ORPHAN_AUTO_CLOSE_CYCLES)은 위의
-        # ORPHAN_AUTO_CLOSE (거래소-전용 reverse ghost 자동청산)와 별개입니다.
-        # 여기서는 내부 상태에서 카운터파트가 사라진 경우만 처리합니다.
-        _cfg_vs = getattr(self, "vs_config", None)
-        for sym in list(self.strategy.active_positions):
-            pos = self.strategy._positions.get(sym)
-            if not pos or not pos.get("is_straddle") or not pos.get("straddle_pair_id"):
-                continue
-
-            counterpart_key = self._get_pair_counterpart(sym)
-            if counterpart_key is not None:
-                # 페어 온전함 — 고아 추적 초기화
-                pos.pop("straddle_orphan_since_cycle", None)
-                continue
-
-            # 카운터파트 없음 — 합법적 청산 여부 확인
-            if pos.get("counterpart_legitimately_closed"):
-                # 카운터파트가 server SL/TP로 정상 청산됨 — 생존 레그는 추세를 타도록 놔둠
-                pos.pop("straddle_orphan_since_cycle", None)
-                continue
-
-            # 진짜 고아 — 카운터파트 없고 합법적 청산 기록도 없음
-            if pos.get("straddle_orphan_since_cycle") is None:
-                pos["straddle_orphan_since_cycle"] = self._cycle_count
-                grace = _cfg_vs.orphan_auto_close_cycles if _cfg_vs else 4
-                logger.warning(f"[{sym}] 스트래들 레그 고아 감지 — 카운터파트 없음. {grace}사이클 후 자동 청산 예정.")
-                self.discord.send(
-                    content=(f"🔍 **[{sym}] 스트래들 고아 감지** — 카운터파트 부재. {grace}사이클 후 자동 청산 예정.")
-                )
-
-            orphan_grace = _cfg_vs.orphan_auto_close_cycles if _cfg_vs else 4
-            orphan_cycles = self._cycle_count - pos["straddle_orphan_since_cycle"]
-            if orphan_cycles >= orphan_grace:
-                logger.warning(f"[{sym}] 고아 스트래들 레그 자동 청산 — {orphan_cycles}사이클 동안 헤지 없음.")
-                self.discord.send(
-                    content=(
-                        f"⚠️ **[{sym}] 고아 스트래들 자동 청산** — {orphan_cycles}사이클 동안 헤지 없음. 자동 청산 실행."
-                    )
-                )
-                # 현재 포지션의 마크 가격 추정 (entry_price 사용)
-                api_sym = to_api_symbol(sym, pos)
-                close_price = pos.get("entry_price", 0.0)
-                try:
-                    _book = self.client.futures_orderbook_ticker(symbol=api_sym)
-                    close_price = float(_book["bidPrice"] if pos["signal"] == 1 else _book["askPrice"])
-                except Exception:
-                    pass
-                closed = self._close_position(sym, "straddle_orphan_auto_close", close_price)
-                if not closed:
-                    logger.error(f"[{sym}] 고아 스트래들 자동 청산 실패 — 수동 개입 필요!")
-            else:
-                # 유예 기간 중 — SL 브라켓 확인
-                if not pos.get("server_sl_order_id"):
-                    logger.warning(f"[{sym}] 고아 스트래들 레그에 SL 브라켓 없음 — bracket repair 필요")
+        # Phase 3: reserved
 
     def _handle_server_partial_tp_fill(
         self: "ScalperProtocol",
@@ -936,15 +896,10 @@ class ReconciliationMixin:
             pos["server_sl_order_id"] = None
 
         # 2. PnL on the partial portion
-        if pos["signal"] == 1:
-            pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            pnl_pct = (pos["entry_price"] - fill_price) / pos["entry_price"]
+        from quantbox.core.types import calc_upnl_pct
 
+        pnl_pct = calc_upnl_pct(pos["entry_price"], fill_price, pos["signal"])
         partial_notional = fill_qty * pos["entry_price"]
-        pnl_usd = pnl_pct * partial_notional
-        cost = partial_notional * self.config.round_trip_cost
-        net_pnl = pnl_usd - cost
 
         # 3. Update position for runner mode
         full_quantity = pos["notional"] / pos["entry_price"]
@@ -979,29 +934,21 @@ class ReconciliationMixin:
 
         # Paper mode cost handling
         if self.paper_mode:
+            raw_pnl = pnl_pct * partial_notional
             paper_exit_cost = partial_notional * self.config.cost_per_side
-            self._paper_balance += pnl_usd - paper_exit_cost
+            self._paper_balance += raw_pnl - paper_exit_cost
 
         # 5. Trade record (partial)
-        trade = {
-            "symbol": api_sym,
-            "signal": pos["signal"],
-            "entry_price": pos["entry_price"],
-            "exit_price": fill_price,
-            "pnl_pct": pnl_pct * 100,
-            "pnl_usd": net_pnl,
-            "notional": partial_notional,
-            "bars_held": pos["bars_held"],
-            "reason": "server_partial_tp",
-            "time": datetime.now(timezone.utc).isoformat(),
-            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-            "mfe_pct": pos.get("best_pnl", 0.0) * 100,
-            "mae_pct": pos.get("worst_pnl", 0.0) * 100,
-            "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
-            "balance_after": self._get_cycle_balance(),
-            "straddle_pair_id": pos.get("straddle_pair_id"),
-        }
+        trade, _net_pnl = build_trade_record(
+            pos,
+            fill_price,
+            partial_notional,
+            "server_partial_tp",
+            self.config.round_trip_cost,
+            pos.get("balance_before") or self._get_cycle_balance(),
+            self._get_cycle_balance(),
+            symbol=api_sym,
+        )
         self._trade_history.append(trade)
 
         _tj = getattr(self, "_journal", None)
@@ -1017,7 +964,7 @@ class ReconciliationMixin:
         logger.info(
             f"[{symbol}] SERVER PARTIAL TP ({fraction * 100:.0f}%): "
             f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
-            f"PnL={pnl_pct * 100:+.2f}% (${net_pnl:+.2f}) "
+            f"PnL={pnl_pct * 100:+.2f}% (${_net_pnl:+.2f}) "
             f"→ remaining ${pos['notional']:.2f}, BE stop active"
         )
         _dir = "LONG ↑" if pos["signal"] == 1 else "SHORT ↓"
@@ -1033,7 +980,7 @@ class ReconciliationMixin:
                     {"name": "진입가", "value": f"${pos['entry_price']:.4f}", "inline": True},
                     {"name": "TP 체결가", "value": f"${fill_price:.4f}", "inline": True},
                     {"name": "수익률", "value": f"{pnl_pct * 100:+.2f}%", "inline": True},
-                    {"name": "확보금액", "value": f"${net_pnl:+.2f}", "inline": True},
+                    {"name": "확보금액", "value": f"${_net_pnl:+.2f}", "inline": True},
                     {"name": "남은 포지션", "value": f"${pos['notional']:.2f}", "inline": True},
                     {"name": "남은 SL", "value": _r_sl, "inline": True},
                 ],
@@ -1051,12 +998,7 @@ class ReconciliationMixin:
 
         Removes the position from internal tracking and logs the PnL.
         """
-        # ── Step 2.2: Straddle pair context before position is removed ──
-        pair_id = None
-        counterpart_key_before: str | None = None
-        if self.strategy._positions.get(symbol, {}).get("is_straddle"):
-            counterpart_key_before = self._get_pair_counterpart(symbol)
-            pair_id = self.strategy._positions.get(symbol, {}).get("straddle_pair_id")
+        pair_id = self.strategy._positions.get(symbol, {}).get("straddle_pair_id")
 
         pos = self.strategy.close_position(symbol)
         if not pos:
@@ -1065,45 +1007,18 @@ class ReconciliationMixin:
         # Extract Binance symbol from compound key for trade records
         api_sym = to_api_symbol(symbol, pos)
 
-        # PnL calculation
-        if pos["signal"] == 1:
-            pnl_pct = (fill_price - pos["entry_price"]) / pos["entry_price"]
-        else:
-            pnl_pct = (pos["entry_price"] - fill_price) / pos["entry_price"]
-
-        # v12.3.2: Use entry-price-based notional for PnL, not exit-price.
-        # fill_qty * fill_price overstates winners and understates losers
-        # by a factor of fill_price/entry_price (~3-5% error per trade).
-        notional = pos["notional"]
-        pnl_usd = pnl_pct * notional
-        # v12.3.2: Always charge round_trip_cost for backtest parity.
-        # Both partial and runner portions must account for their share
-        # of entry + exit costs. The backtest delta model charges
-        # |delta| * cost_per_side per transition, totaling round_trip
-        # over the full lifecycle.
-        cost = notional * self.config.round_trip_cost
-        net_pnl = pnl_usd - cost
-
-        _now = datetime.now(timezone.utc).isoformat()
-        trade = {
-            "symbol": api_sym,
-            "signal": pos["signal"],
-            "entry_price": pos["entry_price"],
-            "exit_price": fill_price,
-            "pnl_pct": pnl_pct * 100,
-            "pnl_usd": net_pnl,
-            "notional": notional,
-            "bars_held": pos["bars_held"],
-            "reason": reason,
-            "time": _now,
-            "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-            "mfe_pct": pos.get("best_pnl", 0.0) * 100,
-            "mae_pct": pos.get("worst_pnl", 0.0) * 100,
-            "entry_time": pos.get("opened_at"),
-            "balance_before": pos.get("balance_before") or self._get_cycle_balance(),
-            "balance_after": self._get_cycle_balance(),
-            "straddle_pair_id": pair_id,
-        }
+        trade, net_pnl = build_trade_record(
+            pos,
+            fill_price,
+            pos["notional"],
+            reason,
+            self.config.round_trip_cost,
+            pos.get("balance_before") or self._get_cycle_balance(),
+            self._get_cycle_balance(),
+            symbol=api_sym,
+            pair_id=pair_id,
+        )
+        pnl_pct = trade["pnl_pct"] / 100  # fraction for logging
         self._trade_history.append(trade)
 
         # Write to persistent journal (dashboard reads from here)
@@ -1120,39 +1035,8 @@ class ReconciliationMixin:
         # still in our state file).
         self._save_state()
 
-        # ── Step 2.2: Straddle pair context logging ──
-        if pair_id:
-            if counterpart_key_before:
-                # Counterpart still open — pair half-closed
-                counterpart_pos = self.strategy._positions.get(counterpart_key_before)
-                if counterpart_pos:
-                    # Verify counterpart brackets are intact after this leg's close
-                    counterpart_has_sl = bool(counterpart_pos.get("server_sl_order_id"))
-                    counterpart_has_tp = bool(counterpart_pos.get("server_tp_order_id"))
-                    if not counterpart_has_sl:
-                        logger.warning(
-                            f"[{symbol}] 스트래들 반-청산 후 카운터파트 SL 없음: "
-                            f"{counterpart_key_before} — bracket repair 필요"
-                        )
-                    logger.info(
-                        f"[{symbol}] 스트래들 페어 반-청산 (pair_id={pair_id}): "
-                        f"이 다리 PnL={net_pnl:+.2f}$, "
-                        f"카운터파트 {counterpart_key_before} 아직 오픈 "
-                        f"(SL={'OK' if counterpart_has_sl else '없음'} "
-                        f"TP={'OK' if counterpart_has_tp else '없음'})"
-                    )
-                    # 카운터파트에 합법적 청산 플래그 설정 — Phase 3에서 survivor로 인식
-                    counterpart_pos["counterpart_legitimately_closed"] = True
-                    logger.info(
-                        f"[{symbol}] 카운터파트 {counterpart_key_before}: "
-                        f"legitimate_closed 플래그 설정 (server fill로 청산됨)"
-                    )
-                else:
-                    logger.info(f"[{symbol}] 스트래들 페어 완전 청산 (pair_id={pair_id}): 양 다리 모두 청산됨")
-            else:
-                logger.info(f"[{symbol}] 스트래들 페어 완전 청산 (pair_id={pair_id}): 양 다리 모두 청산됨")
-
-        emoji = "🎯" if reason == "server_tp" else "🛑"
+        _emoji_map = {"server_tp": "🎯", "server_trail": "🏃", "server_sl": "🛑"}
+        emoji = _emoji_map.get(reason, "🛑")
         logger.info(
             f"[{symbol}] {emoji} {reason.upper()} FILLED: "
             f"{'LONG' if pos['signal'] == 1 else 'SHORT'} "
@@ -1166,7 +1050,12 @@ class ReconciliationMixin:
         hold_time = pos["bars_held"] * 15
 
         _dir = "LONG ↑" if pos["signal"] == 1 else "SHORT ↓"
-        _fill_type = "서버 TP 체결 (바 중간 익절)" if reason == "server_tp" else "서버 SL 체결 (안전장치)"
+        _fill_type_map = {
+            "server_tp": "서버 TP 체결 (바 중간 익절)",
+            "server_trail": "서버 트레일 체결 (추적 익절)",
+            "server_sl": "서버 SL 체결 (안전장치)",
+        }
+        _fill_type = _fill_type_map.get(reason, f"서버 체결 ({reason})")
         n_remaining = self.strategy.n_active
         self.discord.send(
             embed={

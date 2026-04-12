@@ -5,18 +5,17 @@ Engines:
     exit logic in the signal (e.g. RubberBand).  Uses close-to-close PnL.
   - Trade-event engine (trade_sim): Discrete SL/TP simulation with
     intra-bar high/low resolution + cross-symbol slot contention.
-    Canonical engine for VolStraddle (VR Squeeze) and any strategy
+    Canonical engine for VR Directional (D_mom8) and any strategy
     with explicit stop-loss / take-profit.
 
 Usage:
     # Signal-array (RubberBand)
     from quantbox.backtest import VectorizedBacktest, BacktestConfig
 
-    # Trade-event (VolStraddle / any SL-TP strategy)
+    # Trade-event (VR Directional / any SL-TP strategy)
     from quantbox.backtest.trade_sim import (
         collect_trades, portfolio_sim, portfolio_sim_with_details,
-        get_straddle_syms, compute_metrics,
-        sim_directional_trades, sim_straddle_trades,
+        compute_metrics, sim_directional_trades,
     )
 """
 

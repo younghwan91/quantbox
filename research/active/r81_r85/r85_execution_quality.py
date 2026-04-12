@@ -253,7 +253,7 @@ def compute_execution_gaps(trades: list[dict], recon_events: list[dict]) -> dict
             gaps["server_tp_fills"] = int(gaps["server_tp_fills"]) + 1
 
     # ratchet 미스: trailing이 활성화됐을 텐데 max_hold로 청산된 거래
-    trail_activate = cfg.s_trail_activate
+    trail_activate = cfg.d_trail_activate
     for t in trades:
         mfe = t.get("mfe_pct") or 0.0
         reason = t.get("exit_reason") or ""

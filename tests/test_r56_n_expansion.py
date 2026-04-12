@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -237,7 +236,7 @@ class TestTF30mConfig:
 class TestConfigParity:
     def test_d_trail_act_from_config(self):
         """D_TRAIL_ACT must be 0.005 (r47 production, NOT 0.02 from backtest_v14_3_0)."""
-        assert D_TRAIL_ACT == 0.040, f"D_TRAIL_ACT={D_TRAIL_ACT} — must be loaded from config.py, not backtest_v14_3_0"
+        assert D_TRAIL_ACT == 0.015, f"D_TRAIL_ACT={D_TRAIL_ACT} — must be loaded from config.py"
 
     def test_d_trail_dist_from_config(self):
         """D_TRAIL_DIST must be 0.005 (r106: rule #8 floor, NOT stale 0.002/0.003)."""

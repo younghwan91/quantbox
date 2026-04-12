@@ -11,7 +11,6 @@ server SL stays stuck at breakeven — losing all trailing stop protection.
 """
 
 from unittest.mock import MagicMock, patch
-import pytest
 
 
 def _make_scalper(paper: bool = True, **config_overrides):

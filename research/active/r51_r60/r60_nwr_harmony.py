@@ -35,16 +35,14 @@ from quantbox.backtest.trade_sim import (
     build_resampled,
     collect_trades,
     compute_metrics,
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
     portfolio_sim,
     precompute,
     precompute_all_vr,
     sim_directional_trades,
-    sim_straddle_trades,
+    sim_directional_trailing,
 )
-from quantbox.backtest.trade_sim import sim_directional_trailing, sim_straddle_trailing
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 # ── Config (no hardcoding) ──
@@ -53,15 +51,13 @@ SP, LP = cfg.vr_short, cfg.vr_long
 VR_KEY = f"vr_{SP}_{LP}"
 
 D_SL = cfg.d_sl
-S_SL = cfg.s_sl
 D_TP = cfg.d_tp
-S_TP = cfg.s_tp
 D_TRAIL_ACT = cfg.d_trail_activate
 D_TRAIL_DIST = cfg.d_trail_distance
-S_TRAIL_ACT = cfg.s_trail_activate
-S_TRAIL_DIST = cfg.s_trail_distance
-S_VR = cfg.s_vr_threshold  # 0.57 (Combo2)
-S_DUR = cfg.s_squeeze_dur  # 3   (Combo2)
+S_SL = cfg.d_sl  # straddle removed; kept as alias for backward compat in report strings
+S_TP = cfg.d_tp
+S_VR = cfg.d_vr_threshold  # straddle removed; alias for directional threshold
+S_DUR = 0  # straddle removed
 D_VR = cfg.d_vr_threshold
 MAX_CONCURRENT = cfg.max_concurrent  # 10
 VR_LN = cfg.base_leverage / cfg.max_concurrent  # 3.0
@@ -229,15 +225,10 @@ def collect_trades_with_conviction(
     lp = cfg_dict["lp"]
     vr_key = f"vr_{sp}_{lp}"
     tf_data_map = {1: data_15m, 4: data_1h, 16: data_4h}
-    is_straddle = strat == "S_d8"
 
     d_sl = cfg_dict["d_sl"]
-    s_sl = cfg_dict["s_sl"]
     d_tp = cfg_dict.get("d_tp", cfg_dict.get("tp", D_TP))
-    s_tp = cfg_dict.get("s_tp", S_TP)
     d_vr = cfg_dict["d_vr"]
-    s_vr = cfg_dict["s_vr"]
-    s_dur = cfg_dict["s_dur"]
 
     all_trades: list[tuple[str, int, int, float, int, str]] = []
 
@@ -256,59 +247,30 @@ def collect_trades_with_conviction(
             if vr is None:
                 continue
 
-            sl = s_sl if is_straddle else d_sl
-            mh = mh_s if is_straddle else mh_d
+            sl = d_sl
+            mh = mh_d
 
             # BTC close for C2 (aligned to this TF)
             btc_c = None
             if btc_data is not None:
                 btc_c = btc_data.get(ratio)
 
-            if is_straddle:
-                sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
-                # Also compute D signal for B3 (confluence)
-                d_sig = gen_vr_signal(vr, d_vr, warmup)
-                p, e, x = sim_straddle_trailing(
-                    c, h, lo, sig, sl, s_tp, mh, COST_STRADDLE,
-                    S_TRAIL_ACT, S_TRAIL_DIST,
-                )
+            sig = gen_vr_signal(vr, d_vr, warmup)
+            dire = make_direction_momentum(sig, d["mom_8"])
+            p, e, x = sim_directional_trailing(
+                c, h, lo, sig, dire, sl, d_tp, mh, COST_DIRECTIONAL,
+                D_TRAIL_ACT, D_TRAIL_DIST,
+            )
 
-                for k in range(len(p)):
-                    bar_i = int(e[k])
-                    # Squeeze duration at entry: count consecutive bars < s_vr
-                    sq_dur = 0
-                    for back in range(bar_i, max(0, bar_i - 50), -1):
-                        if vr[back] < s_vr:
-                            sq_dur += 1
-                        else:
-                            break
-                    d_overlap = bool(d_sig[bar_i] != 0)
-                    score, _ = compute_conviction_at_bar(
-                        c, vr, btc_c, bar_i, True, d_overlap, sq_dur
-                    )
-                    entry_15m = bar_i * ratio
-                    exit_15m = int(x[k]) * ratio + (ratio - 1)
-                    sym_trades.append((entry_15m, exit_15m, float(p[k]), score, "STRADDLE"))
-            else:
-                sig = gen_vr_signal(vr, d_vr, warmup)
-                dire = make_direction_momentum(sig, d["mom_8"])
-                # Also compute S signal for B3
-                s_sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
-                p, e, x = sim_directional_trailing(
-                    c, h, lo, sig, dire, sl, d_tp, mh, COST_DIRECTIONAL,
-                    D_TRAIL_ACT, D_TRAIL_DIST,
+            for k in range(len(p)):
+                bar_i = int(e[k])
+                direction = "LONG" if dire[bar_i] > 0 else "SHORT"
+                score, _ = compute_conviction_at_bar(
+                    c, vr, btc_c, bar_i, False, False, 0
                 )
-
-                for k in range(len(p)):
-                    bar_i = int(e[k])
-                    direction = "LONG" if dire[bar_i] > 0 else "SHORT"
-                    d_overlap = bool(s_sig[bar_i] != 0)
-                    score, _ = compute_conviction_at_bar(
-                        c, vr, btc_c, bar_i, False, d_overlap, 0
-                    )
-                    entry_15m = bar_i * ratio
-                    exit_15m = int(x[k]) * ratio + (ratio - 1)
-                    sym_trades.append((entry_15m, exit_15m, float(p[k]), score, direction))
+                entry_15m = bar_i * ratio
+                exit_15m = int(x[k]) * ratio + (ratio - 1)
+                sym_trades.append((entry_15m, exit_15m, float(p[k]), score, direction))
 
         # Dedup (same as collect_trades)
         sym_trades.sort(key=lambda x: x[0])
@@ -687,12 +649,12 @@ def main() -> None:
 
     base_cfg = {
         "sp": SP, "lp": LP,
-        "d_sl": D_SL, "s_sl": S_SL, "d_tp": D_TP, "s_tp": S_TP,
-        "d_vr": D_VR, "s_vr": S_VR, "s_dur": S_DUR,
+        "d_sl": D_SL, "d_tp": D_TP,
+        "d_vr": D_VR,
     }
 
-    # ── Run both strategies ──
-    for strat in ["S_d8", "D_mom8"]:
+    # ── Run directional strategy (straddle removed) ──
+    for strat in ["D_mom8"]:
         print(f"\n{'='*70}")
         print(f"[Strategy: {strat}]")
         print("  Computing trades with conviction tags...")

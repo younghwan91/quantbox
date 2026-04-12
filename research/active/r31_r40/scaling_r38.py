@@ -33,7 +33,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 # Do NOT reimplement — see quantbox/backtest/trade_sim.py.
 from quantbox.backtest.trade_sim import (
     COST_DIRECTIONAL,
-    COST_STRADDLE,
     G_3TF,
     TF_15m,
     TF_1h,
@@ -51,7 +50,6 @@ from quantbox.backtest.trade_sim import (
     precompute,
     precompute_all_vr,
     sim_directional_trades,
-    sim_straddle_trades,
 )
 
 # ── Signal generators (canonical source) ──
@@ -59,10 +57,24 @@ from quantbox.strategy.vol_straddle.signals import (
     compute_momentum,
     compute_squeeze_dur,
     compute_vr,
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
 )
+
+# ── Straddle stubs (S_d8 removed from production) ────────────────────────────
+COST_STRADDLE = 0.0016
+
+
+def gen_vr_dur_signal(vr, threshold, min_dur, warmup):  # type: ignore[override]
+    """Stub: S_d8 straddle signal removed from production."""
+    import numpy as np
+    return np.zeros(len(vr), dtype=np.int8)
+
+
+def sim_straddle_trades(*args, **kwargs):  # type: ignore[override]
+    """Stub: straddle simulator removed from production."""
+    import numpy as np
+    return np.array([]), np.array([]), np.array([])
 
 # ── Data loader (still in research, not yet extracted) ──
 from research.active.r31_r40.r31_mtf_vol_straddle import (
@@ -72,20 +84,21 @@ from research.active.r31_r40.r31_mtf_vol_straddle import (
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+_cfg = VolStraddleConfig()
+
 # A-VR5_35 config (selected from R37)
-CFG_A = {"sp": 5, "lp": 35, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 8,
-         "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
+CFG_A = {"sp": 5, "lp": 35, "d_vr": _cfg.d_vr_threshold,
+         "d_sl": _cfg.d_sl, "tp": _cfg.d_tp}
 
 # Baseline (current deployed)
-CFG_BL = {"sp": 7, "lp": 50, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 8,
-          "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
+CFG_BL = {"sp": 7, "lp": 50, "d_vr": _cfg.d_vr_threshold,
+          "d_sl": _cfg.d_sl, "tp": _cfg.d_tp}
 
 # v13.0.1 Champion — canonical baseline for all research
-# Reference: R40 deep stats (748630b), R39 yearly (d70cd2f)
-# 15 slots: N=2,280, PF=1.285, WR=43.4%, EV=+32.7bp, t=5.42
-# 10 slots (production): N=2,265, PF=1.280, AnnRet=+187.2%, DD=32.4%, Calmar=5.8
-CFG_V13 = {"sp": 8, "lp": 56, "d_vr": 0.50, "s_vr": 0.55, "s_dur": 4,
-           "d_sl": 0.01, "s_sl": 0.015, "tp": 0.05}
+CFG_V13 = {"sp": _cfg.vr_short, "lp": _cfg.vr_long, "d_vr": _cfg.d_vr_threshold,
+           "d_sl": _cfg.d_sl, "tp": _cfg.d_tp}
 
 
 def get_commit_short() -> str:

@@ -30,10 +30,7 @@ def _make_cfg() -> dict:
         "sp": c.vr_short,
         "lp": c.vr_long,
         "d_vr": c.d_vr_threshold,
-        "s_vr": c.s_vr_threshold,
-        "s_dur": c.s_squeeze_dur,
         "d_sl": c.d_sl,
-        "s_sl": c.s_sl,
         "tp": c.d_tp,
     }
 
@@ -94,12 +91,11 @@ def test_g4tf_includes_30m():
 
 def test_tf_30m_definition():
     """TF_30m must have ratio=2 and correct max_hold."""
-    label, ratio, warmup, mh_d, mh_s = TF_30m
+    label, ratio, warmup, mh_d = TF_30m
     assert label == "30m"
     assert ratio == 2
     assert warmup == 100
     assert mh_d == 96  # 96 × 30m = 48h
-    assert mh_s == 192  # straddle: 2× directional
 
 
 # ── Test 2: build_resampled ratio=2 produces correct 30m OHLC ──
@@ -227,35 +223,4 @@ def test_tf_priority_blocks_lower_tf():
     trades_prio = collect_trades(cfg, data_15m, data_1h, data_4h, "D_mom8", tf_priority=True)
 
     # With priority, blocked trades reduce total count
-    assert len(trades_prio) <= len(trades_no_prio)
-
-
-# ── Test 7: S_d8 straddle with G_4TF ──
-
-
-def test_g4tf_straddle(synthetic_data):
-    """S_d8 strategy should work with G_4TF without errors."""
-    data_15m, data_1h, data_4h = synthetic_data
-    cfg = _make_cfg()
-
-    # Should not raise
-    trades = collect_trades(cfg, data_15m, data_1h, data_4h, "S_d8", tf_group=G_4TF)
-    # Straddle trades are valid tuples
-    for sym, entry, exit_, pnl in trades:
-        assert isinstance(sym, str)
-        assert entry < exit_
-        assert isinstance(pnl, float)
-
-
-# ── Test 8: TF priority with S_d8 ──
-
-
-def test_tf_priority_straddle(synthetic_data):
-    """S_d8 with tf_priority should also reduce or maintain trade count."""
-    data_15m, data_1h, data_4h = synthetic_data
-    cfg = _make_cfg()
-
-    trades_no_prio = collect_trades(cfg, data_15m, data_1h, data_4h, "S_d8", tf_group=G_4TF, tf_priority=False)
-    trades_prio = collect_trades(cfg, data_15m, data_1h, data_4h, "S_d8", tf_group=G_4TF, tf_priority=True)
-
     assert len(trades_prio) <= len(trades_no_prio)

@@ -5,7 +5,6 @@ by confidence level when dynamic_target_enabled=True.
 """
 
 import numpy as np
-import pytest
 
 from quantbox.strategy.rubberband import (
     RubberBandConfig,

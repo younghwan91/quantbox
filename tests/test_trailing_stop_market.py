@@ -12,8 +12,7 @@ Verifies:
 - Max hold cancel trail before closing
 """
 
-import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -52,8 +51,7 @@ def _inject_position(scalper, pos_key: str, **overrides):
         "position_side": "LONG" if signal == 1 else "SHORT",
         "trail_active": False,
         "opened_at": "2026-01-01T00:00:00+00:00",
-        "strategy_type": "vr_straddle",
-        "is_straddle": True,
+        "strategy_type": "vr_directional",
         "move_size": 1.0,
         "entry_stop_mult": 0.015,
     }
@@ -68,48 +66,21 @@ def _inject_position(scalper, pos_key: str, **overrides):
 
 
 class TestGetTrailParams:
-    def test_straddle_long(self):
-        s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
-        assert cr == pytest.approx(0.5)  # 0.005 * 100
-        # activationPrice = entry × (1 + trail_activate) = 100 × 1.020 = 102.0
-        assert ap == pytest.approx(102.0)
-        assert cs == "SELL"
-
-    def test_straddle_short(self):
-        s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("vr_straddle", -1, 100.0)
-        assert cr == pytest.approx(0.5)
-        # activationPrice = entry × (1 - trail_activate) = 100 × 0.980 = 98.0
-        assert ap == pytest.approx(98.0)
-        assert cs == "BUY"
-
     def test_vr_squeeze_long(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("vr_directional", 1, 200.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100 (r106: rule #8 floor)
-        # activationPrice = entry × (1 + trail_activate) = 200 × 1.040 = 208
-        assert ap == pytest.approx(208.0)
+        # activationPrice = entry × (1 + trail_activate) = 200 × 1.015 = 203
+        assert ap == pytest.approx(203.0)
         assert cs == "SELL"
 
     def test_ma_cluster_short(self):
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("ma_cluster", -1, 50.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100 (r106: rule #8 floor)
-        # activationPrice = entry × (1 - trail_activate) = 50 × 0.98 = 49
-        assert ap == pytest.approx(49.0)
+        # activationPrice = entry × (1 - trail_activate) = 50 × 0.99 = 49.5
+        assert ap == pytest.approx(49.5)
         assert cs == "BUY"
-
-    def test_callback_rate_clamp_min(self):
-        """callbackRate floor is 0.5 (rule #8: callbackRate >= 0.5%)."""
-        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
-
-        cfg = VolStraddleConfig(trail_server_native=True)
-        # Bypass validator to simulate a sub-floor value reaching brackets.py clamp
-        object.__setattr__(cfg, "s_trail_distance", 0.001)
-        s = _build_vs_scalper(vs_config=cfg)
-        cr, _, _ = s._get_trail_params("vr_straddle", 1, 100.0)
-        assert cr == 0.5  # 0.001 * 100 = 0.1 → clamped to 0.5 (rule #8)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -265,7 +236,7 @@ class TestTrailAtEntry:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
         )
 
         pos = s.strategy._positions["TESTUSDT:LONG"]
@@ -289,7 +260,7 @@ class TestTrailAtEntry:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
         )
 
         pos = s.strategy._positions["TESTUSDT:LONG"]
@@ -306,10 +277,10 @@ class TestTrailAtEntry:
         # The positions.py code at L405-460 checks vs_config.trail_server_native
         # and calls _place_trailing_stop_market + skips _place_server_take_profit.
         # We verify by checking the trail params calculation works correctly.
-        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
+        cr, ap, cs = s._get_trail_params("vr_directional", 1, 100.0)
         assert cr == pytest.approx(0.5)
-        # activationPrice = entry × (1 + trail_activate) = 100 × 1.020 = 102.0
-        assert ap == pytest.approx(102.0)
+        # activationPrice = entry × (1 + trail_activate) = 100 × 1.015 = 101.5
+        assert ap == pytest.approx(101.5)
         assert cs == "SELL"
 
 
@@ -360,7 +331,7 @@ class TestClientTrailSuppression:
             trail_active=True,
             peak_gain=0.025,  # 2.5%
             worst_pnl=-0.001,
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
             sl=0.015,
         )
 
@@ -383,7 +354,7 @@ class TestClientTrailSuppression:
             trail_active=True,
             peak_gain=0.025,  # 2.5%
             worst_pnl=-0.001,
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
             sl=0.015,
         )
 
@@ -413,7 +384,6 @@ class TestReconTrailFill:
             "TESTUSDT:LONG",
             server_trail_order_id="77777",
             server_sl_order_id="sl_111",
-            is_straddle=False,
         )
 
         # Mock trail order check → FILLED (regular API)
@@ -445,7 +415,6 @@ class TestReconTrailFill:
             s,
             "TESTUSDT:LONG",
             server_trail_order_id="77777",
-            is_straddle=False,
         )
 
         s._check_trail_regular = MagicMock(return_value=None)
@@ -464,7 +433,6 @@ class TestReconTrailFill:
             s,
             "TESTUSDT:LONG",
             server_trail_order_id="77777",
-            is_straddle=False,
         )
 
         # Trail reports FINISHED but with zero fill
@@ -495,7 +463,6 @@ class TestReconTrailFill:
             s,
             "TESTUSDT:LONG",
             server_trail_order_id="77777",
-            is_straddle=False,
         )
         # Entry-time placement: repair regardless of trail_active
 
@@ -528,8 +495,7 @@ class TestTrailBracketRepair:
             "TESTUSDT:LONG",
             server_trail_order_id=None,
             server_sl_order_id="sl_111",
-            strategy_type="vr_straddle",
-            is_straddle=False,
+            strategy_type="vr_directional",
         )
         # Entry-time placement: trail repaired regardless of trail_active
 
@@ -559,8 +525,7 @@ class TestTrailBracketRepair:
             "TESTUSDT:LONG",
             server_trail_order_id=None,
             server_sl_order_id="sl_111",
-            strategy_type="vr_straddle",
-            is_straddle=False,
+            strategy_type="vr_directional",
         )
         # trail_active is False — trail should STILL be placed (future activationPrice)
 
@@ -585,7 +550,6 @@ class TestTrailBracketRepair:
             "TESTUSDT:LONG",
             server_trail_order_id="trail_77777",
             server_sl_order_id="sl_111",
-            is_straddle=False,
         )
 
         s._check_order_filled = MagicMock(return_value=None)
@@ -653,7 +617,7 @@ class TestStatePersistence:
             sl=0.015,
             tp=0.05,
             tf="15m",
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
         )
 
         pos_key = "TESTUSDT:LONG"
@@ -665,73 +629,6 @@ class TestStatePersistence:
 # ══════════════════════════════════════════════════════════════════════════
 # Straddle: independent trail per leg
 # ══════════════════════════════════════════════════════════════════════════
-
-
-class TestStraddleIndependentTrails:
-    def test_each_leg_has_own_trail(self):
-        """LONG and SHORT legs should each have their own trail order."""
-        s = _build_trail_scalper()
-        _inject_position(
-            s,
-            "TESTUSDT:LONG",
-            server_trail_order_id="trail_11111",
-            signal=1,
-        )
-        _inject_position(
-            s,
-            "TESTUSDT:SHORT",
-            server_trail_order_id="trail_22222",
-            signal=-1,
-            position_side="SHORT",
-        )
-
-        long_trail = s.strategy._positions["TESTUSDT:LONG"]["server_trail_order_id"]
-        short_trail = s.strategy._positions["TESTUSDT:SHORT"]["server_trail_order_id"]
-
-        assert long_trail == "trail_11111"
-        assert short_trail == "trail_22222"
-        assert long_trail != short_trail
-
-    def test_trail_fill_one_leg_preserves_other(self):
-        """When one leg's trail fires, the other leg should be unaffected."""
-        s = _build_trail_scalper()
-        s.paper_mode = False
-        _inject_position(
-            s,
-            "TESTUSDT:LONG",
-            server_trail_order_id="trail_11111",
-            server_sl_order_id="sl_long",
-            is_straddle=True,
-            straddle_pair_id="pair_1",
-        )
-        _inject_position(
-            s,
-            "TESTUSDT:SHORT",
-            server_trail_order_id="trail_22222",
-            server_sl_order_id="sl_short",
-            signal=-1,
-            position_side="SHORT",
-            is_straddle=True,
-            straddle_pair_id="pair_1",
-        )
-
-        # LONG trail fires
-        def mock_trail_check(sym, oid):
-            if oid == "trail_11111":
-                return {"status": "FILLED", "avgPrice": "102.0", "executedQty": "30.0", "orderId": 11111}
-            return None  # Not filled
-
-        s._check_trail_regular = MagicMock(side_effect=mock_trail_check)
-        s._check_order_filled = MagicMock(return_value=None)
-        s._cancel_server_stop_loss = MagicMock(return_value=True)
-        s._record_server_fill = MagicMock()
-
-        s._sync_server_orders()
-
-        # SHORT leg should still exist
-        assert "TESTUSDT:SHORT" in s.strategy._positions
-        # SHORT trail should still be intact
-        assert s.strategy._positions["TESTUSDT:SHORT"]["server_trail_order_id"] == "trail_22222"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -879,7 +776,6 @@ class TestTrailCrossCancel:
             server_trail_order_id="77777",
             server_sl_order_id="sl_111",
             server_tp_order_id="tp_222",
-            is_straddle=False,
         )
 
         # SL fires
@@ -910,7 +806,6 @@ class TestTrailCrossCancel:
             server_trail_order_id="77777",
             server_sl_order_id="sl_111",
             server_tp_order_id="tp_222",
-            is_straddle=False,
         )
 
         # SL/TP not filled
@@ -937,12 +832,6 @@ class TestTrailCrossCancel:
 
 class TestCallbackRateBounds:
     """Test callbackRate edge values from _get_trail_params."""
-
-    def test_straddle_callback_rate(self):
-        """s_trail_distance=0.005 → callbackRate=0.5."""
-        s = _build_trail_scalper()
-        cr, ap, cs = s._get_trail_params("vr_straddle", 1, 100.0)
-        assert cr == pytest.approx(0.5, abs=0.01)  # 0.005 * 100 = 0.5
 
     def test_vr_squeeze_callback_rate(self):
         """d_trail_distance=0.005 → callbackRate=0.5 (r106: rule #8 floor)."""
@@ -1170,7 +1059,7 @@ class TestPaperTrailClientSideFallback:
             trail_active=True,
             peak_gain=0.025,
             server_trail_order_id=None,
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
             sl=0.015,
         )
 
@@ -1191,7 +1080,7 @@ class TestPaperTrailClientSideFallback:
             trail_active=True,
             peak_gain=0.025,
             server_trail_order_id="trail_9999001",
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
             sl=0.015,
         )
 
@@ -1212,7 +1101,7 @@ class TestPaperTrailClientSideFallback:
             trail_active=True,
             peak_gain=0.025,
             server_trail_order_id=None,
-            strategy_type="vr_straddle",
+            strategy_type="vr_directional",
             sl=0.015,
         )
 

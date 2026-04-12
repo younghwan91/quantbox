@@ -10,10 +10,7 @@ Verifies:
 6. Algo API params (algoType=CONDITIONAL, triggerPrice, etc.)
 """
 
-from unittest.mock import MagicMock, patch, call
-import pytest
-
-from quantbox.core.config import Config
+from unittest.mock import MagicMock, patch
 
 
 # ─────────────────────────── Fixtures ──────────────────────────────

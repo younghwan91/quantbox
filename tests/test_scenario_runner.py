@@ -16,7 +16,6 @@ pytest로 실행 가능. 바이낸스 API 불필요.
   7. MFE/MAE tracking: 생애 극값 정확성
 """
 
-import numpy as np
 import pytest
 
 from quantbox.strategy.vol_straddle.strategy import VolStraddleStrategy
@@ -641,9 +640,9 @@ class TestExitPriority:
         pos_key = _open_ma_cluster(strategy, signal=1, entry_price=100.0)
         sl_pct = cfg.ma_cluster_sl  # 2%
 
-        # Bar that hits SL but NOT trail_activate (price rises 1.5%, below ma_cluster_trail_activate=2%)
+        # Bar that hits SL but NOT trail_activate (price rises 0.5%, below ma_cluster_trail_activate=1%)
         sl_low = 100.0 * (1.0 - sl_pct) - 1.0  # 97 — breaches SL
-        below_trail_high = 100.0 * 1.015  # 101.5 — 1.5% gain, below ma_cluster_trail_activate (2%, r75)
+        below_trail_high = 100.0 * 1.005  # 100.5 — 0.5% gain, below ma_cluster_trail_activate (1%)
         reason = _tick(strategy, pos_key, sl_low, high=below_trail_high, low=sl_low)
         assert reason == "stop_loss", f"Expected stop_loss when trail not active, got {reason}"
 

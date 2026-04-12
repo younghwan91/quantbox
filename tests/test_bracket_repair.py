@@ -11,7 +11,7 @@ Bug #12: Limit chaser partial fills on NO_POSITION
 Bug #13: Recursion guard on force close
 """
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
@@ -30,7 +30,7 @@ class TestWouldTriggerAtEntry:
     'WOULD_TRIGGER' during _open_position, it must be stored as None."""
 
     def _make_vs(self, paper=False):
-        """Vol_straddle scalper with trail_server_native=False so TP is placed."""
+        """Scalper with trail_server_native=False so TP is placed."""
         vs_cfg = VolStraddleConfig(trail_server_native=False, hedge_mode=False)
         scalper = _make_vs_scalper(vs_config=vs_cfg, paper=paper)
         _set_signal_meta(scalper)
@@ -418,7 +418,6 @@ class TestSaveStateOnServerFill:
         scalper._sync_server_orders = MagicMock()
         scalper._process_bot_commands = MagicMock()
 
-        import time as _time
         from datetime import datetime, timezone, timedelta
 
         # Make _next_bar_time return something in the past so the loop exits
@@ -515,7 +514,7 @@ class TestForceCloseRecursionGuard:
             server_tp_order_id=None,
         )
 
-        result = scalper._close_position("BNBUSDT", "stop_loss", 290.0)
+        scalper._close_position("BNBUSDT", "stop_loss", 290.0)
 
         # Should have recursed and eventually closed
         assert call_count[0] == 2
@@ -529,7 +528,6 @@ class TestForceCloseRecursionGuard:
 from quantbox.core.limit_chaser import (
     ChaseConfig,
     ChaseFillStatus,
-    ChaseResult,
     LimitOrderChaser,
 )
 
@@ -588,7 +586,6 @@ class TestLimitChaserPartialFillNoPosition:
         mock_client.futures_cancel_order.return_value = {}
 
         # Market fallback → NO_POSITION (position closed between orders)
-        original_market_fallback = chaser._market_fallback
         chaser._market_fallback = MagicMock(return_value="NO_POSITION")
 
         result = chaser.chase_limit_order(

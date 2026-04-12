@@ -20,20 +20,20 @@ ZERO LOOKAHEAD:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 
-from quantbox.core.strategy_names import MA_CLUSTER, VR_DIRECTIONAL, VR_STRADDLE
+from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.strategy.vol_straddle.signals import (
+    check_donchian_breakout,
     check_ma_cluster,
     compute_momentum,
     compute_sma,
-    compute_squeeze_dur,
     compute_vr,
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
     resample_ohlcv,
@@ -97,6 +97,8 @@ class VolStraddleStrategy:
         # so only the cooldown flag needs per-symbol state.
         # in_cooldown: True after signal fired, reset when cluster dissolves.
         self._ma_cluster_cooldown: dict[str, np.ndarray] = {}  # 1-elem array for numba
+        self._donchian_cooldown: dict[str, np.ndarray] = {}  # 1-elem int64 array for numba (countdown)
+        self._donchian_last_4h_epoch: dict[str, int] = {}  # Track 4h epoch to gate on new bars
 
         # ── MA Cluster scan state (populated every scan, even when no signal) ──
         # Used by scalper to produce "MA Cluster monitor" line parallel to
@@ -105,14 +107,9 @@ class VolStraddleStrategy:
         #   'cooldown', 'no_breakout', 'momentum_fail', 'fired'
         self._ma_cluster_state: dict[str, dict] = {}
 
-        # ── Straddle rollback cooldown (per-symbol cycle counter) ──
-        # After a half-open rollback, skip this symbol for N cycles
-        # to prevent the LONG-open → SHORT-fail → rollback loop.
-        self._straddle_rollback_cooldown: dict[str, int] = {}
-
         # ── Signal source tracking (populated by on_bar for each symbol) ──
         # Allows scalper to apply strategy-specific gates after on_bar returns.
-        # Values: 'vr_directional' | 'vr_straddle' | 'ma_cluster' | 'none'
+        # Values: 'vr_directional' | 'ma_cluster' | 'donchian' | 'none'
         self._last_signal_source: dict[str, str] = {}
 
     # ══════════════════════════════════════════════════════════════════
@@ -145,7 +142,6 @@ class VolStraddleStrategy:
         Returns:
             +1 (long), -1 (short), or 0 (no signal).
         """
-        self._current_symbol = symbol
         cfg = self.config
 
         # Store BTC close for C2 conviction condition
@@ -153,18 +149,7 @@ class VolStraddleStrategy:
             self._btc_close = btc_close
 
         # Per-symbol dedup: no signal when position already open
-        # In straddle mode, both legs open simultaneously from one signal,
-        # so if ANY leg exists we skip (no incremental straddle adds).
         if self.has_position(symbol):
-            return 0
-
-        # Straddle rollback cooldown: skip symbol for N cycles after
-        # a half-open rollback to prevent LONG→SHORT-fail→rollback loop.
-        remaining = self._straddle_rollback_cooldown.get(symbol, 0)
-        if remaining > 0:
-            self._straddle_rollback_cooldown[symbol] = remaining - 1
-            if remaining == 1:
-                logger.info(f"[{symbol}] Straddle rollback cooldown expired")
             return 0
 
         high_15m = self._high_data.get(symbol)
@@ -195,6 +180,7 @@ class VolStraddleStrategy:
                     data_4h["high"],
                     data_4h["low"],
                     "4h",
+                    symbol=symbol,
                 )
                 if sig_4h != 0:
                     self._last_signal_source[symbol] = VR_DIRECTIONAL
@@ -207,7 +193,7 @@ class VolStraddleStrategy:
             if min_len >= 4 * (cfg.warmup_1h + 1):
                 c1h, h1h, l1h, v1h = resample_ohlcv(c15, h15, l15, v15, 4)
                 if len(c1h) >= cfg.warmup_1h + 1:
-                    sig_1h = self._check_tf_signal(c1h, h1h, l1h, "1h")
+                    sig_1h = self._check_tf_signal(c1h, h1h, l1h, "1h", symbol=symbol)
                     if sig_1h != 0:
                         self._last_signal_source[symbol] = VR_DIRECTIONAL
                         return sig_1h
@@ -217,14 +203,14 @@ class VolStraddleStrategy:
             if min_len >= 2 * (cfg.warmup_30m + 1):
                 c30, h30, l30, v30 = resample_ohlcv(c15, h15, l15, v15, 2)
                 if len(c30) >= cfg.warmup_30m + 1:
-                    sig_30m = self._check_tf_signal(c30, h30, l30, "30m")
+                    sig_30m = self._check_tf_signal(c30, h30, l30, "30m", symbol=symbol)
                     if sig_30m != 0:
                         self._last_signal_source[symbol] = VR_DIRECTIONAL
                         return sig_30m
 
         # 15m: direct from downloaded data
         if cfg.enable_15m:
-            sig_15m = self._check_tf_signal(c15, h15, l15, "15m")
+            sig_15m = self._check_tf_signal(c15, h15, l15, "15m", symbol=symbol)
             if sig_15m != 0:
                 self._last_signal_source[symbol] = VR_DIRECTIONAL
                 return sig_15m
@@ -245,6 +231,15 @@ class VolStraddleStrategy:
                     self._last_signal_source[symbol] = MA_CLUSTER
                     return sig_ma
 
+        # ── Donchian Channel Breakout (4h, lowest priority) ──
+        # Checked AFTER VR and MA Cluster: fires when both are idle.
+        # Uses directly-fetched 4h OHLCV data (including volume).
+        if cfg.donchian_enabled and symbol in self._htf_4h:
+            sig_don = self._check_donchian_signal(symbol)
+            if sig_don != 0:
+                self._last_signal_source[symbol] = DONCHIAN
+                return sig_don
+
         self._last_signal_source[symbol] = "none"
         return 0
 
@@ -254,16 +249,13 @@ class VolStraddleStrategy:
         high: np.ndarray,
         low: np.ndarray,
         tf: str,
+        symbol: str = "",
     ) -> int:
         """Check VR compression signal for a single timeframe.
 
         Returns:
-            +1 (long), -1 (short), 2 (straddle), or 0 (no signal).
+            +1 (long), -1 (short), or 0 (no signal).
         Stores signal metadata for the scalper to query.
-
-        Signal priority: S_d8 straddle (signal=2) > D_mom8 directional.
-        S_d8 requires sustained squeeze (duration ≥ min_dur), so it fires
-        LATER than D_mom8. They don't compete in practice.
 
         CRITICAL CHECK: Only fires on the LAST bar (current bar close).
         Previous bars are used for VR computation but not for entry.
@@ -279,84 +271,16 @@ class VolStraddleStrategy:
 
         # Store last VR for debug logging (even if no signal)
         vr_val = float(vr[-1]) if len(vr) > 0 and not np.isnan(vr[-1]) else 999.0
-        self._last_vr[self._current_symbol] = vr_val
+        self._last_vr[symbol] = vr_val
         # Store per-TF VR
         if tf == "15m":
-            self._last_vr_15m[self._current_symbol] = vr_val
+            self._last_vr_15m[symbol] = vr_val
         elif tf == "30m":
-            self._last_vr_30m[self._current_symbol] = vr_val
+            self._last_vr_30m[symbol] = vr_val
         elif tf == "1h":
-            self._last_vr_1h[self._current_symbol] = vr_val
+            self._last_vr_1h[symbol] = vr_val
         elif tf == "4h":
-            self._last_vr_4h[self._current_symbol] = vr_val
-
-        # ── S_d8 straddle check (higher priority) ──
-        # Requires sustained VR compression for min_dur bars.
-        if cfg.straddle_enabled:
-            s_sig = gen_vr_dur_signal(
-                vr,
-                cfg.s_vr_threshold,
-                cfg.s_squeeze_dur,
-                warmup,
-            )
-            if s_sig[-1] == 1:
-                # Parity audit: check if D_mom8 would also fire
-                # In R35 backtest, D and S run independently then dedup.
-                # In live, S has priority. Log overlap for monitoring.
-                d_sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
-                d_overlap = bool(d_sig[-1] == 1)
-                if d_overlap:
-                    mom = compute_momentum(close, cfg.momentum_period)
-                    d_dir = int(make_direction_momentum(d_sig, mom)[-1])
-                    logger.info(
-                        f"[{self._current_symbol}] PARITY: S_d8+D_mom8 overlap "
-                        f"TF={tf} VR={vr_val:.3f} — D would be "
-                        f"{'LONG' if d_dir == 1 else 'SHORT'} "
-                        f"(straddle takes priority)"
-                    )
-
-                # ── R34 Conviction Score ──
-                sq_dur = compute_squeeze_dur(vr, cfg.s_vr_threshold)
-                sq_dur_val = int(sq_dur[-1])
-                # B3: For S_d8, check if D_mom8 would also fire
-                score, cond = self._compute_conviction_score(
-                    close,
-                    vr,
-                    tf,
-                    is_straddle=True,
-                    d_overlap=d_overlap,
-                    squeeze_dur=sq_dur_val,
-                )
-
-                # Min conviction filter (T3-Triple mode)
-                if cfg.cw_enabled and score < cfg.min_conviction_score:
-                    logger.info(
-                        f"[{self._current_symbol}] S_d8 BLOCKED: "
-                        f"conviction={score} < min={cfg.min_conviction_score} "
-                        f"TF={tf} {cond} VR={vr_val:.3f}"
-                    )
-                    # Don't return — fall through to D_mom8 check
-                else:
-                    self._last_signal_meta[self._current_symbol] = {
-                        "tf": tf,
-                        "sl": cfg.s_sl,
-                        "tp": cfg.s_tp,
-                        "max_hold": cfg.get_max_hold(tf) * _TF_TO_15M.get(tf, 1),
-                        "vr": vr_val,
-                        "momentum": 0.0,
-                        "straddle": True,
-                        "strategy_type": VR_STRADDLE,
-                        "d_overlap": d_overlap,
-                        "conviction_score": score,
-                        "conviction_cond": cond,
-                    }
-                    logger.info(
-                        f"[{self._current_symbol}] S_d8 straddle signal "
-                        f"TF={tf} VR={vr_val:.3f} conviction={score}/4 "
-                        f"{cond} "
-                        f"(threshold={cfg.s_vr_threshold})"
-                    )
-                    return 2  # Straddle signal
+            self._last_vr_4h[symbol] = vr_val
 
         # ── D_mom8: VR < threshold → directional entry ──
         sig = gen_vr_signal(vr, cfg.d_vr_threshold, warmup)
@@ -375,44 +299,30 @@ class VolStraddleStrategy:
 
         # ── F5: TBR z-score Gate (R46 validated, D_mom8 only) ──
         if self.config.f5_tbr_enabled:
-            tbr_z = self._compute_tbr_zscore(self._current_symbol)
+            tbr_z = self._compute_tbr_zscore(symbol)
             is_long = direction == 1
             blocked = (is_long and tbr_z > self.config.f5_tbr_z_threshold) or (
                 not is_long and tbr_z < -self.config.f5_tbr_z_threshold
             )
             if blocked:
                 logger.info(
-                    f"[{self._current_symbol}] D_mom8 BLOCKED by F5-TBR: "
+                    f"[{symbol}] D_mom8 BLOCKED by F5-TBR: "
                     f"tbr_z={tbr_z:.3f} thresh={self.config.f5_tbr_z_threshold} "
                     f"dir={'LONG' if is_long else 'SHORT'} TF={tf}"
                 )
                 return 0
 
         # ── R34 Conviction Score for D_mom8 ──
-        # B3: Check if S_d8 would also fire (reverse overlap)
-        s_overlap = False
-        if cfg.straddle_enabled and cfg.b3_enabled:
-            s_sig = gen_vr_dur_signal(
-                vr,
-                cfg.s_vr_threshold,
-                cfg.s_squeeze_dur,
-                warmup,
-            )
-            s_overlap = bool(s_sig[-1] == 1)
-
         score, cond = self._compute_conviction_score(
             close,
             vr,
             tf,
-            is_straddle=False,
-            d_overlap=s_overlap,  # B3: S would also fire
-            squeeze_dur=0,  # Not relevant for D_mom8
         )
 
         # Min conviction filter (T3-Triple mode)
         if cfg.cw_enabled and score < cfg.min_conviction_score:
             logger.info(
-                f"[{self._current_symbol}] D_mom8 BLOCKED: "
+                f"[{symbol}] D_mom8 BLOCKED: "
                 f"conviction={score} < min={cfg.min_conviction_score} "
                 f"TF={tf} {cond} VR={vr_val:.3f}"
             )
@@ -421,7 +331,7 @@ class VolStraddleStrategy:
         # Store metadata for scalper to query after on_bar
         # (which TF, SL/TP, max_hold for this specific signal)
         mom_val = float(mom[-1])
-        self._last_signal_meta[self._current_symbol] = {
+        self._last_signal_meta[symbol] = {
             "tf": tf,
             "sl": cfg.d_sl,
             "tp": cfg.d_tp,
@@ -432,15 +342,12 @@ class VolStraddleStrategy:
             "conviction_cond": cond,
         }
         logger.info(
-            f"[{self._current_symbol}] D_mom8 signal "
+            f"[{symbol}] D_mom8 signal "
             f"TF={tf} VR={vr_val:.3f} {'LONG' if direction == 1 else 'SHORT'} "
             f"mom={mom_val:.6f} conviction={score}/4 {cond} "
             f"(threshold={cfg.d_vr_threshold})"
         )
         return direction
-
-    # Track current symbol for signal metadata storage
-    _current_symbol: str = ""
 
     # ══════════════════════════════════════════════════════════════════
     #  MA Cluster Squeeze Signal (R44d V17)
@@ -607,6 +514,99 @@ class VolStraddleStrategy:
         return sig
 
     # ══════════════════════════════════════════════════════════════════
+    #  Donchian Channel Breakout + Volume Spike (4h)
+    # ══════════════════════════════════════════════════════════════════
+
+    def _check_donchian_signal(self, symbol: str) -> int:
+        """Check Donchian channel breakout signal on 4h data.
+
+        50-bar Donchian channel breakout with volume spike (2.5× SMA20)
+        confirmation. Fixed N-bar cooldown after signal fires.
+
+        ZERO LOOKAHEAD:
+          - Channel computed on completed 4h bars only (excludes current bar).
+          - Volume SMA excludes current bar.
+          - Signal fires on the LAST completed bar.
+
+        Args:
+            symbol: Trading symbol.
+
+        Returns:
+            +1 (long breakout), -1 (short breakout), or 0 (no signal).
+        """
+        cfg = self.config
+        data_4h = self._htf_4h.get(symbol)
+        if data_4h is None:
+            return 0
+
+        close_4h = data_4h.get("close")
+        high_4h = data_4h.get("high")
+        low_4h = data_4h.get("low")
+        volume_4h = data_4h.get("volume")
+
+        if close_4h is None or high_4h is None or low_4h is None or volume_4h is None:
+            return 0
+
+        min_needed = max(cfg.donchian_lookback, cfg.donchian_vol_sma) + 2
+        if len(close_4h) < min_needed:
+            return 0
+
+        # Gate: only evaluate when a NEW 4h bar has arrived.
+        # on_bar() is called every 15m, but Donchian operates on 4h bars.
+        # Without this gate, cooldown_arr would decrement every 15m (16x too fast).
+        # Uses UTC 4h epoch (changes at 00:00/04:00/08:00/12:00/16:00/20:00 UTC).
+        cur_4h_epoch = int(time.time()) // (4 * 3600)
+        last_4h_epoch = self._donchian_last_4h_epoch.get(symbol, 0)
+        if cur_4h_epoch == last_4h_epoch:
+            return 0  # Same 4h bar as last check — skip
+        self._donchian_last_4h_epoch[symbol] = cur_4h_epoch
+
+        # Initialize per-symbol cooldown if needed
+        if symbol not in self._donchian_cooldown:
+            self._donchian_cooldown[symbol] = np.zeros(1, dtype=np.int64)
+
+        cooldown_arr = self._donchian_cooldown[symbol]
+
+        sig = check_donchian_breakout(
+            close_4h,
+            high_4h,
+            low_4h,
+            volume_4h,
+            cfg.donchian_lookback,
+            cfg.donchian_vol_sma,
+            cfg.donchian_vol_mult,
+            cfg.donchian_breakout_pct,
+            cooldown_arr,
+            cfg.donchian_cooldown_bars,
+        )
+
+        if sig != 0:
+            mom_val = 0.0
+            if len(close_4h) > cfg.momentum_period:
+                mom = compute_momentum(close_4h, cfg.momentum_period)
+                if len(mom) > 0 and not np.isnan(mom[-1]):
+                    mom_val = float(mom[-1])
+
+            self._last_signal_meta[symbol] = {
+                "tf": "4h",
+                "sl": cfg.donchian_sl,
+                "tp": cfg.donchian_tp,
+                "max_hold": cfg.donchian_max_hold_4h * _TF_TO_15M["4h"],
+                "vr": 0.0,
+                "momentum": mom_val,
+                "strategy_type": DONCHIAN,
+                "leverage_override": cfg.donchian_leverage,
+            }
+            logger.info(
+                f"[{symbol}] DONCHIAN signal "
+                f"TF=4h {'LONG' if sig == 1 else 'SHORT'} "
+                f"lookback={cfg.donchian_lookback} vol_mult={cfg.donchian_vol_mult} "
+                f"SL={cfg.donchian_sl * 100:.1f}% "
+                f"leverage={cfg.donchian_leverage:.0f}x"
+            )
+        return sig
+
+    # ══════════════════════════════════════════════════════════════════
     #  Conviction Score (R34 CW-Tier)
     # ══════════════════════════════════════════════════════════════════
 
@@ -615,8 +615,7 @@ class VolStraddleStrategy:
         close: np.ndarray,
         vr: np.ndarray,
         tf: str,
-        is_straddle: bool,
-        d_overlap: bool,
+        d_overlap: bool = False,
         squeeze_dur: int = 0,
     ) -> tuple[int, dict[str, bool]]:
         """Compute conviction score (0-4) from R34 conditions.
@@ -624,16 +623,15 @@ class VolStraddleStrategy:
         Conditions:
             E2: SMA Proximity — |close - SMA(N)| / SMA(N) < threshold
             C2: BTC Neutral — |BTC momentum(8)| < threshold
-            B3: Confluence — both D_mom8 and S_d8 would fire
-            A3: Quality+ — D: VR < deep threshold; S: duration ≥ long dur
+            B3: Confluence — reserved (always False, never fires)
+            A3: Quality+ — VR < deep threshold
 
         Args:
             close: Close prices for this timeframe.
             vr: VR array for this timeframe.
             tf: Timeframe label ('15m', '1h', '4h').
-            is_straddle: True if S_d8 signal, False if D_mom8.
-            d_overlap: True if both D and S would fire simultaneously.
-            squeeze_dur: Current squeeze duration (for S_d8 A3 check).
+            d_overlap: Deprecated, always False.
+            squeeze_dur: Deprecated, unused.
 
         Returns:
             Tuple of (score, condition_details_dict).
@@ -666,27 +664,15 @@ class VolStraddleStrategy:
                     conditions["c2_btc"] = True
                     score += 1
 
-        # ── B3: Confluence (both D_mom8 and S_d8 would fire) ──
-        if cfg.b3_enabled:
-            if d_overlap:
-                # When S_d8 fires: d_overlap was checked in _check_tf_signal
-                # When D_mom8 fires: we need to check if S_d8 would also fire
-                conditions["b3_confluence"] = True
-                score += 1
+        # ── B3: Confluence (reserved — always False) ──
 
         # ── A3: Quality+ ──
         if cfg.a3_enabled:
             vr_val = float(vr[-1]) if not np.isnan(vr[-1]) else 999.0
-            if is_straddle:
-                # S_d8: extended squeeze duration
-                if squeeze_dur >= cfg.a3_long_squeeze_dur:
-                    conditions["a3_quality"] = True
-                    score += 1
-            else:
-                # D_mom8: extra deep VR compression
-                if vr_val < cfg.a3_deep_vr_threshold:
-                    conditions["a3_quality"] = True
-                    score += 1
+            # D_mom8: extra deep VR compression
+            if vr_val < cfg.a3_deep_vr_threshold:
+                conditions["a3_quality"] = True
+                score += 1
 
         return score, conditions
 
@@ -787,9 +773,8 @@ class VolStraddleStrategy:
         """Check if position should be closed.
 
         Directional trades: SL → Trailing Stop → Hard TP (R43 validated).
-        Straddle trades: unchanged SL/TP/max_hold exit.
 
-        Trailing stop (directional only):
+        Trailing stop:
         - Before trail_activate: fixed SL only.
         - After best_gain >= trail_activate: trail at peak - distance.
         - Hard TP at d_tp (12%) as safety ceiling.
@@ -839,18 +824,8 @@ class VolStraddleStrategy:
             pos["worst_pnl"] = worst_gain
 
         # ── Select trail params based on position type ──
-        is_straddle = pos.get("is_straddle", False)
         strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
-        if is_straddle:
-            # r53 Option A: per-leg trailing for S_d8 straddle
-            trail_activate = self.config.s_trail_activate
-            trail_distance = self.config.s_trail_distance
-        elif strategy_type == MA_CLUSTER:
-            trail_activate = self.config.ma_cluster_trail_activate
-            trail_distance = self.config.ma_cluster_trail_distance
-        else:
-            trail_activate = self.config.d_trail_activate
-            trail_distance = self.config.d_trail_distance
+        trail_activate, trail_distance = self.config.get_trail_params(strategy_type)
 
         # Update peak gain tracking
         peak_gain = pos.get("peak_gain", 0.0)
@@ -923,34 +898,6 @@ class VolStraddleStrategy:
             )
             return "max_hold"
 
-        return None
-
-    def _exit_simple(
-        self,
-        pos: dict,
-        symbol: str,
-        worst_gain: float,
-        best_gain: float,
-        sl_pct: float,
-        tp_pct: float,
-        max_hold: int,
-    ) -> str | None:
-        """Simple SL/TP/max_hold exit for straddle legs."""
-        if worst_gain <= -sl_pct:
-            logger.info(
-                f"[{symbol}] SL hit: worst_gain={worst_gain * 100:+.3f}% "
-                f"vs SL={sl_pct * 100:.1f}% bars={pos['bars_held']}"
-            )
-            return "stop_loss"
-        if best_gain >= tp_pct:
-            logger.info(
-                f"[{symbol}] TP hit: best_gain={best_gain * 100:+.3f}% "
-                f"vs TP={tp_pct * 100:.1f}% bars={pos['bars_held']}"
-            )
-            return "target"
-        if pos["bars_held"] >= max_hold:
-            logger.info(f"[{symbol}] Max hold reached: bars={pos['bars_held']}/{max_hold}")
-            return "max_hold"
         return None
 
     # ══════════════════════════════════════════════════════════════════
@@ -1037,8 +984,7 @@ class VolStraddleStrategy:
             "tp": tp,
             "tf": tf,
             "max_hold": max_hold,
-            "is_straddle": kwargs.get("is_straddle", False),
-            "straddle_pair_id": kwargs.get("straddle_pair_id", None),
+            "straddle_pair_id": kwargs.get("straddle_pair_id", None),  # Legacy (kept for DB compat)
             "strategy_type": kwargs.get("strategy_type", meta.get("strategy_type", VR_DIRECTIONAL)),
             # Balance at open time (for trade record accuracy)
             "balance_before": kwargs.get("balance_before"),
@@ -1129,6 +1075,7 @@ class VolStraddleStrategy:
         close_4h: np.ndarray,
         high_4h: np.ndarray | None = None,
         low_4h: np.ndarray | None = None,
+        volume_4h: np.ndarray | None = None,
     ) -> None:
         """Store 4h OHLCV data for multi-TF VR computation.
 
@@ -1141,6 +1088,7 @@ class VolStraddleStrategy:
             close_4h: 4h close prices.
             high_4h: 4h high prices (optional).
             low_4h: 4h low prices (optional).
+            volume_4h: 4h volume (optional, needed for Donchian volume spike).
         """
         if high_4h is not None and low_4h is not None:
             self._htf_4h[symbol] = {
@@ -1148,6 +1096,8 @@ class VolStraddleStrategy:
                 "high": high_4h,
                 "low": low_4h,
             }
+            if volume_4h is not None:
+                self._htf_4h[symbol]["volume"] = volume_4h
         else:
             # Without high/low, we can't compute VR on raw 4h data.
             # Fall back to resampled 15m data in on_bar.

@@ -14,8 +14,6 @@ Coverage:
 from __future__ import annotations
 
 import sys
-from collections import defaultdict
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +24,6 @@ sys.path.insert(0, str(ROOT))
 
 from research.active.r51_r60.r58_n_expansion_v2 import (
     COST_DIRECTIONAL,
-    COST_STRADDLE,
     D_SL,
     D_TRAIL_ACT,
     D_TRAIL_DIST,
@@ -36,10 +33,6 @@ from research.active.r51_r60.r58_n_expansion_v2 import (
     EXTRA_SYMS_3YR,
     G_4TF,
     MAX_CONC,
-    S_DUR,
-    S_SL,
-    S_TP,
-    S_VR,
     TF_30m,
     VR_KEY,
     VR_LN,
@@ -116,7 +109,7 @@ class TestConfigParity:
     """All r58 params must come from VolStraddleConfig."""
 
     def test_d_trail_activate(self, _cfg):
-        assert D_TRAIL_ACT == 0.040
+        assert D_TRAIL_ACT == 0.015
         assert D_TRAIL_ACT == _cfg.d_trail_activate
 
     def test_d_trail_distance(self, _cfg):
@@ -125,12 +118,6 @@ class TestConfigParity:
 
     def test_d_vr_threshold(self, _cfg):
         assert D_VR == _cfg.d_vr_threshold
-
-    def test_s_vr_threshold(self, _cfg):
-        assert S_VR == _cfg.s_vr_threshold
-
-    def test_s_squeeze_dur(self, _cfg):
-        assert S_DUR == _cfg.s_squeeze_dur
 
     def test_vr_ln(self, _cfg):
         expected = _cfg.base_leverage / _cfg.max_concurrent
@@ -143,17 +130,9 @@ class TestConfigParity:
         assert D_SL == _cfg.d_sl
         assert D_TP == _cfg.d_tp
 
-    def test_s_sl_tp(self, _cfg):
-        assert S_SL == _cfg.s_sl
-        assert S_TP == _cfg.s_tp
-
     def test_cost_directional(self):
         """COST_DIRECTIONAL is 0.08% round-trip."""
         assert abs(COST_DIRECTIONAL - 0.0008) < 1e-9
-
-    def test_cost_straddle(self):
-        """COST_STRADDLE is 0.16% round-trip."""
-        assert abs(COST_STRADDLE - 0.0016) < 1e-9
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -236,7 +215,6 @@ class TestOffset:
 
     def test_offset_zero_for_longest_symbol(self):
         """Longest symbol must have _offset=0 in load logic."""
-        from research.active.r51_r60.r58_n_expansion_v2 import _load_sym_dict
 
         # We can't test actual file loading in unit tests, but verify offset logic
         data = {

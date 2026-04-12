@@ -3,7 +3,7 @@
 Extracted from scalper.py to reduce file size and isolate concerns.
 Methods in this mixin rely on instance attributes set by RubberBandScalper.__init__:
     self.strategy         — active strategy instance
-    self.strategy_name    — 'vol_straddle' / 'rubberband'
+    self.strategy_name    — 'vol_straddle'
     self.config           — RubberBandConfig
     self.vs_config        — VolStraddleConfig
     self._cfg             — active config (vs_config or config)
@@ -137,13 +137,6 @@ class LoopMixin:
             d_trail_activate=vc.d_trail_activate,
             d_trail_distance=vc.d_trail_distance,
             min_confidence=0,
-            straddle_enabled=vc.straddle_enabled,
-            straddle_max_slots=vc.straddle_max_slots,
-            straddle_vr_threshold=vc.s_vr_threshold,
-            straddle_sl=vc.s_sl,
-            straddle_tp=vc.s_tp,
-            straddle_trail_activate=vc.s_trail_activate,
-            straddle_trail_distance=vc.s_trail_distance,
             testnet=settings.binance_testnet,
             ma_cluster_enabled=vc.ma_cluster_enabled,
             ma_cluster_pct=vc.ma_cluster_pct,
@@ -155,6 +148,15 @@ class LoopMixin:
             ma_cluster_trail_activate=vc.ma_cluster_trail_activate,
             ma_cluster_trail_distance=vc.ma_cluster_trail_distance,
             ma_cluster_leverage=vc.ma_cluster_leverage,
+            donchian_enabled=vc.donchian_enabled,
+            donchian_lookback=vc.donchian_lookback,
+            donchian_vol_mult=vc.donchian_vol_mult,
+            donchian_sl=vc.donchian_sl,
+            donchian_tp=vc.donchian_tp,
+            donchian_trail_activate=vc.donchian_trail_activate,
+            donchian_trail_distance=vc.donchian_trail_distance,
+            donchian_leverage=vc.donchian_leverage,
+            risk_per_trade=vc.risk_per_trade,
         )
         print_startup_complete(mode_str)
 

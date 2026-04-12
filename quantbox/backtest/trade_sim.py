@@ -11,12 +11,12 @@ this engine:
   3. Computes production-grade metrics (PF, EV, Calmar, etc.).
 
 Pipeline:
-    signals → sim_directional_trades / sim_straddle_trades
+    signals → sim_directional_trades
     → collect_trades (multi-TF, multi-symbol)
     → portfolio_sim (slot-filtered)
     → compute_metrics
 
-Canonical baseline for VolStraddle (VR Squeeze) strategy.
+Canonical baseline for VR Directional (D_mom8) strategy.
 Extracted from research/active/r31_r40/scaling_r38.py for reuse
 and testability.  All research scripts should import from here.
 
@@ -32,7 +32,6 @@ import numba
 from concurrent.futures import ThreadPoolExecutor
 
 from quantbox.strategy.vol_straddle.signals import (
-    gen_vr_dur_signal,
     gen_vr_signal,
     make_direction_momentum,
 )
@@ -54,7 +53,6 @@ def get_trade_sim_config() -> dict:
 
         cfg = VolStraddleConfig()
         cost_dir = cfg.round_trip_cost
-        cost_str = cfg.round_trip_cost * 2
         w15 = cfg.warmup_15m
         w30 = cfg.warmup_30m
         w1h = int(cfg.warmup_15m / 4)
@@ -64,17 +62,16 @@ def get_trade_sim_config() -> dict:
         mh1h = cfg.max_hold_1h
         mh4h = cfg.max_hold_4h
     except Exception:
-        cost_dir, cost_str = 0.0008, 0.0016
+        cost_dir = 0.0008
         w15, w30, w1h, w4h = 200, 100, 50, 13
         mh15, mh30, mh1h, mh4h = 192, 96, 48, 12
 
     return {
         "cost_directional": cost_dir,
-        "cost_straddle": cost_str,
-        "tf_15m": ("15m", 1, w15, mh15, mh15 * 2),
-        "tf_30m": ("30m", 2, w30, mh30, mh30 * 2),
-        "tf_1h": ("1h", 4, w1h, mh1h, mh1h * 2),
-        "tf_4h": ("4h", 16, w4h, mh4h, mh4h * 2),
+        "tf_15m": ("15m", 1, w15, mh15),
+        "tf_30m": ("30m", 2, w30, mh30),
+        "tf_1h": ("1h", 4, w1h, mh1h),
+        "tf_4h": ("4h", 16, w4h, mh4h),
     }
 
 
@@ -84,7 +81,6 @@ def _load_trade_sim_constants() -> tuple:
     tf15, tf30, tf1h, tf4h = c["tf_15m"], c["tf_30m"], c["tf_1h"], c["tf_4h"]
     return (
         c["cost_directional"],
-        c["cost_straddle"],
         tf15[2],
         tf30[2],
         tf1h[2],
@@ -98,7 +94,6 @@ def _load_trade_sim_constants() -> tuple:
 
 (
     _COST_DIRECTIONAL,
-    _COST_STRADDLE,
     _W15m,
     _W30m,
     _W1h,
@@ -110,7 +105,6 @@ def _load_trade_sim_constants() -> tuple:
 ) = _load_trade_sim_constants()
 
 COST_DIRECTIONAL: float = _COST_DIRECTIONAL  # 2 × round-trip (entry + exit)
-COST_STRADDLE: float = _COST_STRADDLE  # 4 sides (long + short entry/exit)
 
 # Warmup periods — bars to skip before first signal (long ATR needs data).
 WARMUP_15m: int = _W15m
@@ -118,11 +112,11 @@ WARMUP_30m: int = _W30m
 WARMUP_1h: int = _W1h
 WARMUP_4h: int = _W4h
 
-# Timeframe definitions: (label, ratio_vs_15m, warmup, max_hold_dir, max_hold_straddle)
-TF_15m = ("15m", 1, WARMUP_15m, _MH15m, _MH15m * 2)
-TF_30m = ("30m", 2, WARMUP_30m, _MH30m, _MH30m * 2)
-TF_1h = ("1h", 4, WARMUP_1h, _MH1h, _MH1h * 2)
-TF_4h = ("4h", 16, WARMUP_4h, _MH4h, _MH4h * 2)
+# Timeframe definitions: (label, ratio_vs_15m, warmup, max_hold)
+TF_15m = ("15m", 1, WARMUP_15m, _MH15m)
+TF_30m = ("30m", 2, WARMUP_30m, _MH30m)
+TF_1h = ("1h", 4, WARMUP_1h, _MH1h)
+TF_4h = ("4h", 16, WARMUP_4h, _MH4h)
 G_3TF = [TF_15m, TF_1h, TF_4h]
 G_4TF = [TF_15m, TF_30m, TF_1h, TF_4h]
 
@@ -223,22 +217,18 @@ def simulate_with_tiered_slippage(
 ) -> list[tuple[str, int, int, float]]:
     """Run collect_trades then adjust PnL by per-symbol slippage tier.
 
-    The base ``collect_trades()`` bakes in a flat cost (``COST_DIRECTIONAL``
-    or ``COST_STRADDLE``).  This function replaces that flat cost with a
-    per-symbol tiered cost by adjusting each trade's PnL:
+    The base ``collect_trades()`` bakes in a flat cost (``COST_DIRECTIONAL``).
+    This function replaces that flat cost with a per-symbol tiered cost by
+    adjusting each trade's PnL:
 
         pnl_tiered = pnl_flat - (tiered_cost - flat_cost)
-
-    For straddle trades (4 legs) the adjustment scales by 2×:
-        tiered_str_cost = 2 × get_symbol_slippage(sym, ...)
-        delta = tiered_str_cost - COST_STRADDLE
 
     Args:
         cfg: Strategy config dict (same as collect_trades).
         data_15m: 15m OHLCV data dict.
         data_1h: 1h OHLCV data dict.
         data_4h: 4h OHLCV data dict.
-        strat: "D_mom8" or "S_d8".
+        strat: "D_mom8".
         mode: "flat" (unchanged), "tiered" (per-symbol), or
               "conservative" (tiered + 50% buffer).
 
@@ -253,15 +243,13 @@ def simulate_with_tiered_slippage(
     if mode == "flat":
         return trades
 
-    is_straddle = strat == "S_d8"
     conservative = mode == "conservative"
-    flat_cost = COST_STRADDLE if is_straddle else COST_DIRECTIONAL
+    flat_cost = COST_DIRECTIONAL
 
     adjusted: list[tuple[str, int, int, float]] = []
     for sym, entry, exit_b, pnl in trades:
         sym_dir_cost = get_symbol_slippage(sym, conservative=conservative)
-        tiered_cost = sym_dir_cost * 2 if is_straddle else sym_dir_cost
-        delta = tiered_cost - flat_cost
+        delta = sym_dir_cost - flat_cost
         adjusted.append((sym, entry, exit_b, pnl - delta))
     return adjusted
 
@@ -269,96 +257,6 @@ def simulate_with_tiered_slippage(
 # ══════════════════════════════════════════════════════════════════════════════
 #  Numba-Compiled Trade Simulators
 # ══════════════════════════════════════════════════════════════════════════════
-
-
-@numba.jit(nopython=True, cache=True)
-def sim_straddle_trades(
-    close: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    sig: np.ndarray,
-    sl: float,
-    tp: float,
-    max_hold: int,
-    cost: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Simulate straddle (long+short simultaneous) trades with SL/TP.
-
-    Opens both long and short at the trigger bar's close, then uses
-    **intra-bar high/low** to check SL/TP on each subsequent bar.
-    Both legs must close before the trade ends.
-
-    Args:
-        close: Close price array.
-        high: High price array.
-        low: Low price array.
-        sig: Binary signal array (1 = enter, 0 = skip).
-        sl: Stop-loss distance as fraction (e.g. 0.015 = 1.5%).
-        tp: Take-profit distance as fraction (e.g. 0.05 = 5%).
-        max_hold: Maximum bars to hold before forced exit.
-        cost: Total round-trip cost (e.g. 0.0016 for straddle).
-
-    Returns:
-        (pnl, entry_bars, exit_bars) — each 1-D array of length N_trades.
-    """
-    n = len(close)
-    cap = n // 2 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
-    cnt = 0
-    i = 0
-    while i < n - 1:
-        if sig[i] == 0:
-            i += 1
-            continue
-        entry = close[i]
-        if entry <= 0:
-            i += 1
-            continue
-        l_sl = entry * (1.0 - sl)
-        l_tp = entry * (1.0 + tp)
-        s_sl = entry * (1.0 + sl)
-        s_tp = entry * (1.0 - tp)
-        la = True  # long leg active
-        sa = True  # short leg active
-        le = 0.0  # long exit pnl
-        se = 0.0  # short exit pnl
-        eb = i
-        end = min(i + 1 + max_hold, n)
-        for j in range(i + 1, end):
-            if la:
-                if low[j] <= l_sl:
-                    le = -sl
-                    la = False
-                elif high[j] >= l_tp:
-                    le = tp
-                    la = False
-            if sa:
-                if high[j] >= s_sl:
-                    se = -sl
-                    sa = False
-                elif low[j] <= s_tp:
-                    se = tp
-                    sa = False
-            if not la and not sa:
-                eb = j
-                break
-        else:
-            eb = end - 1
-        if la:
-            le = (close[eb] - entry) / entry
-        if sa:
-            se = (entry - close[eb]) / entry
-        # Half-size per leg: straddle pair total = 1× slot notional
-        net = 0.5 * (le + se - cost)
-        if cnt < cap:
-            pnl[cnt] = net
-            ent[cnt] = i
-            ext[cnt] = eb
-            cnt += 1
-        i = eb + 1
-    return pnl[:cnt], ent[:cnt], ext[:cnt]
 
 
 @numba.jit(nopython=True, cache=True)
@@ -570,115 +468,6 @@ def sim_directional_trailing(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Trailing Stop — Straddle
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-@numba.jit(nopython=True, cache=True)
-def sim_straddle_trailing(
-    close: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    sig: np.ndarray,
-    sl: float,
-    tp: float,
-    max_hold: int,
-    cost: float,
-    trail_activate: float,  # activate trailing on winning leg after this gain
-    trail_distance: float,  # trail distance from peak of winning leg
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Straddle sim with trailing on winning legs.
-
-    Each leg gets its own trailing stop once it gains `trail_activate`.
-    """
-    n = len(close)
-    cap = n // 2 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
-    cnt = 0
-    i = 0
-    while i < n - 1:
-        if sig[i] == 0:
-            i += 1
-            continue
-        entry = close[i]
-        if entry <= 0:
-            i += 1
-            continue
-
-        la = True
-        sa = True
-        le = 0.0
-        se = 0.0
-        l_peak = 0.0
-        s_peak = 0.0
-        l_trailing = False
-        s_trailing = False
-        eb = i
-        end = min(i + 1 + max_hold, n)
-        for j in range(i + 1, end):
-            # Long leg — G5 parity fix: trail first when active (tighter stop)
-            if la:
-                l_gain = (high[j] - entry) / entry
-                if l_gain > l_peak:
-                    l_peak = l_gain
-                if not l_trailing and l_peak >= trail_activate:
-                    l_trailing = True
-                if l_trailing:
-                    trail_lvl = entry * (1.0 + l_peak - trail_distance)
-                    if low[j] <= trail_lvl:
-                        le = max(l_peak - trail_distance, -sl)
-                        la = False
-                else:
-                    if low[j] <= entry * (1.0 - sl):
-                        le = -sl
-                        la = False
-                if la and high[j] >= entry * (1.0 + tp):
-                    le = tp
-                    la = False
-
-            # Short leg — G5 parity fix: trail first when active (tighter stop)
-            if sa:
-                s_gain = (entry - low[j]) / entry
-                if s_gain > s_peak:
-                    s_peak = s_gain
-                if not s_trailing and s_peak >= trail_activate:
-                    s_trailing = True
-                if s_trailing:
-                    trail_lvl = entry * (1.0 - s_peak + trail_distance)
-                    if high[j] >= trail_lvl:
-                        se = max(s_peak - trail_distance, -sl)
-                        sa = False
-                else:
-                    if high[j] >= entry * (1.0 + sl):
-                        se = -sl
-                        sa = False
-                if sa and low[j] <= entry * (1.0 - tp):
-                    se = tp
-                    sa = False
-
-            if not la and not sa:
-                eb = j
-                break
-        else:
-            eb = end - 1
-        if la:
-            le = (close[eb] - entry) / entry
-        if sa:
-            se = (entry - close[eb]) / entry
-        # Half-size per leg: straddle pair total = 1× slot notional
-        net = 0.5 * (le + se - cost)
-        if cnt < cap:
-            pnl[cnt] = net
-            ent[cnt] = i
-            ext[cnt] = eb
-            cnt += 1
-        i = eb + 1
-    return pnl[:cnt], ent[:cnt], ext[:cnt]
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 #  Trade Collection — Multi-TF, Multi-Symbol
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -700,14 +489,14 @@ def collect_trades(
 
     Args:
         cfg: Strategy config dict with keys:
-            sp, lp, d_vr, s_vr, s_dur, d_sl, s_sl, tp,
-            s_trail_activate, s_trail_distance,
+            sp, lp, d_vr, d_sl, tp,
             d_trail_activate, d_trail_distance.
+            Legacy keys (s_vr, s_dur, s_sl, s_trail_*) are accepted but ignored.
             Build from VolStraddleConfig — do NOT hardcode values.
         data_15m: {symbol: {close, high, low, vr_X_Y, mom_8, ...}}.
         data_1h: Same structure, 1h resampled.
         data_4h: Same structure, 4h resampled.
-        strat: "D_mom8" or "S_d8".
+        strat: "D_mom8".
         tf_group: List of TF tuples to scan. None → G_3TF (backward-compat).
             Use G_4TF for production parity (includes 30m).
         tf_priority: If True (default, G1 parity fix), higher TFs take priority —
@@ -719,7 +508,7 @@ def collect_trades(
         List of (symbol, entry_bar_15m, exit_bar_15m, pnl_float).
     """
     # ── Guard: verify required keys come from config, not hardcoded ──────────
-    _REQUIRED_CFG_KEYS = {"sp", "lp", "d_sl", "s_sl", "tp", "d_vr", "s_vr", "s_dur"}
+    _REQUIRED_CFG_KEYS = {"sp", "lp", "d_sl", "tp", "d_vr"}
     _missing = _REQUIRED_CFG_KEYS - cfg.keys()
     if _missing:
         raise ValueError(
@@ -728,52 +517,30 @@ def collect_trades(
             "  from quantbox.strategy.vol_straddle.config import VolStraddleConfig\n"
             "  cfg_obj = VolStraddleConfig()\n"
             "  cfg = {'sp': cfg_obj.vr_short, 'lp': cfg_obj.vr_long,\n"
-            "         'd_vr': cfg_obj.d_vr_threshold, 's_vr': cfg_obj.s_vr_threshold,\n"
-            "         's_dur': cfg_obj.s_squeeze_dur, 'd_sl': cfg_obj.d_sl,\n"
-            "         's_sl': cfg_obj.s_sl, 'tp': cfg_obj.d_tp}"
+            "         'd_vr': cfg_obj.d_vr_threshold, 'd_sl': cfg_obj.d_sl,\n"
+            "         'tp': cfg_obj.d_tp}"
         )
     if not (0 < cfg["d_sl"] < 0.20):
         raise ValueError(f"cfg['d_sl']={cfg['d_sl']} out of valid range (0, 0.20). Check config source.")
     if not (0 < cfg["tp"] <= 1.0):
         raise ValueError(f"cfg['tp']={cfg['tp']} out of valid range (0, 1.0]. Check config source.")
-    if strat not in ("D_mom8", "S_d8"):
-        raise ValueError(f"strat must be 'D_mom8' or 'S_d8', got {strat!r}")
+    if strat != "D_mom8":
+        raise ValueError(f"strat must be 'D_mom8', got {strat!r}")
     # ─────────────────────────────────────────────────────────────────────────
 
     # G4 parity fix: read trade sim config fresh (not module-level cache)
     _tsc = get_trade_sim_config()
     _cost_dir = _tsc["cost_directional"]
-    _cost_str = _tsc["cost_straddle"]
     _G_3TF = [_tsc["tf_15m"], _tsc["tf_1h"], _tsc["tf_4h"]]
     _G_4TF = [_tsc["tf_15m"], _tsc["tf_30m"], _tsc["tf_1h"], _tsc["tf_4h"]]
 
     sp = cfg["sp"]
     lp = cfg["lp"]
     vr_key = f"vr_{sp}_{lp}"
-    is_straddle = strat == "S_d8"
 
     d_sl = cfg["d_sl"]
-    s_sl = cfg["s_sl"]
     tp = cfg["tp"]
     d_vr = cfg["d_vr"]
-    s_vr = cfg["s_vr"]
-    s_dur = cfg["s_dur"]
-
-    # G7 parity fix: straddle trailing params — optional for backward compat
-    # with research scripts. Falls back to VolStraddleConfig defaults.
-    if "s_trail_activate" in cfg:
-        s_trail_activate = cfg["s_trail_activate"]
-        s_trail_distance = cfg["s_trail_distance"]
-    else:
-        try:
-            from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _VSCfg
-
-            _vs = _VSCfg()
-            s_trail_activate = _vs.s_trail_activate
-            s_trail_distance = _vs.s_trail_distance
-        except Exception:
-            s_trail_activate = 0.030  # config default
-            s_trail_distance = 0.005  # config default (rule #8 floor)
 
     # D_mom8 directional trailing params — parity fix: live uses trailing stop
     # for D_mom8 but backtest was using sim_directional_trades (no trail).
@@ -788,7 +555,7 @@ def collect_trades(
             d_trail_activate = _vs.d_trail_activate
             d_trail_distance = _vs.d_trail_distance
         except Exception:
-            d_trail_activate = 0.040  # config default
+            d_trail_activate = 0.015  # config default
             d_trail_distance = 0.005  # config default (rule #8 floor)
 
     # Resolve TF group — default G_3TF (fresh from config, G4 fix)
@@ -809,7 +576,7 @@ def collect_trades(
             sorted_tfs = sorted(active_tfs, key=lambda t: t[1], reverse=True)
             occupied: list[tuple[int, int]] = []  # (entry_15m, exit_15m) of accepted trades
 
-            for tf_label, ratio, warmup, mh_d, mh_s in sorted_tfs:
+            for tf_label, ratio, warmup, mh_d in sorted_tfs:
                 d_tf = tf_data_map.get(ratio)
                 if d_tf is None or sym not in d_tf:
                     continue
@@ -821,42 +588,21 @@ def collect_trades(
                 if vr is None:
                     continue
 
-                sl = s_sl if is_straddle else d_sl
-                mh = mh_s if is_straddle else mh_d
-
-                if is_straddle:
-                    sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
-                    # G7 parity fix: use sim_straddle_trailing (with per-leg trailing)
-                    # instead of sim_straddle_trades (SL/TP only). Live straddle
-                    # uses TRAILING_STOP_MARKET — backtest must match.
-                    p, e, x = sim_straddle_trailing(
-                        c,
-                        h,
-                        lo,
-                        sig,
-                        sl,
-                        tp,
-                        mh,
-                        _cost_str,
-                        s_trail_activate,
-                        s_trail_distance,
-                    )
-                else:
-                    sig = gen_vr_signal(vr, d_vr, warmup)
-                    dire = make_direction_momentum(sig, d["mom_8"])
-                    p, e, x = sim_directional_trailing(
-                        c,
-                        h,
-                        lo,
-                        sig,
-                        dire,
-                        sl,
-                        tp,
-                        mh,
-                        _cost_dir,
-                        d_trail_activate,
-                        d_trail_distance,
-                    )
+                sig = gen_vr_signal(vr, d_vr, warmup)
+                dire = make_direction_momentum(sig, d["mom_8"])
+                p, e, x = sim_directional_trailing(
+                    c,
+                    h,
+                    lo,
+                    sig,
+                    dire,
+                    d_sl,
+                    tp,
+                    mh_d,
+                    _cost_dir,
+                    d_trail_activate,
+                    d_trail_distance,
+                )
 
                 for k in range(len(p)):
                     entry_15m = int(e[k]) * ratio
@@ -877,7 +623,7 @@ def collect_trades(
             # Original behavior: collect from all TFs independently, then time-dedup
             sym_trades: list[tuple[int, int, float]] = []
 
-            for tf_label, ratio, warmup, mh_d, mh_s in active_tfs:
+            for tf_label, ratio, warmup, mh_d in active_tfs:
                 d_tf = tf_data_map.get(ratio)
                 if d_tf is None or sym not in d_tf:
                     continue
@@ -889,40 +635,21 @@ def collect_trades(
                 if vr is None:
                     continue
 
-                sl = s_sl if is_straddle else d_sl
-                mh = mh_s if is_straddle else mh_d
-
-                if is_straddle:
-                    sig = gen_vr_dur_signal(vr, s_vr, s_dur, warmup)
-                    # G7 parity fix: use sim_straddle_trailing (matching live behavior)
-                    p, e, x = sim_straddle_trailing(
-                        c,
-                        h,
-                        lo,
-                        sig,
-                        sl,
-                        tp,
-                        mh,
-                        _cost_str,
-                        s_trail_activate,
-                        s_trail_distance,
-                    )
-                else:
-                    sig = gen_vr_signal(vr, d_vr, warmup)
-                    dire = make_direction_momentum(sig, d["mom_8"])
-                    p, e, x = sim_directional_trailing(
-                        c,
-                        h,
-                        lo,
-                        sig,
-                        dire,
-                        sl,
-                        tp,
-                        mh,
-                        _cost_dir,
-                        d_trail_activate,
-                        d_trail_distance,
-                    )
+                sig = gen_vr_signal(vr, d_vr, warmup)
+                dire = make_direction_momentum(sig, d["mom_8"])
+                p, e, x = sim_directional_trailing(
+                    c,
+                    h,
+                    lo,
+                    sig,
+                    dire,
+                    d_sl,
+                    tp,
+                    mh_d,
+                    _cost_dir,
+                    d_trail_activate,
+                    d_trail_distance,
+                )
 
                 for k in range(len(p)):
                     entry_15m = int(e[k]) * ratio
@@ -988,17 +715,7 @@ def portfolio_sim(
     Args:
         all_trades: List of (symbol, entry_bar, exit_bar, pnl).
         max_concurrent: Max simultaneous slots (e.g. 10 for live config).
-        straddle_syms: Optional set of symbols whose trades are S_d8 straddles.
-            Each straddle trade consumes 2 slots (LONG+SHORT legs) matching
-            live behaviour where each leg occupies one of the 10 slots.
-            Usage for mixed VR+STRD backtest::
-
-                strd_trades = collect_trades(cfg, ..., "S_d8")
-                strd_syms = frozenset(sym for sym, *_ in strd_trades)
-                pnl = portfolio_sim(vr_trades + strd_trades, 10, straddle_syms=strd_syms)
-
-            For standalone STRD-only backtests use ``max_concurrent=5`` instead
-            (r79 convention — avoids the need for this parameter).
+        straddle_syms: Kept for backward compat. Ignored.
 
     Returns:
         1-D array of accepted trade PnLs (in chronological order).
@@ -1008,18 +725,16 @@ def portfolio_sim(
     active: list[tuple[str, int]] = []  # (symbol, exit_bar)
 
     for sym, entry, exit_b, pnl_val in trades:
-        slots = 2 if (straddle_syms and sym in straddle_syms) else 1
         # Expire finished trades
         active = [(s, e) for s, e in active if e > entry]
         # Same-symbol block
         sym_active = any(s == sym for s, _ in active)
         if sym_active:
             continue
-        # Slot limit: straddle needs 2 free slots
-        if len(active) + slots > max_concurrent:
+        # Slot limit
+        if len(active) + 1 > max_concurrent:
             continue
-        # Consume `slots` entries so the active slot count is accurate
-        active.extend([(sym, exit_b)] * slots)
+        active.append((sym, exit_b))
         accepted_pnl.append(pnl_val)
 
     return np.array(accepted_pnl) if accepted_pnl else np.empty(0)
@@ -1039,8 +754,7 @@ def portfolio_sim_with_details(
     Args:
         all_trades: List of (symbol, entry_bar, exit_bar, pnl).
         max_concurrent: Max simultaneous slots.
-        straddle_syms: Optional set of straddle symbols (consume 2 slots each).
-            See ``portfolio_sim`` docstring for usage.
+        straddle_syms: Kept for backward compat. Ignored.
 
     Returns:
         (pnl_array, accepted_trades_list).
@@ -1050,40 +764,17 @@ def portfolio_sim_with_details(
     active: list[tuple[str, int]] = []
 
     for sym, entry, exit_b, pnl_val in trades:
-        slots = 2 if (straddle_syms and sym in straddle_syms) else 1
         active = [(s, e) for s, e in active if e > entry]
         sym_active = any(s == sym for s, _ in active)
         if sym_active:
             continue
-        if len(active) + slots > max_concurrent:
+        if len(active) + 1 > max_concurrent:
             continue
-        active.extend([(sym, exit_b)] * slots)
+        active.append((sym, exit_b))
         accepted.append((sym, entry, exit_b, pnl_val))
 
     pnl = np.array([t[3] for t in accepted]) if accepted else np.empty(0)
     return pnl, accepted
-
-
-def get_straddle_syms(strd_trades: list[tuple[str, int, int, float]]) -> frozenset[str]:
-    """Return the set of symbols present in a straddle trade list.
-
-    Convenience helper for building the ``straddle_syms`` argument to
-    ``portfolio_sim`` / ``portfolio_sim_with_details`` in mixed backtests.
-
-    Example::
-
-        strd_trades = collect_trades(cfg, data_15m, data_1h, data_4h, "S_d8")
-        vr_trades   = collect_trades(cfg, data_15m, data_1h, data_4h, "D_mom8")
-        strd_syms   = get_straddle_syms(strd_trades)
-        pnl = portfolio_sim(vr_trades + strd_trades, 10, straddle_syms=strd_syms)
-
-    Args:
-        strd_trades: Trades returned by ``collect_trades(..., strat="S_d8")``.
-
-    Returns:
-        frozenset of symbol strings.
-    """
-    return frozenset(t[0] for t in strd_trades)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1652,6 +1343,307 @@ def collect_ma_cluster_trades(
             _min_duration,
             _max_duration,
             _min_momentum,
+            _sl,
+            _tp,
+            _trail_activate,
+            _trail_distance,
+            _max_hold,
+            cost,
+            WARMUP_4h,
+        )
+
+        for k in range(len(p)):
+            entry_bar = int(e[k]) * ratio + offset
+            exit_bar = int(x[k]) * ratio + ratio - 1 + offset
+            all_trades.append((sym, entry_bar, exit_bar, float(p[k])))
+
+    return all_trades
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Donchian Channel Breakout + Volume Spike — Canonical Sim
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@numba.jit(nopython=True, cache=True)
+def sim_donchian_trailing(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    volume: np.ndarray,
+    lookback: int,
+    vol_sma_period: int,
+    vol_mult: float,
+    breakout_pct: float,
+    cooldown_bars: int,
+    sl: float,
+    tp: float,
+    trail_activate: float,
+    trail_distance: float,
+    max_hold: int,
+    cost: float,
+    warmup: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Donchian channel breakout + volume spike with trailing stop exit (numba-accelerated).
+
+    Signal detection (inlined from check_donchian_breakout):
+      - Donchian channel: chan_high = max(high[i-lookback:i]), chan_low = min(low[i-lookback:i])
+        using completed bars only (no lookahead).
+      - Volume spike: volume[i] > vol_mult * mean(volume[i-vol_sma_period:i]).
+      - LONG: close[i] > chan_high AND (close[i] - chan_high) / chan_high > breakout_pct AND spike.
+      - SHORT: close[i] < chan_low AND (chan_low - close[i]) / chan_low > breakout_pct AND spike.
+      - Cooldown: skip cooldown_bars after a signal fires.
+
+    Exit logic (matches sim_ma_cluster_trailing - G5 parity fix applies):
+      1. Peak gain updated from intra-bar high/low.
+      2. Trailing activates once peak_gain >= trail_activate.
+      3. When trailing active: trail checked first (tighter stop).
+         SL skipped since trail level is always above SL once activated.
+      4. When trailing NOT active: SL checked normally.
+      5. Hard TP cap: exit at tp.
+      6. Max hold: exit at close[max_hold_bar].
+
+    Args:
+        close: 4h close price array.
+        high: 4h high price array.
+        low: 4h low price array.
+        volume: 4h volume array.
+        lookback: Donchian channel period in bars (e.g. 50).
+        vol_sma_period: Volume SMA period for spike detection (e.g. 20).
+        vol_mult: Volume spike multiplier threshold (e.g. 2.5).
+        breakout_pct: Minimum breakout fraction beyond channel (e.g. 0.02 = 2%).
+        cooldown_bars: Bars to skip after a signal fires (e.g. 3).
+        sl: Stop-loss fraction (e.g. 0.015 = 1.5%).
+        tp: Hard TP cap fraction (e.g. 0.20 = 20%).
+        trail_activate: Peak gain to activate trailing (e.g. 0.02 = 2%).
+        trail_distance: Trail distance from peak (e.g. 0.008 = 0.8%).
+        max_hold: Maximum bars to hold (in 4h bar units).
+        cost: Round-trip transaction cost (e.g. 0.0008).
+        warmup: Skip first N bars.
+
+    Returns:
+        (pnl, entry_bars, exit_bars) - each 1-D array of length N_trades.
+        Bar indices are in 4h bar units.
+    """
+    n = len(close)
+    cap = n // 4 + 1
+    pnl = np.empty(cap, dtype=np.float64)
+    ent = np.empty(cap, dtype=np.int64)
+    ext = np.empty(cap, dtype=np.int64)
+    cnt = 0
+    i = warmup
+    cooldown = 0
+
+    while i < n - 1:
+        # Count down cooldown
+        if cooldown > 0:
+            cooldown -= 1
+            i += 1
+            continue
+
+        # Need enough bars for channel and volume SMA
+        if i < lookback or i < vol_sma_period:
+            i += 1
+            continue
+
+        # Donchian channel from completed bars (no lookahead)
+        chan_high = high[i - lookback]
+        chan_low = low[i - lookback]
+        for k in range(i - lookback + 1, i):
+            if high[k] > chan_high:
+                chan_high = high[k]
+            if low[k] < chan_low:
+                chan_low = low[k]
+
+        # Volume spike: volume[i] vs SMA of completed bars
+        vol_sum = 0.0
+        for k in range(i - vol_sma_period, i):
+            vol_sum += volume[k]
+        vol_sma = vol_sum / vol_sma_period
+        spike = volume[i] > vol_mult * vol_sma
+
+        if not spike:
+            i += 1
+            continue
+
+        # Breakout direction
+        d = 0
+        if close[i] > chan_high and (close[i] - chan_high) / chan_high > breakout_pct:
+            d = 1
+        elif close[i] < chan_low and chan_low > 0.0 and (chan_low - close[i]) / chan_low > breakout_pct:
+            d = -1
+
+        if d == 0:
+            i += 1
+            continue
+
+        # Signal fired - set cooldown
+        cooldown = cooldown_bars
+
+        entry = close[i]
+        end = min(i + 1 + max_hold, n)
+        eb = end - 1
+        trade_pnl = 0.0
+        trailing_active = False
+        peak_gain = 0.0
+
+        for j in range(i + 1, end):
+            if d == 1:
+                # Update peak gain from intra-bar high
+                cur_gain = (high[j] - entry) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+
+                if trailing_active:
+                    # G5 parity fix: trail first when active (tighter stop)
+                    trail_level = entry * (1.0 + peak_gain - trail_distance)
+                    if low[j] <= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if low[j] <= entry * (1.0 - sl):
+                        trade_pnl = -sl
+                        eb = j
+                        break
+
+                if high[j] >= entry * (1.0 + tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+            else:
+                # SHORT
+                cur_gain = (entry - low[j]) / entry
+                if cur_gain > peak_gain:
+                    peak_gain = cur_gain
+
+                if not trailing_active and peak_gain >= trail_activate:
+                    trailing_active = True
+
+                if trailing_active:
+                    # G5 parity fix: trail first when active (tighter stop)
+                    trail_level = entry * (1.0 - peak_gain + trail_distance)
+                    if high[j] >= trail_level:
+                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        eb = j
+                        break
+                else:
+                    if high[j] >= entry * (1.0 + sl):
+                        trade_pnl = -sl
+                        eb = j
+                        break
+
+                if low[j] <= entry * (1.0 - tp):
+                    trade_pnl = tp
+                    eb = j
+                    break
+        else:
+            # Max-hold exit at close
+            if d == 1:
+                trade_pnl = (close[eb] - entry) / entry
+            else:
+                trade_pnl = (entry - close[eb]) / entry
+
+        if cnt < cap:
+            pnl[cnt] = trade_pnl - cost
+            ent[cnt] = i
+            ext[cnt] = eb
+            cnt += 1
+
+        i = eb + 1
+
+    return pnl[:cnt], ent[:cnt], ext[:cnt]
+
+
+def collect_donchian_trades(
+    data_15m: dict,
+    data_4h: dict | None = None,
+    *,
+    lookback: int | None = None,
+    vol_sma_period: int | None = None,
+    vol_mult: float | None = None,
+    breakout_pct: float | None = None,
+    cooldown_bars: int | None = None,
+    sl: float | None = None,
+    tp: float | None = None,
+    trail_activate: float | None = None,
+    trail_distance: float | None = None,
+    max_hold: int | None = None,
+    cost: float = COST_DIRECTIONAL,
+) -> list[tuple[str, int, int, float]]:
+    """Collect Donchian channel breakout trades for all whitelist symbols (4h only).
+
+    Runs ``sim_donchian_trailing`` per symbol and converts 4h bar indices to
+    the 15m base timeline used by ``portfolio_sim``.
+
+    Parameters default to ``VolStraddleConfig`` values (single source of truth).
+    Pass explicit values only for parameter sweeps.
+
+    Args:
+        data_15m: {symbol: {close, high, low, volume, _offset, ...}} - 15m bars.
+        data_4h: Pre-resampled 4h data dict.  If None, resampled from data_15m.
+        lookback: Donchian channel period in 4h bars (default: cfg.donchian_lookback).
+        vol_sma_period: Volume SMA period (default: cfg.donchian_vol_sma).
+        vol_mult: Volume spike multiplier (default: cfg.donchian_vol_mult).
+        breakout_pct: Min breakout fraction beyond channel (default: cfg.donchian_breakout_pct).
+        cooldown_bars: Bars to skip after signal fires (default: cfg.donchian_cooldown_bars).
+        sl: Stop-loss fraction (default: cfg.donchian_sl).
+        tp: Hard TP cap fraction (default: cfg.donchian_tp).
+        trail_activate: Gain to activate trailing (default: cfg.donchian_trail_activate).
+        trail_distance: Trail distance from peak (default: cfg.donchian_trail_distance).
+        max_hold: Maximum bars to hold in 4h units (default: cfg.donchian_max_hold_4h).
+        cost: Round-trip transaction cost (default: COST_DIRECTIONAL = 0.0008).
+
+    Returns:
+        List of (symbol, entry_15m_bar, exit_15m_bar, pnl) sorted by symbol.
+        Compatible with ``portfolio_sim()``.
+    """
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+    cfg = VolStraddleConfig()
+
+    # Resolve params from config defaults
+    _lookback = lookback if lookback is not None else cfg.donchian_lookback
+    _vol_sma_period = vol_sma_period if vol_sma_period is not None else cfg.donchian_vol_sma
+    _vol_mult = vol_mult if vol_mult is not None else cfg.donchian_vol_mult
+    _breakout_pct = breakout_pct if breakout_pct is not None else cfg.donchian_breakout_pct
+    _cooldown_bars = cooldown_bars if cooldown_bars is not None else cfg.donchian_cooldown_bars
+    _sl = sl if sl is not None else cfg.donchian_sl
+    _tp = tp if tp is not None else cfg.donchian_tp
+    _trail_activate = trail_activate if trail_activate is not None else cfg.donchian_trail_activate
+    _trail_distance = trail_distance if trail_distance is not None else cfg.donchian_trail_distance
+    _max_hold = max_hold if max_hold is not None else cfg.donchian_max_hold_4h
+
+    ratio = 16  # 4h = 16 x 15m bars
+
+    # Resample to 4h if not provided
+    if data_4h is None:
+        data_4h = build_resampled(data_15m, ratio)
+
+    all_trades: list[tuple[str, int, int, float]] = []
+
+    for sym in sorted(data_15m.keys()):
+        d4 = data_4h.get(sym)
+        if d4 is None:
+            continue
+        if "volume" not in d4:
+            continue
+
+        offset = int(data_15m[sym].get("_offset", 0))
+
+        p, e, x = sim_donchian_trailing(
+            d4["close"],
+            d4["high"],
+            d4["low"],
+            d4["volume"],
+            _lookback,
+            _vol_sma_period,
+            _vol_mult,
+            _breakout_pct,
+            _cooldown_bars,
             _sl,
             _tp,
             _trail_activate,
