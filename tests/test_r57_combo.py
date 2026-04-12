@@ -67,8 +67,8 @@ class TestConfigParity:
     """r57 must match production config values (not backtest_v14_3_0 stale values)."""
 
     def test_d_trail_activate(self, _cfg):
-        """D_TRAIL_ACT must equal config.d_trail_activate=0.040 (not stale 0.02)."""
-        assert D_TRAIL_ACT == 0.040, f"Expected 0.040, got {D_TRAIL_ACT}"
+        """D_TRAIL_ACT must equal config.d_trail_activate=0.015."""
+        assert D_TRAIL_ACT == 0.015, f"Expected 0.015, got {D_TRAIL_ACT}"
         assert D_TRAIL_ACT == _cfg.d_trail_activate
 
     def test_d_trail_distance(self, _cfg):

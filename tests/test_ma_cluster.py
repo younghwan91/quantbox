@@ -529,7 +529,7 @@ class TestMaClusterConfig:
         assert cfg.ma_cluster_min_momentum == 0.01
         assert cfg.ma_cluster_sl == 0.02
         assert cfg.ma_cluster_tp == 0.08
-        assert cfg.ma_cluster_max_hold_4h == 12
+        assert cfg.ma_cluster_max_hold_4h == 6
         assert cfg.ma_cluster_leverage == 21.0
         assert cfg.ma_cluster_sma_periods == [20, 50, 100, 200]
 
@@ -627,8 +627,8 @@ class TestStrategyIntegration:
         assert meta["tp"] == 0.08
         assert meta["tf"] == "4h"
         assert meta["leverage_override"] == 21.0
-        # max_hold should be converted: 12 bars × 16 (4h→15m) = 192
-        assert meta["max_hold"] == 12 * 16
+        # max_hold should be converted: 6 bars × 16 (4h→15m) = 96
+        assert meta["max_hold"] == 6 * 16
 
     def test_ma_cluster_disabled(self):
         """No MA cluster signal when disabled."""
@@ -986,7 +986,7 @@ class TestMaxHoldTfConversion:
     """Verify max_hold is correctly converted from native TF to 15m bars."""
 
     def test_4h_max_hold_in_signal_meta(self):
-        """MA cluster signal metadata has max_hold = 12 * 16 = 192."""
+        """MA cluster signal metadata has max_hold = 6 * 16 = 96."""
         from quantbox.strategy.vol_straddle.strategy import _TF_TO_15M
 
         assert _TF_TO_15M == {"15m": 1, "30m": 2, "1h": 4, "4h": 16}
@@ -1022,7 +1022,7 @@ class TestMaxHoldTfConversion:
         sig = strategy.on_bar("TESTUSDT", np.full(500, 100.0))
         if sig != 0:
             meta = strategy.get_last_signal_meta("TESTUSDT")
-            assert meta["max_hold"] == 12 * 16  # 192 bars of 15m
+            assert meta["max_hold"] == 6 * 16  # 96 bars of 15m
 
     def test_vr_1h_max_hold_conversion(self):
         """VR 1h signal should have max_hold = 48 * 4 = 192."""

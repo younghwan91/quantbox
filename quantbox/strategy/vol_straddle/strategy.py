@@ -20,6 +20,7 @@ ZERO LOOKAHEAD:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -97,7 +98,7 @@ class VolStraddleStrategy:
         # in_cooldown: True after signal fired, reset when cluster dissolves.
         self._ma_cluster_cooldown: dict[str, np.ndarray] = {}  # 1-elem array for numba
         self._donchian_cooldown: dict[str, np.ndarray] = {}  # 1-elem int64 array for numba (countdown)
-        self._donchian_last_4h_len: dict[str, int] = {}  # Track 4h bar count to gate on new bars
+        self._donchian_last_4h_epoch: dict[str, int] = {}  # Track 4h epoch to gate on new bars
 
         # ── MA Cluster scan state (populated every scan, even when no signal) ──
         # Used by scalper to produce "MA Cluster monitor" line parallel to
@@ -553,11 +554,12 @@ class VolStraddleStrategy:
         # Gate: only evaluate when a NEW 4h bar has arrived.
         # on_bar() is called every 15m, but Donchian operates on 4h bars.
         # Without this gate, cooldown_arr would decrement every 15m (16x too fast).
-        cur_4h_len = len(close_4h)
-        last_4h_len = self._donchian_last_4h_len.get(symbol, 0)
-        if cur_4h_len == last_4h_len:
+        # Uses UTC 4h epoch (changes at 00:00/04:00/08:00/12:00/16:00/20:00 UTC).
+        cur_4h_epoch = int(time.time()) // (4 * 3600)
+        last_4h_epoch = self._donchian_last_4h_epoch.get(symbol, 0)
+        if cur_4h_epoch == last_4h_epoch:
             return 0  # Same 4h bar as last check — skip
-        self._donchian_last_4h_len[symbol] = cur_4h_len
+        self._donchian_last_4h_epoch[symbol] = cur_4h_epoch
 
         # Initialize per-symbol cooldown if needed
         if symbol not in self._donchian_cooldown:

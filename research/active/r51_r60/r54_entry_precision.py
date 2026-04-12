@@ -76,7 +76,7 @@ print("[PARITY CHECK]")
 print(f"  D_TRAIL: activate={D_TRAIL_ACTIVATE:.3f} / distance={D_TRAIL_DISTANCE:.3f}")
 print(f"  S_TRAIL: activate={S_TRAIL_ACTIVATE:.3f} / distance={S_TRAIL_DISTANCE:.3f}")
 print(f"  D_TP={D_TP:.2f}, D_SL={D_SL:.3f}, L/N={cfg.base_leverage/MAX_CONC:.1f}")
-assert D_TRAIL_ACTIVATE == 0.040, f"D trail activate mismatch: {D_TRAIL_ACTIVATE}"
+assert D_TRAIL_ACTIVATE == 0.015, f"D trail activate mismatch: {D_TRAIL_ACTIVATE}"
 assert D_TRAIL_DISTANCE == 0.002, f"D trail distance mismatch: {D_TRAIL_DISTANCE}"
 print("  ✅ All params match production config.py\n")
 
