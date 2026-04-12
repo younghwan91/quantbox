@@ -102,7 +102,7 @@ print(f"  SMA period={E2_SMA_PERIOD}  MOM period={MOM_PERIOD}")
 assert S_VR == 0.57, f"S_VR mismatch: {S_VR}"
 assert D_VR == 0.5, f"D_VR mismatch: {D_VR}"
 assert S_TRAIL_ACT == 0.020
-assert D_TRAIL_ACT == 0.040
+assert D_TRAIL_ACT == 0.015
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────

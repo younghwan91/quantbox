@@ -555,7 +555,7 @@ def collect_trades(
             d_trail_activate = _vs.d_trail_activate
             d_trail_distance = _vs.d_trail_distance
         except Exception:
-            d_trail_activate = 0.040  # config default
+            d_trail_activate = 0.015  # config default
             d_trail_distance = 0.005  # config default (rule #8 floor)
 
     # Resolve TF group — default G_3TF (fresh from config, G4 fix)
