@@ -1454,8 +1454,9 @@ class RubberBandScalper(
             state["ma_cluster_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._ma_cluster_cooldown.items()}
         if hasattr(self.strategy, "_donchian_cooldown"):
             state["donchian_cooldown"] = {sym: int(arr[0]) for sym, arr in self.strategy._donchian_cooldown.items()}
-        if hasattr(self.strategy, "_donchian_last_4h_epoch"):
-            state["donchian_last_4h_epoch"] = dict(self.strategy._donchian_last_4h_epoch)
+        # _donchian_last_4h_epoch is NOT persisted: epoch-0 default on restart
+        # lets the first cycle evaluate Donchian (safe), and cooldown_arr
+        # already prevents duplicate signals within the same 4h window.
         filepath = PAPER_STATE_FILE if self.paper_mode else STATE_FILE
         try:
             save_scalper_state(state, filepath=filepath)
@@ -1688,12 +1689,9 @@ class RubberBandScalper(
             if cooldown_data:
                 logger.info(f"Restored Donchian cooldown for {len(cooldown_data)} symbols")
 
-        # Restore Donchian 4h epoch gate to prevent duplicate signal on restart
-        if hasattr(self.strategy, "_donchian_last_4h_epoch"):
-            last_4h_data = state.get("donchian_last_4h_epoch", {})
-            self.strategy._donchian_last_4h_epoch.update(last_4h_data)
-            if last_4h_data:
-                logger.info(f"Restored Donchian 4h epoch gate for {len(last_4h_data)} symbols")
+        # _donchian_last_4h_epoch is NOT restored: epoch-0 default lets the
+        # first cycle evaluate Donchian (safe), cooldown_arr prevents duplicates.
+        # Also handles migration from old donchian_last_4h_len gracefully.
 
         # Startup exchange cross-check: warn immediately if exchange has
         # positions not present in restored state (reverse ghost candidates).

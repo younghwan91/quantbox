@@ -559,7 +559,6 @@ class VolStraddleStrategy:
         last_4h_epoch = self._donchian_last_4h_epoch.get(symbol, 0)
         if cur_4h_epoch == last_4h_epoch:
             return 0  # Same 4h bar as last check — skip
-        self._donchian_last_4h_epoch[symbol] = cur_4h_epoch
 
         # Initialize per-symbol cooldown if needed
         if symbol not in self._donchian_cooldown:
@@ -579,6 +578,10 @@ class VolStraddleStrategy:
             cooldown_arr,
             cfg.donchian_cooldown_bars,
         )
+
+        # Stamp epoch only after successful evaluation (not before — avoids
+        # silently skipping the entire 4h window if check_donchian_breakout raises).
+        self._donchian_last_4h_epoch[symbol] = cur_4h_epoch
 
         if sig != 0:
             mom_val = 0.0
