@@ -70,8 +70,8 @@ class TestGetTrailParams:
         s = _build_trail_scalper()
         cr, ap, cs = s._get_trail_params("vr_directional", 1, 200.0)
         assert cr == pytest.approx(0.5)  # 0.005 * 100 (r106: rule #8 floor)
-        # activationPrice = entry × (1 + trail_activate) = 200 × 1.040 = 208
-        assert ap == pytest.approx(208.0)
+        # activationPrice = entry × (1 + trail_activate) = 200 × 1.015 = 203
+        assert ap == pytest.approx(203.0)
         assert cs == "SELL"
 
     def test_ma_cluster_short(self):
@@ -279,8 +279,8 @@ class TestTrailAtEntry:
         # We verify by checking the trail params calculation works correctly.
         cr, ap, cs = s._get_trail_params("vr_directional", 1, 100.0)
         assert cr == pytest.approx(0.5)
-        # activationPrice = entry × (1 + trail_activate) = 100 × 1.040 = 104.0
-        assert ap == pytest.approx(104.0)
+        # activationPrice = entry × (1 + trail_activate) = 100 × 1.015 = 101.5
+        assert ap == pytest.approx(101.5)
         assert cs == "SELL"
 
 

@@ -560,7 +560,7 @@ class TestPastIncidentPrevention:
 
         r47에서 0.5%로 단축된 후, r69 연도별 검증으로 1.0%가 최적으로 확인됨.
         """
-        assert cfg.d_trail_activate == 0.040, f"r69→current: trail_activate=0.040 (4.0%). got={cfg.d_trail_activate}"
+        assert cfg.d_trail_activate == 0.015, f"live tuning: trail_activate=0.015 (1.5%). got={cfg.d_trail_activate}"
         assert cfg.d_trail_distance == 0.005, f"r106: trail_distance=0.005 (0.5%, rule #8). got={cfg.d_trail_distance}"
 
     def test_ma_cluster_trail_activate_not_zero(self, cfg):

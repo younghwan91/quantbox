@@ -46,7 +46,9 @@ class VolStraddleConfig(BaseSettings):
     # Once unrealized gain reaches trail_activate, a trailing stop
     # follows at trail_distance below peak. Hard TP at d_tp (20% safety cap, rarely hit).
     # Mechanism: lets VR squeeze explosive releases run beyond fixed TP.
-    d_trail_activate: float = 0.040  # r106: 1.0%→4.0% (headroom for 0.5% callbackRate floor; PF=1.395, Calmar=6.0)
+    d_trail_activate: float = (
+        0.015  # r106→live: 4.0%→1.5% (bar-close MFE avg 1.04%, 4% unreachable; 10x lev → 1.5% raw = 15% pos)
+    )
     d_trail_distance: float = 0.005  # r106: 0.2%→0.5% (Binance callbackRate floor, rule #8)
 
     hedge_mode: bool = True  # Binance Hedge Mode (dualSidePosition=true)
@@ -280,7 +282,7 @@ class VolStraddleConfig(BaseSettings):
     # When True, places/updates Binance STOP order at trail_stop_gain price after
     # trail activation, ensuring intrabar execution matching backtest assumption.
     trail_server_ratchet_enabled: bool = True
-    ma_cluster_max_hold_4h: int = 12  # 12 × 4h = 48h
+    ma_cluster_max_hold_4h: int = 6  # 6 × 4h = 24h (avg loss held 10h; cut lingering losers earlier)
     ma_cluster_leverage: float = 21.0  # Half-Kelly: f*/2=4.33%, L=0.0433×10/0.02≈21
     ma_cluster_sma_periods: list[int] = Field(
         default_factory=lambda: [20, 50, 100, 200],

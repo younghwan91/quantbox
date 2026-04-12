@@ -87,7 +87,7 @@ class TestConfig:
     def test_sl_tp(self, cfg):
         assert cfg.d_sl == 0.01  # 1% SL
         assert cfg.d_tp == 0.20  # r68: raised to 0.20 — dead parameter, trail always exits first
-        assert cfg.d_trail_activate == 0.040  # r69→current: 0.010→0.040
+        assert cfg.d_trail_activate == 0.015  # live tuning: 0.040→0.015
         assert cfg.d_trail_distance == 0.005  # r106: 0.5% behind peak (rule #8)
 
     def test_momentum_period(self, cfg):
