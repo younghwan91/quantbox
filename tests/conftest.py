@@ -48,6 +48,23 @@ def _clear_settings_cache():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_live_pause_env(monkeypatch):
+    """Strip live-operational `.env` overrides that break default-config tests.
+
+    Tests should validate config.py defaults unless they explicitly override.
+    Live-only pause flags (e.g. VS_MIN_CONVICTION_SCORE=5 used to disable D_mom8
+    entries in production) would otherwise leak into test fixtures that
+    instantiate `VolStraddleConfig()` without arguments.
+
+    Pydantic-settings precedence: os.environ overrides .env file. Setting the
+    env var to '0' (config.py default) via monkeypatch neutralizes the .env
+    entry for the test process only.
+    """
+    # D_mom8 pause flag (Pause for Repair, 2026-04-17) — neutralize in tests.
+    monkeypatch.setenv("VS_MIN_CONVICTION_SCORE", "0")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_state_file(tmp_path):
     """Redirect scalper state file to tmp_path so tests never corrupt
     the production state (data/state/scalper_state.json).
