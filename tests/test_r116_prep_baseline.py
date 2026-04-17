@@ -129,3 +129,48 @@ def test_baseline_no_mock_data():
     for pat in forbidden:
         matches = re.findall(pat, SCRIPT_SRC)
         assert not matches, f"Mock data pattern '{pat}' found in script: {matches}"
+
+
+# ── test_ma_cluster_per_symbol_schema ─────────────────────────────────────────
+
+
+def test_ma_cluster_per_symbol_schema():
+    """run_ma_cluster must produce per_symbol breakdown (US-URGENT-5)."""
+    import json as _json
+
+    # Source-text check: run_ma_cluster should call compute_per_symbol_metrics.
+    ma_func_src = re.search(
+        r"def run_ma_cluster\(.*?(?=\ndef |\Z)",
+        SCRIPT_SRC,
+        flags=re.DOTALL,
+    )
+    assert ma_func_src is not None, "run_ma_cluster function not found in script"
+    assert "compute_per_symbol_metrics" in ma_func_src.group(0), "run_ma_cluster does not compute per_symbol breakdown"
+    assert '"per_symbol"' in ma_func_src.group(0), "run_ma_cluster result dict missing per_symbol key"
+
+    # Artifact check: if baseline has been run, JSON file should include per_symbol
+    artifact = Path(__file__).parents[1] / ".omc" / "state" / "r116_prep" / "ma_cluster_metrics.json"
+    if artifact.exists():
+        data = _json.loads(artifact.read_text())
+        assert "per_symbol" in data, "ma_cluster_metrics.json missing per_symbol array"
+        assert isinstance(data["per_symbol"], list)
+        if data["per_symbol"]:
+            row = data["per_symbol"][0]
+            for key in ("symbol", "N", "WR_pct", "PF", "mfe_losing_avg_pct"):
+                assert key in row, f"per_symbol row missing {key}"
+
+
+def test_ma_cluster_blacklist_candidates_artifact_valid():
+    """If candidates file exists, it must have the documented schema."""
+    import json as _json
+
+    path = Path(__file__).parents[1] / ".omc" / "state" / "r116_prep" / "ma_cluster_blacklist_candidates.json"
+    if not path.exists():
+        pytest.skip("ma_cluster_blacklist_candidates.json not generated yet")
+    data = _json.loads(path.read_text())
+    assert "criterion" in data
+    assert "count" in data
+    assert "candidates" in data
+    for c in data["candidates"]:
+        assert c["PF"] < 1.0
+        assert c["N"] >= 10

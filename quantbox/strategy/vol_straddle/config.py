@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import os
 
-from pydantic import Field, model_validator
+from typing import Annotated
+
+from pydantic import Field, field_validator, model_validator
 from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class VolStraddleConfig(BaseSettings):
@@ -50,6 +52,21 @@ class VolStraddleConfig(BaseSettings):
         0.015  # r106→live: 4.0%→1.5% (bar-close MFE avg 1.04%, 4% unreachable; 10x lev → 1.5% raw = 15% pos)
     )
     d_trail_distance: float = 0.005  # r106: 0.2%→0.5% (Binance callbackRate floor, rule #8)
+
+    # ── D_mom8: Symbol Blacklist (r116b quickwin) ──
+    # Symbols excluded from D_mom8 entries (strategy.py:on_bar gate).
+    # Derived from baseline per-symbol PF analysis; expected quarterly refresh.
+    # Does NOT affect C2 BTC momentum signal (reads BTCUSDT data separately),
+    # nor MA Cluster / Donchian strategies.
+    # Env var format: VS_D_SYMBOL_BLACKLIST="SYM1,SYM2,SYM3"
+    # Annotated with NoDecode so pydantic-settings passes the raw env value to
+    # the validator below instead of JSON-decoding. Enables comma-separated
+    # env form: VS_D_SYMBOL_BLACKLIST="FOO,BAR,BAZ"
+    d_symbol_blacklist: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        description="Symbols to skip for D_mom8 entries (PF<baseline-threshold). "
+        "Quarterly refresh expected. Applied in strategy.py:on_bar post-signal gate.",
+    )
 
     hedge_mode: bool = True  # Binance Hedge Mode (dualSidePosition=true)
 
@@ -134,11 +151,15 @@ class VolStraddleConfig(BaseSettings):
     soft_eq_scale3: float = 0.40
 
     # ── CW-Tier Conviction Sizing (R34 validated) ──
-    # Score = count of 4 conditions: E2, C2, B3, A3 (0-4)
-    # CW-Tier multiplier applied to position size based on score.
+    # Score = count of 4 conditions: E2, C2, B3, A3 (0-4 range).
+    # NOTE (2026-04-17, US-URGENT-6): B3_confluence is reserved-always-False in
+    # live code (strategy.py:_compute_conviction_score). Max achievable score in
+    # production is therefore 3 (E2 + C2 + A3). The score-index 4 in cw_multipliers
+    # is dead code preserved for backwards compat; min_conviction_score=3 == gate to
+    # max-achievable, =4 or 5 blocks all entries.
     # T3-Triple: optional high-conviction filter (score ≥ min_conviction_score).
     cw_enabled: bool = True  # Enable conviction-weighted sizing
-    min_conviction_score: int = 0  # Min score to enter (0=all, 3=T3-Triple)
+    min_conviction_score: int = 0  # Min score to enter (0=all, 3=max-achievable post-b3-reserve)
     cw_multipliers: list[float] = Field(
         default_factory=lambda: [
             0.5,  # score 0 → 0.5x
@@ -462,6 +483,30 @@ class VolStraddleConfig(BaseSettings):
         if errors:
             raise ValueError("VolStraddleConfig safety constraint violations:\n  - " + "\n  - ".join(errors))
         return self
+
+    @field_validator("d_symbol_blacklist", mode="before")
+    @classmethod
+    def _parse_d_symbol_blacklist(cls, v):
+        """Parse VS_D_SYMBOL_BLACKLIST as comma-separated string, JSON array,
+        or pass-through for list input.
+
+        NoDecode annotation on the field causes pydantic-settings to pass the
+        raw env string here without JSON-decoding; we handle both formats.
+        """
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(s).strip() for s in v if str(s).strip()]
+        if isinstance(v, str):
+            s = v.strip().strip('"').strip("'")
+            if not s:
+                return []
+            if s.startswith("["):
+                import json
+
+                return json.loads(s)
+            return [part.strip() for part in s.split(",") if part.strip()]
+        return v
 
     @model_validator(mode="after")
     def _populate_symbol_whitelist(self) -> "VolStraddleConfig":

@@ -1737,13 +1737,15 @@ class RubberBandScalper(
                 logger.warning(
                     f"[{check_key}] STARTUP CROSSCHECK: Untracked position on exchange! "
                     f"notional=${notional:.2f} uPnL={upnl:+.2f} — "
-                    f"No SL/TP. Will be auto-closed in first reconciliation cycle."
+                    f"No SL/TP. Alert-only — use !adopt or !close-orphan via Discord."
                 )
                 self.discord.send(
                     content=(
                         f"⚠️ **Startup: Untracked position [{check_key}]** — "
                         f"notional=${notional:.2f} uPnL={upnl:+.2f}. "
-                        f"No SL/TP protection. Auto-close pending (next reconciliation cycle)."
+                        f"No SL/TP protection. **Alert-only**: "
+                        f"use `!adopt {check_key}` to take over with brackets, "
+                        f"or `!close-orphan {check_key}` to close at market."
                     )
                 )
 
