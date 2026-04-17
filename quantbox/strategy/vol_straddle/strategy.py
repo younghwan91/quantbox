@@ -289,6 +289,11 @@ class VolStraddleStrategy:
         if sig[-1] != 1:
             return 0
 
+        # ── r116b: Symbol blacklist gate (post-signal, pre-sizing) ──
+        if cfg.d_symbol_blacklist and symbol in cfg.d_symbol_blacklist:
+            logger.info(f"[{symbol}] D_mom8 BLOCKED: symbol in d_symbol_blacklist (size={len(cfg.d_symbol_blacklist)})")
+            return 0
+
         # Direction from momentum
         mom = compute_momentum(close, cfg.momentum_period)
         dire = make_direction_momentum(sig, mom)
@@ -641,6 +646,12 @@ class VolStraddleStrategy:
         """
         cfg = self.config
         score = 0
+        # Conviction score dict — E2, C2, B3, A3 (0-4 in schema).
+        # NOTE (US-URGENT-6, 2026-04-17): b3_confluence is PERMANENTLY reserved
+        # and never set to True below. Max achievable score in production is 3.
+        # Displays elsewhere (positions.py:126,341,534; strategy.py:355) still
+        # show `/4` — this is schema-accurate but can mislead operators about
+        # headroom. See config.py min_conviction_score docstring for details.
         conditions: dict[str, bool] = {
             "e2_sma": False,
             "c2_btc": False,

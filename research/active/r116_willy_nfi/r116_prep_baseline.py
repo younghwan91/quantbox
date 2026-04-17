@@ -353,6 +353,7 @@ def run_ma_cluster(cfg: VolStraddleConfig) -> dict:
 
     metrics = compute_metrics(pnl_port, DATA_YEARS, portfolio_size=cfg.max_concurrent)
     mfe_losing = compute_mfe_losing(accepted, data_15m)
+    per_symbol = compute_per_symbol_metrics(accepted, data_15m)
 
     n = metrics["N"]
     low_n = n < 100
@@ -374,6 +375,7 @@ def run_ma_cluster(cfg: VolStraddleConfig) -> dict:
         "ann_ret_pct": metrics["ann_ret_pct"],
         "low_N": low_n,
         "tolerance_bands": {"WR": 0.05, "PF": 0.10} if low_n else None,
+        "per_symbol": per_symbol,
         "elapsed_s": round(time.time() - t0, 1),
     }
     _print_summary(result)
