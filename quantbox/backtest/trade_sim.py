@@ -798,20 +798,42 @@ def pf_from_pnl(pnl: np.ndarray) -> float:
     return pos / neg if neg > 0 else 999.0
 
 
-def compute_metrics(pnl: np.ndarray, data_years: float) -> dict:
+def compute_metrics(pnl: np.ndarray, data_years: float, portfolio_size: int = 1) -> dict:
     """Compute comprehensive performance metrics from PnL array.
 
-    Uses 1x compound model: ``equity *= (1 + pnl_per_trade)``.
-    This is the canonical metrics function for all VR research.
+    Uses compound model with optional portfolio-size scaling:
+    ``equity *= (1 + pnl_per_trade / portfolio_size)``.
+
+    When ``portfolio_size=1`` (default, legacy behavior), each trade compounds
+    at full equity (1x reinvestment). This matches a single-slot strategy where
+    every trade uses all capital — historically correct for per-strategy research
+    at moderate N but mathematically explodes when N × avg_per_trade is large
+    (e.g. Donchian N=1876 × 2%/trade → ann_ret ≈ 1.7B%, Calmar ≈ 61M — real
+    observed r116-prep baseline artifact).
+
+    When ``portfolio_size>1``, each trade uses 1/portfolio_size of equity —
+    the realistic model for a multi-slot portfolio (e.g. ``max_concurrent=10``).
+    Matches live sizing semantics where a single trade cannot consume more than
+    1/N of account equity.
 
     Args:
-        pnl: Array of per-trade PnL values.
+        pnl: Array of per-trade PnL values (fractional, e.g. 0.015 = 1.5%).
         data_years: Duration of data in years (for annualization).
+        portfolio_size: Capital-allocation divisor. Default 1 preserves legacy
+            1x-compound behavior (backward-compat for r41_r65 research). Pass
+            ``VolStraddleConfig().max_concurrent`` (=10) for portfolio-aware
+            metrics. Must be ≥ 1.
 
     Returns:
         Dict with keys: N, PF, EV_bp, t, WR, RR, avg_win_pct,
         avg_loss_pct, ret_pct, max_dd_pct, tpd, ann_ret_pct, calmar.
+
+    Raises:
+        ValueError: If ``portfolio_size < 1``.
     """
+    if portfolio_size < 1:
+        raise ValueError(f"portfolio_size must be >= 1, got {portfolio_size}")
+
     n = len(pnl)
     if n < 2:
         return {
@@ -839,8 +861,9 @@ def compute_metrics(pnl: np.ndarray, data_years: float) -> dict:
     se = float(np.std(pnl) / np.sqrt(n)) * 10000
     t_stat = ev / se if se > 0 else 0.0
 
-    # Equity curve (1x compound) — vectorized via numpy cumproduct
-    equity_curve = np.cumprod(1.0 + pnl)
+    # Equity curve — scaled by portfolio_size to reflect per-slot capital allocation
+    scaled_pnl = pnl / portfolio_size
+    equity_curve = np.cumprod(1.0 + scaled_pnl)
     equity = float(equity_curve[-1])
     peaks = np.maximum.accumulate(equity_curve)
     drawdowns = (peaks - equity_curve) / peaks
