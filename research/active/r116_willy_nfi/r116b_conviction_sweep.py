@@ -111,11 +111,15 @@ def collect_tagged_trades(
     data_15m: dict,
     data_1h: dict,
     data_4h: dict,
-) -> list[tuple[str, int, int, float, int]]:
+    include_direction: bool = False,
+) -> list[tuple]:
     """Collect D_mom8 trades with conviction score attached. Mirrors collect_trades
     G_4TF + tf_priority=True + funding drag exactly. Adds conviction tag at entry bar.
 
-    Returns list of (symbol, entry_15m, exit_15m, pnl, conviction_score).
+    Returns:
+        If include_direction=False: list of (symbol, entry_15m, exit_15m, pnl, conviction_score).
+        If include_direction=True:  list of (symbol, entry_15m, exit_15m, pnl, conviction_score, direction).
+            direction is +1 (LONG) or -1 (SHORT) from momentum at entry bar.
     """
     sp = ct_cfg["sp"]
     lp = ct_cfg["lp"]
@@ -177,7 +181,13 @@ def collect_tagged_trades(
                         break
                 if not blocked:
                     score = compute_conviction_at_bar(c, vr, btc_c, bar_i)
-                    all_trades.append((sym, entry_15m, exit_15m, float(p[k]), score))
+                    direction = int(dire[bar_i]) if bar_i < len(dire) else 0
+                    if include_direction:
+                        all_trades.append(
+                            (sym, entry_15m, exit_15m, float(p[k]), score, direction)
+                        )
+                    else:
+                        all_trades.append((sym, entry_15m, exit_15m, float(p[k]), score))
                     occupied.append((entry_15m, exit_15m))
 
     # Funding drag (mirrors collect_trades line 677-694)
@@ -185,10 +195,11 @@ def collect_tagged_trades(
     if funding_8h > 0:
         BARS_PER_8H_15M = 32
         adjusted = []
-        for sym, entry_b, exit_b, pnl, score in all_trades:
-            bars_held = exit_b - entry_b
+        for t in all_trades:
+            bars_held = t[2] - t[1]
             funding_drag = funding_8h * (bars_held / BARS_PER_8H_15M)
-            adjusted.append((sym, entry_b, exit_b, pnl - funding_drag, score))
+            pnl_adj = t[3] - funding_drag
+            adjusted.append((*t[:3], pnl_adj, *t[4:]))
         all_trades = adjusted
 
     return all_trades
