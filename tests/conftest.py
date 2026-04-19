@@ -62,6 +62,15 @@ def _isolate_live_pause_env(monkeypatch):
     """
     # D_mom8 pause flag (Pause for Repair, 2026-04-17) — neutralize in tests.
     monkeypatch.setenv("VS_MIN_CONVICTION_SCORE", "0")
+    # Sizing/DD tests pin to original policy inputs (risk=1%, DD bands 1.5/3/5%,
+    # halt=15%, daily=5%) so they verify formula mechanics, independent of
+    # current Kelly/DD policy (2026-04-19: risk=6% quarter-Kelly, DD bands 5/10/15%).
+    monkeypatch.setenv("VS_RISK_PER_TRADE", "0.01")
+    monkeypatch.setenv("VS_SOFT_EQ_DD1", "0.015")
+    monkeypatch.setenv("VS_SOFT_EQ_DD2", "0.03")
+    monkeypatch.setenv("VS_SOFT_EQ_DD3", "0.05")
+    monkeypatch.setenv("VS_MAX_DRAWDOWN_PCT", "0.15")
+    monkeypatch.setenv("VS_DAILY_LOSS_LIMIT_PCT", "0.05")
 
 
 @pytest.fixture(autouse=True)
