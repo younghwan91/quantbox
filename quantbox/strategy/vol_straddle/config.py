@@ -101,11 +101,11 @@ class VolStraddleConfig(BaseSettings):
     # ── Position Sizing & Leverage (Half-Kelly derived) ──
     base_leverage: float = 30.0  # Half-Kelly: f*/2=3.07%, L=0.0307×10/0.01≈30
     max_leverage: float = 30.0  # Hard cap (matches base_leverage)
-    risk_per_trade: float = 0.01  # 1% risk per trade
+    risk_per_trade: float = 0.06  # Quarter-Kelly: 40 MA trades → f*=0.378, f*/4=0.0945 → 0.06 (clamped by max_leverage=30×, MA effective=6%/trade, VR=3%/trade)
 
     # ── Risk Management ──
     max_concurrent: int = 10  # 10 slots (VR L/N=30/10=3.0, MA L/N=21/10=2.1)
-    max_drawdown_pct: float = 0.15  # 15% session drawdown → halt (STRD-dominant: MaxDD=2.6% BT)
+    max_drawdown_pct: float = 0.25  # 25% session drawdown → halt (2026-04-19: raised 15→25% for quarter-Kelly risk=6%/trade; allows ~4 SL before halt)
     max_exposure_multiplier: float = (
         35.0  # Max total open notional / balance. 35x = 17% above 10×30x/10=30x theoretical max
     )
@@ -142,12 +142,14 @@ class VolStraddleConfig(BaseSettings):
     divergence_cooldown_hours: float = 24.0  # Min hours between alerts
 
     # ── SoftTight DD Scaling (safety mechanism) ──
+    # 2026-04-19: bands widened ~3× to match quarter-Kelly risk_per_trade=6%.
+    # Old 1.5/3/5% triggered on single SL hit (6% > 1.5%), defeating the risk increase.
     soft_equity_scale: bool = True
-    soft_eq_dd1: float = 0.015  # 1.5% DD → 80% sizing (tightened from 2%)
+    soft_eq_dd1: float = 0.05  # 5% DD → 80% sizing (~1 SL at 6%)
     soft_eq_scale1: float = 0.80
-    soft_eq_dd2: float = 0.03  # 3% DD → 60% sizing (tightened from 4%)
+    soft_eq_dd2: float = 0.10  # 10% DD → 60% sizing (~2 SL)
     soft_eq_scale2: float = 0.60
-    soft_eq_dd3: float = 0.05  # 5% DD → 40% sizing (tightened from 6%)
+    soft_eq_dd3: float = 0.15  # 15% DD → 40% sizing (~2.5 SL)
     soft_eq_scale3: float = 0.40
 
     # ── CW-Tier Conviction Sizing (R34 validated) ──
@@ -379,7 +381,9 @@ class VolStraddleConfig(BaseSettings):
     # Block new entries for the rest of the day after realized loss exceeds limit.
     # Prevents the "keep entering and losing" spiral during bad market sessions.
     # Resets at UTC midnight. Set to 0 to disable.
-    daily_loss_limit_pct: float = 0.05  # 5% of account balance
+    daily_loss_limit_pct: float = (
+        0.12  # 12% of account balance (2026-04-19: 5→12% for quarter-Kelly risk=6%/trade; 2 SL triggers)
+    )
 
     # ── Entry Retry / SL Cancel (shared execution params) ──
     entry_retry_count: int = 2  # VS_ENTRY_RETRY_COUNT: max retries for entry
