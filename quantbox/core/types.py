@@ -132,26 +132,34 @@ def build_trade_record(
     (full for normal close, partial for partial close).
     """
     pnl_frac = calc_upnl_pct(pos["entry_price"], fill_price, pos["signal"])
+    pnl_pct_val = pnl_frac * 100
     pnl_usd = pnl_frac * notional
     cost = notional * round_trip_cost
     net_pnl = pnl_usd - cost
 
     from quantbox.core.strategy_names import VR_DIRECTIONAL  # avoid circular
 
+    # MFE/MAE invariant: the fill price is proof the position reached that excursion,
+    # so MFE ≥ pnl_pct and MAE ≤ pnl_pct always. Close-bar best_pnl/worst_pnl trackers
+    # miss intrabar peaks when server-side trail/SL fires mid-bar (position closes
+    # before the bar's evaluate_exit runs), causing impossible mfe<pnl records otherwise.
+    mfe_pct = max(pos.get("best_pnl", 0.0) * 100, pnl_pct_val)
+    mae_pct = min(pos.get("worst_pnl", 0.0) * 100, pnl_pct_val)
+
     trade = {
         "symbol": symbol,
         "signal": pos["signal"],
         "entry_price": pos["entry_price"],
         "exit_price": fill_price,
-        "pnl_pct": pnl_frac * 100,
+        "pnl_pct": pnl_pct_val,
         "pnl_usd": net_pnl,
         "notional": notional,
         "bars_held": pos["bars_held"],
         "reason": reason,
         "time": datetime.now(timezone.utc).isoformat(),
         "strategy_type": pos.get("strategy_type", VR_DIRECTIONAL),
-        "mfe_pct": pos.get("best_pnl", 0.0) * 100,
-        "mae_pct": pos.get("worst_pnl", 0.0) * 100,
+        "mfe_pct": mfe_pct,
+        "mae_pct": mae_pct,
         "entry_time": pos.get("opened_at"),
         "balance_before": balance_before,
         "balance_after": balance_after,
