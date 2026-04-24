@@ -680,16 +680,47 @@ class TestClosePaths:
         assert abs(trade["pnl_pct"] - expected_pnl_pct) < 0.01
 
     def test_close_trade_has_mfe_mae(self):
-        """Trade record includes mfe_pct and mae_pct from position."""
-        scalper = self._make_close_scalper()
-        pos_key = self._setup_position(scalper)
+        """Trade record includes mfe_pct and mae_pct, clamped by the exit-price invariant."""
+        scalper = self._make_close_scalper()  # mocked fill @ 105 → realized pnl = +5%
+        pos_key = self._setup_position(scalper)  # best_pnl=0.02, worst_pnl=-0.005
         scalper._close_position(pos_key, reason="stop_loss", current_price=99.0)
 
         trade = scalper._trade_history[-1]
         assert "mfe_pct" in trade
         assert "mae_pct" in trade
-        assert abs(trade["mfe_pct"] - 2.0) < 0.01  # best_pnl=0.02 → 2%
-        assert abs(trade["mae_pct"] - (-0.5)) < 0.01  # worst_pnl=-0.005 → -0.5%
+        # fill @ +5% proves the position reached ≥ +5%, so MFE = max(2.0, 5.0) = 5.0.
+        assert abs(trade["mfe_pct"] - 5.0) < 0.01
+        # MAE clamp unaffected since pnl (+5%) > worst_pnl (-0.5%).
+        assert abs(trade["mae_pct"] - (-0.5)) < 0.01
+
+    def test_mfe_mae_invariant_when_intrabar_extreme_exceeds_tracked(self):
+        """MFE ≥ pnl and MAE ≤ pnl always — regression for live trades where
+        server-side trail/SL fires intrabar and close-bar best_pnl/worst_pnl
+        misses the true extreme (BCH/XTZ/SAND 2026-04-22 had mfe<pnl recorded)."""
+        # LONG trail-exit: pnl +1.39% but tracked best_pnl only +0.57% (BCH-like)
+        scalper = self._make_close_scalper()
+        scalper._place_order = MagicMock(return_value={"avgPrice": "101.39", "executedQty": "30.0", "status": "FILLED"})
+        pos_key = self._setup_position(scalper, signal=1)
+        scalper.strategy._positions[pos_key]["best_pnl"] = 0.0057
+        scalper.strategy._positions[pos_key]["worst_pnl"] = -0.002
+        scalper._close_position(pos_key, reason="server_trail", current_price=101.39)
+
+        trade = scalper._trade_history[-1]
+        assert trade["mfe_pct"] >= trade["pnl_pct"], "MFE must be >= pnl_pct"
+        assert trade["mae_pct"] <= trade["pnl_pct"], "MAE must be <= pnl_pct"
+        assert abs(trade["mfe_pct"] - 1.39) < 0.01  # lifted from 0.57 to 1.39
+
+        # SHORT SL-exit: pnl -2.02% but tracked worst_pnl only -0.41% (QTUM-like)
+        scalper2 = self._make_close_scalper()
+        scalper2._place_order = MagicMock(return_value={"avgPrice": "97.98", "executedQty": "30.0", "status": "FILLED"})
+        pos_key2 = self._setup_position(scalper2, signal=1)  # LONG to make 97.98 a loss
+        scalper2.strategy._positions[pos_key2]["best_pnl"] = 0.003
+        scalper2.strategy._positions[pos_key2]["worst_pnl"] = -0.0041
+        scalper2._close_position(pos_key2, reason="server_sl", current_price=97.98)
+
+        trade2 = scalper2._trade_history[-1]
+        assert trade2["mae_pct"] <= trade2["pnl_pct"]
+        assert abs(trade2["mae_pct"] - (-2.02)) < 0.01  # lifted from -0.41 to -2.02
 
     def test_close_trade_has_entry_time(self):
         """Trade record includes entry_time from opened_at."""
