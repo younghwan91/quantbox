@@ -7,6 +7,7 @@
 [![Tests](https://img.shields.io/badge/tests-1929%20passed-brightgreen.svg)]()
 [![Coverage](https://img.shields.io/badge/coverage-77%25-green.svg)]()
 [![Branch](https://img.shields.io/badge/branch-main-blue.svg)]()
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-younghwan--chae-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/in/younghwan-chae/)
 
 바이낸스 USDT-M 선물 전용 VR 압축 스퀴즈 시스템. VR Squeeze(30x)와 MA Cluster Squeeze(21x) 두 축이 10슬롯 공유 풀에서 동시 운용. Numba 가속 백테스트, pydantic-settings 환경 관리.
 
