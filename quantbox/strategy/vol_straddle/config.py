@@ -315,6 +315,14 @@ class VolStraddleConfig(BaseSettings):
     # 4h MA50 = 50 bars × 4h = 200h ≈ 8.3 days — matches MA cluster's strategic timeframe.
     ma_cluster_btc_gate_enabled: bool = True  # Block MA cluster LONGs when BTC below 4h MA50
     ma_cluster_btc_ma_period_4h: int = 50  # 50 × 4h = 200h ≈ 8.3 days
+    # r115: CW conviction sizing — reduces MaxDD 14.1%→10.1% with ~flat PF
+    ma_cluster_cw_enabled: bool = True
+    ma_cluster_cw_spread_threshold: float = 0.015  # "tight" proxy: spread < 1.5% (backtest median ≈1.0-1.5%)
+    ma_cluster_cw_volume_mult: float = 1.5  # volume spike: entry bar > N× symbol avg
+    ma_cluster_cw_mom_mult: float = 2.0  # strong momentum: |mom| > N× min_momentum
+    ma_cluster_cw_multipliers: list[float] = Field(
+        default_factory=lambda: [0.5, 0.75, 1.0, 1.5],
+    )
 
     # ── Donchian Channel Breakout + Volume Spike (4h-only) ──
     # Complementary strategy: 50-bar Donchian channel breakout with volume spike confirmation.
