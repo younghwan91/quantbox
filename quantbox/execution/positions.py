@@ -116,7 +116,7 @@ class PositionMixin:
             f"(risk={vs.risk_per_trade * 100:.0f}% × N={vs.max_concurrent} / SL={sl_pct * 100:.1f}%)"
         )
 
-        # ── R34 CW-Tier Conviction Sizing (VR only, not MA Cluster) ──
+        # ── R34 CW-Tier Conviction Sizing (VR only) ──
         conviction_score = sig_meta.get("conviction_score", 0)
         if vs.cw_enabled and vs.cw_multipliers and strategy_type == VR_DIRECTIONAL:
             idx = min(conviction_score, len(vs.cw_multipliers) - 1)
@@ -127,6 +127,13 @@ class PositionMixin:
                 f"{cw_mult:.1f}x → notional=${notional:.2f} "
                 f"({sig_meta.get('conviction_cond', {})})"
             )
+
+        # ── r115 MA Cluster CW Conviction Sizing ──
+        if strategy_type == MA_CLUSTER and vs.ma_cluster_cw_enabled and vs.ma_cluster_cw_multipliers:
+            cw_score = sig_meta.get("ma_cluster_cw_score", 0)
+            cw_mult = sig_meta.get("ma_cluster_cw_mult", 1.0)
+            notional *= cw_mult
+            logger.info(f"[{symbol}] MA_CLUSTER CW: score={cw_score}/3 → {cw_mult:.2f}x → notional=${notional:.2f}")
 
         # ── Cap notional at Binance's max allowable for this symbol/leverage ──
         # Prevents -2027 "Exceeded the maximum allowable position" errors.

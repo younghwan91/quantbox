@@ -226,6 +226,7 @@ class VolStraddleStrategy:
                     data_4h["high"],
                     data_4h["low"],
                     symbol,
+                    volume_4h=data_4h.get("volume"),
                 )
                 if sig_ma != 0:
                     self._last_signal_source[symbol] = MA_CLUSTER
@@ -364,6 +365,7 @@ class VolStraddleStrategy:
         high_4h: np.ndarray,
         low_4h: np.ndarray,
         symbol: str,
+        volume_4h: np.ndarray | None = None,
     ) -> int:
         """Check MA cluster squeeze signal on 4h data.
 
@@ -496,6 +498,23 @@ class VolStraddleStrategy:
                     )
 
         if sig != 0:
+            # r115: CW conviction score (0-3)
+            cw_score = 0
+            if cfg.ma_cluster_cw_enabled:
+                # 1) tight spread
+                if spread < cfg.ma_cluster_cw_spread_threshold * 100:
+                    cw_score += 1
+                # 2) volume spike: entry bar volume > N× symbol avg
+                if volume_4h is not None and len(volume_4h) >= 20:
+                    avg_vol = float(np.nanmean(volume_4h[-20:]))
+                    if avg_vol > 0 and float(volume_4h[-1]) > cfg.ma_cluster_cw_volume_mult * avg_vol:
+                        cw_score += 1
+                # 3) strong momentum
+                if abs(mom_val) > cfg.ma_cluster_cw_mom_mult * cfg.ma_cluster_min_momentum:
+                    cw_score += 1
+
+            cw_mult = cfg.ma_cluster_cw_multipliers[min(cw_score, len(cfg.ma_cluster_cw_multipliers) - 1)]
+
             self._last_signal_meta[symbol] = {
                 "tf": "4h",
                 "sl": cfg.ma_cluster_sl,
@@ -507,12 +526,14 @@ class VolStraddleStrategy:
                 "ma_cluster_spread": spread,
                 "ma_cluster_duration": dur,
                 "leverage_override": cfg.ma_cluster_leverage,
+                "ma_cluster_cw_score": cw_score,
+                "ma_cluster_cw_mult": cw_mult,
             }
             logger.info(
                 f"[{symbol}] MA_CLUSTER signal "
                 f"TF=4h {'LONG' if sig == 1 else 'SHORT'} "
                 f"spread={spread:.2f}% duration={dur} "
-                f"mom={mom_val:.6f} "
+                f"mom={mom_val:.6f} CW={cw_score}/3 ({cw_mult:.2f}x) "
                 f"SL={cfg.ma_cluster_sl * 100:.0f}% TP={cfg.ma_cluster_tp * 100:.0f}% "
                 f"leverage={cfg.ma_cluster_leverage:.0f}x"
             )
