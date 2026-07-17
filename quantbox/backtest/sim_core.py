@@ -34,6 +34,8 @@ from __future__ import annotations
 import numba
 import numpy as np
 
+from quantbox.strategy.vol_straddle.signals import check_ma_cluster
+
 # Bar-kind enum (kept as plain ints for numba nopython).
 KIND_RESET_SKIP = 0
 KIND_HOLD_SKIP = 1
@@ -462,6 +464,194 @@ def run_ma_cluster(
             WARMUP_4h,
         )
 
+        for kk in range(len(p)):
+            entry_bar = int(e[kk]) * ratio + offset
+            exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
+            all_trades.append((sym, entry_bar, exit_bar, float(p[kk])))
+
+    return all_trades
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Live-faithful path — CALLS the live signal function instead of re-deriving it
+# ══════════════════════════════════════════════════════════════════════════════
+#
+#  Why this exists (measured 2026-07-17): the monolith's MA-cluster entry scan
+#  fires **2.32x** the trades that live ``signals.check_ma_cluster`` fires — 2,184
+#  of 3,836 backtest trades (56.9%) would never be taken live.
+#
+#  Live fires once per cluster episode: on signal it sets ``in_cooldown_arr[0]=1``
+#  and clears it only when ``duration == 0`` (the cluster dissolves).  The monolith
+#  only does ``cluster_count = 0`` after a trade, which does NOT require dissolution
+#  — the count rebuilds inside the same episode and re-enters ``min_duration`` bars
+#  later (worst observed: 17 entries in one episode).  Its own comment claims
+#  "One signal per cluster episode"; the code does not implement it.  ``max_duration``
+#  (zombie filter) is bypassed the same way.
+#
+#  The fix is not to re-derive live's rule a third time — that is the disease.
+#  ``check_ma_cluster`` is ``@numba.jit(nopython=True)``, so a jitted driver can
+#  call it directly.  Then backtest == live by construction.
+#
+#  NOTE: live's entry rule is **trade-independent** (cooldown reacts to cluster
+#  dissolution, not to trade boundaries) — that is exactly why live is safe to call
+#  at any cadence.  So precomputing signals over the whole array is correct HERE,
+#  even though it breaks parity against the monolith (whose entry state is coupled
+#  to trade boundaries — see the parity trap note above).  That coupling is itself
+#  a symptom of the bug.
+
+
+@numba.jit(nopython=True, cache=True)
+def live_ma_cluster_signals(
+    close: np.ndarray,
+    sma20: np.ndarray,
+    sma50: np.ndarray,
+    sma100: np.ndarray,
+    sma200: np.ndarray,
+    momentum: np.ndarray,
+    cluster_pct: float,
+    min_duration: int,
+    max_duration: int,
+    min_momentum: float,
+    warmup: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Replay live ``check_ma_cluster`` bar by bar; return per-bar (entry_ok, direction).
+
+    This CALLS the live function — it does not reimplement it.  The cooldown array
+    persists across bars exactly like ``strategy.py``'s per-symbol
+    ``self._ma_cluster_cooldown``.  Live evaluates on the last completed 4h bar every
+    15m cycle; within one 4h bar the inputs don't change, so one call per 4h bar is
+    equivalent.
+    """
+    n = len(close)
+    entry_ok: np.ndarray = np.zeros(n, dtype=np.bool_)
+    direction: np.ndarray = np.zeros(n, dtype=np.int8)
+    cooldown: np.ndarray = np.zeros(1, dtype=np.int64)
+    dur_out: np.ndarray = np.zeros(1, dtype=np.int64)
+
+    for t in range(warmup, n):
+        sig = check_ma_cluster(
+            close[: t + 1],
+            sma20[: t + 1],
+            sma50[: t + 1],
+            sma100[: t + 1],
+            sma200[: t + 1],
+            momentum[: t + 1],
+            cluster_pct,
+            min_duration,
+            cooldown,
+            dur_out,
+            max_duration,
+            min_momentum,
+        )
+        if sig != 0:
+            entry_ok[t] = True
+            direction[t] = sig
+    return entry_ok, direction
+
+
+def run_ma_cluster_live(
+    data_15m: dict,
+    data_4h: dict | None = None,
+    *,
+    cluster_pct: float | None = None,
+    min_duration: int | None = None,
+    max_duration: int | None = None,
+    min_momentum: float | None = None,
+    sl: float | None = None,
+    tp: float | None = None,
+    trail_activate: float | None = None,
+    trail_distance: float | None = None,
+    max_hold: int | None = None,
+    cost: float | None = None,
+    ratio: int = 16,
+) -> list[tuple[str, int, int, float]]:
+    """MA-cluster trades using the **live** entry rule (``check_ma_cluster``).
+
+    Same signature/output as :func:`run_ma_cluster`, but entries come from replaying
+    the production signal function rather than the monolith's re-derived scan.  SMAs
+    use production ``compute_sma`` (the monolith seeds its inline rolling sum with
+    ``np.sum``, which diverges from live in float64 — real but ~1e-15).
+
+    This will NOT match ``collect_ma_cluster_trades`` — that is the point: measured
+    2026-07-17, the monolith takes 2.32x live's trades.  Use this to see what the
+    strategy's edge actually is under live semantics.
+
+    Exit handling reuses :func:`sim_drive` unchanged (no second copy of exit logic):
+    ``bar_kind`` is ACTIVE everywhere with ``min_duration=1``, so the driver's
+    counter never gates — the gate is ``entry_ok``, which already encodes live's
+    duration/cooldown/breakout/momentum decision.  The driver's post-trade
+    ``i = eb + 1`` jump reproduces live's inability to re-enter a symbol while a
+    position is open.
+    """
+    from quantbox.backtest.trade_sim import COST_DIRECTIONAL, WARMUP_4h, build_resampled
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+    from quantbox.strategy.vol_straddle.signals import compute_momentum, compute_sma
+
+    cfg = VolStraddleConfig()
+    _cluster_pct = cluster_pct if cluster_pct is not None else cfg.ma_cluster_pct
+    _min_duration = min_duration if min_duration is not None else cfg.ma_cluster_min_duration
+    _max_duration = max_duration if max_duration is not None else cfg.ma_cluster_max_duration
+    _min_momentum = min_momentum if min_momentum is not None else cfg.ma_cluster_min_momentum
+    _sl = sl if sl is not None else cfg.ma_cluster_sl
+    _tp = tp if tp is not None else cfg.ma_cluster_tp
+    _trail_activate = trail_activate if trail_activate is not None else cfg.ma_cluster_trail_activate
+    _trail_distance = trail_distance if trail_distance is not None else cfg.ma_cluster_trail_distance
+    _max_hold = max_hold if max_hold is not None else cfg.ma_cluster_max_hold_4h
+    _cost = cost if cost is not None else COST_DIRECTIONAL
+
+    if data_4h is None:
+        data_4h = build_resampled(data_15m, ratio)
+
+    all_trades: list[tuple[str, int, int, float]] = []
+    for sym in sorted(data_15m.keys()):
+        d = data_4h.get(sym)
+        if d is None:
+            continue
+        c = d["close"]
+        if len(c) < WARMUP_4h + 2:
+            continue
+
+        # Live's own SMA/momentum implementations — not the monolith's inline copies.
+        sma20 = compute_sma(c, 20)
+        sma50 = compute_sma(c, 50)
+        sma100 = compute_sma(c, 100)
+        sma200 = compute_sma(c, 200)
+        mom = compute_momentum(c, 8)
+
+        entry_ok, direction = live_ma_cluster_signals(
+            c,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            _cluster_pct,
+            _min_duration,
+            _max_duration,
+            _min_momentum,
+            WARMUP_4h,
+        )
+
+        bar_kind: np.ndarray = np.full(len(c), KIND_ACTIVE, dtype=np.int8)
+        p, e, x, _dr = sim_drive(
+            c,
+            d["high"],
+            d["low"],
+            bar_kind,
+            entry_ok,
+            direction,
+            1,
+            0,  # min_duration=1 / max_duration=0 — gating already done by entry_ok
+            _sl,
+            _tp,
+            _trail_activate,
+            _trail_distance,
+            _max_hold,
+            _cost,
+            WARMUP_4h,
+        )
+
+        offset = int(data_15m[sym].get("_offset", 0))
         for kk in range(len(p)):
             entry_bar = int(e[kk]) * ratio + offset
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
