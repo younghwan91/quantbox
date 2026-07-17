@@ -37,7 +37,6 @@ Per-trade independent test.  No position overlap.
 
 import json
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,7 +46,6 @@ import numpy as np
 
 # ── Project path ─────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
 
 # ── Constants ────────────────────────────────────────────────────────────────
 COST_PER_SIDE = 0.0004  # 0.04% per side (maker/taker avg for liquid)

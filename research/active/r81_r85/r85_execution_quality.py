@@ -12,14 +12,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 # 프로젝트 루트를 sys.path에 추가
 ROOT = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(ROOT))
 
 from quantbox.core.bot_utils import GIT_COMMIT  # noqa: E402
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig  # noqa: E402

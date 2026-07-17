@@ -57,7 +57,6 @@ Usage:
 
 import json
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,7 +65,6 @@ import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
 
 COST_STRADDLE = 0.0004 * 4    # 0.16%
 COST_DIRECTIONAL = 0.0004 * 2  # 0.08%

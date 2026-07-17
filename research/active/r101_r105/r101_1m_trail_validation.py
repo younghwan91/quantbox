@@ -15,16 +15,13 @@ The 1m sim shows actual price path.
 """
 
 import os
-import sys
 import numpy as np
-from pathlib import Path
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # Add project root
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from binance.client import Client
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig

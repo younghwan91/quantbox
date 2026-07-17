@@ -20,13 +20,11 @@ Phase 3: PnL 시나리오 분해 — 4가지 결과(양방수익/한방승/한�
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (
     COST_DIRECTIONAL,

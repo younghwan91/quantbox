@@ -17,7 +17,6 @@ Usage:
 """
 
 import os
-import sys
 import time
 import json
 import numpy as np
@@ -25,7 +24,6 @@ import numba
 from pathlib import Path
 from datetime import datetime, timezone
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 

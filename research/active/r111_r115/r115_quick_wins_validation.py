@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import subprocess
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +26,6 @@ import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (
     bootstrap_pf,

@@ -13,7 +13,6 @@ Usage:
 
 from __future__ import annotations
 
-import sys
 import time
 from pathlib import Path
 
@@ -21,7 +20,6 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (
     build_resampled,

@@ -21,14 +21,12 @@ Phase D: 최적 조합 (WR 43%+, N 8,000+, PF 1.90+)
 from __future__ import annotations
 
 import os
-import sys
 import warnings
 from pathlib import Path
 
 import numpy as np
 
 warnings.filterwarnings("ignore")
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from quantbox.backtest.trade_sim import (
     G_3TF,

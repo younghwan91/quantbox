@@ -26,7 +26,6 @@ from pathlib import Path
 import numpy as np
 import numba
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from quantbox.strategy.rubberband import (
     _compute_sma_inline,
     _compute_rsi_inline,

@@ -26,14 +26,12 @@ Phase 요약:
 from __future__ import annotations
 
 import subprocess
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (
     COST_STRADDLE,

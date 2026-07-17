@@ -18,7 +18,6 @@ VR Squeeze와 MA Cluster에 대해:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numba
@@ -26,7 +25,6 @@ import numpy as np
 
 # ── Imports ──────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (  # noqa: E402
     compute_metrics,

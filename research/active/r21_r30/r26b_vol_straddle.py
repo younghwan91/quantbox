@@ -16,7 +16,6 @@ This script stress-tests that finding:
 
 import json
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +24,6 @@ import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
 
 COST_PER_SIDE = 0.0004
 FEE_4LEGS = COST_PER_SIDE * 4

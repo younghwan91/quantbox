@@ -20,14 +20,12 @@ Usage:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import compute_metrics, portfolio_sim
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
