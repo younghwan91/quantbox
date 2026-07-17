@@ -292,9 +292,9 @@ def sim_directional_trades(
     """
     n = len(close)
     cap = n // 2 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
+    pnl: np.ndarray = np.empty(cap, dtype=np.float64)
+    ent: np.ndarray = np.empty(cap, dtype=np.int64)
+    ext: np.ndarray = np.empty(cap, dtype=np.int64)
     cnt = 0
     i = 0
     while i < n - 1:
@@ -347,7 +347,6 @@ def sim_directional_trades(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@numba.jit(nopython=True, cache=True)
 def sim_directional_trailing(
     close: np.ndarray,
     high: np.ndarray,
@@ -371,100 +370,31 @@ def sim_directional_trailing(
         trail_activate: e.g. 0.02 means trailing activates after +2% gain
         trail_distance: e.g. 0.01 means trail 1% below peak
     """
-    n = len(close)
-    cap = n // 2 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
-    cnt = 0
-    i = 0
-    while i < n - 1:
-        if sig[i] == 0 or dire[i] == 0:
-            i += 1
-            continue
-        entry = close[i]
-        if entry <= 0:
-            i += 1
-            continue
-        d = dire[i]
-        end = min(i + 1 + max_hold, n)
-        eb = end - 1
-        trade_pnl = 0.0
-        trailing_active = False
-        peak_gain = 0.0
+    # 위임: 공용 엔진 sim_core 가 유일 구현이다 (중복 sim 제거).
+    # 기존 백테스트 숫자 불변은 tests/test_golden_trades.py 가 실데이터로 지킨다.
+    from quantbox.backtest.sim_core import directional_conditions, sim_drive
 
-        for j in range(i + 1, end):
-            if d == 1:
-                # Update peak gain from intra-bar high
-                cur_gain = (high[j] - entry) / entry
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
-
-                if trailing_active:
-                    # Trail level is always above SL once active (tighter stop).
-                    # On exchange, tighter stop fires first → check trail first.
-                    # G5 parity fix: previous code checked SL first even when
-                    # trail was active, exiting at -sl when exchange would exit
-                    # at the trail level (much better PnL).
-                    trail_level = entry * (1.0 + peak_gain - trail_distance)
-                    if low[j] <= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-                else:
-                    # No trail active — SL only
-                    if low[j] <= entry * (1.0 - sl):
-                        trade_pnl = -sl
-                        eb = j
-                        break
-
-                if high[j] >= entry * (1.0 + tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-            else:
-                # SHORT
-                cur_gain = (entry - low[j]) / entry
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
-
-                if trailing_active:
-                    # Trail level is always tighter than SL once active.
-                    # G5 parity fix: check trail first (exchange fires tighter stop).
-                    trail_level = entry * (1.0 - peak_gain + trail_distance)
-                    if high[j] >= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-                else:
-                    if high[j] >= entry * (1.0 + sl):
-                        trade_pnl = -sl
-                        eb = j
-                        break
-
-                if low[j] <= entry * (1.0 - tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-        else:
-            if d == 1:
-                trade_pnl = (close[eb] - entry) / entry
-            else:
-                trade_pnl = (entry - close[eb]) / entry
-
-        if cnt < cap:
-            pnl[cnt] = trade_pnl - cost
-            ent[cnt] = i
-            ext[cnt] = eb
-            cnt += 1
-        i = eb + 1
-    return pnl[:cnt], ent[:cnt], ext[:cnt]
+    bar_kind, entry_ok, direction = directional_conditions(close, sig, dire)
+    pnl, ent, ext, _dirs = sim_drive(
+        close,
+        high,
+        low,
+        bar_kind,
+        entry_ok,
+        direction,
+        1,
+        0,  # min_duration=1, max_duration=off (게이팅은 entry_ok가 전담)
+        sl,
+        tp,
+        trail_activate,
+        trail_distance,
+        max_hold,
+        cost,
+        0,  # warmup=0 (이 함수는 warmup 인자가 없다)
+        2,
+        0,  # cap_divisor=2 (n//2+1), cooldown=off
+    )
+    return pnl, ent, ext
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1058,7 +988,6 @@ def precompute_all_vr(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@numba.jit(nopython=True, cache=True)
 def sim_ma_cluster_trailing(
     close: np.ndarray,
     high: np.ndarray,
@@ -1130,134 +1059,33 @@ def sim_ma_cluster_trailing(
         (pnl, entry_bars, exit_bars) — each 1-D array of length N_trades.
         Bar indices are in 4h bar units.
     """
-    n = len(close)
-    cap = n // 4 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
-    cnt = 0
-    i = warmup
-    cluster_count = 0
+    # 위임: 공용 엔진 sim_core 가 유일 구현이다 (중복 sim 제거).
+    # 기존 백테스트 숫자 불변은 tests/test_golden_trades.py 가 실데이터로 지킨다.
+    from quantbox.backtest.sim_core import ma_cluster_conditions, sim_drive
 
-    while i < n - 1:
-        if np.isnan(sma200[i]):
-            cluster_count = 0
-            i += 1
-            continue
-
-        ma_max = max(sma20[i], max(sma50[i], max(sma100[i], sma200[i])))
-        ma_min = min(sma20[i], min(sma50[i], min(sma100[i], sma200[i])))
-        if close[i] <= 0.0:
-            i += 1
-            continue
-        spread = (ma_max - ma_min) / close[i]
-
-        if spread <= cluster_pct:
-            cluster_count += 1
-        else:
-            cluster_count = 0
-            i += 1
-            continue
-
-        # Min duration: cluster must have persisted
-        if cluster_count < min_duration:
-            i += 1
-            continue
-
-        # Max duration: zombie filter
-        if max_duration > 0 and cluster_count > max_duration:
-            i += 1
-            continue
-
-        # Breakout: price must be outside the cluster zone
-        if ma_min <= close[i] <= ma_max:
-            i += 1
-            continue
-
-        # Momentum direction confirmation
-        if abs(momentum[i]) < min_momentum:
-            i += 1
-            continue
-        d = 1 if momentum[i] > 0 else -1
-
-        entry = close[i]
-        end = min(i + 1 + max_hold, n)
-        eb = end - 1
-        trade_pnl = 0.0
-        trailing_active = False
-        peak_gain = 0.0
-
-        for j in range(i + 1, end):
-            if d == 1:
-                # Update peak gain from intra-bar high
-                cur_gain = (high[j] - entry) / entry
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
-
-                if trailing_active:
-                    # G5 parity fix: trail first when active (tighter stop)
-                    trail_level = entry * (1.0 + peak_gain - trail_distance)
-                    if low[j] <= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-                else:
-                    if low[j] <= entry * (1.0 - sl):
-                        trade_pnl = -sl
-                        eb = j
-                        break
-
-                if high[j] >= entry * (1.0 + tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-            else:
-                # SHORT
-                cur_gain = (entry - low[j]) / entry
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
-
-                if trailing_active:
-                    # G5 parity fix: trail first when active (tighter stop)
-                    trail_level = entry * (1.0 - peak_gain + trail_distance)
-                    if high[j] >= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-                else:
-                    if high[j] >= entry * (1.0 + sl):
-                        trade_pnl = -sl
-                        eb = j
-                        break
-
-                if low[j] <= entry * (1.0 - tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-        else:
-            # Max-hold exit at close
-            if d == 1:
-                trade_pnl = (close[eb] - entry) / entry
-            else:
-                trade_pnl = (entry - close[eb]) / entry
-
-        if cnt < cap:
-            pnl[cnt] = trade_pnl - cost
-            ent[cnt] = i
-            ext[cnt] = eb
-            cnt += 1
-
-        # One signal per cluster episode — reset after trade
-        cluster_count = 0
-        i = eb + 1
-
-    return pnl[:cnt], ent[:cnt], ext[:cnt]
+    bar_kind, entry_ok, direction = ma_cluster_conditions(
+        close, sma20, sma50, sma100, sma200, momentum, cluster_pct, min_momentum
+    )
+    pnl, ent, ext, _dirs = sim_drive(
+        close,
+        high,
+        low,
+        bar_kind,
+        entry_ok,
+        direction,
+        min_duration,
+        max_duration,
+        sl,
+        tp,
+        trail_activate,
+        trail_distance,
+        max_hold,
+        cost,
+        warmup,
+        4,
+        0,  # cap_divisor=4 (n//4+1), cooldown=off
+    )
+    return pnl, ent, ext
 
 
 def collect_ma_cluster_trades(
@@ -1388,7 +1216,6 @@ def collect_ma_cluster_trades(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@numba.jit(nopython=True, cache=True)
 def sim_donchian_trailing(
     close: np.ndarray,
     high: np.ndarray,
@@ -1448,137 +1275,33 @@ def sim_donchian_trailing(
         (pnl, entry_bars, exit_bars) - each 1-D array of length N_trades.
         Bar indices are in 4h bar units.
     """
-    n = len(close)
-    cap = n // 4 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
-    cnt = 0
-    i = warmup
-    cooldown = 0
+    # 위임: 공용 엔진 sim_core 가 유일 구현이다 (중복 sim 제거).
+    # 기존 백테스트 숫자 불변은 tests/test_golden_trades.py 가 실데이터로 지킨다.
+    from quantbox.backtest.sim_core import donchian_conditions, sim_drive
 
-    while i < n - 1:
-        # Count down cooldown
-        if cooldown > 0:
-            cooldown -= 1
-            i += 1
-            continue
-
-        # Need enough bars for channel and volume SMA
-        if i < lookback or i < vol_sma_period:
-            i += 1
-            continue
-
-        # Donchian channel from completed bars (no lookahead)
-        chan_high = high[i - lookback]
-        chan_low = low[i - lookback]
-        for k in range(i - lookback + 1, i):
-            if high[k] > chan_high:
-                chan_high = high[k]
-            if low[k] < chan_low:
-                chan_low = low[k]
-
-        # Volume spike: volume[i] vs SMA of completed bars
-        vol_sum = 0.0
-        for k in range(i - vol_sma_period, i):
-            vol_sum += volume[k]
-        vol_sma = vol_sum / vol_sma_period
-        spike = volume[i] > vol_mult * vol_sma
-
-        if not spike:
-            i += 1
-            continue
-
-        # Breakout direction
-        d = 0
-        if close[i] > chan_high and (close[i] - chan_high) / chan_high > breakout_pct:
-            d = 1
-        elif close[i] < chan_low and chan_low > 0.0 and (chan_low - close[i]) / chan_low > breakout_pct:
-            d = -1
-
-        if d == 0:
-            i += 1
-            continue
-
-        # Signal fired - set cooldown
-        cooldown = cooldown_bars
-
-        entry = close[i]
-        end = min(i + 1 + max_hold, n)
-        eb = end - 1
-        trade_pnl = 0.0
-        trailing_active = False
-        peak_gain = 0.0
-
-        for j in range(i + 1, end):
-            if d == 1:
-                # Update peak gain from intra-bar high
-                cur_gain = (high[j] - entry) / entry
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
-
-                if trailing_active:
-                    # G5 parity fix: trail first when active (tighter stop)
-                    trail_level = entry * (1.0 + peak_gain - trail_distance)
-                    if low[j] <= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-                else:
-                    if low[j] <= entry * (1.0 - sl):
-                        trade_pnl = -sl
-                        eb = j
-                        break
-
-                if high[j] >= entry * (1.0 + tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-            else:
-                # SHORT
-                cur_gain = (entry - low[j]) / entry
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
-
-                if trailing_active:
-                    # G5 parity fix: trail first when active (tighter stop)
-                    trail_level = entry * (1.0 - peak_gain + trail_distance)
-                    if high[j] >= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-                else:
-                    if high[j] >= entry * (1.0 + sl):
-                        trade_pnl = -sl
-                        eb = j
-                        break
-
-                if low[j] <= entry * (1.0 - tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-        else:
-            # Max-hold exit at close
-            if d == 1:
-                trade_pnl = (close[eb] - entry) / entry
-            else:
-                trade_pnl = (entry - close[eb]) / entry
-
-        if cnt < cap:
-            pnl[cnt] = trade_pnl - cost
-            ent[cnt] = i
-            ext[cnt] = eb
-            cnt += 1
-
-        i = eb + 1
-
-    return pnl[:cnt], ent[:cnt], ext[:cnt]
+    bar_kind, entry_ok, direction = donchian_conditions(
+        close, high, low, volume, lookback, vol_sma_period, vol_mult, breakout_pct
+    )
+    pnl, ent, ext, _dirs = sim_drive(
+        close,
+        high,
+        low,
+        bar_kind,
+        entry_ok,
+        direction,
+        1,
+        0,  # min_duration=1, max_duration=off (게이팅은 entry_ok가 전담)
+        sl,
+        tp,
+        trail_activate,
+        trail_distance,
+        max_hold,
+        cost,
+        warmup,
+        2,
+        cooldown_bars,  # cap_divisor=2 (n//2+1), donchian은 감소 쿨다운 사용
+    )
+    return pnl, ent, ext
 
 
 def collect_donchian_trades(
