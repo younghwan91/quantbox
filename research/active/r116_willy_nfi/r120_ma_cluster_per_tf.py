@@ -133,27 +133,6 @@ def momentum8(close: np.ndarray) -> np.ndarray:
     return mom
 
 
-def build_btc_gate_mask(
-    btc_close_4h: np.ndarray,
-    btc_ma50_4h: np.ndarray,
-    n_tf_bars: int,
-    ratio: int,
-) -> np.ndarray:
-    """Build gate mask at TF resolution.
-
-    For each TF bar j, the corresponding 4h bar index is j // (16 // ratio).
-    gate[j] = 1.0 if BTC close >= MA50 (LONG OK), else 0.0.
-    NaN 4h bars → 1.0 (gate passes, match live fallback).
-    """
-    ratio_to_4h = 16 // ratio  # how many TF bars per 4h bar
-    mask = np.ones(n_tf_bars, dtype=np.float64)
-    for j in range(n_tf_bars):
-        idx_4h = j // ratio_to_4h
-        if idx_4h < len(btc_ma50_4h) and not np.isnan(btc_ma50_4h[idx_4h]):
-            mask[j] = 1.0 if btc_close_4h[idx_4h] >= btc_ma50_4h[idx_4h] else 0.0
-    return mask
-
-
 # ── Numba sim ─────────────────────────────────────────────────────────────────
 
 @numba.jit(nopython=True, cache=True)
