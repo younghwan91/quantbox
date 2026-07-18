@@ -57,14 +57,12 @@
       "load_data"
     ],
     "research/active/r21_r30/r28_vol_straddle.py": [
-      "compute_momentum",
       "compute_vr",
       "gen_vr_signal",
       "sim_directional",
       "sim_straddle"
     ],
     "research/active/r21_r30/r29_vol_straddle.py": [
-      "compute_momentum",
       "compute_vr",
       "gen_vr_signal",
       "make_direction_momentum",
@@ -73,7 +71,6 @@
     ],
     "research/active/r21_r30/r30_vol_straddle.py": [
       "bootstrap_pf",
-      "compute_momentum",
       "compute_vr",
       "gen_vr_signal",
       "make_direction_momentum",
@@ -88,7 +85,6 @@
     "research/active/r31_r40/r31_mtf_vol_straddle.py": [
       "bootstrap_pf",
       "build_resampled",
-      "compute_momentum",
       "compute_vr",
       "gen_vr_signal",
       "make_direction_momentum",

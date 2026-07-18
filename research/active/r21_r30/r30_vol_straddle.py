@@ -94,14 +94,7 @@ def compute_vr(
     return vr
 
 
-@numba.jit(nopython=True, cache=True)
-def compute_momentum(close: np.ndarray, lookback: int) -> np.ndarray:
-    n = len(close)
-    out = np.full(n, 0.0)
-    for i in range(lookback, n):
-        if close[i - lookback] > 0:
-            out[i] = close[i] / close[i - lookback] - 1.0
-    return out
+from quantbox.research.harness import compute_momentum  # 이주(P2): 재구현 제거 (라이브와 비트동일)
 
 
 @numba.jit(nopython=True, cache=True)
