@@ -79,8 +79,29 @@ TP먼저       r47_exit_ab_test
   브래킷 주문(activationPrice/callbackRate) 거동과 일치하는지는 별도 검증 대상이다.
   즉 "실험 vs canonical" 드리프트는 확인됐으나 "canonical vs 실제 체결"은 미확인.
 
+## 상위 질문 조사 — canonical vs 라이브 trailing (2026-07-18, 코드 분석)
+
+라이브 trailing 설정 코드를 읽어 canonical `sim_drive`와 대조했다.
+(`brackets.py:_get_trail_params`, `positions.py`, Binance TRAILING_STOP_MARKET)
+
+| | 청산가 (LONG) |
+|---|---|
+| 라이브 (Binance callbackRate) | `peak_price × (1 − trail_distance)` = peak_price − **peak_price**×td |
+| canonical `sim_drive` | `entry × (1 + peak_gain − td)` = peak_price − **entry**×td |
+
+**되돌림폭 base가 다르다: 라이브=peak_price, sim=entry.** peak_price > entry(활성화 시점)
+이므로 라이브 청산가가 더 낮다 → **라이브가 더 늦게 청산, 백테스트가 보수적**.
+크기 ≈ `trail_distance × peak_gain` (peak_gain 5% → ~2.5bp/트레이드, 20% → ~10bp).
+
+- **활성화 트리거는 일치**: activationPrice = entry×(1+trail_activate) ⟺ sim의
+  peak_gain ≥ trail_activate. `config.py:76` "Matches IDEAL sim model"은 이 부분을 가리킨다.
+- **청산가 계산은 불일치** (base가 entry vs peak).
+- 방향이 안전(백테스트 < 라이브)하고, **인시던트 룰 #8 영역(라이브 자본)**이라
+  코드 분석만으로 확정/수정 불가. **DOGEUSDT 실측 필요 (CLAUDE.md API 정책).**
+- 미확정: 이 차이가 실제 체결에서 유의한지, r119류 exit 드리프트와 겹치는지.
+
 ## 아직 안 한 것
 
+- **canonical trailing base를 DOGEUSDT 실측으로 검증** (위 표) → 유의하면 sim_drive 정정.
 - 후보 12개를 실측(harness 재현)으로 확정 — r119처럼 각각 셋업 필요.
-- canonical exit이 라이브 체결과 일치하는지 검증(위 상위 질문).
 - 정정이 필요한 실험 목록화 → 사용자 확인 → 선택적 재발행.
