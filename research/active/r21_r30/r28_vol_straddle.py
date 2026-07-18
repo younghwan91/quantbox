@@ -66,19 +66,7 @@ def _atr_pct(close: np.ndarray, high: np.ndarray, low: np.ndarray, period: int) 
     return out
 
 
-@numba.jit(nopython=True, cache=True)
-def compute_vr(
-    close: np.ndarray, high: np.ndarray, low: np.ndarray,
-    sp: int, lp: int,
-) -> np.ndarray:
-    atr_s = _atr_pct(close, high, low, sp)
-    atr_l = _atr_pct(close, high, low, lp)
-    n = len(close)
-    vr = np.full(n, np.nan)
-    for i in range(n):
-        if not np.isnan(atr_s[i]) and not np.isnan(atr_l[i]) and atr_l[i] > 0:
-            vr[i] = atr_s[i] / atr_l[i]
-    return vr
+from quantbox.research.harness import compute_vr  # 이주(P2): 재구현 제거 (라이브와 비트동일)
 
 
 @numba.jit(nopython=True, cache=True)
