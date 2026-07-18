@@ -57,11 +57,12 @@ uv run ruff format quantbox/ tests/
 # Type check
 uv run mypy
 
-# Run the bot (paper trading)
-python -m quantbox.scalper --strategy vol_straddle --paper
+# Run the bot (paper trading) — use `uv run` so the venv python is found
+# (bare `python` fails with "python: not found" in non-login shells like tmux sh)
+uv run python -m quantbox.scalper --strategy vol_straddle --paper
 
 # Run a single cycle
-python -m quantbox.scalper --strategy vol_straddle --paper --once
+uv run python -m quantbox.scalper --strategy vol_straddle --paper --once
 ```
 
 Pre-commit hooks run: ruff format → ruff check → mypy → pytest-fast → research-param-guard (on research/*.py).
