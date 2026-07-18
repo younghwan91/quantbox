@@ -55,9 +55,32 @@ r119를 harness로 재현해 원본과 비교(BTC MA50 게이트 ON, ATR OFF, tr
 핵심: harness가 존재하는 이유는 **미래**를 막는 것이지 과거를 소급 정정하는 게 아니다.
 과거 실험은 "그 숫자를 믿을 수 있나"를 감사하는 대상이지, 자동 이주 대상이 아니다.
 
+## exit 드리프트 범위 (정적 스캔, 2026-07-18)
+
+trailing exit을 가진 활성 실험 17개를 정규식 휴리스틱으로 스캔(활성화 판정 위치,
+TP/SL 체크 순서). **13개가 canonical과 다른 exit 패턴 후보** — 대부분 r119와 같은
+"trailing 1봉 지연 + TP-before-SL":
+
+```
+지연 TP먼저   r103_ma_cluster_parity, r115_quick_wins, r119_btc_atr, r120_per_tf,
+             r43/r43b_exit_improvement, r55_subtf, r57_combo, r75_ma_cluster_sweep,
+             r91_ma_cluster_parity, r92_ma_cluster_gate
+지연         r43c_exit_improvement
+TP먼저       r47_exit_ab_test
+```
+
+**신뢰도 한계 (중요):**
+- 정규식 휴리스틱이다. **r119만 실측(재현) 확인됨.** 나머지 12개는 "후보"이지 확정 아님.
+- ma_cluster 계열(r103/r115/r120/r75/r91/r92)이 전부 같은 패턴 → 이 계열은 **서로는
+  일관**될 가능성이 높다. 그렇다면 계열 내 파라미터 비교(어느 게 나은가)는 유효하고,
+  **절대 PF만** 프로덕션/라이브보다 높게 나온다(r119: 2.523 vs 2.228).
+- **미해결 상위 질문: canonical(sim_drive)이 정말 라이브 Binance trailing과 같은가?**
+  sim_drive는 프로덕션 `trade_sim`과 bit-parity이지만, 그 exit 시뮬레이션이 라이브
+  브래킷 주문(activationPrice/callbackRate) 거동과 일치하는지는 별도 검증 대상이다.
+  즉 "실험 vs canonical" 드리프트는 확인됐으나 "canonical vs 실제 체결"은 미확인.
+
 ## 아직 안 한 것
 
-- **exit 드리프트 범위 감사.** 자체 sim을 가진 활성 실험 ~47개 중 몇 개가 r119처럼
-  trailing 타이밍/SL 순서가 canonical과 다른지. r119가 유일할 리 없다.
-- r119 exit 차이가 정확히 위 2지점으로 100% 설명되는지 미세 검증(코드 비교로 명확하나 미측정).
+- 후보 12개를 실측(harness 재현)으로 확정 — r119처럼 각각 셋업 필요.
+- canonical exit이 라이브 체결과 일치하는지 검증(위 상위 질문).
 - 정정이 필요한 실험 목록화 → 사용자 확인 → 선택적 재발행.
