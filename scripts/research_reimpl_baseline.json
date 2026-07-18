@@ -202,9 +202,6 @@
       "sim_directional_widetp_trail",
       "sim_straddle_partial"
     ],
-    "research/active/r41_r45/r43d_exit_improvement.py": [
-      "get_commit_short"
-    ],
     "research/active/r41_r45/r43e_exit_improvement.py": [
       "get_commit_short"
     ],
