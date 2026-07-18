@@ -1109,6 +1109,14 @@ def collect_ma_cluster_trades(
     ``sim_ma_cluster_trailing`` and converts bar indices to the 15m base
     timeline used by ``portfolio_sim``.
 
+    ⚠️ **재구현 경고 — 라이브와 2.32x 차이 (2026-07-18 실측).** 이 함수의 진입
+    스캔은 라이브 ``signals.check_ma_cluster`` 를 재구현한 것이고, 클러스터 에피소드당
+    1회여야 할 진입이 재진입으로 **2.32배** 발생한다(3,836 vs 라이브 1,652, 유령 56.9%).
+    즉 **라이브 실거래는 이 함수를 쓰지 않으며(strategy.py 가 check_ma_cluster 를 호출),
+    이 백테스트만 과대**하다. 라이브 기준 성과가 필요하면 ``sim_core.run_ma_cluster_live``
+    를 써라(진입 PF 1.9→2.0, 연 40.5%→17.8%). 이 함수는 기존 백테스트 숫자 재현용으로만
+    유지된다. 상세: docs/refactor/research_audit.md, tests/test_sim_core_live_parity.py.
+
     Parameters default to ``VolStraddleConfig`` values (single source of truth).
     Pass explicit values only for parameter sweeps.
 
