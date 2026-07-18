@@ -63,21 +63,7 @@ from quantbox.research.harness import get_commit_short  # 이주(P2): 재구현 
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@numba.jit(nopython=True, cache=True)
-def compute_sma(close: np.ndarray, period: int) -> np.ndarray:
-    """Simple Moving Average — rolling mean of close."""
-    n = len(close)
-    out = np.full(n, np.nan)
-    if n < period:
-        return out
-    s = 0.0
-    for i in range(period):
-        s += close[i]
-    out[period - 1] = s / period
-    for i in range(period, n):
-        s += close[i] - close[i - period]
-        out[i] = s / period
-    return out
+from quantbox.research.harness import compute_sma  # 이주(P2): 재구현 제거 (라이브 SMA 정렬)
 
 
 @numba.jit(nopython=True, cache=True)

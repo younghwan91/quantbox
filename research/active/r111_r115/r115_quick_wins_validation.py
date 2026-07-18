@@ -110,11 +110,7 @@ def build_resampled_arrays(
     return close, high, low
 
 
-def compute_sma(arr: np.ndarray, period: int) -> np.ndarray:
-    out = np.full(len(arr), np.nan)
-    for i in range(period - 1, len(arr)):
-        out[i] = np.mean(arr[i - period + 1 : i + 1])
-    return out
+from quantbox.research.harness import compute_sma  # 이주(P2): 재구현 제거 (라이브 SMA 정렬)
 
 
 def momentum8(close: np.ndarray) -> np.ndarray:

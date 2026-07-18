@@ -13,7 +13,6 @@
     ],
     "research/active/r101_r105/r103_ma_cluster_parity.py": [
       "build_resampled",
-      "compute_sma",
       "load_data",
       "momentum8",
       "sim_live_style_gated"
@@ -25,23 +24,17 @@
       "load_all_data",
       "sim_straddle_trailing_detailed"
     ],
-    "research/active/r111_r115/r111_ma_cluster_feature_extraction.py": [
-      "compute_sma"
-    ],
     "research/active/r111_r115/r115_quick_wins_validation.py": [
-      "compute_sma",
       "load_data",
       "momentum8",
       "sim_live_style_gated"
     ],
     "research/active/r116_willy_nfi/r119_btc_atr_vol_gate.py": [
-      "compute_sma",
       "load_data",
       "momentum8",
       "sim_ma_cluster"
     ],
     "research/active/r116_willy_nfi/r120_ma_cluster_per_tf.py": [
-      "compute_sma",
       "load_data",
       "momentum8",
       "sim_ma_tf"
@@ -189,7 +182,6 @@
       "sim_vr_momentum_follow"
     ],
     "research/active/r41_r45/r44c_ma_confluence.py": [
-      "compute_sma",
       "sim_key_ma_bounce",
       "sim_ma_cluster_breakout",
       "sim_ma_order_pullback",
@@ -288,7 +280,6 @@
     ],
     "research/active/r91_r95/r91_ma_cluster_parity.py": [
       "build_resampled",
-      "compute_sma",
       "load_data",
       "momentum8",
       "sim_backtest_style",
@@ -297,7 +288,6 @@
     ],
     "research/active/r91_r95/r92_ma_cluster_gate.py": [
       "build_resampled",
-      "compute_sma",
       "load_data",
       "momentum8",
       "sim_live_style_gated"

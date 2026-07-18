@@ -101,17 +101,7 @@ def load_numtrades_data(whitelist: list[str]) -> dict[str, np.ndarray]:
 
 # ── Helper: SMA / ATR 계산 ──────────────────────────────────────────────────
 
-def compute_sma(arr: np.ndarray, period: int) -> np.ndarray:
-    """Rolling SMA (numba 안 쓰는 순수 numpy 버전)."""
-    out = np.full(len(arr), np.nan)
-    if len(arr) < period:
-        return out
-    s = float(np.sum(arr[:period]))
-    out[period - 1] = s / period
-    for i in range(period, len(arr)):
-        s += arr[i] - arr[i - period]
-        out[i] = s / period
-    return out
+from quantbox.research.harness import compute_sma  # 이주(P2): 재구현 제거 (라이브 SMA 정렬)
 
 
 def compute_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> np.ndarray:
