@@ -47,6 +47,12 @@ BANNED: dict[str, str] = {
     "momentum8": "from quantbox.research.harness import compute_momentum  # compute_momentum(close, 8)",
     "build_resampled": "from quantbox.research.harness import build_resampled  # 또는 MarketData.resample(ratio)",
     "resample_ohlcv": "from quantbox.research.harness import resample_ohlcv",
+    # 라이브 신호 함수 (진입 규칙 단일소스, Phase 2). research가 재구현하면 백테-라이브 갈라짐.
+    "check_ma_cluster": "from quantbox.research.harness import check_ma_cluster  # 또는 run_ma_cluster_live",
+    "check_donchian_breakout": "from quantbox.research.harness import check_donchian_breakout",
+    "gen_vr_signal": "from quantbox.research.harness import gen_vr_signal",
+    "make_direction_momentum": "from quantbox.research.harness import make_direction_momentum",
+    "compute_vr": "from quantbox.research.harness import compute_vr",
 }
 
 #: 자체 sim 커널 정의 금지. 공용 드라이버 sim_drive를 쓴다.

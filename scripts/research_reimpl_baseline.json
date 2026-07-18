@@ -74,20 +74,28 @@
     ],
     "research/active/r21_r30/r28_vol_straddle.py": [
       "compute_momentum",
+      "compute_vr",
+      "gen_vr_signal",
       "get_commit_short",
       "sim_directional",
       "sim_straddle"
     ],
     "research/active/r21_r30/r29_vol_straddle.py": [
       "compute_momentum",
+      "compute_vr",
+      "gen_vr_signal",
       "get_commit_short",
+      "make_direction_momentum",
       "sim_directional",
       "sim_straddle"
     ],
     "research/active/r21_r30/r30_vol_straddle.py": [
       "bootstrap_pf",
       "compute_momentum",
+      "compute_vr",
+      "gen_vr_signal",
       "get_commit_short",
+      "make_direction_momentum",
       "sim_directional",
       "sim_directional_delayed",
       "sim_straddle",
@@ -101,7 +109,10 @@
       "bootstrap_pf",
       "build_resampled",
       "compute_momentum",
+      "compute_vr",
+      "gen_vr_signal",
       "get_commit_short",
+      "make_direction_momentum",
       "resample_ohlcv",
       "sim_directional",
       "sim_straddle"
@@ -395,6 +406,7 @@
     ],
     "research/active/r96_r100/r100_half_be.py": [
       "load_data",
+      "make_direction_momentum",
       "sim_baseline_trades",
       "sim_half_be_trades"
     ]

@@ -41,7 +41,16 @@ from quantbox.research.harness import report
 from quantbox.research.harness.data import MarketData
 from quantbox.research.harness.experiment import ExperimentResult, experiment
 from quantbox.research.harness.gitinfo import get_commit, get_commit_short, repo_root
-from quantbox.strategy.vol_straddle.signals import compute_momentum, compute_sma, resample_ohlcv
+from quantbox.strategy.vol_straddle.signals import (
+    check_donchian_breakout,
+    check_ma_cluster,
+    compute_momentum,
+    compute_sma,
+    compute_vr,
+    gen_vr_signal,
+    make_direction_momentum,
+    resample_ohlcv,
+)
 
 __all__ = [
     # harness
@@ -71,4 +80,10 @@ __all__ = [
     "compute_sma",
     "compute_momentum",
     "resample_ohlcv",
+    # 라이브 신호 함수 (진입 규칙 단일소스 — research는 재구현 말고 이걸 import)
+    "check_ma_cluster",
+    "check_donchian_breakout",
+    "gen_vr_signal",
+    "make_direction_momentum",
+    "compute_vr",
 ]
