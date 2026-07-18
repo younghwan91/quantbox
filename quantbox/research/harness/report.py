@@ -166,3 +166,45 @@ def robust_gate(
         "boot_ok": boot_ok,
         "n_walk": n_walk,
     }
+
+
+def compare_to_live(
+    backtest_metrics: dict[str, Any],
+    live_metrics: dict[str, Any],
+    *,
+    pf_tol: float = 0.30,
+    ev_tol_bp: float = 20.0,
+    wr_tol: float = 8.0,
+) -> dict[str, Any]:
+    """백테스트 지표 vs 실현(라이브) 지표 대조 — discrepancy 감시 (Phase 4).
+
+    라이브 운영 재개 후 저널의 실현 지표(PF/WR/EV_bp)를 넣어 백테스트 가정과의 갭을
+    감시한다. 갭이 허용치를 넘으면 aligned=False → 알림 대상(슬리피지/펀딩/체결지연 원인
+    규명). read-only 감시 — 라이브 거래에 개입하지 않는다.
+
+    Args:
+        backtest_metrics: report.standard(...) 결과(또는 compute_metrics dict).
+        live_metrics: 실현 지표 dict (같은 키: PF, WR, EV_bp).
+        pf_tol / ev_tol_bp / wr_tol: 허용 갭 임계.
+
+    Returns:
+        aligned(bool) + per-key {backtest, live, gap} + 항목별 ok 플래그.
+    """
+    disc: dict[str, dict[str, float]] = {}
+    for key in ("PF", "WR", "EV_bp"):
+        b = backtest_metrics.get(key)
+        lv = live_metrics.get(key)
+        if b is not None and lv is not None:
+            disc[key] = {"backtest": float(b), "live": float(lv), "gap": float(lv) - float(b)}
+
+    pf_ok = "PF" not in disc or abs(disc["PF"]["gap"]) <= pf_tol
+    ev_ok = "EV_bp" not in disc or abs(disc["EV_bp"]["gap"]) <= ev_tol_bp
+    wr_ok = "WR" not in disc or abs(disc["WR"]["gap"]) <= wr_tol
+
+    return {
+        "aligned": bool(pf_ok and ev_ok and wr_ok),
+        "discrepancy": disc,
+        "pf_ok": pf_ok,
+        "ev_ok": ev_ok,
+        "wr_ok": wr_ok,
+    }

@@ -39,7 +39,7 @@ from quantbox.backtest.trade_sim import (
 )
 from quantbox.research.harness import report
 from quantbox.research.harness.data import MarketData
-from quantbox.research.harness.experiment import ExperimentResult, experiment
+from quantbox.research.harness.experiment import ExperimentResult, experiment, run_parallel
 from quantbox.research.harness.gitinfo import get_commit, get_commit_short, repo_root
 from quantbox.strategy.vol_straddle.signals import (
     check_donchian_breakout,
@@ -57,6 +57,7 @@ __all__ = [
     "MarketData",
     "experiment",
     "ExperimentResult",
+    "run_parallel",
     "report",
     "get_commit",
     "get_commit_short",

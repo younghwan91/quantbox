@@ -74,3 +74,32 @@ def experiment(
         return wrapper
 
     return decorator
+
+
+def run_parallel(
+    experiment_fns: list,
+    *,
+    max_workers: int = 4,
+) -> dict[str, ExperimentResult]:
+    """여러 @experiment 함수를 병렬 실행한다 (Phase 5 — 멀티에이전트 실행 인프라).
+
+    **실행만 병렬** — 공용코어(sim_core)는 read-only로 공유되므로 안전하다(코어를
+    동시 수정하지 않는다, deep-interview R4 결정). 각 실험은 독립적으로 도는 순수
+    함수라 병렬 결과 = 순차 결과(결정론). 이게 '실험은 병렬, 코어는 순차' 원칙의 구현이다.
+
+    Args:
+        experiment_fns: @experiment로 감싼 무인자 함수들.
+        max_workers: 동시 실행 수.
+
+    Returns:
+        {experiment_name: ExperimentResult}.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    results: dict[str, ExperimentResult] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(fn) for fn in experiment_fns]
+        for f in futures:
+            r = f.result()
+            results[r.name] = r
+    return results
