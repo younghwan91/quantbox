@@ -82,13 +82,7 @@ def load_15m() -> dict:
     return data
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True,
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 def print_strategy(label: str, m: dict, boot: dict) -> None:

@@ -98,13 +98,7 @@ MIN_OOS_IS_RATIO = 0.85
 MAX_N_DROP     = 0.20  # N must not drop more than 20%
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ─── Data Loading ─────────────────────────────────────────────────────────────

@@ -19,11 +19,9 @@
       "sim_live_style_gated"
     ],
     "research/active/r106_r110/r106_trail_distance_sweep.py": [
-      "get_commit",
       "load_all_data"
     ],
     "research/active/r106_r110/r107_straddle_trail_activate_sweep.py": [
-      "get_commit",
       "load_all_data",
       "sim_straddle_trailing_detailed"
     ],
@@ -32,31 +30,26 @@
     ],
     "research/active/r111_r115/r115_quick_wins_validation.py": [
       "compute_sma",
-      "get_commit",
       "load_data",
       "momentum8",
       "sim_live_style_gated"
     ],
     "research/active/r116_willy_nfi/r119_btc_atr_vol_gate.py": [
       "compute_sma",
-      "get_commit",
       "load_data",
       "momentum8",
       "sim_ma_cluster"
     ],
     "research/active/r116_willy_nfi/r120_ma_cluster_per_tf.py": [
       "compute_sma",
-      "get_commit",
       "load_data",
       "momentum8",
       "sim_ma_tf"
     ],
     "research/active/r21_r30/r25_vol_straddle.py": [
-      "get_commit_short",
       "load_data"
     ],
     "research/active/r21_r30/r26_vol_straddle.py": [
-      "get_commit_short",
       "load_data",
       "sim_atr_adaptive",
       "sim_breakout",
@@ -64,19 +57,16 @@
       "sim_trailing"
     ],
     "research/active/r21_r30/r26b_vol_straddle.py": [
-      "get_commit_short",
       "load_data",
       "sim_straddle"
     ],
     "research/active/r21_r30/r27_vol_straddle.py": [
-      "get_commit_short",
       "load_data"
     ],
     "research/active/r21_r30/r28_vol_straddle.py": [
       "compute_momentum",
       "compute_vr",
       "gen_vr_signal",
-      "get_commit_short",
       "sim_directional",
       "sim_straddle"
     ],
@@ -84,7 +74,6 @@
       "compute_momentum",
       "compute_vr",
       "gen_vr_signal",
-      "get_commit_short",
       "make_direction_momentum",
       "sim_directional",
       "sim_straddle"
@@ -94,7 +83,6 @@
       "compute_momentum",
       "compute_vr",
       "gen_vr_signal",
-      "get_commit_short",
       "make_direction_momentum",
       "sim_directional",
       "sim_directional_delayed",
@@ -102,8 +90,7 @@
       "sim_straddle_delayed"
     ],
     "research/active/r31_r40/r31_final_analysis.py": [
-      "compute_metrics",
-      "get_commit_short"
+      "compute_metrics"
     ],
     "research/active/r31_r40/r31_mtf_vol_straddle.py": [
       "bootstrap_pf",
@@ -111,7 +98,6 @@
       "compute_momentum",
       "compute_vr",
       "gen_vr_signal",
-      "get_commit_short",
       "make_direction_momentum",
       "resample_ohlcv",
       "sim_directional",
@@ -122,7 +108,6 @@
       "sim_straddle_trades"
     ],
     "research/active/r31_r40/r32_exit_optimization.py": [
-      "get_commit_short",
       "sim_directional_atr_sl",
       "sim_directional_atr_trail",
       "sim_directional_partial",
@@ -134,7 +119,6 @@
       "sim_straddle_trail"
     ],
     "research/active/r31_r40/r33_creative_ab.py": [
-      "get_commit_short",
       "sim_directional_adapt_hold",
       "sim_directional_cooldown",
       "sim_directional_trades",
@@ -145,18 +129,15 @@
       "sim_straddle_trades"
     ],
     "research/active/r31_r40/r34_multi_condition.py": [
-      "get_commit_short",
       "sim_directional_trades",
       "sim_straddle_trades"
     ],
     "research/active/r31_r40/r35_n_boost.py": [
-      "get_commit_short",
       "sim_directional_trades",
       "sim_straddle_trades"
     ],
     "research/active/r31_r40/r36_frequency_boost.py": [
       "compute_metrics",
-      "get_commit_short",
       "portfolio_sim",
       "sim_directional_tiered",
       "sim_directional_trades",
@@ -165,7 +146,6 @@
     ],
     "research/active/r31_r40/r37_frequency_boost.py": [
       "compute_metrics",
-      "get_commit_short",
       "sim_directional_trades",
       "sim_straddle_trades"
     ],
@@ -173,19 +153,13 @@
       "sim_realistic"
     ],
     "research/active/r31_r40/scaling_r38.py": [
-      "get_commit_short",
       "sim_straddle_trades"
     ],
-    "research/active/r41_r45/backtest_v14_6yr.py": [
-      "get_commit"
-    ],
     "research/active/r41_r45/r42_regime_adaptive.py": [
-      "get_commit_short",
       "sim_regime_directional",
       "sim_regime_straddle"
     ],
     "research/active/r41_r45/r43_exit_improvement.py": [
-      "get_commit_short",
       "sim_directional_atr_exit",
       "sim_directional_breakeven",
       "sim_directional_trailing",
@@ -193,23 +167,14 @@
       "sim_straddle_trailing"
     ],
     "research/active/r41_r45/r43b_exit_improvement.py": [
-      "get_commit_short",
       "sim_directional_trail_tightsl"
     ],
     "research/active/r41_r45/r43c_exit_improvement.py": [
-      "get_commit_short",
       "sim_directional_partial_tp",
       "sim_directional_widetp_trail",
       "sim_straddle_partial"
     ],
-    "research/active/r41_r45/r43e_exit_improvement.py": [
-      "get_commit_short"
-    ],
-    "research/active/r41_r45/r43f_exit_improvement.py": [
-      "get_commit_short"
-    ],
     "research/active/r41_r45/r44_high_vol_complement.py": [
-      "get_commit_short",
       "sim_bollinger_mr",
       "sim_momentum_exhaustion",
       "sim_rsi_extreme_mr",
@@ -217,7 +182,6 @@
       "sim_vr_regime_switch"
     ],
     "research/active/r41_r45/r44b_high_vol_complement.py": [
-      "get_commit_short",
       "sim_aligned_momentum",
       "sim_momentum_breakout",
       "sim_momentum_rsi_confirm",
@@ -226,7 +190,6 @@
     ],
     "research/active/r41_r45/r44c_ma_confluence.py": [
       "compute_sma",
-      "get_commit_short",
       "sim_key_ma_bounce",
       "sim_ma_cluster_breakout",
       "sim_ma_order_pullback",
@@ -234,60 +197,42 @@
       "sim_vwma_bounce"
     ],
     "research/active/r41_r45/r44d_ma_cluster_refined.py": [
-      "get_commit_short",
       "sim_ma3_cluster_squeeze",
       "sim_ma_cluster_entry",
       "sim_ma_cluster_squeeze",
       "sim_ma_cluster_squeeze_vr"
     ],
-    "research/active/r41_r45/r44e_ma_cluster_deep.py": [
-      "get_commit_short"
-    ],
     "research/active/r41_r45/r45_param_sweep.py": [
-      "get_commit_short",
       "sim_ma_cluster_enhanced"
     ],
     "research/active/r47_r50/r47_exit_ab_test.py": [
-      "get_commit_short",
       "sim_directional_time_flat_exit",
       "sim_ma_cluster_trailing",
       "sim_straddle_flatness_exit"
-    ],
-    "research/active/r47_r50/r47b_comparison.py": [
-      "get_commit"
-    ],
-    "research/active/r47_r50/r48_dd_halt_analysis.py": [
-      "get_commit"
     ],
     "research/active/r47_r50/r52_asymmetric_small_cap.py": [
       "sim_trade"
     ],
     "research/active/r51_r60/r54_entry_precision.py": [
-      "get_commit_short",
       "sim_directional_delayed",
       "sim_directional_with_filter"
     ],
     "research/active/r51_r60/r55_subtf_entry.py": [
-      "get_commit",
       "sim_directional_pullback",
       "sim_ma_cluster_pullback",
       "sim_straddle_trailing"
     ],
     "research/active/r51_r60/r56_n_expansion.py": [
-      "get_commit",
       "sim_straddle_trailing"
     ],
     "research/active/r51_r60/r57_combo_30m_pullback.py": [
-      "get_commit",
       "sim_directional_pullback_trailing",
       "sim_straddle_trailing"
     ],
     "research/active/r51_r60/r58_n_expansion_v2.py": [
-      "get_commit",
       "sim_straddle_trailing"
     ],
     "research/active/r51_r60/r59_oos_validation.py": [
-      "get_commit",
       "sim_straddle_trailing"
     ],
     "research/active/r51_r60/r61_sma_filter.py": [
@@ -301,56 +246,23 @@
       "sim_directional_trailing_breakeven",
       "sim_directional_trailing_with_mfe"
     ],
-    "research/active/r66_r70/r66_prod_verify.py": [
-      "get_commit"
-    ],
-    "research/active/r66_r70/r67_sensitivity.py": [
-      "get_commit"
-    ],
-    "research/active/r66_r70/r68_trail_activate.py": [
-      "get_commit"
-    ],
-    "research/active/r66_r70/r69_yearly_breakdown.py": [
-      "get_commit"
-    ],
-    "research/active/r71_r75/r71_tbr_reeval.py": [
-      "get_commit"
-    ],
-    "research/active/r71_r75/r72_combined_portfolio.py": [
-      "get_commit"
-    ],
-    "research/active/r71_r75/r73_trail_combined.py": [
-      "get_commit"
-    ],
-    "research/active/r71_r75/r74_s_trail_sweep.py": [
-      "get_commit"
-    ],
     "research/active/r71_r75/r75_ma_cluster_sweep.py": [
-      "get_commit",
       "load_data",
       "sim_ma_cluster_trailing"
     ],
     "research/active/r76_r80/r76_trail_distance.py": [
-      "get_commit",
       "load_all_data"
     ],
-    "research/active/r76_r80/r77_s_d8_audit.py": [
-      "get_commit"
-    ],
     "research/active/r76_r80/r77_slippage_sensitivity.py": [
-      "get_commit",
       "load_data"
     ],
     "research/active/r76_r80/r78_strd_reliability.py": [
-      "get_commit",
       "load_data"
     ],
     "research/active/r76_r80/r79_strd_slot_parity.py": [
-      "get_commit",
       "load_data"
     ],
     "research/active/r76_r80/r80_mixed_slot_parity.py": [
-      "get_commit",
       "load_all_data"
     ],
     "research/active/r81_r85/r81_strd_sl_trail_ratio.py": [
@@ -360,21 +272,17 @@
       "load_all_data"
     ],
     "research/active/r86_r90/r86_production_parity.py": [
-      "get_commit",
       "load_all_data"
     ],
     "research/active/r86_r90/r88_edge_decay.py": [
-      "get_commit",
       "load_all_data"
     ],
     "research/active/r86_r90/r89_trail_distance.py": [
-      "get_commit",
       "sim_directional_trailing_barclose",
       "sim_straddle_mfe_analysis",
       "sim_straddle_trailing_barclose"
     ],
     "research/active/r86_r90/r90_ratchet_model.py": [
-      "get_commit",
       "sim_directional_ratchet",
       "sim_straddle_ratchet"
     ],
@@ -395,7 +303,6 @@
       "sim_live_style_gated"
     ],
     "research/active/r91_r95/r93_straddle_alpha_decay.py": [
-      "get_commit",
       "load_all_data"
     ],
     "research/active/r91_r95/r95_tbr_filter.py": [

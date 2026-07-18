@@ -49,13 +49,7 @@ WARMUP_30m: int = 100
 DATA_YEARS: float = 5.67  # 2020-01-01 ~ 2025-09-30 (approximate)
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════

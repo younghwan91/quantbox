@@ -50,13 +50,7 @@ WARMUP_30m: int = 100
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 def _get_g4tf(cfg: VolStraddleConfig) -> list:

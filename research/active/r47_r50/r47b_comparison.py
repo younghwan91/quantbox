@@ -66,11 +66,7 @@ TBR_Z_THRESHOLD    = 0.5
 MAX_CONCURRENT     = 10
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 def _blended_ln(vr_n: int, ma_n: int) -> float:

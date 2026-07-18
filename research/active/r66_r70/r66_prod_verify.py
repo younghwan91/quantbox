@@ -84,13 +84,7 @@ print(f"VR_LN     : {cfg.base_leverage / MAX_CONC:.1f}")
 print("✅ All params from config.py\n")
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ─── Data Loading ─────────────────────────────────────────────────────────────

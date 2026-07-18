@@ -81,13 +81,7 @@ ATR_THRESH_GRID = [1.3, 1.5, 2.0, 2.5]
 TRAIL_DISTANCE  = 0.005                    # Binance floor (Rule #8)
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True,
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ── Data ─────────────────────────────────────────────────────────────────────

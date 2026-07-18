@@ -64,13 +64,7 @@ TRAIL_DISTANCE_FIXED = 0.005  # Binance callbackRate floor (Rule #8)
 CW_MULTIPLIERS = {0: 0.5, 1: 0.75, 2: 1.0, 3: 1.5}
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True,
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ── Data loading (r92 패턴) ─────────────────────────────────────────────────

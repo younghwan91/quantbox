@@ -90,13 +90,7 @@ SL_VALS     = [0.010, 0.008, 0.006]   # prod at index 0
 YEARS_OOS   = [2023, 2024, 2025]      # must ALL improve for upgrade
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ─── Data Loading ─────────────────────────────────────────────────────────────
