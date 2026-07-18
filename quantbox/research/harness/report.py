@@ -100,3 +100,69 @@ def render(metrics: dict[str, Any], title: str = "") -> str:
     if b:
         lines.append(f"bootstrap PF: median={b['median']}  CI=[{b['CI_lo']}, {b['CI_hi']}]  P(PF≥1)={b['P_PF_ge_1']}%")
     return "\n".join(lines)
+
+
+def robust_gate(
+    trades: list[Trade],
+    data: MarketData,
+    cfg: VolStraddleConfig | None = None,
+    *,
+    n_walk: int = 4,
+    min_boot_p_pf: float = 90.0,
+    min_segment_trades: int = 10,
+) -> dict[str, Any]:
+    """트레이드셋이 강건성(stochastic optimization) 게이트를 통과하는지 판정한다.
+
+    Phase 3 (파리티 강제 코어 리팩토링). 단일 in-sample PF를 노이즈에 맞춰 쥐어짜는
+    오버피팅을 구조적으로 차단한다. 통과 = 시간 분할 OOS + 부트스트랩 둘 다 강건:
+      - 워크포워드: 진입 시점 기준 시계열을 n_walk 등분, 각 구간 PF > 1 (첨점 아닌 고원).
+      - 부트스트랩: 전체 P(PF≥1) >= min_boot_p_pf.
+    신규 백테스트 발행에 이 게이트를 요구하면 '단일 숫자 최적화'가 불가능해진다.
+    (SL 하향은 별개 — 구조적 슬리피지라 OOS로도 안 잡힘, feedback_no_sl_optimization.)
+
+    Args:
+        trades: (symbol, entry_bar, exit_bar, pnl) 리스트.
+        data: 기간 산출용 MarketData.
+        cfg: 파라미터 출처. None이면 VolStraddleConfig().
+        n_walk: 워크포워드 구간 수.
+        min_boot_p_pf: 부트스트랩 P(PF≥1) 통과 임계 (%).
+        min_segment_trades: 구간이 이보다 적으면 판정 제외(None).
+
+    Returns:
+        passed / walkforward_pf / walk_ok / bootstrap / boot_ok / n_walk.
+    """
+    cfg = cfg or VolStraddleConfig()
+    if not trades:
+        return {"passed": False, "reason": "no trades", "walkforward_pf": [], "bootstrap": {}}
+
+    n_slots = cfg.max_concurrent
+    yrs = data_years(data)
+
+    # 워크포워드: 진입 bar 기준 시계열 n_walk 등분.
+    max_bar = max(t[1] for t in trades) + 1
+    edges = [max_bar * i // n_walk for i in range(n_walk + 1)]
+    walk_pf: list[float | None] = []
+    for k in range(n_walk):
+        seg = [t for t in trades if edges[k] <= t[1] < edges[k + 1]]
+        if len(seg) < min_segment_trades:
+            walk_pf.append(None)
+            continue
+        seg_pnl = portfolio_sim(seg, n_slots, None)
+        m = compute_metrics(seg_pnl, max(yrs / n_walk, 1e-9), portfolio_size=n_slots)
+        walk_pf.append(m["PF"])
+
+    full_pnl = portfolio_sim(trades, n_slots, None)
+    boot = bootstrap_pf(full_pnl)
+
+    valid = [p for p in walk_pf if p is not None]
+    walk_ok = len(valid) >= 2 and all(p > 1.0 for p in valid)
+    boot_ok = boot["P_PF_ge_1"] >= min_boot_p_pf
+
+    return {
+        "passed": bool(walk_ok and boot_ok),
+        "walkforward_pf": walk_pf,
+        "walk_ok": walk_ok,
+        "bootstrap": boot,
+        "boot_ok": boot_ok,
+        "n_walk": n_walk,
+    }
