@@ -93,15 +93,41 @@ TP먼저       r47_exit_ab_test
 이므로 라이브 청산가가 더 낮다 → **라이브가 더 늦게 청산, 백테스트가 보수적**.
 크기 ≈ `trail_distance × peak_gain` (peak_gain 5% → ~2.5bp/트레이드, 20% → ~10bp).
 
-- **활성화 트리거는 일치**: activationPrice = entry×(1+trail_activate) ⟺ sim의
-  peak_gain ≥ trail_activate. `config.py:76` "Matches IDEAL sim model"은 이 부분을 가리킨다.
-- **청산가 계산은 불일치** (base가 entry vs peak).
-- 방향이 안전(백테스트 < 라이브)하고, **인시던트 룰 #8 영역(라이브 자본)**이라
-  코드 분석만으로 확정/수정 불가. **DOGEUSDT 실측 필요 (CLAUDE.md API 정책).**
-- 미확정: 이 차이가 실제 체결에서 유의한지, r119류 exit 드리프트와 겹치는지.
+**세 요소로 분리 (2026-07-18 정량화):**
+
+1. **활성화 트리거 = 라이브와 일치.** activationPrice = entry×(1+trail_activate) ⟺
+   sim의 peak_gain ≥ trail_activate (peak_price ≥ entry×(1+trail_activate)). canonical은
+   이 봉에서 **즉시** 활성화 = 라이브와 같다. `config.py:76` "Matches IDEAL sim model".
+2. **청산가 base 차이(entry vs peak) = 집계 영향 0.** sim_drive를 복사해 peak-base 변형을
+   만들어 ma_cluster 3836 트레이드에 두 모델을 돌린 결과: 개별 트레이드 **2536/3836이
+   달라지지만** 평균 PnL 53.63bp 동일(차이 0.000bp), **PF 1.904 / EV 53.6bp 완전 동일.**
+   차이가 양방향 상쇄된다. → **백테스트 결론에 영향 없음. 실측 우선순위 낮음.**
+   (`scratchpad/trail_base_quant.py`)
+3. 결론: **canonical(sim_drive) trailing은 라이브 기준으로 신뢰 가능.** 활성화는 일치하고,
+   base 차이는 집계에 안 나타난다. 아침의 "canonical이 라이브와 다를 수 있다" 우려는 해소.
+
+## exit 드리프트 확정 — 활성 실험 10개, r119와 동일 코드 (2026-07-18)
+
+후보 12개의 exit 블록을 canonical과 라인 비교. **10개가 r119와 정확히 같은
+"활성화 1봉 지연 + TP-before-SL" 패턴** (코드 동일 → 동작 동일 → r119 실측이 대표):
+
+```
+지연+TP먼저 (10):  r103_ma_cluster_parity, r115_quick_wins, r120_per_tf,
+                  r43/r43b_exit_improvement, r55_subtf, r57_combo,
+                  r75_ma_cluster_sweep, r91_ma_cluster_parity, r92_ma_cluster_gate
+지연만 (1):        r43c_exit_improvement
+TP먼저만 (1):      r47_exit_ab_test
+```
+
+**핵심 구분:** r119류 드리프트의 주원인은 **활성화 1봉 지연**(canonical은 즉시=라이브).
+이건 청산 시점 자체를 바꿔 집계에 큰 영향(r119: PF 2.523→2.228, ~12% 과대). base 차이
+(요소 2)와 달리 상쇄되지 않는다. 즉 **canonical이 라이브에 맞고, 이 실험들이 틀렸다.**
+
+영향받는 ma_cluster 계열(r103/r115/r120/r75/r91/r92)은 **서로는 일관**(같은 지연 패턴)
+이므로 계열 내 파라미터 비교는 유효, **절대 PF만** ~12% 부풀려짐.
 
 ## 아직 안 한 것
 
-- **canonical trailing base를 DOGEUSDT 실측으로 검증** (위 표) → 유의하면 sim_drive 정정.
-- 후보 12개를 실측(harness 재현)으로 확정 — r119처럼 각각 셋업 필요.
-- 정정이 필요한 실험 목록화 → 사용자 확인 → 선택적 재발행.
+- 정정 필요 실험 목록(위 10개) → 사용자 확인 → harness 재현으로 재발행.
+- MA cluster 프로덕션 라이브 규칙 승격(진입 갭, 별건) → 사용자 결정.
+- (선택) canonical trailing base DOGEUSDT 실측 — 집계 영향 0이라 우선순위 낮음.
