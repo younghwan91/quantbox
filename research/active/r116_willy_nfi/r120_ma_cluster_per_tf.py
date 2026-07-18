@@ -114,11 +114,7 @@ def resample(c15: np.ndarray, h15: np.ndarray, l15: np.ndarray, ratio: int) -> t
 from quantbox.research.harness import compute_sma  # 이주(P2): 재구현 제거 (라이브 SMA 정렬)
 
 
-def momentum8(close: np.ndarray) -> np.ndarray:
-    mom = np.full(len(close), np.nan)
-    for i in range(8, len(close)):
-        mom[i] = (close[i] - close[i - 8]) / close[i - 8]
-    return mom
+from quantbox.research.harness import compute_momentum  # 이주(P2): momentum8=compute_momentum(·,8), 라이브 정렬
 
 
 # ── Numba sim ─────────────────────────────────────────────────────────────────
@@ -273,7 +269,7 @@ def run_symbol_tf(
     sma50  = compute_sma(c, 50)
     sma100 = compute_sma(c, 100)
     sma200 = compute_sma(c, 200)
-    mom    = momentum8(c)
+    mom    = compute_momentum(c, 8)
 
     offset_15m = d15.get("_offset", 0)
     offset_tf  = offset_15m // ratio

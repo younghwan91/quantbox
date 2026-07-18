@@ -14,7 +14,6 @@
     "research/active/r101_r105/r103_ma_cluster_parity.py": [
       "build_resampled",
       "load_data",
-      "momentum8",
       "sim_live_style_gated"
     ],
     "research/active/r106_r110/r106_trail_distance_sweep.py": [
@@ -26,17 +25,14 @@
     ],
     "research/active/r111_r115/r115_quick_wins_validation.py": [
       "load_data",
-      "momentum8",
       "sim_live_style_gated"
     ],
     "research/active/r116_willy_nfi/r119_btc_atr_vol_gate.py": [
       "load_data",
-      "momentum8",
       "sim_ma_cluster"
     ],
     "research/active/r116_willy_nfi/r120_ma_cluster_per_tf.py": [
       "load_data",
-      "momentum8",
       "sim_ma_tf"
     ],
     "research/active/r21_r30/r25_vol_straddle.py": [
@@ -277,7 +273,6 @@
     "research/active/r91_r95/r91_ma_cluster_parity.py": [
       "build_resampled",
       "load_data",
-      "momentum8",
       "sim_backtest_style",
       "sim_live_style",
       "sim_slfirst_only"
@@ -285,7 +280,6 @@
     "research/active/r91_r95/r92_ma_cluster_gate.py": [
       "build_resampled",
       "load_data",
-      "momentum8",
       "sim_live_style_gated"
     ],
     "research/active/r91_r95/r93_straddle_alpha_decay.py": [

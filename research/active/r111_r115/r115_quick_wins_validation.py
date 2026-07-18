@@ -113,11 +113,7 @@ def build_resampled_arrays(
 from quantbox.research.harness import compute_sma  # 이주(P2): 재구현 제거 (라이브 SMA 정렬)
 
 
-def momentum8(close: np.ndarray) -> np.ndarray:
-    mom = np.full(len(close), np.nan)
-    for i in range(8, len(close)):
-        mom[i] = (close[i] - close[i - 8]) / close[i - 8]
-    return mom
+from quantbox.research.harness import compute_momentum  # 이주(P2): momentum8=compute_momentum(·,8), 라이브 정렬
 
 
 # ── Numba sim: r92 패턴 (BTC gate + configurable trail) ────────────────────
@@ -283,7 +279,7 @@ def run_symbol(
     sma50 = compute_sma(c4, 50)
     sma100 = compute_sma(c4, 100)
     sma200 = compute_sma(c4, 200)
-    mom = momentum8(c4)
+    mom = compute_momentum(c4, 8)
     offset = d15.get("_offset", 0)
 
     # BTC 4h 정렬
