@@ -411,7 +411,7 @@ def run_ma_cluster(
     with the monolith; the live-faithful path (:func:`run_ma_cluster_live`)
     applies it by default instead.
     """
-    from quantbox.backtest.trade_sim import COST_DIRECTIONAL, WARMUP_4h, build_resampled
+    from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
     from quantbox.strategy.vol_straddle.signals import compute_momentum
 
@@ -425,7 +425,9 @@ def run_ma_cluster(
     _trail_activate = trail_activate if trail_activate is not None else cfg.ma_cluster_trail_activate
     _trail_distance = trail_distance if trail_distance is not None else cfg.ma_cluster_trail_distance
     _max_hold = max_hold if max_hold is not None else cfg.ma_cluster_max_hold_4h
-    _cost = cost if cost is not None else COST_DIRECTIONAL
+    # G4: 호출 시점에 읽는다 — 모듈 전역은 import 시점에 굳어 설정 변경을 무시한다.
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)
@@ -635,7 +637,7 @@ def run_ma_cluster_live(
     sizes every trade at 1.0x while live sizes 0.5x-1.5x.  Pass ``False`` to see
     the unweighted edge.
     """
-    from quantbox.backtest.trade_sim import COST_DIRECTIONAL, WARMUP_4h, build_resampled
+    from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
     from quantbox.strategy.vol_straddle.signals import compute_momentum, compute_sma
 
@@ -649,7 +651,9 @@ def run_ma_cluster_live(
     _trail_activate = trail_activate if trail_activate is not None else cfg.ma_cluster_trail_activate
     _trail_distance = trail_distance if trail_distance is not None else cfg.ma_cluster_trail_distance
     _max_hold = max_hold if max_hold is not None else cfg.ma_cluster_max_hold_4h
-    _cost = cost if cost is not None else COST_DIRECTIONAL
+    # G4: 호출 시점에 읽는다 — 모듈 전역은 import 시점에 굳어 설정 변경을 무시한다.
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)

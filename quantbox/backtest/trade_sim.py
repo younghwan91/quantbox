@@ -1101,7 +1101,7 @@ def collect_ma_cluster_trades(
     trail_activate: float | None = None,
     trail_distance: float | None = None,
     max_hold: int | None = None,
-    cost: float = COST_DIRECTIONAL,
+    cost: float | None = None,
 ) -> list[tuple[str, int, int, float]]:
     """Collect MA cluster trailing trades for all whitelist symbols (4h only).
 
@@ -1133,7 +1133,9 @@ def collect_ma_cluster_trades(
         trail_activate: Gain to activate trailing (default: cfg.ma_cluster_trail_activate).
         trail_distance: Trail distance from peak (default: cfg.ma_cluster_trail_distance).
         max_hold: Maximum bars to hold in 4h units (default: cfg.ma_cluster_max_hold_4h).
-        cost: Round-trip transaction cost (default: COST_DIRECTIONAL = 0.0008).
+        cost: Round-trip transaction cost.  G4: ``None`` reads ``cfg.round_trip_cost``
+            at call time — module-level constants are frozen at import and would
+            silently ignore a config change made after import.
 
     Returns:
         List of (symbol, entry_15m_bar, exit_15m_bar, pnl) sorted by symbol.
@@ -1145,6 +1147,8 @@ def collect_ma_cluster_trades(
     cfg = VolStraddleConfig()
 
     # Resolve params from config defaults
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    _warmup_4h = get_trade_sim_config()["tf_4h"][2]
     _cluster_pct = cluster_pct if cluster_pct is not None else cfg.ma_cluster_pct
     _min_duration = min_duration if min_duration is not None else cfg.ma_cluster_min_duration
     _max_duration = max_duration if max_duration is not None else cfg.ma_cluster_max_duration
@@ -1207,8 +1211,8 @@ def collect_ma_cluster_trades(
             _trail_activate,
             _trail_distance,
             _max_hold,
-            cost,
-            WARMUP_4h,
+            _cost,
+            _warmup_4h,
         )
 
         for k in range(len(p)):
@@ -1326,7 +1330,7 @@ def collect_donchian_trades(
     trail_activate: float | None = None,
     trail_distance: float | None = None,
     max_hold: int | None = None,
-    cost: float = COST_DIRECTIONAL,
+    cost: float | None = None,
 ) -> list[tuple[str, int, int, float]]:
     """Collect Donchian channel breakout trades for all whitelist symbols (4h only).
 
@@ -1349,7 +1353,8 @@ def collect_donchian_trades(
         trail_activate: Gain to activate trailing (default: cfg.donchian_trail_activate).
         trail_distance: Trail distance from peak (default: cfg.donchian_trail_distance).
         max_hold: Maximum bars to hold in 4h units (default: cfg.donchian_max_hold_4h).
-        cost: Round-trip transaction cost (default: COST_DIRECTIONAL = 0.0008).
+        cost: Round-trip transaction cost.  G4: ``None`` reads ``cfg.round_trip_cost``
+            at call time (see ``collect_ma_cluster_trades``).
 
     Returns:
         List of (symbol, entry_15m_bar, exit_15m_bar, pnl) sorted by symbol.
@@ -1360,6 +1365,8 @@ def collect_donchian_trades(
     cfg = VolStraddleConfig()
 
     # Resolve params from config defaults
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    _warmup_4h = get_trade_sim_config()["tf_4h"][2]
     _lookback = lookback if lookback is not None else cfg.donchian_lookback
     _vol_sma_period = vol_sma_period if vol_sma_period is not None else cfg.donchian_vol_sma
     _vol_mult = vol_mult if vol_mult is not None else cfg.donchian_vol_mult
@@ -1403,8 +1410,8 @@ def collect_donchian_trades(
             _trail_activate,
             _trail_distance,
             _max_hold,
-            cost,
-            WARMUP_4h,
+            _cost,
+            _warmup_4h,
         )
 
         for k in range(len(p)):
