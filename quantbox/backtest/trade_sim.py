@@ -27,9 +27,15 @@ it very easy to produce slightly different numbers.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
 import numpy as np
 import numba
 from concurrent.futures import ThreadPoolExecutor
+
+if TYPE_CHECKING:
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 from quantbox.strategy.vol_straddle.signals import (
     gen_vr_signal,
@@ -630,11 +636,21 @@ def collect_trades(
 #  Portfolio Simulation — Slot Allocation
 # ══════════════════════════════════════════════════════════════════════════════
 
+#: 15m 봉 기준 하루치 봉 수 (일손실 차단기의 하루 경계).
+BARS_PER_DAY_15M = 96
+
 
 def portfolio_sim(
     all_trades: list[tuple[str, int, int, float]],
     max_concurrent: int,
     straddle_syms: frozenset[str] | None = None,
+    *,
+    directions: Sequence[int] | None = None,
+    btc_close: np.ndarray | None = None,
+    cfg: "VolStraddleConfig | None" = None,
+    dir_diversity: bool = False,
+    btc_gate: bool = False,
+    daily_loss: bool = False,
 ) -> np.ndarray:
     """Filter trades by max concurrent positions, no same-symbol overlap.
 
@@ -650,30 +666,31 @@ def portfolio_sim(
     Returns:
         1-D array of accepted trade PnLs (in chronological order).
     """
-    trades = sorted(all_trades, key=lambda x: x[1])
-    accepted_pnl: list[float] = []
-    active: list[tuple[str, int]] = []  # (symbol, exit_bar)
-
-    for sym, entry, exit_b, pnl_val in trades:
-        # Expire finished trades
-        active = [(s, e) for s, e in active if e > entry]
-        # Same-symbol block
-        sym_active = any(s == sym for s, _ in active)
-        if sym_active:
-            continue
-        # Slot limit
-        if len(active) + 1 > max_concurrent:
-            continue
-        active.append((sym, exit_b))
-        accepted_pnl.append(pnl_val)
-
-    return np.array(accepted_pnl) if accepted_pnl else np.empty(0)
+    pnl, _ = portfolio_sim_with_details(
+        all_trades,
+        max_concurrent,
+        straddle_syms,
+        directions=directions,
+        btc_close=btc_close,
+        cfg=cfg,
+        dir_diversity=dir_diversity,
+        btc_gate=btc_gate,
+        daily_loss=daily_loss,
+    )
+    return pnl
 
 
 def portfolio_sim_with_details(
     all_trades: list[tuple[str, int, int, float]],
     max_concurrent: int,
     straddle_syms: frozenset[str] | None = None,
+    *,
+    directions: Sequence[int] | None = None,
+    btc_close: np.ndarray | None = None,
+    cfg: "VolStraddleConfig | None" = None,
+    dir_diversity: bool = False,
+    btc_gate: bool = False,
+    daily_loss: bool = False,
 ) -> tuple[np.ndarray, list[tuple[str, int, int, float]]]:
     """Portfolio sim that also returns accepted trades with metadata.
 
@@ -689,19 +706,70 @@ def portfolio_sim_with_details(
     Returns:
         (pnl_array, accepted_trades_list).
     """
-    trades = sorted(all_trades, key=lambda x: x[1])
-    accepted: list[tuple[str, int, int, float]] = []
-    active: list[tuple[str, int]] = []
+    if dir_diversity and directions is None:
+        raise ValueError("dir_diversity=True requires `directions` (one +1/-1 per trade)")
+    if btc_gate and (directions is None or btc_close is None):
+        raise ValueError("btc_gate=True requires `directions` and `btc_close`")
 
-    for sym, entry, exit_b, pnl_val in trades:
-        active = [(s, e) for s, e in active if e > entry]
-        sym_active = any(s == sym for s, _ in active)
-        if sym_active:
+    if cfg is not None:
+        _cfg = cfg
+    else:
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        _cfg = VolStraddleConfig()
+    _dirs = list(directions) if directions is not None else [0] * len(all_trades)
+    if len(_dirs) != len(all_trades):
+        raise ValueError(f"directions length {len(_dirs)} != trades {len(all_trades)}")
+
+    # 정렬은 방향과 함께 — 인덱스가 어긋나면 필터가 조용히 엉뚱한 방향을 본다.
+    order = sorted(range(len(all_trades)), key=lambda i: all_trades[i][1])
+    accepted: list[tuple[str, int, int, float]] = []
+    active: list[tuple[str, int, int]] = []  # (symbol, exit_bar, direction)
+
+    # 실현 이벤트 (청산봉, 자기자본 대비 손익) — 차단기는 **이미 청산된** 손익만 본다.
+    realized: list[tuple[int, float]] = []
+    ma_period = _cfg.btc_long_ma_period
+
+    for i in order:
+        sym, entry, exit_b, pnl_val = all_trades[i]
+        d = _dirs[i]
+
+        # 만료 정리 — 이 시점 이전에 끝난 트레이드는 슬롯을 비운다.
+        active = [a for a in active if a[1] > entry]
+
+        # 일손실 차단기(G7): 이 진입 시점까지 **청산 완료된** 당일 손익만 센다.
+        # (진입 순서로 순회하므로, 아직 안 끝난 트레이드의 손실을 미리 반영하면
+        #  라이브가 허용했을 진입을 부당하게 막게 된다.)
+        if daily_loss:
+            day = entry // BARS_PER_DAY_15M
+            day_loss = sum(v for eb, v in realized if eb <= entry and eb // BARS_PER_DAY_15M == day)
+            if day_loss < -_cfg.daily_loss_limit_pct:
+                continue
+
+        if any(s == sym for s, _, _ in active):
             continue
         if len(active) + 1 > max_concurrent:
             continue
-        active.append((sym, exit_b))
+
+        # 방향 분산: 같은 방향 동시 보유 상한.
+        if dir_diversity:
+            same_dir = sum(1 for _, _, ad in active if ad == d)
+            if same_dir >= _cfg.max_same_direction:
+                continue
+
+        # G6 BTC 트렌드 게이트: BTC가 MA 아래면 LONG 차단.
+        if btc_gate and d == 1 and btc_close is not None:
+            if entry >= ma_period - 1 and entry < len(btc_close):
+                window = btc_close[entry - ma_period + 1 : entry + 1]
+                if float(btc_close[entry]) < float(np.mean(window)):
+                    continue
+
+        active.append((sym, exit_b, d))
         accepted.append((sym, entry, exit_b, pnl_val))
+
+        if daily_loss:
+            # 자기자본 대비 영향 = pnl / 슬롯수 (등분 사이징). 실현 시점은 청산 봉.
+            realized.append((exit_b, pnl_val / max(max_concurrent, 1)))
 
     pnl = np.array([t[3] for t in accepted]) if accepted else np.empty(0)
     return pnl, accepted
@@ -1101,7 +1169,7 @@ def collect_ma_cluster_trades(
     trail_activate: float | None = None,
     trail_distance: float | None = None,
     max_hold: int | None = None,
-    cost: float = COST_DIRECTIONAL,
+    cost: float | None = None,
 ) -> list[tuple[str, int, int, float]]:
     """Collect MA cluster trailing trades for all whitelist symbols (4h only).
 
@@ -1133,7 +1201,9 @@ def collect_ma_cluster_trades(
         trail_activate: Gain to activate trailing (default: cfg.ma_cluster_trail_activate).
         trail_distance: Trail distance from peak (default: cfg.ma_cluster_trail_distance).
         max_hold: Maximum bars to hold in 4h units (default: cfg.ma_cluster_max_hold_4h).
-        cost: Round-trip transaction cost (default: COST_DIRECTIONAL = 0.0008).
+        cost: Round-trip transaction cost.  G4: ``None`` reads ``cfg.round_trip_cost``
+            at call time — module-level constants are frozen at import and would
+            silently ignore a config change made after import.
 
     Returns:
         List of (symbol, entry_15m_bar, exit_15m_bar, pnl) sorted by symbol.
@@ -1145,6 +1215,8 @@ def collect_ma_cluster_trades(
     cfg = VolStraddleConfig()
 
     # Resolve params from config defaults
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    _warmup_4h = get_trade_sim_config()["tf_4h"][2]
     _cluster_pct = cluster_pct if cluster_pct is not None else cfg.ma_cluster_pct
     _min_duration = min_duration if min_duration is not None else cfg.ma_cluster_min_duration
     _max_duration = max_duration if max_duration is not None else cfg.ma_cluster_max_duration
@@ -1207,8 +1279,8 @@ def collect_ma_cluster_trades(
             _trail_activate,
             _trail_distance,
             _max_hold,
-            cost,
-            WARMUP_4h,
+            _cost,
+            _warmup_4h,
         )
 
         for k in range(len(p)):
@@ -1326,7 +1398,7 @@ def collect_donchian_trades(
     trail_activate: float | None = None,
     trail_distance: float | None = None,
     max_hold: int | None = None,
-    cost: float = COST_DIRECTIONAL,
+    cost: float | None = None,
 ) -> list[tuple[str, int, int, float]]:
     """Collect Donchian channel breakout trades for all whitelist symbols (4h only).
 
@@ -1349,7 +1421,8 @@ def collect_donchian_trades(
         trail_activate: Gain to activate trailing (default: cfg.donchian_trail_activate).
         trail_distance: Trail distance from peak (default: cfg.donchian_trail_distance).
         max_hold: Maximum bars to hold in 4h units (default: cfg.donchian_max_hold_4h).
-        cost: Round-trip transaction cost (default: COST_DIRECTIONAL = 0.0008).
+        cost: Round-trip transaction cost.  G4: ``None`` reads ``cfg.round_trip_cost``
+            at call time (see ``collect_ma_cluster_trades``).
 
     Returns:
         List of (symbol, entry_15m_bar, exit_15m_bar, pnl) sorted by symbol.
@@ -1360,6 +1433,8 @@ def collect_donchian_trades(
     cfg = VolStraddleConfig()
 
     # Resolve params from config defaults
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    _warmup_4h = get_trade_sim_config()["tf_4h"][2]
     _lookback = lookback if lookback is not None else cfg.donchian_lookback
     _vol_sma_period = vol_sma_period if vol_sma_period is not None else cfg.donchian_vol_sma
     _vol_mult = vol_mult if vol_mult is not None else cfg.donchian_vol_mult
@@ -1403,8 +1478,8 @@ def collect_donchian_trades(
             _trail_activate,
             _trail_distance,
             _max_hold,
-            cost,
-            WARMUP_4h,
+            _cost,
+            _warmup_4h,
         )
 
         for k in range(len(p)):

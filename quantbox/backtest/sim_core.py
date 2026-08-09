@@ -31,10 +31,15 @@ against the existing collectors is enforced by ``tests/test_sim_core_parity.py``
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numba
 import numpy as np
 
 from quantbox.strategy.vol_straddle.signals import check_ma_cluster
+
+if TYPE_CHECKING:
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 # Bar-kind enum (kept as plain ints for numba nopython).
 KIND_RESET_SKIP = 0
@@ -64,6 +69,7 @@ def sim_drive(
     warmup: int,
     cap_divisor: int = 4,
     cooldown_bars: int = 0,
+    trail_peak_lag: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Generic entry-episode + trailing-exit driver (strategy/TF agnostic).
 
@@ -83,6 +89,14 @@ def sim_drive(
 
     ``cooldown_bars`` skips that many bars after each trade (Donchian's
     post-signal cooldown).  ``0`` disables it (ma_cluster / directional).
+
+    ``trail_peak_lag`` (G6) controls the intra-bar ordering assumption.  Live
+    trails tick-by-tick; bars only give high/low with unknown order.  ``0``
+    (default, bit-identical to the monolith) raises the peak with this bar's
+    high before testing the trail — i.e. assumes high came first, the optimistic
+    bound.  ``1`` uses only the peak as of the previous bar, the pessimistic
+    bound.  The spread between the two is the uncertainty this assumption
+    creates; it cannot be removed with bar data.
 
     Returns:
         (pnl, entry_bars, exit_bars, dirs) — 1-D arrays of length N_trades,
@@ -136,18 +150,22 @@ def sim_drive(
 
         for j in range(i + 1, end):
             if d == 1:
+                prev_peak = peak_gain
                 cur_gain = (high[j] - entry) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
 
-                if not trailing_active and peak_gain >= trail_activate:
+                # G6: 트레일 판정에 쓸 고점 — lag면 이 봉의 고점은 아직 못 봤다고 본다.
+                eff_peak = prev_peak if trail_peak_lag > 0 else peak_gain
+
+                if not trailing_active and eff_peak >= trail_activate:
                     trailing_active = True
 
                 if trailing_active:
                     # G5 parity: trail first when active (tighter stop).
-                    trail_level = entry * (1.0 + peak_gain - trail_distance)
+                    trail_level = entry * (1.0 + eff_peak - trail_distance)
                     if low[j] <= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        trade_pnl = max(eff_peak - trail_distance, -sl)
                         eb = j
                         break
                 else:
@@ -161,17 +179,20 @@ def sim_drive(
                     eb = j
                     break
             else:
+                prev_peak = peak_gain
                 cur_gain = (entry - low[j]) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
 
-                if not trailing_active and peak_gain >= trail_activate:
+                eff_peak = prev_peak if trail_peak_lag > 0 else peak_gain
+
+                if not trailing_active and eff_peak >= trail_activate:
                     trailing_active = True
 
                 if trailing_active:
-                    trail_level = entry * (1.0 - peak_gain + trail_distance)
+                    trail_level = entry * (1.0 - eff_peak + trail_distance)
                     if high[j] >= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        trade_pnl = max(eff_peak - trail_distance, -sl)
                         eb = j
                         break
                 else:
@@ -390,7 +411,10 @@ def run_ma_cluster(
     max_hold: int | None = None,
     cost: float | None = None,
     ratio: int = 16,
-) -> list[tuple[str, int, int, float]]:
+    cw_sizing: bool = False,
+    return_directions: bool = False,
+    trail_peak_lag: int = 0,
+) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
     """MA-cluster trades via the generic engine — bit-parity with the monolith.
 
     Drop-in equivalent of ``trade_sim.collect_ma_cluster_trades``: same config
@@ -399,8 +423,13 @@ def run_ma_cluster(
 
     ``ratio`` selects the timeframe (16 = 4h, 4 = 1h, 2 = 30m, 1 = 15m).  At
     ``ratio=16`` the output matches ``collect_ma_cluster_trades`` exactly.
+
+    ``cw_sizing`` (G8) scales each trade's PnL by live's conviction multiplier.
+    It defaults to **off** here because this function's contract is bit-parity
+    with the monolith; the live-faithful path (:func:`run_ma_cluster_live`)
+    applies it by default instead.
     """
-    from quantbox.backtest.trade_sim import COST_DIRECTIONAL, WARMUP_4h, build_resampled
+    from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
     from quantbox.strategy.vol_straddle.signals import compute_momentum
 
@@ -414,7 +443,9 @@ def run_ma_cluster(
     _trail_activate = trail_activate if trail_activate is not None else cfg.ma_cluster_trail_activate
     _trail_distance = trail_distance if trail_distance is not None else cfg.ma_cluster_trail_distance
     _max_hold = max_hold if max_hold is not None else cfg.ma_cluster_max_hold_4h
-    _cost = cost if cost is not None else COST_DIRECTIONAL
+    # G4: 호출 시점에 읽는다 — 모듈 전역은 import 시점에 굳어 설정 변경을 무시한다.
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)
@@ -429,6 +460,7 @@ def run_ma_cluster(
             d["mom_8"] = compute_momentum(c, 8)
 
     all_trades: list[tuple[str, int, int, float]] = []
+    all_dirs: list[int] = []
     for sym in sorted(data_15m.keys()):
         d = data_4h.get(sym)
         if d is None or "sma_200" not in d or "mom_8" not in d:
@@ -446,7 +478,7 @@ def run_ma_cluster(
             _cluster_pct,
             _min_momentum,
         )
-        p, e, x, _dr = sim_drive(
+        p, e, x, dr = sim_drive(
             d["close"],
             d["high"],
             d["low"],
@@ -462,14 +494,50 @@ def run_ma_cluster(
             _max_hold,
             _cost,
             WARMUP_4h,
+            trail_peak_lag=trail_peak_lag,
+        )
+
+        mult = (
+            _cw_mults(d, d["sma_20"], d["sma_50"], d["sma_100"], d["sma_200"], d["mom_8"], cfg) if cw_sizing else None
         )
 
         for kk in range(len(p)):
             entry_bar = int(e[kk]) * ratio + offset
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
-            all_trades.append((sym, entry_bar, exit_bar, float(p[kk])))
+            trade_pnl = float(p[kk]) if mult is None else float(p[kk]) * float(mult[int(e[kk])])
+            all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
+            all_dirs.append(int(dr[kk]))
 
-    return all_trades
+    return (all_trades, all_dirs) if return_directions else all_trades
+
+
+def _cw_mults(
+    d: dict,
+    sma20: np.ndarray,
+    sma50: np.ndarray,
+    sma100: np.ndarray,
+    sma200: np.ndarray,
+    momentum: np.ndarray,
+    cfg: "VolStraddleConfig",
+) -> np.ndarray:
+    """Per-bar conviction multiplier for MA cluster (G8) — live's own judgement.
+
+    Args:
+        d: TF bar dict; needs ``close`` and ``volume``.
+        sma20: SMA(20) on TF bars.
+        sma50: SMA(50).
+        sma100: SMA(100).
+        sma200: SMA(200).
+        momentum: Momentum array on TF bars.
+        cfg: Config supplying the CW thresholds and multiplier table.
+
+    Returns:
+        float64 multiplier array, one entry per TF bar.
+    """
+    from quantbox.backtest.conviction import ma_cluster_cw_mults, ma_cluster_cw_scores
+
+    scores = ma_cluster_cw_scores(d["close"], sma20, sma50, sma100, sma200, momentum, d["volume"], cfg)
+    return ma_cluster_cw_mults(scores, cfg)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -564,7 +632,10 @@ def run_ma_cluster_live(
     max_hold: int | None = None,
     cost: float | None = None,
     ratio: int = 16,
-) -> list[tuple[str, int, int, float]]:
+    cw_sizing: bool = True,
+    return_directions: bool = False,
+    trail_peak_lag: int = 0,
+) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
     """MA-cluster trades using the **live** entry rule (``check_ma_cluster``).
 
     Same signature/output as :func:`run_ma_cluster`, but entries come from replaying
@@ -582,8 +653,14 @@ def run_ma_cluster_live(
     duration/cooldown/breakout/momentum decision.  The driver's post-trade
     ``i = eb + 1`` jump reproduces live's inability to re-enter a symbol while a
     position is open.
+
+    ``cw_sizing`` (G8) applies live's conviction-weighted sizing — each trade's
+    PnL is scaled by ``ma_cluster_cw_multipliers[score]``.  It defaults to **on**
+    because live runs with ``ma_cluster_cw_enabled=True``; without it the backtest
+    sizes every trade at 1.0x while live sizes 0.5x-1.5x.  Pass ``False`` to see
+    the unweighted edge.
     """
-    from quantbox.backtest.trade_sim import COST_DIRECTIONAL, WARMUP_4h, build_resampled
+    from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
     from quantbox.strategy.vol_straddle.signals import compute_momentum, compute_sma
 
@@ -597,12 +674,15 @@ def run_ma_cluster_live(
     _trail_activate = trail_activate if trail_activate is not None else cfg.ma_cluster_trail_activate
     _trail_distance = trail_distance if trail_distance is not None else cfg.ma_cluster_trail_distance
     _max_hold = max_hold if max_hold is not None else cfg.ma_cluster_max_hold_4h
-    _cost = cost if cost is not None else COST_DIRECTIONAL
+    # G4: 호출 시점에 읽는다 — 모듈 전역은 import 시점에 굳어 설정 변경을 무시한다.
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)
 
     all_trades: list[tuple[str, int, int, float]] = []
+    all_dirs: list[int] = []
     for sym in sorted(data_15m.keys()):
         d = data_4h.get(sym)
         if d is None:
@@ -633,7 +713,7 @@ def run_ma_cluster_live(
         )
 
         bar_kind: np.ndarray = np.full(len(c), KIND_ACTIVE, dtype=np.int8)
-        p, e, x, _dr = sim_drive(
+        p, e, x, dr = sim_drive(
             c,
             d["high"],
             d["low"],
@@ -649,12 +729,17 @@ def run_ma_cluster_live(
             _max_hold,
             _cost,
             WARMUP_4h,
+            trail_peak_lag=trail_peak_lag,
         )
+
+        mult = _cw_mults(d, sma20, sma50, sma100, sma200, mom, cfg) if cw_sizing else None
 
         offset = int(data_15m[sym].get("_offset", 0))
         for kk in range(len(p)):
             entry_bar = int(e[kk]) * ratio + offset
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
-            all_trades.append((sym, entry_bar, exit_bar, float(p[kk])))
+            trade_pnl = float(p[kk]) if mult is None else float(p[kk]) * float(mult[int(e[kk])])
+            all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
+            all_dirs.append(int(dr[kk]))
 
-    return all_trades
+    return (all_trades, all_dirs) if return_directions else all_trades
