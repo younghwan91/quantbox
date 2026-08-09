@@ -175,10 +175,22 @@ class TestConvictionGate:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+R116B_STATE_DIR = REPO_ROOT / ".omc" / "state" / "r116b"
+
+# .omc/state/ is gitignored — these artifacts only exist where the sweep was
+# actually run. On a clean checkout (CI) there is nothing to inspect, so skip
+# rather than fail: their absence says nothing about the code under test.
+requires_r116b_artifacts = pytest.mark.skipif(
+    not R116B_STATE_DIR.exists(),
+    reason="r116b sweep artifacts absent — run the sweep scripts first",
+)
+
+
+@requires_r116b_artifacts
 class TestOutputSchema:
     """Runtime artifacts from sweep execution must contain expected keys."""
 
-    STATE_DIR = REPO_ROOT / ".omc" / "state" / "r116b"
+    STATE_DIR = R116B_STATE_DIR
     REQUIRED_KEYS = {
         "N",
         "WR_pct",
@@ -232,8 +244,9 @@ class TestCombinedSelection:
         top2 = select_top_n(variants, 2)
         assert [v["variant"] for v in top2] == ["B", "D"]
 
+    @requires_r116b_artifacts
     def test_combined_summary_csv_has_four_rows(self):
-        summary = REPO_ROOT / ".omc" / "state" / "r116b" / "combined_summary.csv"
+        summary = R116B_STATE_DIR / "combined_summary.csv"
         assert summary.exists(), "combined_summary.csv missing"
         lines = summary.read_text().strip().split("\n")
         # Header + 4 combos
