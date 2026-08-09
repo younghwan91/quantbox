@@ -69,6 +69,7 @@ def sim_drive(
     warmup: int,
     cap_divisor: int = 4,
     cooldown_bars: int = 0,
+    trail_peak_lag: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Generic entry-episode + trailing-exit driver (strategy/TF agnostic).
 
@@ -88,6 +89,14 @@ def sim_drive(
 
     ``cooldown_bars`` skips that many bars after each trade (Donchian's
     post-signal cooldown).  ``0`` disables it (ma_cluster / directional).
+
+    ``trail_peak_lag`` (G6) controls the intra-bar ordering assumption.  Live
+    trails tick-by-tick; bars only give high/low with unknown order.  ``0``
+    (default, bit-identical to the monolith) raises the peak with this bar's
+    high before testing the trail — i.e. assumes high came first, the optimistic
+    bound.  ``1`` uses only the peak as of the previous bar, the pessimistic
+    bound.  The spread between the two is the uncertainty this assumption
+    creates; it cannot be removed with bar data.
 
     Returns:
         (pnl, entry_bars, exit_bars, dirs) — 1-D arrays of length N_trades,
@@ -141,18 +150,22 @@ def sim_drive(
 
         for j in range(i + 1, end):
             if d == 1:
+                prev_peak = peak_gain
                 cur_gain = (high[j] - entry) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
 
-                if not trailing_active and peak_gain >= trail_activate:
+                # G6: 트레일 판정에 쓸 고점 — lag면 이 봉의 고점은 아직 못 봤다고 본다.
+                eff_peak = prev_peak if trail_peak_lag > 0 else peak_gain
+
+                if not trailing_active and eff_peak >= trail_activate:
                     trailing_active = True
 
                 if trailing_active:
                     # G5 parity: trail first when active (tighter stop).
-                    trail_level = entry * (1.0 + peak_gain - trail_distance)
+                    trail_level = entry * (1.0 + eff_peak - trail_distance)
                     if low[j] <= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        trade_pnl = max(eff_peak - trail_distance, -sl)
                         eb = j
                         break
                 else:
@@ -166,17 +179,20 @@ def sim_drive(
                     eb = j
                     break
             else:
+                prev_peak = peak_gain
                 cur_gain = (entry - low[j]) / entry
                 if cur_gain > peak_gain:
                     peak_gain = cur_gain
 
-                if not trailing_active and peak_gain >= trail_activate:
+                eff_peak = prev_peak if trail_peak_lag > 0 else peak_gain
+
+                if not trailing_active and eff_peak >= trail_activate:
                     trailing_active = True
 
                 if trailing_active:
-                    trail_level = entry * (1.0 - peak_gain + trail_distance)
+                    trail_level = entry * (1.0 - eff_peak + trail_distance)
                     if high[j] >= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
+                        trade_pnl = max(eff_peak - trail_distance, -sl)
                         eb = j
                         break
                 else:
@@ -397,6 +413,7 @@ def run_ma_cluster(
     ratio: int = 16,
     cw_sizing: bool = False,
     return_directions: bool = False,
+    trail_peak_lag: int = 0,
 ) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
     """MA-cluster trades via the generic engine — bit-parity with the monolith.
 
@@ -477,6 +494,7 @@ def run_ma_cluster(
             _max_hold,
             _cost,
             WARMUP_4h,
+            trail_peak_lag=trail_peak_lag,
         )
 
         mult = (
@@ -616,6 +634,7 @@ def run_ma_cluster_live(
     ratio: int = 16,
     cw_sizing: bool = True,
     return_directions: bool = False,
+    trail_peak_lag: int = 0,
 ) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
     """MA-cluster trades using the **live** entry rule (``check_ma_cluster``).
 
@@ -710,6 +729,7 @@ def run_ma_cluster_live(
             _max_hold,
             _cost,
             WARMUP_4h,
+            trail_peak_lag=trail_peak_lag,
         )
 
         mult = _cw_mults(d, sma20, sma50, sma100, sma200, mom, cfg) if cw_sizing else None
