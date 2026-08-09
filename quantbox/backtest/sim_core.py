@@ -396,7 +396,8 @@ def run_ma_cluster(
     cost: float | None = None,
     ratio: int = 16,
     cw_sizing: bool = False,
-) -> list[tuple[str, int, int, float]]:
+    return_directions: bool = False,
+) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
     """MA-cluster trades via the generic engine — bit-parity with the monolith.
 
     Drop-in equivalent of ``trade_sim.collect_ma_cluster_trades``: same config
@@ -442,6 +443,7 @@ def run_ma_cluster(
             d["mom_8"] = compute_momentum(c, 8)
 
     all_trades: list[tuple[str, int, int, float]] = []
+    all_dirs: list[int] = []
     for sym in sorted(data_15m.keys()):
         d = data_4h.get(sym)
         if d is None or "sma_200" not in d or "mom_8" not in d:
@@ -459,7 +461,7 @@ def run_ma_cluster(
             _cluster_pct,
             _min_momentum,
         )
-        p, e, x, _dr = sim_drive(
+        p, e, x, dr = sim_drive(
             d["close"],
             d["high"],
             d["low"],
@@ -486,8 +488,9 @@ def run_ma_cluster(
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
             trade_pnl = float(p[kk]) if mult is None else float(p[kk]) * float(mult[int(e[kk])])
             all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
+            all_dirs.append(int(dr[kk]))
 
-    return all_trades
+    return (all_trades, all_dirs) if return_directions else all_trades
 
 
 def _cw_mults(
@@ -612,7 +615,8 @@ def run_ma_cluster_live(
     cost: float | None = None,
     ratio: int = 16,
     cw_sizing: bool = True,
-) -> list[tuple[str, int, int, float]]:
+    return_directions: bool = False,
+) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
     """MA-cluster trades using the **live** entry rule (``check_ma_cluster``).
 
     Same signature/output as :func:`run_ma_cluster`, but entries come from replaying
@@ -659,6 +663,7 @@ def run_ma_cluster_live(
         data_4h = build_resampled(data_15m, ratio)
 
     all_trades: list[tuple[str, int, int, float]] = []
+    all_dirs: list[int] = []
     for sym in sorted(data_15m.keys()):
         d = data_4h.get(sym)
         if d is None:
@@ -689,7 +694,7 @@ def run_ma_cluster_live(
         )
 
         bar_kind: np.ndarray = np.full(len(c), KIND_ACTIVE, dtype=np.int8)
-        p, e, x, _dr = sim_drive(
+        p, e, x, dr = sim_drive(
             c,
             d["high"],
             d["low"],
@@ -715,5 +720,6 @@ def run_ma_cluster_live(
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
             trade_pnl = float(p[kk]) if mult is None else float(p[kk]) * float(mult[int(e[kk])])
             all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
+            all_dirs.append(int(dr[kk]))
 
-    return all_trades
+    return (all_trades, all_dirs) if return_directions else all_trades
