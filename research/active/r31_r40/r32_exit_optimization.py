@@ -80,13 +80,7 @@ def _init_worker(d15: dict, d1h: dict, d4h: dict, dy: float) -> None:
     _G_DATA_YEARS = dy
 
 
-def get_commit_short() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit_short  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════

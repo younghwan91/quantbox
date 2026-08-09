@@ -14,10 +14,8 @@ This is NOT a per-symbol independent backtest. It simulates the portfolio
 exactly as the live scalper would run it, bar by bar across all 20 symbols.
 """
 
-import sys
 import argparse
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 load_dotenv()

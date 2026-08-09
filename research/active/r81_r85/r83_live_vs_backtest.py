@@ -3,7 +3,6 @@
 Downloads gap data to extend cached 15m NPZ through 2026-03-15,
 builds 1h/4h from 15m, runs VR/STRD strategies, compares with journal.
 """
-import sys
 import numpy as np
 import time
 import os
@@ -11,8 +10,6 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from binance.client import Client
 from dotenv import load_dotenv

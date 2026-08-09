@@ -14,7 +14,6 @@ Key questions:
 
 import json
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,7 +22,6 @@ import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
 
 # ── Constants ────────────────────────────────────────────────────────────────
 MAX_HOLD = 192          # 48h in 15m bars
@@ -44,13 +42,7 @@ EXPLOSION_PCT = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10]
 ASYM_THRESHOLDS = [1.5, 2.0, 3.0, 5.0]  # dom/sub > k
 
 
-def get_commit_short() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit_short  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════

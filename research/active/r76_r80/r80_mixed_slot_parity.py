@@ -79,13 +79,7 @@ S_DUR_GRID = [2, 3, 4, 5]
 MAX_HOLD_MULT_GRID = [0.75, 1.0, 1.5, 2.0]  # vs current 2× directional
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════

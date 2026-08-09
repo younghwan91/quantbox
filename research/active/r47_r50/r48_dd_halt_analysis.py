@@ -55,11 +55,7 @@ print(f"  f5_tbr_enabled={cfg.f5_tbr_enabled}  (must be False for Option D)")
 assert not cfg.f5_tbr_enabled, "TBR must be OFF for deployed config"
 print(f"  max_drawdown_pct (current halt)={cfg.max_drawdown_pct:.0%}")
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 print("\n[Data] Loading 15m OHLCV...")

@@ -20,11 +20,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from quantbox.backtest.sim_core import run_ma_cluster_live  # noqa: E402
 from quantbox.backtest.trade_sim import (  # noqa: E402
     G_4TF,
     build_resampled,
     bootstrap_pf,
-    collect_ma_cluster_trades,
     collect_trades,
     compute_metrics,
     portfolio_sim,
@@ -96,7 +96,10 @@ def collect_existing_trades(data_15m, data_1h, data_4h):
     vr_trades = collect_trades(
         d_cfg, data_15m, data_1h, data_4h, "D_mom8", tf_group=G_4TF
     )
-    ma_trades = collect_ma_cluster_trades(data_15m, data_4h)
+    # 라이브 규칙(check_ma_cluster 호출)으로 백테스트한다. 재구현판
+    # collect_ma_cluster_trades 는 클러스터 에피소드당 재진입으로 2.32x 과대 —
+    # autoresearch 가 ma_cluster 를 과대평가해 잘못된 포트폴리오를 학습했다. (2026-07-18)
+    ma_trades = run_ma_cluster_live(data_15m, data_4h)
     return vr_trades + ma_trades
 
 
@@ -472,7 +475,7 @@ def main():
     print("  with PF < 1.0 → FAIL (not robust)")
     print()
     print("---")
-    print(f"primary_metric: 0")
+    print("primary_metric: 0")
 
 
 if __name__ == "__main__":

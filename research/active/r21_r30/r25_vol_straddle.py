@@ -37,7 +37,6 @@ Per-trade independent test.  No position overlap.
 
 import json
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,7 +46,6 @@ import numpy as np
 
 # ── Project path ─────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
 
 # ── Constants ────────────────────────────────────────────────────────────────
 COST_PER_SIDE = 0.0004  # 0.04% per side (maker/taker avg for liquid)
@@ -84,15 +82,7 @@ SIGNAL_NAMES = [
 NUM_SIGNALS = len(SIGNAL_NAMES)
 
 
-def get_commit_short() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(ROOT),
-            text=True,
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit_short  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════
