@@ -41,13 +41,7 @@ COST_DIRECTIONAL = 0.0008
 WARMUP_4h = 13  # ceil(200/16) — enough for SMA200 to be valid
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True,
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════

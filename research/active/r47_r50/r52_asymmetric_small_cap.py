@@ -16,7 +16,6 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 from quantbox.backtest.trade_sim import portfolio_sim, compute_metrics, bootstrap_pf

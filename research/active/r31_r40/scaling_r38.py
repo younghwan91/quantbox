@@ -101,13 +101,7 @@ CFG_V13 = {"sp": _cfg.vr_short, "lp": _cfg.vr_long, "d_vr": _cfg.d_vr_threshold,
            "d_sl": _cfg.d_sl, "tp": _cfg.d_tp}
 
 
-def get_commit_short() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit_short  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════

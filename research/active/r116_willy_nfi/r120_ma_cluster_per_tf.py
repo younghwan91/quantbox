@@ -29,7 +29,6 @@ Usage:
 from __future__ import annotations
 
 import subprocess
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -38,7 +37,6 @@ import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import bootstrap_pf, compute_metrics, portfolio_sim
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
@@ -68,13 +66,7 @@ TF_CONFIGS = [
 ]
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True,
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ── Data ─────────────────────────────────────────────────────────────────────
@@ -119,39 +111,10 @@ def resample(c15: np.ndarray, h15: np.ndarray, l15: np.ndarray, ratio: int) -> t
     return close, high, low
 
 
-def compute_sma(arr: np.ndarray, period: int) -> np.ndarray:
-    out = np.full(len(arr), np.nan)
-    for i in range(period - 1, len(arr)):
-        out[i] = np.mean(arr[i - period + 1 : i + 1])
-    return out
+from quantbox.research.harness import compute_sma  # 이주(P2): 재구현 제거 (라이브 SMA 정렬)
 
 
-def momentum8(close: np.ndarray) -> np.ndarray:
-    mom = np.full(len(close), np.nan)
-    for i in range(8, len(close)):
-        mom[i] = (close[i] - close[i - 8]) / close[i - 8]
-    return mom
-
-
-def build_btc_gate_mask(
-    btc_close_4h: np.ndarray,
-    btc_ma50_4h: np.ndarray,
-    n_tf_bars: int,
-    ratio: int,
-) -> np.ndarray:
-    """Build gate mask at TF resolution.
-
-    For each TF bar j, the corresponding 4h bar index is j // (16 // ratio).
-    gate[j] = 1.0 if BTC close >= MA50 (LONG OK), else 0.0.
-    NaN 4h bars → 1.0 (gate passes, match live fallback).
-    """
-    ratio_to_4h = 16 // ratio  # how many TF bars per 4h bar
-    mask = np.ones(n_tf_bars, dtype=np.float64)
-    for j in range(n_tf_bars):
-        idx_4h = j // ratio_to_4h
-        if idx_4h < len(btc_ma50_4h) and not np.isnan(btc_ma50_4h[idx_4h]):
-            mask[j] = 1.0 if btc_close_4h[idx_4h] >= btc_ma50_4h[idx_4h] else 0.0
-    return mask
+from quantbox.research.harness import compute_momentum  # 이주(P2): momentum8=compute_momentum(·,8), 라이브 정렬
 
 
 # ── Numba sim ─────────────────────────────────────────────────────────────────
@@ -306,7 +269,7 @@ def run_symbol_tf(
     sma50  = compute_sma(c, 50)
     sma100 = compute_sma(c, 100)
     sma200 = compute_sma(c, 200)
-    mom    = momentum8(c)
+    mom    = compute_momentum(c, 8)
 
     offset_15m = d15.get("_offset", 0)
     offset_tf  = offset_15m // ratio

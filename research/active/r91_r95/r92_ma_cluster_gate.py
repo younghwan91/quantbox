@@ -25,14 +25,12 @@ Usage:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import compute_metrics, portfolio_sim
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
@@ -98,18 +96,10 @@ def build_resampled(c15: np.ndarray, h15: np.ndarray, l15: np.ndarray, ratio: in
     return close, high, low
 
 
-def compute_sma(arr: np.ndarray, period: int) -> np.ndarray:
-    out = np.full(len(arr), np.nan)
-    for i in range(period - 1, len(arr)):
-        out[i] = np.mean(arr[i - period + 1 : i + 1])
-    return out
+from quantbox.research.harness import compute_sma  # 이주(P2): 재구현 제거 (라이브 SMA 정렬)
 
 
-def momentum8(close: np.ndarray) -> np.ndarray:
-    mom = np.full(len(close), np.nan)
-    for i in range(8, len(close)):
-        mom[i] = (close[i] - close[i - 8]) / close[i - 8]
-    return mom
+from quantbox.research.harness import compute_momentum  # 이주(P2): momentum8=compute_momentum(·,8), 라이브 정렬
 
 
 # ── Core sim (live-style + optional BTC gate) ────────────────────────────────
@@ -267,7 +257,7 @@ def run_symbol(sym: str, d15: dict, btc_4h: np.ndarray, btc_ma50: np.ndarray, p:
     sma50  = compute_sma(c4, 50)
     sma100 = compute_sma(c4, 100)
     sma200 = compute_sma(c4, 200)
-    mom    = momentum8(c4)
+    mom    = compute_momentum(c4, 8)
     offset = d15.get("_offset", 0)
 
     # Align BTC 4h to this symbol's 4h bars via offset

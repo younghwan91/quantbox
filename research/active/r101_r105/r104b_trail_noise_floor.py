@@ -22,7 +22,6 @@ Usage:
 from __future__ import annotations
 
 import os
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,7 +32,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from binance.client import Client
 from quantbox.backtest.trade_sim import (

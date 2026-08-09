@@ -19,7 +19,6 @@ Usage:
 from __future__ import annotations
 
 import subprocess
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -29,7 +28,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT))
 
 from quantbox.backtest.trade_sim import (
     COST_STRADDLE,
@@ -108,13 +106,7 @@ PROD_IDX: dict[str, int] = {
 }
 
 
-def get_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit  # 이주(P2): 재구현 제거
 
 
 # ─── Data Loading ─────────────────────────────────────────────────────────────

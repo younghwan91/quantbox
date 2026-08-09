@@ -92,13 +92,7 @@ TF_4h  = ("4h", 16, WARMUP_4h,  12,  24, 8)
 G_3TF  = [TF_15m, TF_1h, TF_4h]
 
 
-def get_commit_short() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit_short  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════

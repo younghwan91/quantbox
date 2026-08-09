@@ -33,7 +33,6 @@ Part 4: EXPANDING WINDOW WALK-FORWARD
 
 import json
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,20 +41,13 @@ import numba
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
 
 COST_STRADDLE = 0.0004 * 4
 COST_DIRECTIONAL = 0.0004 * 2
 WARMUP = 200
 
 
-def get_commit_short() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from quantbox.research.harness import get_commit_short  # 이주(P2): 재구현 제거
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -87,29 +79,10 @@ def _atr_pct(close: np.ndarray, high: np.ndarray, low: np.ndarray, period: int) 
     return out
 
 
-@numba.jit(nopython=True, cache=True)
-def compute_vr(
-    close: np.ndarray, high: np.ndarray, low: np.ndarray,
-    sp: int, lp: int,
-) -> np.ndarray:
-    atr_s = _atr_pct(close, high, low, sp)
-    atr_l = _atr_pct(close, high, low, lp)
-    n = len(close)
-    vr = np.full(n, np.nan)
-    for i in range(n):
-        if not np.isnan(atr_s[i]) and not np.isnan(atr_l[i]) and atr_l[i] > 0:
-            vr[i] = atr_s[i] / atr_l[i]
-    return vr
+from quantbox.research.harness import compute_vr  # 이주(P2): 재구현 제거 (라이브와 비트동일)
 
 
-@numba.jit(nopython=True, cache=True)
-def compute_momentum(close: np.ndarray, lookback: int) -> np.ndarray:
-    n = len(close)
-    out = np.full(n, 0.0)
-    for i in range(lookback, n):
-        if close[i - lookback] > 0:
-            out[i] = close[i] / close[i - lookback] - 1.0
-    return out
+from quantbox.research.harness import compute_momentum  # 이주(P2): 재구현 제거 (라이브와 비트동일)
 
 
 @numba.jit(nopython=True, cache=True)

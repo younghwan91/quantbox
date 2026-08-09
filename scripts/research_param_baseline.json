@@ -1,0 +1,33 @@
+{
+  "_comment": "가드 도입 시점에 이미 존재하던 하드코딩 파라미터 — 유예 목록. 여기 없는 새 값은 pre-commit이 막는다. 이 목록은 늘리지 않고 줄여 나간다. 갱신: uv run python scripts/check_research_params.py --update-baseline",
+  "grandfathered": {
+    "research/active/misc/optimal_slots_v2.py": [
+      "d_sl=0.01"
+    ],
+    "research/active/r31_r40/r35_n_boost.py": [
+      "d_sl=0.0075",
+      "d_sl=0.01"
+    ],
+    "research/active/r31_r40/r36_frequency_boost.py": [
+      "d_sl=0.01"
+    ],
+    "research/active/r31_r40/r37_frequency_boost.py": [
+      "d_sl=0.01"
+    ],
+    "research/active/r31_r40/r38b_scaling_grid.py": [
+      "d_sl=0.01"
+    ],
+    "research/active/r31_r40/r39_scaling_yearly.py": [
+      "d_sl=0.01"
+    ],
+    "research/active/r31_r40/r40_lookahead_audit.py": [
+      "d_sl=0.01"
+    ],
+    "research/active/r31_r40/r40b_optimal_slots.py": [
+      "d_sl=0.01"
+    ],
+    "research/active/r31_r40/r40c_stats_deep.py": [
+      "d_sl=0.01"
+    ]
+  }
+}
