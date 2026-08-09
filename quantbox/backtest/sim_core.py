@@ -31,10 +31,15 @@ against the existing collectors is enforced by ``tests/test_sim_core_parity.py``
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numba
 import numpy as np
 
 from quantbox.strategy.vol_straddle.signals import check_ma_cluster
+
+if TYPE_CHECKING:
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 # Bar-kind enum (kept as plain ints for numba nopython).
 KIND_RESET_SKIP = 0
@@ -390,6 +395,7 @@ def run_ma_cluster(
     max_hold: int | None = None,
     cost: float | None = None,
     ratio: int = 16,
+    cw_sizing: bool = False,
 ) -> list[tuple[str, int, int, float]]:
     """MA-cluster trades via the generic engine — bit-parity with the monolith.
 
@@ -399,6 +405,11 @@ def run_ma_cluster(
 
     ``ratio`` selects the timeframe (16 = 4h, 4 = 1h, 2 = 30m, 1 = 15m).  At
     ``ratio=16`` the output matches ``collect_ma_cluster_trades`` exactly.
+
+    ``cw_sizing`` (G8) scales each trade's PnL by live's conviction multiplier.
+    It defaults to **off** here because this function's contract is bit-parity
+    with the monolith; the live-faithful path (:func:`run_ma_cluster_live`)
+    applies it by default instead.
     """
     from quantbox.backtest.trade_sim import COST_DIRECTIONAL, WARMUP_4h, build_resampled
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
@@ -464,12 +475,46 @@ def run_ma_cluster(
             WARMUP_4h,
         )
 
+        mult = (
+            _cw_mults(d, d["sma_20"], d["sma_50"], d["sma_100"], d["sma_200"], d["mom_8"], cfg) if cw_sizing else None
+        )
+
         for kk in range(len(p)):
             entry_bar = int(e[kk]) * ratio + offset
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
-            all_trades.append((sym, entry_bar, exit_bar, float(p[kk])))
+            trade_pnl = float(p[kk]) if mult is None else float(p[kk]) * float(mult[int(e[kk])])
+            all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
 
     return all_trades
+
+
+def _cw_mults(
+    d: dict,
+    sma20: np.ndarray,
+    sma50: np.ndarray,
+    sma100: np.ndarray,
+    sma200: np.ndarray,
+    momentum: np.ndarray,
+    cfg: "VolStraddleConfig",
+) -> np.ndarray:
+    """Per-bar conviction multiplier for MA cluster (G8) — live's own judgement.
+
+    Args:
+        d: TF bar dict; needs ``close`` and ``volume``.
+        sma20: SMA(20) on TF bars.
+        sma50: SMA(50).
+        sma100: SMA(100).
+        sma200: SMA(200).
+        momentum: Momentum array on TF bars.
+        cfg: Config supplying the CW thresholds and multiplier table.
+
+    Returns:
+        float64 multiplier array, one entry per TF bar.
+    """
+    from quantbox.backtest.conviction import ma_cluster_cw_mults, ma_cluster_cw_scores
+
+    scores = ma_cluster_cw_scores(d["close"], sma20, sma50, sma100, sma200, momentum, d["volume"], cfg)
+    return ma_cluster_cw_mults(scores, cfg)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -564,6 +609,7 @@ def run_ma_cluster_live(
     max_hold: int | None = None,
     cost: float | None = None,
     ratio: int = 16,
+    cw_sizing: bool = True,
 ) -> list[tuple[str, int, int, float]]:
     """MA-cluster trades using the **live** entry rule (``check_ma_cluster``).
 
@@ -582,6 +628,12 @@ def run_ma_cluster_live(
     duration/cooldown/breakout/momentum decision.  The driver's post-trade
     ``i = eb + 1`` jump reproduces live's inability to re-enter a symbol while a
     position is open.
+
+    ``cw_sizing`` (G8) applies live's conviction-weighted sizing — each trade's
+    PnL is scaled by ``ma_cluster_cw_multipliers[score]``.  It defaults to **on**
+    because live runs with ``ma_cluster_cw_enabled=True``; without it the backtest
+    sizes every trade at 1.0x while live sizes 0.5x-1.5x.  Pass ``False`` to see
+    the unweighted edge.
     """
     from quantbox.backtest.trade_sim import COST_DIRECTIONAL, WARMUP_4h, build_resampled
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
@@ -651,10 +703,13 @@ def run_ma_cluster_live(
             WARMUP_4h,
         )
 
+        mult = _cw_mults(d, sma20, sma50, sma100, sma200, mom, cfg) if cw_sizing else None
+
         offset = int(data_15m[sym].get("_offset", 0))
         for kk in range(len(p)):
             entry_bar = int(e[kk]) * ratio + offset
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
-            all_trades.append((sym, entry_bar, exit_bar, float(p[kk])))
+            trade_pnl = float(p[kk]) if mult is None else float(p[kk]) * float(mult[int(e[kk])])
+            all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
 
     return all_trades
