@@ -728,7 +728,11 @@ def portfolio_sim_with_details(
 
     # 실현 이벤트 (청산봉, 자기자본 대비 손익) — 차단기는 **이미 청산된** 손익만 본다.
     realized: list[tuple[int, float]] = []
-    ma_period = _cfg.btc_long_ma_period
+
+    # 필터 판정은 라이브 RiskGuard가 한다 — 백테스트는 사본을 두지 않는다.
+    from quantbox.execution.risk_guard import RiskGuard
+
+    _guard = RiskGuard(_cfg)
 
     for i in order:
         sym, entry, exit_b, pnl_val = all_trades[i]
@@ -743,7 +747,8 @@ def portfolio_sim_with_details(
         if daily_loss:
             day = entry // BARS_PER_DAY_15M
             day_loss = sum(v for eb, v in realized if eb <= entry and eb // BARS_PER_DAY_15M == day)
-            if day_loss < -_cfg.daily_loss_limit_pct:
+            # 손익이 자기자본 대비 **비율**이므로 balance=1.0으로 넘긴다.
+            if _guard.check_daily_loss(day_loss, 1.0):
                 continue
 
         if any(s == sym for s, _, _ in active):
@@ -751,18 +756,17 @@ def portfolio_sim_with_details(
         if len(active) + 1 > max_concurrent:
             continue
 
-        # 방향 분산: 같은 방향 동시 보유 상한.
+        # 방향 분산: 라이브와 같은 판정기를 쓴다. 라이브는 pos dict를 보므로 스냅샷을 만든다.
         if dir_diversity:
-            same_dir = sum(1 for _, _, ad in active if ad == d)
-            if same_dir >= _cfg.max_same_direction:
+            snapshot = {f"{s}:{k}": {"signal": ad} for k, (s, _, ad) in enumerate(active)}
+            if not _guard.allow_direction(d, snapshot)[0]:
                 continue
 
-        # G6 BTC 트렌드 게이트: BTC가 MA 아래면 LONG 차단.
-        if btc_gate and d == 1 and btc_close is not None:
-            if entry >= ma_period - 1 and entry < len(btc_close):
-                window = btc_close[entry - ma_period + 1 : entry + 1]
-                if float(btc_close[entry]) < float(np.mean(window)):
-                    continue
+        # G6 BTC 트렌드 게이트: 라이브는 배열 **끝**을 보므로 진입 봉까지 잘라 넘긴다.
+        if btc_gate and d == 1 and btc_close is not None and entry < len(btc_close):
+            window = btc_close[: entry + 1]
+            if not _guard.allow_long(window, _guard.compute_btc_gate(window)):
+                continue
 
         active.append((sym, exit_b, d))
         accepted.append((sym, entry, exit_b, pnl_val))

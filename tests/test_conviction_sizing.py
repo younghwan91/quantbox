@@ -1,10 +1,11 @@
-"""G8 파리티: MA cluster conviction-weighted sizing을 백테스트에 이식.
+"""G8 파리티: MA cluster conviction-weighted sizing — 라이브와 **같은 함수**를 쓴다.
 
-라이브(`strategy.py:500-516`)는 진입 시 3개 조건으로 CW 점수(0~3)를 매기고
-`ma_cluster_cw_multipliers`로 명목가를 0.5~1.5배 스케일한다. 백테스트에는 이 축이
-아예 없어서 모든 트레이드를 1.0배로 계산해 왔다 — 사이징 축이 통째로 달랐다.
+이전에는 라이브(`strategy.py`)가 인라인으로 CW를 판정하고 백테스트가 그걸 벡터화해
+다시 짰다. 값은 맞춰 놨지만 사본이라 라이브 조건이 바뀌면 조용히 갈라졌다 — 실제로
+`close <= 0` 경계에서 이미 갈라져 있었다.
 
-여기 테스트는 이식된 스코어러가 **라이브와 같은 판정**을 내는지 고정한다.
+지금은 `strategy.vol_straddle.conviction`이 단일 소스이고 양쪽이 이를 호출한다.
+여기 테스트는 (a) 판정 자체의 경계와 (b) **사본이 다시 생기지 않았는지**를 고정한다.
 """
 
 from pathlib import Path
@@ -12,96 +13,126 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from quantbox.backtest.conviction import ma_cluster_cw_mults, ma_cluster_cw_scores
+from quantbox.strategy.vol_straddle.conviction import (
+    CW_VOL_WINDOW,
+    ma_cluster_cw_multiplier,
+    ma_cluster_cw_score,
+    ma_cluster_spread_pct,
+)
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "data" / "cache_extended"
 
 
-def _flat(n: int, value: float) -> np.ndarray:
+def _flat_volume(n: int = CW_VOL_WINDOW, value: float = 100.0) -> np.ndarray:
+    """스파이크 없는 거래량 — 조건2가 거짓인 기본값."""
     return np.full(n, value, dtype=np.float64)
 
 
-def _bars(n: int = 25) -> dict[str, np.ndarray]:
-    """CW 3조건이 모두 거짓인 기본 봉 세트 (조건별로 하나씩 켜서 쓴다)."""
-    cfg = VolStraddleConfig()
-    return {
-        # spread = (max-min)/close*100 = 3.0% > 1.5% 임계 → 조건1 거짓
-        "close": _flat(n, 100.0),
-        "sma_20": _flat(n, 100.0),
-        "sma_50": _flat(n, 103.0),
-        "sma_100": _flat(n, 103.0),
-        "sma_200": _flat(n, 103.0),
-        # 평탄한 거래량 → 스파이크 없음 → 조건2 거짓
-        "volume": _flat(n, 100.0),
-        # |mom| = 0 → 조건3 거짓
-        "momentum": _flat(n, 0.0),
-        "_cfg": cfg,
-    }
-
-
-def _scores(b: dict) -> np.ndarray:
-    return ma_cluster_cw_scores(
-        b["close"], b["sma_20"], b["sma_50"], b["sma_100"], b["sma_200"], b["momentum"], b["volume"], b["_cfg"]
-    )
+# ──────────────────────────────────────────────────────────────────────────
+#  판정 경계
+# ──────────────────────────────────────────────────────────────────────────
 
 
 def test_all_three_conditions_give_max_score() -> None:
-    """좁은 스프레드 + 거래량 스파이크 + 강한 모멘텀 → 점수 3 → 1.5배."""
+    """좁은 스프레드 + 거래량 스파이크 + 강한 모멘텀 → 점수 3 → 최대 배수."""
     cfg = VolStraddleConfig()
-    b = _bars()
-    i = 24
+    vol = _flat_volume()
+    vol[-1] = 1000.0  # mean = (19*100+1000)/20 = 145, 1000 > 1.5*145
 
-    # 1) tight spread: (100.5-100)/100*100 = 0.5% < 1.5%
-    b["sma_50"][i] = b["sma_100"][i] = b["sma_200"][i] = 100.5
-    # 2) volume spike: mean(volume[5:25]) = (19*100+1000)/20 = 145, 1000 > 1.5*145
-    b["volume"][i] = 1000.0
-    # 3) strong momentum: |mom| > 2.0 * min_momentum
-    b["momentum"][i] = cfg.ma_cluster_cw_mom_mult * cfg.ma_cluster_min_momentum * 10.0
-
-    scores = _scores(b)
-    assert scores[i] == 3
-
-    mults = ma_cluster_cw_mults(scores, cfg)
-    assert mults[i] == cfg.ma_cluster_cw_multipliers[3]
+    score = ma_cluster_cw_score(
+        spread_pct=0.5,  # < 1.5%
+        mom_val=cfg.ma_cluster_cw_mom_mult * cfg.ma_cluster_min_momentum * 10.0,
+        volume=vol,
+        cfg=cfg,
+    )
+    assert score == 3
+    assert ma_cluster_cw_multiplier(score, cfg) == cfg.ma_cluster_cw_multipliers[3]
 
 
 def test_no_conditions_give_min_score() -> None:
-    """세 조건 모두 거짓 → 점수 0 → 0.5배 (라이브가 명목가를 절반으로 줄이는 구간)."""
+    """세 조건 모두 거짓 → 점수 0 → 라이브가 명목가를 절반으로 줄이는 구간."""
     cfg = VolStraddleConfig()
-    b = _bars()
-    scores = _scores(b)
-    assert scores[24] == 0
-    assert ma_cluster_cw_mults(scores, cfg)[24] == cfg.ma_cluster_cw_multipliers[0]
+    score = ma_cluster_cw_score(spread_pct=3.0, mom_val=0.0, volume=_flat_volume(), cfg=cfg)
+    assert score == 0
+    assert ma_cluster_cw_multiplier(score, cfg) == cfg.ma_cluster_cw_multipliers[0]
 
 
 def test_volume_condition_needs_20_bars() -> None:
-    """20봉 미만 구간에서는 거래량 조건이 아예 평가되지 않는다 (라이브 `len>=20` 가드)."""
+    """20봉 미만이면 거래량 조건은 아예 평가되지 않는다 (라이브 `len >= 20` 가드)."""
     cfg = VolStraddleConfig()
-    b = _bars()
-    # 거래량 스파이크를 봉 10에 둔다 — 라이브라면 창이 20봉이 안 돼 점수를 안 준다.
-    b["volume"][10] = 1e6
-    b["sma_50"][10] = b["sma_100"][10] = b["sma_200"][10] = 100.5  # 조건1만 참
-    scores = _scores(b)
-    assert scores[10] == 1, "20봉 미만인데 거래량 조건이 가산됐다"
-    assert ma_cluster_cw_mults(scores, cfg)[10] == cfg.ma_cluster_cw_multipliers[1]
+    short = np.full(CW_VOL_WINDOW - 1, 100.0)
+    short[-1] = 1e6  # 창이 모자라면 이 스파이크는 무시돼야 한다
+
+    score = ma_cluster_cw_score(spread_pct=0.5, mom_val=0.0, volume=short, cfg=cfg)
+    assert score == 1, "20봉 미만인데 거래량 조건이 가산됐다"
 
 
 def test_spread_threshold_is_percent_units() -> None:
-    """임계 비교는 퍼센트 단위 — 라이브가 `spread < threshold*100`으로 쓴다.
+    """임계 비교는 퍼센트 단위 — 라이브가 `spread < threshold * 100`으로 쓴다.
 
     비율 단위(0.015)로 잘못 비교하면 거의 모든 봉이 조건1을 통과해 점수가 부풀려진다.
     """
-    b = _bars()
-    i = 24
-    # spread = 2.0% — 임계 1.5%보다 넓으므로 조건1은 거짓이어야 한다.
-    b["sma_50"][i] = b["sma_100"][i] = b["sma_200"][i] = 102.0
-    assert _scores(b)[i] == 0
+    cfg = VolStraddleConfig()
+    # 2.0% — 임계 1.5%보다 넓으므로 조건1은 거짓
+    assert ma_cluster_cw_score(spread_pct=2.0, mom_val=0.0, volume=_flat_volume(), cfg=cfg) == 0
+    # 1.0% — 통과
+    assert ma_cluster_cw_score(spread_pct=1.0, mom_val=0.0, volume=_flat_volume(), cfg=cfg) == 1
+
+
+def test_disabled_config_scores_zero() -> None:
+    """`ma_cluster_cw_enabled=False`면 라이브는 점수를 세지 않는다."""
+    cfg = VolStraddleConfig(ma_cluster_cw_enabled=False)
+    vol = _flat_volume()
+    vol[-1] = 1e6
+    assert ma_cluster_cw_score(spread_pct=0.1, mom_val=99.0, volume=vol, cfg=cfg) == 0
+
+
+def test_spread_falls_back_to_zero_on_nonpositive_close() -> None:
+    """`close <= 0`이면 스프레드는 0.0 — 라이브의 폴백 동작을 그대로 따른다.
+
+    사본 시절 백테스트는 이걸 NaN으로 두어 조건1을 탈락시켰다. 실데이터엔 없는
+    경계지만, 사본이 만드는 드리프트가 실재했음을 남겨 둔다.
+    """
+    assert ma_cluster_spread_pct(0.0, 100.0, 101.0, 102.0, 103.0) == 0.0
+    assert ma_cluster_spread_pct(100.0, 100.0, 100.0, 100.0, 100.5) == pytest.approx(0.5)
+
+
+def test_multiplier_clamps_beyond_table() -> None:
+    """표 길이를 넘는 점수는 클램프된다 (라이브 `min(score, len-1)`)."""
+    cfg = VolStraddleConfig()
+    assert ma_cluster_cw_multiplier(99, cfg) == cfg.ma_cluster_cw_multipliers[-1]
 
 
 # ──────────────────────────────────────────────────────────────────────────
-#  sim 배선 — 실데이터 (라이브 충실 경로에는 기본 ON, 모놀리식 재현 경로는 opt-in)
+#  구조적 결합 — 사본이 다시 생기지 않았는가
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_live_has_no_inline_cw_arithmetic() -> None:
+    """라이브가 CW 조건을 다시 인라인으로 계산하면 실패한다.
+
+    `strategy.py`는 임계값을 직접 비교하지 않고 공유 함수를 호출해야 한다.
+    """
+    src = (ROOT / "quantbox" / "strategy" / "vol_straddle" / "strategy.py").read_text()
+    for token in ("ma_cluster_cw_spread_threshold", "ma_cluster_cw_volume_mult", "ma_cluster_cw_mom_mult"):
+        assert token not in src, f"strategy.py가 CW 조건을 다시 인라인 계산한다: {token}"
+    assert "ma_cluster_cw_score(" in src, "라이브가 공유 CW 판정을 호출하지 않는다"
+
+
+def test_backtest_has_no_cw_copy() -> None:
+    """백테스트에 CW 판정 사본이 부활하면 실패한다."""
+    assert not (ROOT / "quantbox" / "backtest" / "conviction.py").exists(), (
+        "backtest/conviction.py가 되살아났다 — CW 판정은 strategy 쪽 단일 소스만 둔다"
+    )
+    src = (ROOT / "quantbox" / "backtest" / "sim_core.py").read_text()
+    for token in ("ma_cluster_cw_spread_threshold", "ma_cluster_cw_volume_mult", "ma_cluster_cw_mom_mult"):
+        assert token not in src, f"sim_core.py가 CW 조건을 다시 계산한다: {token}"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  sim 배선 — 실데이터
 # ──────────────────────────────────────────────────────────────────────────
 
 

@@ -154,3 +154,39 @@ def test_sim_returns_directions_aligned_with_trades() -> None:
     assert len(dirs) == len(trades)
     assert set(dirs) <= {1, -1}, f"방향이 ±1이 아니다: {set(dirs)}"
     assert len(set(dirs)) == 2, "한 방향만 나왔다 — 배선이 상수를 반환하는지 의심"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+#  구조적 결합 — 필터 판정을 백테스트가 다시 짜지 않았는가
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_portfolio_sim_delegates_to_risk_guard() -> None:
+    """필터 판정은 라이브 `RiskGuard`가 한다 — 백테스트에 사본을 두지 않는다.
+
+    이전에는 방향 분산·BTC 게이트·일손실을 `trade_sim.py`가 직접 계산했다. 값은
+    맞춰 놨지만 사본이라 라이브 규칙이 바뀌면 조용히 갈라졌다.
+    """
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[1] / "quantbox" / "backtest" / "trade_sim.py").read_text()
+
+    assert "RiskGuard(" in src, "portfolio_sim이 RiskGuard를 쓰지 않는다"
+    for call in ("allow_direction(", "allow_long(", "check_daily_loss("):
+        assert call in src, f"필터 판정을 위임하지 않는다: {call}"
+    # 임계값을 직접 읽으면 판정을 다시 짜고 있다는 신호다.
+    for token in ("max_same_direction", "btc_long_ma_period", "daily_loss_limit_pct"):
+        assert token not in src, f"trade_sim.py가 필터 임계값을 직접 비교한다: {token}"
+
+
+def test_risk_guard_is_constructible_without_exchange() -> None:
+    """RiskGuard가 config만으로 만들어져야 백테스트가 호출할 수 있다.
+
+    거래소 클라이언트나 스캘퍼 상태를 요구하기 시작하면 이 결합이 깨진다.
+    """
+    from quantbox.execution.risk_guard import RiskGuard
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+    guard = RiskGuard(VolStraddleConfig())
+    assert guard.check_daily_loss(0.0, 1.0) is False
+    assert guard.allow_direction(1, {})[0] is True

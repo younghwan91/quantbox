@@ -497,21 +497,21 @@ def run_ma_cluster(
             trail_peak_lag=trail_peak_lag,
         )
 
-        mult = (
-            _cw_mults(d, d["sma_20"], d["sma_50"], d["sma_100"], d["sma_200"], d["mom_8"], cfg) if cw_sizing else None
-        )
-
         for kk in range(len(p)):
             entry_bar = int(e[kk]) * ratio + offset
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
-            trade_pnl = float(p[kk]) if mult is None else float(p[kk]) * float(mult[int(e[kk])])
+            trade_pnl = float(p[kk])
+            if cw_sizing:
+                trade_pnl *= _cw_mult_at(
+                    d, d["sma_20"], d["sma_50"], d["sma_100"], d["sma_200"], d["mom_8"], cfg, int(e[kk])
+                )
             all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
             all_dirs.append(int(dr[kk]))
 
     return (all_trades, all_dirs) if return_directions else all_trades
 
 
-def _cw_mults(
+def _cw_mult_at(
     d: dict,
     sma20: np.ndarray,
     sma50: np.ndarray,
@@ -519,8 +519,14 @@ def _cw_mults(
     sma200: np.ndarray,
     momentum: np.ndarray,
     cfg: "VolStraddleConfig",
-) -> np.ndarray:
-    """Per-bar conviction multiplier for MA cluster (G8) — live's own judgement.
+    idx: int,
+) -> float:
+    """Conviction multiplier at one entry bar (G8) — CALLS live's own judgement.
+
+    This does not re-derive live's CW conditions; it feeds the entry bar's state to
+    ``strategy.vol_straddle.conviction``, the same functions ``strategy.py`` calls.
+    Evaluating per entry bar (not per bar) keeps that call affordable — live only
+    scores bars where a signal actually fired.
 
     Args:
         d: TF bar dict; needs ``close`` and ``volume``.
@@ -530,14 +536,25 @@ def _cw_mults(
         sma200: SMA(200).
         momentum: Momentum array on TF bars.
         cfg: Config supplying the CW thresholds and multiplier table.
+        idx: Entry bar index into the TF arrays.
 
     Returns:
-        float64 multiplier array, one entry per TF bar.
+        Nominal-size multiplier for that entry.
     """
-    from quantbox.backtest.conviction import ma_cluster_cw_mults, ma_cluster_cw_scores
+    from quantbox.strategy.vol_straddle.conviction import (
+        ma_cluster_cw_multiplier,
+        ma_cluster_cw_score,
+        ma_cluster_spread_pct,
+    )
 
-    scores = ma_cluster_cw_scores(d["close"], sma20, sma50, sma100, sma200, momentum, d["volume"], cfg)
-    return ma_cluster_cw_mults(scores, cfg)
+    spread = ma_cluster_spread_pct(
+        float(d["close"][idx]), float(sma20[idx]), float(sma50[idx]), float(sma100[idx]), float(sma200[idx])
+    )
+    m = float(momentum[idx])
+    # 라이브도 NaN 모멘텀을 0.0으로 정규화한다 (`strategy.py`).
+    mom_val = 0.0 if np.isnan(m) else m
+    score = ma_cluster_cw_score(spread, mom_val, d["volume"][: idx + 1], cfg)
+    return ma_cluster_cw_multiplier(score, cfg)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -732,13 +749,13 @@ def run_ma_cluster_live(
             trail_peak_lag=trail_peak_lag,
         )
 
-        mult = _cw_mults(d, sma20, sma50, sma100, sma200, mom, cfg) if cw_sizing else None
-
         offset = int(data_15m[sym].get("_offset", 0))
         for kk in range(len(p)):
             entry_bar = int(e[kk]) * ratio + offset
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
-            trade_pnl = float(p[kk]) if mult is None else float(p[kk]) * float(mult[int(e[kk])])
+            trade_pnl = float(p[kk])
+            if cw_sizing:
+                trade_pnl *= _cw_mult_at(d, sma20, sma50, sma100, sma200, mom, cfg, int(e[kk]))
             all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
             all_dirs.append(int(dr[kk]))
 
