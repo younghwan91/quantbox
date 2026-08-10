@@ -381,7 +381,7 @@ def sim_directional_trailing(
     from quantbox.backtest.sim_core import directional_conditions, sim_drive
 
     bar_kind, entry_ok, direction = directional_conditions(close, sig, dire)
-    pnl, ent, ext, _dirs = sim_drive(
+    pnl, ent, ext, _dirs, _rsn = sim_drive(
         close,
         high,
         low,
@@ -1155,7 +1155,7 @@ def sim_ma_cluster_trailing(
     bar_kind, entry_ok, direction = ma_cluster_conditions(
         close, sma20, sma50, sma100, sma200, momentum, cluster_pct, min_momentum
     )
-    pnl, ent, ext, _dirs = sim_drive(
+    pnl, ent, ext, _dirs, _rsn = sim_drive(
         close,
         high,
         low,
@@ -1383,7 +1383,7 @@ def sim_donchian_trailing(
     bar_kind, entry_ok, direction = donchian_conditions(
         close, high, low, volume, lookback, vol_sma_period, vol_mult, breakout_pct
     )
-    pnl, ent, ext, _dirs = sim_drive(
+    pnl, ent, ext, _dirs, _rsn = sim_drive(
         close,
         high,
         low,
