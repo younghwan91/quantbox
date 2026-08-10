@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 from quantbox.backtest.trade_sim import portfolio_sim, portfolio_sim_with_details
+from quantbox.execution.sizing import equity_fraction_per_trade
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 #: 15m 봉 하루치.
@@ -89,8 +90,9 @@ def test_daily_loss_breaker_blocks_rest_of_day() -> None:
     """당일 실현손실이 한도를 넘으면 그날 남은 진입은 막히고, 다음 날 풀린다."""
     cfg = VolStraddleConfig()
     slots = cfg.max_concurrent
-    # 한 건당 자기자본 영향 = pnl / slots. 한도를 확실히 넘기도록 큰 손실을 쓴다.
-    big_loss = -cfg.daily_loss_limit_pct * slots * 2
+    sl = cfg.ma_cluster_sl
+    # 한 건당 자기자본 영향 = 가격변동 × (레버리지 / 슬롯수). 한도를 확실히 넘기도록 잡는다.
+    big_loss = -cfg.daily_loss_limit_pct / equity_fraction_per_trade(sl, cfg) * 2
 
     trades = [
         ("AAA", 1, 2, big_loss),  # 0일차: 손실 확정 → 이후 차단
@@ -98,7 +100,7 @@ def test_daily_loss_breaker_blocks_rest_of_day() -> None:
         ("CCC", BARS_PER_DAY + 5, BARS_PER_DAY + 10, 0.05),  # 1일차: 다시 허용
     ]
 
-    _, accepted = portfolio_sim_with_details(trades, max_concurrent=slots, daily_loss=True, cfg=cfg)
+    _, accepted = portfolio_sim_with_details(trades, max_concurrent=slots, daily_loss=True, cfg=cfg, sl_pct=sl)
     assert [t[0] for t in accepted] == ["AAA", "CCC"], f"차단기가 잘못 동작: {[t[0] for t in accepted]}"
 
 
@@ -106,7 +108,9 @@ def test_daily_loss_breaker_stays_off_when_within_limit() -> None:
     """한도 안이면 아무것도 막지 않는다."""
     cfg = VolStraddleConfig()
     trades = [("AAA", 1, 2, -0.0001), ("BBB", 10, 20, 0.05)]
-    _, accepted = portfolio_sim_with_details(trades, max_concurrent=cfg.max_concurrent, daily_loss=True, cfg=cfg)
+    _, accepted = portfolio_sim_with_details(
+        trades, max_concurrent=cfg.max_concurrent, daily_loss=True, cfg=cfg, sl_pct=cfg.ma_cluster_sl
+    )
     assert len(accepted) == 2
 
 
@@ -190,3 +194,57 @@ def test_risk_guard_is_constructible_without_exchange() -> None:
     guard = RiskGuard(VolStraddleConfig())
     assert guard.check_daily_loss(0.0, 1.0) is False
     assert guard.allow_direction(1, {})[0] is True
+
+
+def test_daily_loss_requires_sl_pct() -> None:
+    """자기자본 환산 없이 일손실을 켜면 거부된다.
+
+    이전에는 `pnl / max_concurrent`로 환산해 레버리지를 통째로 빠뜨렸다 —
+    SL 1회를 자기자본 0.2%로 봤지만 라이브는 6%다(30배). 그래서 실데이터에서
+    차단기가 **한 건도 막지 못했다**. 조용히 틀리느니 요구하고 멈춘다.
+    """
+    with pytest.raises(ValueError, match="sl_pct"):
+        portfolio_sim_with_details([("AAA", 1, 2, -0.5)], max_concurrent=10, daily_loss=True)
+
+
+def test_equity_scale_matches_live_risk_design() -> None:
+    """환산 계수는 라이브 설계와 일치해야 한다 — SL 1회 = `risk_per_trade`."""
+    cfg = VolStraddleConfig()
+    scale = equity_fraction_per_trade(cfg.ma_cluster_sl, cfg)
+    loss_at_sl = cfg.ma_cluster_sl * scale
+    assert loss_at_sl == pytest.approx(cfg.risk_per_trade, rel=1e-9), (
+        f"SL 1회 손실 {loss_at_sl:.4f} != risk_per_trade {cfg.risk_per_trade}"
+    )
+
+
+def test_live_sizing_has_no_inline_leverage_formula() -> None:
+    """라이브가 레버리지 식을 다시 인라인 계산하면 실패한다."""
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[1] / "quantbox" / "execution" / "positions.py").read_text()
+    assert "risk_based_leverage(" in src, "positions.py가 공유 사이징 함수를 쓰지 않는다"
+    assert "vs.risk_per_trade * vs.max_concurrent" not in src, "레버리지 식이 다시 인라인으로 들어왔다"
+
+
+def test_daily_loss_block_is_sticky_until_next_day() -> None:
+    """한 번 걸리면 그날은 이익이 실현돼도 풀리지 않는다 (라이브 `_daily_loss_blocked`).
+
+    진입마다 재계산하면, 나중에 이익 트레이드가 청산되며 당일 합계가 한도 위로
+    올라와 라이브라면 막혔을 진입이 백테스트에서는 열린다.
+    """
+    cfg = VolStraddleConfig()
+    sl = cfg.ma_cluster_sl
+    trip = -cfg.daily_loss_limit_pct / equity_fraction_per_trade(sl, cfg) * 2
+
+    trades = [
+        ("AAA", 1, 2, trip),  # 0일차: 차단 발동
+        ("BBB", 3, 4, -trip),  # 0일차: 큰 이익이 곧바로 실현 (합계는 플러스로 회복)
+        ("CCC", 50, 60, 0.05),  # 0일차: 회복했어도 라이브는 여전히 차단
+        ("DDD", BARS_PER_DAY + 5, BARS_PER_DAY + 9, 0.05),  # 1일차: 해제
+    ]
+    _, accepted = portfolio_sim_with_details(
+        trades, max_concurrent=cfg.max_concurrent, daily_loss=True, cfg=cfg, sl_pct=sl
+    )
+    names = [t[0] for t in accepted]
+    assert "CCC" not in names, f"회복하자 차단이 풀렸다 — 라이브는 자정까지 고정: {names}"
+    assert "DDD" in names, f"다음 날에도 차단이 남았다: {names}"

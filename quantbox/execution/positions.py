@@ -21,6 +21,7 @@ import numpy as np
 from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
 from quantbox.core.types import build_trade_record, to_api_symbol
 from quantbox.core.terminal_ui import format_entry, format_exit
+from quantbox.execution.sizing import risk_based_leverage
 from quantbox.utils.diagnostics import _diag_logger
 
 logger = logging.getLogger("Scalper")
@@ -108,8 +109,7 @@ class PositionMixin:
         # ── Risk-based leverage: 1 SL hit = risk_per_trade % of balance ──
         # per_slot_capital × leverage × SL = balance × risk_per_trade
         # ∴ leverage = risk_per_trade × max_concurrent / SL
-        leverage = vs.risk_per_trade * vs.max_concurrent / sl_pct
-        leverage = max(1.0, min(vs.max_leverage, leverage))
+        leverage = risk_based_leverage(sl_pct, vs)
         notional = per_slot_capital * leverage
         logger.info(
             f"[{symbol}] {strategy_type}: risk-based leverage={leverage:.1f}x "

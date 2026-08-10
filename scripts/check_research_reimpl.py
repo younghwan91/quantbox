@@ -61,6 +61,8 @@ BANNED: dict[str, str] = {
     "allow_long": "from quantbox.execution.risk_guard import RiskGuard  # RiskGuard(cfg).allow_long(...)",
     "check_daily_loss": "from quantbox.execution.risk_guard import RiskGuard  # RiskGuard(cfg).check_daily_loss(...)",
     "compute_btc_gate": "from quantbox.execution.risk_guard import RiskGuard  # RiskGuard(cfg).compute_btc_gate(...)",
+    "risk_based_leverage": "from quantbox.execution.sizing import risk_based_leverage",
+    "equity_fraction_per_trade": "from quantbox.execution.sizing import equity_fraction_per_trade",
 }
 
 #: 자체 sim 커널 정의 금지. 공용 드라이버 sim_drive를 쓴다.
