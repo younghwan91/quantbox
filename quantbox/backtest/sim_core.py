@@ -778,7 +778,7 @@ def run_ma_cluster_live(
 #  This does NOT re-implement exits: the same ``sim_drive`` runs on the 15m grid.
 
 
-def run_ma_cluster_live_15m_exits(
+def run_ma_cluster_live_fine_exits(
     data_15m: dict,
     data_4h: dict | None = None,
     *,
@@ -796,14 +796,19 @@ def run_ma_cluster_live_15m_exits(
     cw_sizing: bool = True,
     return_directions: bool = False,
     trail_peak_lag: int = 0,
+    exit_ratio: int = 1,
 ) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
-    """MA-cluster with live entries on 4h bars but exits resolved on 15m bars.
+    """MA-cluster with live entries on 4h bars but exits resolved on finer bars.
 
     Entry selection is identical to :func:`run_ma_cluster_live` — the same
     ``check_ma_cluster`` replay on completed 4h bars.  Only the exit grid changes:
-    a trade entered at the close of 4h bar ``e`` starts on 15m bar ``e*ratio +
-    ratio - 1`` (that bar's close IS the 4h close) and its SL/TP/trail are then
-    evaluated bar by bar on 15m data.
+    a trade entered at the close of 4h bar ``e`` starts on the exit-grid bar whose
+    close IS that 4h close, and its SL/TP/trail are then evaluated bar by bar at
+    the finer resolution.
+
+    ``exit_ratio`` is 15m bars per exit bar: 1 = 15m, 2 = 30m, 4 = 1h, 8 = 2h,
+    16 = 4h (which reproduces :func:`run_ma_cluster_live`\'s exit behaviour).
+    Sweeping it shows how much of the measured edge depends on bar aggregation.
 
     Exit logic is not duplicated — ``sim_drive`` is driven on the 15m arrays.
 
@@ -823,12 +828,19 @@ def run_ma_cluster_live_15m_exits(
         ratio: 15m bars per entry-TF bar (16 = 4h).
         cw_sizing: Apply live conviction-weighted sizing.
         return_directions: Also return per-trade ±1 directions.
-        trail_peak_lag: Intra-bar ordering assumption, now on 15m bars.
+        trail_peak_lag: Intra-bar ordering assumption, now on exit-grid bars.
+        exit_ratio: 15m bars per exit bar. Must divide ``ratio``.
 
     Returns:
-        ``[(symbol, entry_bar_15m, exit_bar_15m, pnl)]``, or that plus a
-        directions list when ``return_directions`` is set.
+        ``[(symbol, entry_bar_15m, exit_bar_15m, pnl)]`` — bar indices are in 15m
+        units regardless of ``exit_ratio`` so results stay comparable and feed
+        ``portfolio_sim`` unchanged. Plus a directions list when requested.
+
+    Raises:
+        ValueError: ``exit_ratio`` does not divide ``ratio``.
     """
+    if exit_ratio < 1 or ratio % exit_ratio != 0:
+        raise ValueError(f"exit_ratio must divide ratio ({ratio}), got {exit_ratio}")
     from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
     from quantbox.strategy.vol_straddle.signals import compute_momentum, compute_sma
@@ -848,6 +860,9 @@ def run_ma_cluster_live_15m_exits(
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)
+    #: 진입 4h 봉 하나가 청산 격자에서 차지하는 봉 수.
+    per_entry = ratio // exit_ratio
+    data_exit = data_15m if exit_ratio == 1 else build_resampled(data_15m, exit_ratio)
 
     all_trades: list[tuple[str, int, int, float]] = []
     all_dirs: list[int] = []
@@ -879,24 +894,26 @@ def run_ma_cluster_live_15m_exits(
             WARMUP_4h,
         )
 
-        d15 = data_15m[sym]
-        c15 = d15["close"]
-        n15 = len(c15)
+        dx = data_exit.get(sym)
+        if dx is None:
+            continue
+        cx = dx["close"]
+        nx = len(cx)
 
-        # 4h 봉 e의 종가 = 15m 봉 e*ratio + ratio - 1 의 종가. 진입 시점을 그리로 옮긴다.
-        entry_ok: np.ndarray = np.zeros(n15, dtype=np.bool_)
-        direction: np.ndarray = np.zeros(n15, dtype=np.int8)
+        # 4h 봉 e의 종가 = 청산 격자 봉 (e+1)*per_entry - 1 의 종가. 진입을 그리로 옮긴다.
+        entry_ok: np.ndarray = np.zeros(nx, dtype=np.bool_)
+        direction: np.ndarray = np.zeros(nx, dtype=np.int8)
         idx4 = np.nonzero(entry_ok_4h)[0]
-        idx15 = idx4 * ratio + ratio - 1
-        keep = idx15 < n15
-        entry_ok[idx15[keep]] = True
-        direction[idx15[keep]] = direction_4h[idx4[keep]]
+        idxx = (idx4 + 1) * per_entry - 1
+        keep = idxx < nx
+        entry_ok[idxx[keep]] = True
+        direction[idxx[keep]] = direction_4h[idx4[keep]]
 
-        bar_kind: np.ndarray = np.full(n15, KIND_ACTIVE, dtype=np.int8)
+        bar_kind: np.ndarray = np.full(nx, KIND_ACTIVE, dtype=np.int8)
         p, e, x, dr = sim_drive(
-            c15,
-            d15["high"],
-            d15["low"],
+            cx,
+            dx["high"],
+            dx["low"],
             bar_kind,
             entry_ok,
             direction,
@@ -906,20 +923,38 @@ def run_ma_cluster_live_15m_exits(
             _tp,
             _trail_activate,
             _trail_distance,
-            _max_hold_4h * ratio,
+            _max_hold_4h * per_entry,
             _cost,
-            WARMUP_4h * ratio,
+            WARMUP_4h * per_entry,
             trail_peak_lag=trail_peak_lag,
         )
 
-        offset = int(d15.get("_offset", 0))
+        offset = int(data_15m[sym].get("_offset", 0))
         for kk in range(len(p)):
-            e15 = int(e[kk])
+            ex = int(e[kk])
             trade_pnl = float(p[kk])
             if cw_sizing:
                 # CW는 진입한 4h 봉의 상태로 판정한다 — 라이브와 같은 시점.
-                trade_pnl *= _cw_mult_at(d4, sma20, sma50, sma100, sma200, mom, cfg, e15 // ratio)
-            all_trades.append((sym, e15 + offset, int(x[kk]) + offset, trade_pnl))
+                trade_pnl *= _cw_mult_at(d4, sma20, sma50, sma100, sma200, mom, cfg, (ex + 1) // per_entry - 1)
+            # 봉 인덱스는 항상 15m 단위로 환산해 내보낸다 (해상도 간 비교 가능하게).
+            entry_bar = ex * exit_ratio + exit_ratio - 1 + offset
+            exit_bar = int(x[kk]) * exit_ratio + exit_ratio - 1 + offset
+            all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
             all_dirs.append(int(dr[kk]))
 
     return (all_trades, all_dirs) if return_directions else all_trades
+
+
+def run_ma_cluster_live_15m_exits(data_15m: dict, data_4h: dict | None = None, **kwargs):
+    """Backward-compatible alias: :func:`run_ma_cluster_live_fine_exits` at 15m.
+
+    Args:
+        data_15m: 15m OHLCV dict keyed by symbol.
+        data_4h: Pre-resampled 4h dict; built when omitted.
+        **kwargs: Forwarded unchanged; ``exit_ratio`` is pinned to 1.
+
+    Returns:
+        Same as :func:`run_ma_cluster_live_fine_exits`.
+    """
+    kwargs.pop("exit_ratio", None)
+    return run_ma_cluster_live_fine_exits(data_15m, data_4h, exit_ratio=1, **kwargs)
