@@ -390,7 +390,8 @@ class TestChaseConfig:
         assert config.chase_interval_seconds == 1.0
         assert config.timeout_seconds == 30.0
         assert config.fallback_to_market is True
-        assert config.initial_offset_ticks == 0
+        # VolStraddleConfig와 같은 값 — 배선이 빠져도 의도한 동작으로 떨어지게 한다.
+        assert config.initial_offset_ticks == 1
 
     def test_custom_values(self):
         config = ChaseConfig(
