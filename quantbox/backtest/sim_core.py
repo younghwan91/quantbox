@@ -760,3 +760,166 @@ def run_ma_cluster_live(
             all_dirs.append(int(dr[kk]))
 
     return (all_trades, all_dirs) if return_directions else all_trades
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  G6 narrowing — resolve 4h exits on the 15m grid
+# ══════════════════════════════════════════════════════════════════════════════
+#
+#  ``trail_peak_lag`` bounds the intra-bar ordering assumption but cannot remove
+#  it: within one 4h bar we never learn whether the high or the low came first.
+#  Measured on the full symbol set that assumption alone spans PF 1.618-2.078.
+#
+#  The band shrinks with bar resolution.  Entries stay on 4h (live evaluates the
+#  MA cluster on completed 4h bars), but exits — SL, TP, trailing — are checked
+#  against 15m bars, which is 16x finer and closer to live's tick-level brackets.
+#  The residual uncertainty is then one 15m bar wide instead of one 4h bar.
+#
+#  This does NOT re-implement exits: the same ``sim_drive`` runs on the 15m grid.
+
+
+def run_ma_cluster_live_15m_exits(
+    data_15m: dict,
+    data_4h: dict | None = None,
+    *,
+    cluster_pct: float | None = None,
+    min_duration: int | None = None,
+    max_duration: int | None = None,
+    min_momentum: float | None = None,
+    sl: float | None = None,
+    tp: float | None = None,
+    trail_activate: float | None = None,
+    trail_distance: float | None = None,
+    max_hold: int | None = None,
+    cost: float | None = None,
+    ratio: int = 16,
+    cw_sizing: bool = True,
+    return_directions: bool = False,
+    trail_peak_lag: int = 0,
+) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
+    """MA-cluster with live entries on 4h bars but exits resolved on 15m bars.
+
+    Entry selection is identical to :func:`run_ma_cluster_live` — the same
+    ``check_ma_cluster`` replay on completed 4h bars.  Only the exit grid changes:
+    a trade entered at the close of 4h bar ``e`` starts on 15m bar ``e*ratio +
+    ratio - 1`` (that bar's close IS the 4h close) and its SL/TP/trail are then
+    evaluated bar by bar on 15m data.
+
+    Exit logic is not duplicated — ``sim_drive`` is driven on the 15m arrays.
+
+    Args:
+        data_15m: 15m OHLCV dict keyed by symbol.
+        data_4h: Pre-resampled 4h dict; built from ``data_15m`` when omitted.
+        cluster_pct: MA cluster width. Defaults to config.
+        min_duration: Min cluster duration in 4h bars. Defaults to config.
+        max_duration: Zombie-cluster cutoff. Defaults to config.
+        min_momentum: Momentum floor for entry. Defaults to config.
+        sl: Stop-loss fraction. Defaults to config.
+        tp: Take-profit fraction. Defaults to config.
+        trail_activate: Gain at which trailing arms. Defaults to config.
+        trail_distance: Trail give-back. Defaults to config.
+        max_hold: Max hold in **4h** bars; converted to 15m internally.
+        cost: Round-trip cost. Defaults to config.
+        ratio: 15m bars per entry-TF bar (16 = 4h).
+        cw_sizing: Apply live conviction-weighted sizing.
+        return_directions: Also return per-trade ±1 directions.
+        trail_peak_lag: Intra-bar ordering assumption, now on 15m bars.
+
+    Returns:
+        ``[(symbol, entry_bar_15m, exit_bar_15m, pnl)]``, or that plus a
+        directions list when ``return_directions`` is set.
+    """
+    from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+    from quantbox.strategy.vol_straddle.signals import compute_momentum, compute_sma
+
+    cfg = VolStraddleConfig()
+    _cluster_pct = cluster_pct if cluster_pct is not None else cfg.ma_cluster_pct
+    _min_duration = min_duration if min_duration is not None else cfg.ma_cluster_min_duration
+    _max_duration = max_duration if max_duration is not None else cfg.ma_cluster_max_duration
+    _min_momentum = min_momentum if min_momentum is not None else cfg.ma_cluster_min_momentum
+    _sl = sl if sl is not None else cfg.ma_cluster_sl
+    _tp = tp if tp is not None else cfg.ma_cluster_tp
+    _trail_activate = trail_activate if trail_activate is not None else cfg.ma_cluster_trail_activate
+    _trail_distance = trail_distance if trail_distance is not None else cfg.ma_cluster_trail_distance
+    _max_hold_4h = max_hold if max_hold is not None else cfg.ma_cluster_max_hold_4h
+    _cost = cost if cost is not None else cfg.round_trip_cost
+    WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
+
+    if data_4h is None:
+        data_4h = build_resampled(data_15m, ratio)
+
+    all_trades: list[tuple[str, int, int, float]] = []
+    all_dirs: list[int] = []
+    for sym in sorted(data_15m.keys()):
+        d4 = data_4h.get(sym)
+        if d4 is None:
+            continue
+        c4 = d4["close"]
+        if len(c4) < WARMUP_4h + 2:
+            continue
+
+        sma20 = compute_sma(c4, 20)
+        sma50 = compute_sma(c4, 50)
+        sma100 = compute_sma(c4, 100)
+        sma200 = compute_sma(c4, 200)
+        mom = compute_momentum(c4, 8)
+
+        entry_ok_4h, direction_4h = live_ma_cluster_signals(
+            c4,
+            sma20,
+            sma50,
+            sma100,
+            sma200,
+            mom,
+            _cluster_pct,
+            _min_duration,
+            _max_duration,
+            _min_momentum,
+            WARMUP_4h,
+        )
+
+        d15 = data_15m[sym]
+        c15 = d15["close"]
+        n15 = len(c15)
+
+        # 4h 봉 e의 종가 = 15m 봉 e*ratio + ratio - 1 의 종가. 진입 시점을 그리로 옮긴다.
+        entry_ok: np.ndarray = np.zeros(n15, dtype=np.bool_)
+        direction: np.ndarray = np.zeros(n15, dtype=np.int8)
+        idx4 = np.nonzero(entry_ok_4h)[0]
+        idx15 = idx4 * ratio + ratio - 1
+        keep = idx15 < n15
+        entry_ok[idx15[keep]] = True
+        direction[idx15[keep]] = direction_4h[idx4[keep]]
+
+        bar_kind: np.ndarray = np.full(n15, KIND_ACTIVE, dtype=np.int8)
+        p, e, x, dr = sim_drive(
+            c15,
+            d15["high"],
+            d15["low"],
+            bar_kind,
+            entry_ok,
+            direction,
+            1,
+            0,  # gating already encoded in entry_ok
+            _sl,
+            _tp,
+            _trail_activate,
+            _trail_distance,
+            _max_hold_4h * ratio,
+            _cost,
+            WARMUP_4h * ratio,
+            trail_peak_lag=trail_peak_lag,
+        )
+
+        offset = int(d15.get("_offset", 0))
+        for kk in range(len(p)):
+            e15 = int(e[kk])
+            trade_pnl = float(p[kk])
+            if cw_sizing:
+                # CW는 진입한 4h 봉의 상태로 판정한다 — 라이브와 같은 시점.
+                trade_pnl *= _cw_mult_at(d4, sma20, sma50, sma100, sma200, mom, cfg, e15 // ratio)
+            all_trades.append((sym, e15 + offset, int(x[kk]) + offset, trade_pnl))
+            all_dirs.append(int(dr[kk]))
+
+    return (all_trades, all_dirs) if return_directions else all_trades
