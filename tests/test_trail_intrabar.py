@@ -56,7 +56,7 @@ def test_same_bar_peak_and_trigger_is_optimistic_by_default() -> None:
     high = np.array([100.0, 105.0, 100.0])
     low = np.array([100.0, 103.0, 100.0])  # 103 <= 104 → 같은 봉에서 발동
 
-    pnl, ent, ext, _ = _one_shot(close, high, low)
+    pnl, ent, ext, _, _ = _one_shot(close, high, low)
     assert len(pnl) == 1
     assert pnl[0] == np.float64(0.05 - 0.01), "봉1 고점(+5%) 기준 트레일이 아니다"
     assert ext[0] == 1
@@ -72,8 +72,8 @@ def test_peak_lag_gives_pessimistic_bound() -> None:
     high = np.array([100.0, 105.0, 100.0])
     low = np.array([100.0, 103.0, 100.0])
 
-    _, _, ext_opt, _ = _one_shot(close, high, low)
-    _, _, ext_pess, _ = _one_shot(close, high, low, trail_peak_lag=1)
+    _, _, ext_opt, _, _ = _one_shot(close, high, low)
+    _, _, ext_pess, _, _ = _one_shot(close, high, low, trail_peak_lag=1)
 
     # 이 케이스에서 관측되는 차이는 **청산 시점**이다. 봉1의 고점을 신뢰하지 않으므로
     # 트레일은 봉2에 가서야 발동한다. (PnL은 그 사이 고점이 안 바뀌어 우연히 같다 —
@@ -99,8 +99,8 @@ def test_lag_never_exits_earlier_than_optimistic() -> None:
     high = close + 2.0
     low = close - 2.0
 
-    _, _, ext_opt, _ = _one_shot(close, high, low)
-    _, _, ext_pess, _ = _one_shot(close, high, low, trail_peak_lag=1)
+    _, _, ext_opt, _, _ = _one_shot(close, high, low)
+    _, _, ext_pess, _, _ = _one_shot(close, high, low, trail_peak_lag=1)
     assert ext_pess[0] >= ext_opt[0]
 
 

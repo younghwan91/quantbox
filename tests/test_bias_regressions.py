@@ -42,7 +42,7 @@ def test_sl_checked_before_tp_when_not_trailing():
     low = np.array([100.0, 97.0], dtype=np.float64)  # SL(98) 도달
     bar_kind, entry_ok, direction = _const_arrays(2)
 
-    pnl, ent, ext, _d = sim_drive(
+    pnl, ent, ext, _d, _r = sim_drive(
         close,
         high,
         low,
@@ -80,7 +80,7 @@ def test_trailing_activates_same_bar_not_next():
     low = np.array([100.0, 102.0], dtype=np.float64)  # trail_level=102.5 도달
     bar_kind, entry_ok, direction = _const_arrays(2)
 
-    pnl, ent, ext, _d = sim_drive(
+    pnl, ent, ext, _d, _r = sim_drive(
         close,
         high,
         low,
@@ -114,7 +114,7 @@ def test_short_direction_symmetry():
     entry_ok = np.ones(2, dtype=np.bool_)
     direction = np.full(2, -1, dtype=np.int8)  # SHORT
 
-    pnl, ent, ext, _d = sim_drive(
+    pnl, ent, ext, _d, _r = sim_drive(
         close,
         high,
         low,

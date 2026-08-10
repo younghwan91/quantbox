@@ -129,3 +129,40 @@ def test_invalid_exit_ratio_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="exit_ratio"):
         run_ma_cluster_live_fine_exits(_load(), exit_ratio=5)
+
+
+def test_exit_reasons_partition_all_trades() -> None:
+    """모든 트레이드가 정확히 하나의 청산 사유로 분류된다 — 분해가 새면 귀속이 틀어진다."""
+    from quantbox.backtest.sim_core import (
+        EXIT_MAXHOLD,
+        EXIT_SL,
+        EXIT_TP,
+        EXIT_TRAIL,
+        run_ma_cluster_live_fine_exits,
+    )
+
+    trades, dirs, reasons = run_ma_cluster_live_fine_exits(_load(), cw_sizing=False, return_reasons=True)
+    assert len(reasons) == len(trades) == len(dirs)
+    assert set(reasons) <= {EXIT_TRAIL, EXIT_SL, EXIT_TP, EXIT_MAXHOLD}
+
+
+def test_sl_exits_are_resolution_invariant() -> None:
+    """SL 청산 손익은 해상도와 무관하게 -(sl+cost)로 고정이다.
+
+    이 불변성이 깨지면 해상도 비교 자체가 성립하지 않는다 — 아티팩트를
+    트레일에 귀속시킨 근거가 바로 'SL은 안 변한다'는 사실이다.
+    """
+    import numpy as np
+
+    from quantbox.backtest.sim_core import EXIT_SL, run_ma_cluster_live_fine_exits
+
+    cfg = VolStraddleConfig()
+    expected = -(cfg.ma_cluster_sl + cfg.round_trip_cost)
+    data = _load()
+    for exit_ratio in (16, 4, 1):
+        trades, _d, reasons = run_ma_cluster_live_fine_exits(
+            data, cw_sizing=False, exit_ratio=exit_ratio, return_reasons=True
+        )
+        sl_pnl = np.array([t[3] for t, r in zip(trades, reasons, strict=True) if r == EXIT_SL])
+        assert len(sl_pnl) > 0
+        np.testing.assert_allclose(sl_pnl, expected, atol=1e-12)

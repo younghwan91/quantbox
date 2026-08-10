@@ -70,7 +70,7 @@ def sim_drive(
     cap_divisor: int = 4,
     cooldown_bars: int = 0,
     trail_peak_lag: int = 0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Generic entry-episode + trailing-exit driver (strategy/TF agnostic).
 
     Owns ALL cross-bar state so per-strategy condition kernels stay stateless.
@@ -99,8 +99,11 @@ def sim_drive(
     creates; it cannot be removed with bar data.
 
     Returns:
-        (pnl, entry_bars, exit_bars, dirs) — 1-D arrays of length N_trades,
-        bar indices in the input array's own bar units.
+        (pnl, entry_bars, exit_bars, dirs, exit_reasons) — 1-D arrays of length
+        N_trades, bar indices in the input array's own bar units.  ``exit_reasons``
+        holds ``EXIT_TRAIL`` / ``EXIT_SL`` / ``EXIT_TP`` / ``EXIT_MAXHOLD`` and is
+        purely diagnostic: it records which branch ended each trade so the
+        resolution-dependence of the exit model can be attributed per path.
     """
     n = len(close)
     cap = n // cap_divisor + 1
@@ -108,6 +111,7 @@ def sim_drive(
     ent: np.ndarray = np.empty(cap, dtype=np.int64)
     ext: np.ndarray = np.empty(cap, dtype=np.int64)
     drs: np.ndarray = np.empty(cap, dtype=np.int64)
+    rsn: np.ndarray = np.empty(cap, dtype=np.int8)
     cnt = 0
     i = warmup
     count = 0
@@ -147,6 +151,7 @@ def sim_drive(
         trade_pnl = 0.0
         trailing_active = False
         peak_gain = 0.0
+        reason = EXIT_MAXHOLD
 
         for j in range(i + 1, end):
             if d == 1:
@@ -167,16 +172,19 @@ def sim_drive(
                     if low[j] <= trail_level:
                         trade_pnl = max(eff_peak - trail_distance, -sl)
                         eb = j
+                        reason = EXIT_TRAIL
                         break
                 else:
                     if low[j] <= entry * (1.0 - sl):
                         trade_pnl = -sl
                         eb = j
+                        reason = EXIT_SL
                         break
 
                 if high[j] >= entry * (1.0 + tp):
                     trade_pnl = tp
                     eb = j
+                    reason = EXIT_TP
                     break
             else:
                 prev_peak = peak_gain
@@ -194,16 +202,19 @@ def sim_drive(
                     if high[j] >= trail_level:
                         trade_pnl = max(eff_peak - trail_distance, -sl)
                         eb = j
+                        reason = EXIT_TRAIL
                         break
                 else:
                     if high[j] >= entry * (1.0 + sl):
                         trade_pnl = -sl
                         eb = j
+                        reason = EXIT_SL
                         break
 
                 if low[j] <= entry * (1.0 - tp):
                     trade_pnl = tp
                     eb = j
+                    reason = EXIT_TP
                     break
         else:
             # Max-hold exit at close.
@@ -217,6 +228,7 @@ def sim_drive(
             ent[cnt] = i
             ext[cnt] = eb
             drs[cnt] = d
+            rsn[cnt] = reason
             cnt += 1
 
         # One signal per episode — reset after trade, resume past the exit.
@@ -224,7 +236,14 @@ def sim_drive(
         cooldown = cooldown_bars
         i = eb + 1
 
-    return pnl[:cnt], ent[:cnt], ext[:cnt], drs[:cnt]
+    return pnl[:cnt], ent[:cnt], ext[:cnt], drs[:cnt], rsn[:cnt]
+
+
+#: 청산 사유 태그 — 어느 경로로 트레이드가 끝났는지 (해상도 아티팩트 분해용).
+EXIT_TRAIL = 0
+EXIT_SL = 1
+EXIT_TP = 2
+EXIT_MAXHOLD = 3
 
 
 # ── MA cluster condition kernel (stateless) ──────────────────────────────────
@@ -478,7 +497,7 @@ def run_ma_cluster(
             _cluster_pct,
             _min_momentum,
         )
-        p, e, x, dr = sim_drive(
+        p, e, x, dr, _rsn = sim_drive(
             d["close"],
             d["high"],
             d["low"],
@@ -730,7 +749,7 @@ def run_ma_cluster_live(
         )
 
         bar_kind: np.ndarray = np.full(len(c), KIND_ACTIVE, dtype=np.int8)
-        p, e, x, dr = sim_drive(
+        p, e, x, dr, _rsn = sim_drive(
             c,
             d["high"],
             d["low"],
@@ -797,7 +816,12 @@ def run_ma_cluster_live_fine_exits(
     return_directions: bool = False,
     trail_peak_lag: int = 0,
     exit_ratio: int = 1,
-) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
+    return_reasons: bool = False,
+) -> (
+    list[tuple[str, int, int, float]]
+    | tuple[list[tuple[str, int, int, float]], list[int]]
+    | tuple[list[tuple[str, int, int, float]], list[int], list[int]]
+):
     """MA-cluster with live entries on 4h bars but exits resolved on finer bars.
 
     Entry selection is identical to :func:`run_ma_cluster_live` — the same
@@ -830,6 +854,7 @@ def run_ma_cluster_live_fine_exits(
         return_directions: Also return per-trade ±1 directions.
         trail_peak_lag: Intra-bar ordering assumption, now on exit-grid bars.
         exit_ratio: 15m bars per exit bar. Must divide ``ratio``.
+        return_reasons: Also return per-trade exit reason tags (``EXIT_*``).
 
     Returns:
         ``[(symbol, entry_bar_15m, exit_bar_15m, pnl)]`` — bar indices are in 15m
@@ -866,6 +891,7 @@ def run_ma_cluster_live_fine_exits(
 
     all_trades: list[tuple[str, int, int, float]] = []
     all_dirs: list[int] = []
+    all_reasons: list[int] = []
     for sym in sorted(data_15m.keys()):
         d4 = data_4h.get(sym)
         if d4 is None:
@@ -910,7 +936,7 @@ def run_ma_cluster_live_fine_exits(
         direction[idxx[keep]] = direction_4h[idx4[keep]]
 
         bar_kind: np.ndarray = np.full(nx, KIND_ACTIVE, dtype=np.int8)
-        p, e, x, dr = sim_drive(
+        p, e, x, dr, _rsn = sim_drive(
             cx,
             dx["high"],
             dx["low"],
@@ -941,7 +967,10 @@ def run_ma_cluster_live_fine_exits(
             exit_bar = int(x[kk]) * exit_ratio + exit_ratio - 1 + offset
             all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
             all_dirs.append(int(dr[kk]))
+            all_reasons.append(int(_rsn[kk]))
 
+    if return_reasons:
+        return all_trades, all_dirs, all_reasons
     return (all_trades, all_dirs) if return_directions else all_trades
 
 
