@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 
 from quantbox.backtest.sim_core import KIND_ACTIVE, sim_drive
@@ -142,20 +144,39 @@ def test_short_direction_symmetry():
 # ──────────────────────────────────────────────────────────────────────────
 
 
-def test_ma_cluster_funding_not_yet_deducted_documented():
-    """ma_cluster 라이브 경로가 펀딩을 아직 차감하지 않음을 명시 고정한다.
+def test_ma_cluster_funding_is_deducted():
+    """ma_cluster 라이브 경로가 펀딩을 차감한다 (2026-08-10 정정).
 
-    VR(collect_trades)은 G3 parity로 펀딩 반영(trade_sim.py:602). ma_cluster(sim_core)는
-    미반영 → 성과 약간 과대(방향 안전=라이브가 약간 나쁨). Phase 2에서 정정 예정.
-    이 테스트는 '몰래 반영되거나(숫자 변경) 반대로 회귀'하는 걸 감지하는 앵커다.
+    이전에는 VR(collect_trades)만 G3 파리티로 펀딩을 반영하고 ma_cluster(sim_core)는
+    빠져 있었다. 보유가 길수록 드래그가 커지므로, **보유 기간을 비교하는 실험에서는
+    이 누락이 장기 보유를 부당하게 유리하게 만든다.**
+
+    차감은 `trade_sim.apply_funding_drag`와 같은 요율/주기를 쓴다.
     """
-    import quantbox.backtest.sim_core as sc
+    import numpy as np
 
-    src = sc.__file__
-    with open(src, encoding="utf-8") as f:
-        text = f.read()
-    # sim_core의 sim_drive/run_ma_cluster_live는 funding을 차감하지 않는다(현상태).
-    # Phase 2에서 펀딩을 넣으면 이 앵커를 갱신하고 골든/성과 변경을 리포트해야 한다.
-    assert "funding" not in text.lower(), (
-        "sim_core에 funding이 도입됨 — Phase 2 정정이면 이 회귀와 골든/리포트를 함께 갱신하라"
-    )
+    from quantbox.backtest.sim_core import run_ma_cluster_live
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+    cache = pathlib.Path(__file__).resolve().parents[1] / "data" / "cache_extended"
+    if not cache.is_dir():
+        pytest.skip("확장 캐시 없음")
+
+    from quantbox.research.harness import MarketData
+
+    data = MarketData.load(["BTCUSDT"]).data
+    on = run_ma_cluster_live(data, cw_sizing=False)
+    off = run_ma_cluster_live(data, cw_sizing=False, funding=False)
+
+    assert [t[:3] for t in on] == [t[:3] for t in off], "펀딩이 트레이드 집합을 바꿨다"
+    drags = np.array([b[3] - a[3] for a, b in zip(on, off, strict=True)])
+    assert (drags >= 0).all(), "펀딩이 손익을 늘렸다"
+    assert drags.max() > 0, "펀딩이 실제로 차감되지 않았다"
+
+    # 드래그는 보유 기간에 비례해야 한다.
+    rate = VolStraddleConfig().default_funding_rate_8h
+    holds = np.array([t[2] - t[1] for t in on], dtype=float)
+    assert holds.max() > 0
+    # entry_bar는 봉 시작을 가리키므로 종가 기준 보유는 (holds - (ratio-1)) 이다.
+    expected = rate * ((holds - 15) / 32)
+    np.testing.assert_allclose(drags, expected, atol=1e-12)

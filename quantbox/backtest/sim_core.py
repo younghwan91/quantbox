@@ -671,6 +671,7 @@ def run_ma_cluster_live(
     cw_sizing: bool = True,
     return_directions: bool = False,
     trail_peak_lag: int = 0,
+    funding: bool = True,
 ) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
     """MA-cluster trades using the **live** entry rule (``check_ma_cluster``).
 
@@ -696,7 +697,7 @@ def run_ma_cluster_live(
     sizes every trade at 1.0x while live sizes 0.5x-1.5x.  Pass ``False`` to see
     the unweighted edge.
     """
-    from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
+    from quantbox.backtest.trade_sim import BARS_PER_8H_15M, build_resampled, get_trade_sim_config
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
     from quantbox.strategy.vol_straddle.signals import compute_momentum, compute_sma
 
@@ -713,6 +714,7 @@ def run_ma_cluster_live(
     # G4: 호출 시점에 읽는다 — 모듈 전역은 import 시점에 굳어 설정 변경을 무시한다.
     _cost = cost if cost is not None else cfg.round_trip_cost
     WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
+    _fund = cfg.default_funding_rate_8h if funding else 0.0
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)
@@ -772,7 +774,11 @@ def run_ma_cluster_live(
         for kk in range(len(p)):
             entry_bar = int(e[kk]) * ratio + offset
             exit_bar = int(x[kk]) * ratio + ratio - 1 + offset
-            trade_pnl = float(p[kk])
+            # 펀딩은 명목가 대비이므로 CW 배수 **전에** 뺀다 (배수가 명목가를 바꾼다).
+            # 보유 기간은 종가→종가다. entry_bar는 봉 **시작**을 가리키므로 쓰면 안 된다
+            # (15봉 과대 계산 → fine-exits 경로와 어긋난다).
+            _hold_15m = (int(x[kk]) - int(e[kk])) * ratio
+            trade_pnl = float(p[kk]) - _fund * (_hold_15m / BARS_PER_8H_15M)
             if cw_sizing:
                 trade_pnl *= _cw_mult_at(d, sma20, sma50, sma100, sma200, mom, cfg, int(e[kk]))
             all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
@@ -817,6 +823,7 @@ def run_ma_cluster_live_fine_exits(
     trail_peak_lag: int = 0,
     exit_ratio: int = 1,
     return_reasons: bool = False,
+    funding: bool = True,
 ) -> (
     list[tuple[str, int, int, float]]
     | tuple[list[tuple[str, int, int, float]], list[int]]
@@ -855,6 +862,8 @@ def run_ma_cluster_live_fine_exits(
         trail_peak_lag: Intra-bar ordering assumption, now on exit-grid bars.
         exit_ratio: 15m bars per exit bar. Must divide ``ratio``.
         return_reasons: Also return per-trade exit reason tags (``EXIT_*``).
+        funding: Deduct holding-period funding. Live pays it every 8h on notional,
+            so it scales with hold length — decisive when comparing hold horizons.
 
     Returns:
         ``[(symbol, entry_bar_15m, exit_bar_15m, pnl)]`` — bar indices are in 15m
@@ -866,7 +875,7 @@ def run_ma_cluster_live_fine_exits(
     """
     if exit_ratio < 1 or ratio % exit_ratio != 0:
         raise ValueError(f"exit_ratio must divide ratio ({ratio}), got {exit_ratio}")
-    from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
+    from quantbox.backtest.trade_sim import BARS_PER_8H_15M, build_resampled, get_trade_sim_config
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
     from quantbox.strategy.vol_straddle.signals import compute_momentum, compute_sma
 
@@ -882,6 +891,7 @@ def run_ma_cluster_live_fine_exits(
     _max_hold_4h = max_hold if max_hold is not None else cfg.ma_cluster_max_hold_4h
     _cost = cost if cost is not None else cfg.round_trip_cost
     WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
+    _fund = cfg.default_funding_rate_8h if funding else 0.0
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)
@@ -958,7 +968,9 @@ def run_ma_cluster_live_fine_exits(
         offset = int(data_15m[sym].get("_offset", 0))
         for kk in range(len(p)):
             ex = int(e[kk])
-            trade_pnl = float(p[kk])
+            _hold_15m = (int(x[kk]) - ex) * exit_ratio
+            # 펀딩은 명목가 대비이므로 CW 배수 **전에** 뺀다.
+            trade_pnl = float(p[kk]) - _fund * (_hold_15m / BARS_PER_8H_15M)
             if cw_sizing:
                 # CW는 진입한 4h 봉의 상태로 판정한다 — 라이브와 같은 시점.
                 trade_pnl *= _cw_mult_at(d4, sma20, sma50, sma100, sma200, mom, cfg, (ex + 1) // per_entry - 1)
