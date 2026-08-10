@@ -651,6 +651,7 @@ def portfolio_sim(
     dir_diversity: bool = False,
     btc_gate: bool = False,
     daily_loss: bool = False,
+    sl_pct: float | None = None,
 ) -> np.ndarray:
     """Filter trades by max concurrent positions, no same-symbol overlap.
 
@@ -676,6 +677,7 @@ def portfolio_sim(
         dir_diversity=dir_diversity,
         btc_gate=btc_gate,
         daily_loss=daily_loss,
+        sl_pct=sl_pct,
     )
     return pnl
 
@@ -691,6 +693,7 @@ def portfolio_sim_with_details(
     dir_diversity: bool = False,
     btc_gate: bool = False,
     daily_loss: bool = False,
+    sl_pct: float | None = None,
 ) -> tuple[np.ndarray, list[tuple[str, int, int, float]]]:
     """Portfolio sim that also returns accepted trades with metadata.
 
@@ -710,6 +713,10 @@ def portfolio_sim_with_details(
         raise ValueError("dir_diversity=True requires `directions` (one +1/-1 per trade)")
     if btc_gate and (directions is None or btc_close is None):
         raise ValueError("btc_gate=True requires `directions` and `btc_close`")
+    if daily_loss and sl_pct is None:
+        # 자기자본 환산 없이는 라이브 한도와 비교할 수 없다. `pnl / max_concurrent` 는
+        # 레버리지를 빼먹어 SL 1회를 30배 과소평가했다 — 그래서 한 건도 막지 못했다.
+        raise ValueError("daily_loss=True requires `sl_pct` (전략 손절 폭 — 자기자본 환산에 쓴다)")
 
     if cfg is not None:
         _cfg = cfg
@@ -731,8 +738,13 @@ def portfolio_sim_with_details(
 
     # 필터 판정은 라이브 RiskGuard가 한다 — 백테스트는 사본을 두지 않는다.
     from quantbox.execution.risk_guard import RiskGuard
+    from quantbox.execution.sizing import equity_fraction_per_trade
 
     _guard = RiskGuard(_cfg)
+    # 라이브 사이징으로 환산 — 백테스트 pnl은 가격 변동률이고 한도는 자기자본 기준이다.
+    _eq_scale = equity_fraction_per_trade(sl_pct, _cfg) if sl_pct is not None else 0.0
+    #: 차단이 발동한 날 (라이브는 자정까지 고정). -1 = 미발동.
+    _blocked_day = -1
 
     for i in order:
         sym, entry, exit_b, pnl_val = all_trades[i]
@@ -746,9 +758,14 @@ def portfolio_sim_with_details(
         #  라이브가 허용했을 진입을 부당하게 막게 된다.)
         if daily_loss:
             day = entry // BARS_PER_DAY_15M
-            day_loss = sum(v for eb, v in realized if eb <= entry and eb // BARS_PER_DAY_15M == day)
-            # 손익이 자기자본 대비 **비율**이므로 balance=1.0으로 넘긴다.
-            if _guard.check_daily_loss(day_loss, 1.0):
+            if day != _blocked_day:
+                day_loss = sum(v for eb, v in realized if eb <= entry and eb // BARS_PER_DAY_15M == day)
+                # 손익이 자기자본 대비 **비율**이므로 balance=1.0으로 넘긴다.
+                if _guard.check_daily_loss(day_loss, 1.0):
+                    # 라이브는 한 번 걸리면 UTC 자정까지 고정이다 (`scalper.py`의
+                    # `_daily_loss_blocked`). 이후 이익이 실현돼도 그날은 풀리지 않는다.
+                    _blocked_day = day
+            if day == _blocked_day:
                 continue
 
         if any(s == sym for s, _, _ in active):
@@ -772,8 +789,8 @@ def portfolio_sim_with_details(
         accepted.append((sym, entry, exit_b, pnl_val))
 
         if daily_loss:
-            # 자기자본 대비 영향 = pnl / 슬롯수 (등분 사이징). 실현 시점은 청산 봉.
-            realized.append((exit_b, pnl_val / max(max_concurrent, 1)))
+            # 자기자본 대비 영향 = 가격변동 × (레버리지 / 슬롯수). 실현 시점은 청산 봉.
+            realized.append((exit_b, pnl_val * _eq_scale))
 
     pnl = np.array([t[3] for t in accepted]) if accepted else np.empty(0)
     return pnl, accepted
