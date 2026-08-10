@@ -20,8 +20,12 @@ from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 #: Binance USDT-M 최소 명목가 (심볼별로 다르나 $5가 일반적 하한).
 MIN_NOTIONAL = 5.0
 
-#: 이 잔고까지는 더스트가 문제되지 않아야 한다. 라이브 잔고 $1000의 약 1/5.
-STRESS_BALANCE = 200.0
+#: 실계좌 잔고 (2026-08). 이 잔고에서는 더스트가 문제되지 않아야 한다.
+LIVE_BALANCE = 1000.0
+
+#: 여유 배수 하한. 이 아래로 내려가면 백테스트가 무시하는 더스트/부분체결이
+#: 실제 성과 변수가 되기 시작한다.
+MARGIN = 10.0
 
 
 def _declared(field: str):
@@ -46,23 +50,53 @@ def _min_notional_at(balance: float, sl: float) -> float:
     return per_slot * leverage * cw_floor
 
 
-@pytest.mark.parametrize("strategy_sl_attr", ["ma_cluster_sl", "d_sl", "donchian_sl"])
-def test_dust_threshold_not_binding_under_current_sizing(strategy_sl_attr: str) -> None:
-    """최소 명목가가 거래소 하한보다 최소 10배 이상 커야 한다.
+def _min_operating_balance(sl: float) -> float:
+    """더스트 여유 10배를 확보하는 최소 잔고.
 
-    여유가 10배 밑으로 내려가면 백테스트가 무시하고 있는 더스트/부분체결이
-    실제 성과 변수가 되기 시작한다 — 그때 이 테스트가 먼저 깨진다.
+    레버리지를 낮추면 명목가가 줄어 이 값이 **올라간다** — 사이징 축소의 숨은 대가다.
+    """
+    return (
+        MIN_NOTIONAL
+        * MARGIN
+        * _declared("max_concurrent")
+        / (
+            max(1.0, min(_declared("max_leverage"), _declared("risk_per_trade") * _declared("max_concurrent") / sl))
+            * min(_declared("ma_cluster_cw_multipliers"))
+        )
+    )
+
+
+@pytest.mark.parametrize("strategy_sl_attr", ["ma_cluster_sl", "d_sl", "donchian_sl"])
+def test_dust_not_binding_at_live_balance(strategy_sl_attr: str) -> None:
+    """실계좌 잔고에서 최소 명목가가 거래소 하한의 10배를 넘어야 한다.
+
+    2026-08-10 사이징 축소(30배 → 2.5배)로 명목가가 12분의 1이 됐다. 파산 확률을
+    없애는 대가로 **최소 운용 잔고가 올라간다** — 그 경계를 여기서 고정한다.
     """
     sl = _declared(strategy_sl_attr)
-    notional = _min_notional_at(STRESS_BALANCE, sl)
+    notional = _min_notional_at(LIVE_BALANCE, sl)
 
-    assert notional > MIN_NOTIONAL * 10, (
-        f"{strategy_sl_attr}: 잔고 ${STRESS_BALANCE:.0f}에서 최소 명목가 ${notional:.2f} — "
+    assert notional > MIN_NOTIONAL * MARGIN, (
+        f"{strategy_sl_attr}: 잔고 ${LIVE_BALANCE:.0f}에서 최소 명목가 ${notional:.2f} — "
         f"거래소 하한 ${MIN_NOTIONAL}에 근접했다. 더스트/부분체결을 백테스트에 반영해야 한다."
+    )
+
+
+@pytest.mark.parametrize("strategy_sl_attr", ["ma_cluster_sl", "d_sl", "donchian_sl"])
+def test_minimum_operating_balance_is_below_live_balance(strategy_sl_attr: str) -> None:
+    """운용 가능 하한 잔고가 실계좌보다 낮아야 한다.
+
+    현재 값(2026-08-10): MA Cluster $400 / VR $200 / Donchian $300.
+    잔고가 이 아래로 내려가면 진입이 거부되거나 더스트가 슬롯을 막기 시작한다.
+    """
+    need = _min_operating_balance(_declared(strategy_sl_attr))
+    assert need < LIVE_BALANCE, (
+        f"{strategy_sl_attr}: 최소 운용 잔고 ${need:,.0f} > 실계좌 ${LIVE_BALANCE:,.0f} — "
+        f"이 사이징으로는 운용할 수 없다."
     )
 
 
 def test_dust_becomes_binding_at_tiny_balance() -> None:
     """가드가 공허하지 않음을 보인다 — 잔고가 충분히 작으면 실제로 걸린다."""
     tiny = _min_notional_at(1.0, _declared("ma_cluster_sl"))
-    assert tiny < MIN_NOTIONAL * 10, "어떤 잔고에서도 안 걸린다면 이 가드는 아무것도 지키지 않는다"
+    assert tiny < MIN_NOTIONAL * MARGIN, "어떤 잔고에서도 안 걸린다면 이 가드는 아무것도 지키지 않는다"

@@ -101,7 +101,13 @@ class VolStraddleConfig(BaseSettings):
     # ── Position Sizing & Leverage (Half-Kelly derived) ──
     base_leverage: float = 30.0  # Half-Kelly: f*/2=3.07%, L=0.0307×10/0.01≈30
     max_leverage: float = 30.0  # Hard cap (matches base_leverage)
-    risk_per_trade: float = 0.06  # Quarter-Kelly: 40 MA trades → f*=0.378, f*/4=0.0945 → 0.06 (clamped by max_leverage=30×, MA effective=6%/trade, VR=3%/trade)
+    # 2026-08-10: 0.06 → 0.005. 기존 값은 아티팩트가 섞인 백테스트로 산출한 Kelly에
+    # 기반했다. 최근 3년 실측(N=828, PF 1.195)을 블록 부트스트랩(4000회)한 결과
+    # 0.06에서는 80% 초과 드로다운 확률이 99.1%, 3년 손실 확률이 45.2%였다 —
+    # 켈리 정점을 한참 지나 수익 자체를 깎는 구간이다(15배가 30배보다 수익이 높다).
+    # 0.005에서 P(DD>80%)=0.0%, P(DD>50%)=0.3%, 중앙 연수익 +15.31%.
+    # (ref: docs/backtest_results/202608/20260810_f3191ec_trail_removal_long_hold.md §12)
+    risk_per_trade: float = 0.005
 
     # ── Risk Management ──
     max_concurrent: int = 10  # 10 slots (VR L/N=30/10=3.0, MA L/N=21/10=2.1)
@@ -298,6 +304,11 @@ class VolStraddleConfig(BaseSettings):
     ma_cluster_min_momentum: float = 0.01  # Min |momentum| for entry (R45: was 0.003)
     ma_cluster_sl: float = 0.02  # 2% stop loss
     ma_cluster_tp: float = 0.08  # 8% hard TP ceiling (safety; r47: trailing fires first)
+    # 2026-08-10: 트레일 비활성. 봉 해상도를 높여 재측정한 결과 트레일이 만들던 수익의
+    # 95.4%가 봉 집계 아티팩트였고("고점이 먼저 왔다" 가정), 실제로는 신호의 엣지를
+    # 조기 청산으로 잘라내고 있었다. 트레일 제거 + 보유 연장이 OOS 5/5 구간 양(+).
+    # (ref: docs/backtest_results/202608/20260810_f3191ec_trail_removal_long_hold.md)
+    ma_cluster_trail_enabled: bool = False
     ma_cluster_trail_activate: float = 0.01  # autoresearch apr03: 1.5%→1.0% (earlier trail, PF +2%)
     ma_cluster_trail_distance: float = 0.005  # r106: 0.3%→0.5% (Binance callbackRate floor, rule #8; pending sweep)
 
@@ -305,7 +316,11 @@ class VolStraddleConfig(BaseSettings):
     # When True, places/updates Binance STOP order at trail_stop_gain price after
     # trail activation, ensuring intrabar execution matching backtest assumption.
     trail_server_ratchet_enabled: bool = True
-    ma_cluster_max_hold_4h: int = 6  # 6 × 4h = 24h (avg loss held 10h; cut lingering losers earlier)
+    # 2026-08-10: 6 → 24 (4일). 신호는 "맞히는 빈도"가 아니라 "맞혔을 때 오래 간다"는
+    # 성질이다 — 비용 제외 평균이 보유 1봉 +0.067%(t=1.47)에서 12봉 +0.601%(t=3.97)로
+    # 커진다. 24h 청산은 그 엣지를 잘라내고 있었다. 워크포워드에서 학습 구간이 고른
+    # 값도 매 구간 24~36이었고 h∈[18,48] 전체가 고원이다.
+    ma_cluster_max_hold_4h: int = 24  # 24 × 4h = 4일
     ma_cluster_leverage: float = 21.0  # Half-Kelly: f*/2=4.33%, L=0.0433×10/0.02≈21
     ma_cluster_sma_periods: list[int] = Field(
         default_factory=lambda: [20, 50, 100, 200],
@@ -553,6 +568,20 @@ class VolStraddleConfig(BaseSettings):
             "1h": self.max_hold_1h,
             "4h": self.max_hold_4h,
         }.get(tf, self.max_hold_15m)
+
+    def is_trail_enabled(self, strategy_type: str) -> bool:
+        """해당 전략이 서버측 트레일링 스탑을 쓰는지.
+
+        Args:
+            strategy_type: 정규화된 전략 타입.
+
+        Returns:
+            트레일을 걸어야 하면 True. 명시적 플래그가 없는 전략은 기존 동작(True)을
+            유지한다 — 이 스위치는 측정으로 근거가 확인된 전략에만 적용한다.
+        """
+        if strategy_type == MA_CLUSTER:
+            return self.ma_cluster_trail_enabled
+        return True
 
     def get_trail_params(self, strategy_type: str) -> tuple[float, float]:
         """Return (trail_activate, trail_distance) for a strategy type."""
