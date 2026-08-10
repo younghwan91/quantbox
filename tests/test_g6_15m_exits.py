@@ -120,6 +120,7 @@ def test_exit_ratio_16_reproduces_4h_path() -> None:
         (s, eb - (RATIO - 1), xb, round(p, 12))
         for s, eb, xb, p in run_ma_cluster_live_fine_exits(data, cw_sizing=False, exit_ratio=RATIO)
     ]
+    # 펀딩 보유 기간 계산이 두 경로에서 어긋나면 여기서 잡힌다 (종가→종가여야 한다).
     assert a == b, "exit_ratio=16이 4h 경로를 재현하지 못한다 — 사다리 비교가 무의미해진다"
 
 
@@ -159,9 +160,10 @@ def test_sl_exits_are_resolution_invariant() -> None:
     cfg = VolStraddleConfig()
     expected = -(cfg.ma_cluster_sl + cfg.round_trip_cost)
     data = _load()
+    # 펀딩은 보유 기간에 비례하므로 끄고 본다 — 여기서 고정하려는 건 청산 모델이다.
     for exit_ratio in (16, 4, 1):
         trades, _d, reasons = run_ma_cluster_live_fine_exits(
-            data, cw_sizing=False, exit_ratio=exit_ratio, return_reasons=True
+            data, cw_sizing=False, exit_ratio=exit_ratio, return_reasons=True, funding=False
         )
         sl_pnl = np.array([t[3] for t, r in zip(trades, reasons, strict=True) if r == EXIT_SL])
         assert len(sl_pnl) > 0

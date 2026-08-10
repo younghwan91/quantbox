@@ -605,31 +605,48 @@ def collect_trades(
                     all_trades.append((sym, entry_15m, exit_15m, pnl_val))
                     accepted.append((entry_15m, exit_15m))
 
-    # ── G3 parity fix: deduct funding costs ────────────────────────────────
-    # Binance charges funding every 8h on open positions. At 30x leverage
-    # this is a material drag (0.9-5.4% of notional over 48h holds).
-    # Deduction is post-hoc on collected trades (no Numba signature change).
-    # funding_rate_8h: cost per 8h as fraction of notional (e.g. 0.0001 = 0.01%)
-    if "funding_rate_8h" in cfg:
-        _funding_8h = cfg["funding_rate_8h"]
-    else:
-        try:
-            from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _VSCfg2
-
-            _funding_8h = _VSCfg2().default_funding_rate_8h
-        except Exception:
-            _funding_8h = 0.0001  # conservative default
-
-    if _funding_8h > 0:
-        _BARS_PER_8H_15M = 32  # 8h × 4 bars/h = 32 bars at 15m
-        adjusted: list[tuple[str, int, int, float]] = []
-        for sym, entry_b, exit_b, pnl_val in all_trades:
-            bars_held = exit_b - entry_b
-            funding_drag = _funding_8h * (bars_held / _BARS_PER_8H_15M)
-            adjusted.append((sym, entry_b, exit_b, pnl_val - funding_drag))
-        all_trades = adjusted
+    all_trades = apply_funding_drag(all_trades, cfg.get("funding_rate_8h"))
 
     return all_trades
+
+
+#: 15m 봉 기준 8시간 (펀딩 주기).
+BARS_PER_8H_15M = 32
+
+
+def apply_funding_drag(
+    trades: list[tuple[str, int, int, float]],
+    funding_rate_8h: float | None = None,
+) -> list[tuple[str, int, int, float]]:
+    """보유 기간에 비례한 펀딩비를 트레이드 손익에서 뺀다 (G3 파리티).
+
+    Binance는 8시간마다 명목가 기준으로 펀딩을 청구한다. 30배 명목가에서는
+    무시할 수 없는 드래그이고(48h 보유 시 명목가의 0.9~5.4%), **보유가 길수록
+    커지므로 장기 보유 설계를 평가할 때 특히 중요하다.**
+
+    sim의 손익은 가격 변동률이고 펀딩도 명목가 대비 비율이므로 단위가 같다 —
+    그대로 빼면 된다.
+
+    Args:
+        trades: ``[(symbol, entry_bar_15m, exit_bar_15m, pnl)]``.
+        funding_rate_8h: 8시간당 명목가 대비 비율. None이면 config의
+            ``default_funding_rate_8h``를 읽는다. 0 이하면 아무것도 하지 않는다.
+
+    Returns:
+        펀딩을 차감한 트레이드 리스트. 입력은 변경하지 않는다.
+    """
+    if funding_rate_8h is None:
+        try:
+            from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _C
+
+            funding_rate_8h = _C().default_funding_rate_8h
+        except Exception:
+            funding_rate_8h = 0.0001  # conservative default
+
+    if not funding_rate_8h or funding_rate_8h <= 0:
+        return trades
+
+    return [(sym, eb, xb, pnl - funding_rate_8h * ((xb - eb) / BARS_PER_8H_15M)) for sym, eb, xb, pnl in trades]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
