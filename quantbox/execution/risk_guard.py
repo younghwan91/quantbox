@@ -54,12 +54,14 @@ class RiskGuard:
             return None
         btc_ma = float(np.mean(btc_close[-self.cfg.btc_long_ma_period :]))
         btc_cur = float(btc_close[-1])
-        btc_above_ma = btc_cur >= btc_ma
-        logger.info(
-            f"G6 BTC Trend Gate: BTC=${btc_cur:.1f} "
-            f"MA{self.cfg.btc_long_ma_period}=${btc_ma:.1f} "
-            f"-> {'ABOVE (LONG OK)' if btc_above_ma else 'BELOW (LONG BLOCKED)'}"
-        )
+        # 백테스트는 트레이드마다 이 게이트를 부른다 — f-string 평가를 지연시킨다.
+        if logger.isEnabledFor(logging.INFO):
+            btc_above_ma = btc_cur >= btc_ma
+            logger.info(
+                f"G6 BTC Trend Gate: BTC=${btc_cur:.1f} "
+                f"MA{self.cfg.btc_long_ma_period}=${btc_ma:.1f} "
+                f"-> {'ABOVE (LONG OK)' if btc_above_ma else 'BELOW (LONG BLOCKED)'}"
+            )
         return btc_ma
 
     def allow_long(self, btc_close: np.ndarray | None, btc_ma: float | None) -> bool:

@@ -53,6 +53,14 @@ BANNED: dict[str, str] = {
     "gen_vr_signal": "from quantbox.research.harness import gen_vr_signal",
     "make_direction_momentum": "from quantbox.research.harness import make_direction_momentum",
     "compute_vr": "from quantbox.research.harness import compute_vr",
+    # 사이징/리스크 판정 (단일소스). 재구현하면 백테-라이브가 사이징 축에서 갈라진다.
+    "ma_cluster_cw_score": "from quantbox.strategy.vol_straddle.conviction import ma_cluster_cw_score",
+    "ma_cluster_cw_multiplier": "from quantbox.strategy.vol_straddle.conviction import ma_cluster_cw_multiplier",
+    "ma_cluster_spread_pct": "from quantbox.strategy.vol_straddle.conviction import ma_cluster_spread_pct",
+    "allow_direction": "from quantbox.execution.risk_guard import RiskGuard  # RiskGuard(cfg).allow_direction(...)",
+    "allow_long": "from quantbox.execution.risk_guard import RiskGuard  # RiskGuard(cfg).allow_long(...)",
+    "check_daily_loss": "from quantbox.execution.risk_guard import RiskGuard  # RiskGuard(cfg).check_daily_loss(...)",
+    "compute_btc_gate": "from quantbox.execution.risk_guard import RiskGuard  # RiskGuard(cfg).compute_btc_gate(...)",
 }
 
 #: 자체 sim 커널 정의 금지. 공용 드라이버 sim_drive를 쓴다.

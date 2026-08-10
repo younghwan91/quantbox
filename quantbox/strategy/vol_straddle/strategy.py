@@ -28,6 +28,11 @@ import numpy as np
 
 from quantbox.core.strategy_names import DONCHIAN, MA_CLUSTER, VR_DIRECTIONAL
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+from quantbox.strategy.vol_straddle.conviction import (
+    ma_cluster_cw_multiplier,
+    ma_cluster_cw_score,
+    ma_cluster_spread_pct,
+)
 from quantbox.strategy.vol_straddle.signals import (
     check_donchian_breakout,
     check_ma_cluster,
@@ -434,7 +439,7 @@ class VolStraddleStrategy:
         ma_vals = [float(sma20[idx]), float(sma50[idx]), float(sma100[idx]), float(sma200[idx])]
         ma_max = max(ma_vals)
         ma_min = min(ma_vals)
-        spread = (ma_max - ma_min) / close_4h[idx] * 100 if close_4h[idx] > 0 else 0.0
+        spread = ma_cluster_spread_pct(float(close_4h[idx]), ma_vals[0], ma_vals[1], ma_vals[2], ma_vals[3])
         mom_val = float(mom[-1]) if len(mom) > 0 and not np.isnan(mom[-1]) else 0.0
         dur = int(duration_out[0])
 
@@ -498,22 +503,9 @@ class VolStraddleStrategy:
                     )
 
         if sig != 0:
-            # r115: CW conviction score (0-3)
-            cw_score = 0
-            if cfg.ma_cluster_cw_enabled:
-                # 1) tight spread
-                if spread < cfg.ma_cluster_cw_spread_threshold * 100:
-                    cw_score += 1
-                # 2) volume spike: entry bar volume > N× symbol avg
-                if volume_4h is not None and len(volume_4h) >= 20:
-                    avg_vol = float(np.nanmean(volume_4h[-20:]))
-                    if avg_vol > 0 and float(volume_4h[-1]) > cfg.ma_cluster_cw_volume_mult * avg_vol:
-                        cw_score += 1
-                # 3) strong momentum
-                if abs(mom_val) > cfg.ma_cluster_cw_mom_mult * cfg.ma_cluster_min_momentum:
-                    cw_score += 1
-
-            cw_mult = cfg.ma_cluster_cw_multipliers[min(cw_score, len(cfg.ma_cluster_cw_multipliers) - 1)]
+            # r115: CW conviction score (0-3) — 백테스트와 공유하는 단일 소스.
+            cw_score = ma_cluster_cw_score(spread, mom_val, volume_4h, cfg)
+            cw_mult = ma_cluster_cw_multiplier(cw_score, cfg)
 
             self._last_signal_meta[symbol] = {
                 "tf": "4h",
