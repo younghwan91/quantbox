@@ -95,3 +95,37 @@ def test_directions_align_with_trades() -> None:
     trades, dirs = run_ma_cluster_live_15m_exits(data, return_directions=True)
     assert len(dirs) == len(trades)
     assert set(dirs) <= {1, -1}
+
+
+@pytest.mark.parametrize("exit_ratio", [1, 2, 4, 8, 16])
+def test_fine_exits_report_bars_in_15m_units(exit_ratio: int) -> None:
+    """어떤 해상도든 봉 인덱스는 15m 단위로 나온다 — 해상도 간 비교가 성립해야 한다."""
+    from quantbox.backtest.sim_core import run_ma_cluster_live_fine_exits
+
+    trades = run_ma_cluster_live_fine_exits(_load(), cw_sizing=False, exit_ratio=exit_ratio)
+    assert len(trades) > 0
+    assert all(eb < xb for _, eb, xb, _ in trades), "진입이 청산보다 늦거나 같다"
+
+
+def test_exit_ratio_16_reproduces_4h_path() -> None:
+    """`exit_ratio=16`은 기존 4h 경로와 같아야 한다 — 사다리 측정의 전제다.
+
+    진입 보고 시점만 다르다(4h 경로는 봉 시작, fine 경로는 종가 봉).
+    """
+    from quantbox.backtest.sim_core import run_ma_cluster_live, run_ma_cluster_live_fine_exits
+
+    data = _load()
+    a = [(s, eb, xb, round(p, 12)) for s, eb, xb, p in run_ma_cluster_live(data, cw_sizing=False)]
+    b = [
+        (s, eb - (RATIO - 1), xb, round(p, 12))
+        for s, eb, xb, p in run_ma_cluster_live_fine_exits(data, cw_sizing=False, exit_ratio=RATIO)
+    ]
+    assert a == b, "exit_ratio=16이 4h 경로를 재현하지 못한다 — 사다리 비교가 무의미해진다"
+
+
+def test_invalid_exit_ratio_is_rejected() -> None:
+    """`ratio`를 나누지 못하는 값은 격자 정렬이 깨지므로 거부한다."""
+    from quantbox.backtest.sim_core import run_ma_cluster_live_fine_exits
+
+    with pytest.raises(ValueError, match="exit_ratio"):
+        run_ma_cluster_live_fine_exits(_load(), exit_ratio=5)
