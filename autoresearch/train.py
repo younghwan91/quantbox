@@ -158,10 +158,10 @@ def report(tag: str, m: dict, elapsed: float) -> None:
 #  [SEARCH] 신호 생성 — 실험마다 여기만 바꾼다
 # ══════════════════════════════════════════════════════════════════════════════
 
-TAG = "exp11"
+TAG = "exp15-slots5"
 
 #: [SEARCH] 포트폴리오 노브 — main()이 읽는다.
-SLOTS: int | None = None  # None이면 cfg.max_concurrent
+SLOTS: int | None = 5
 DIR_DIVERSITY: bool | None = None  # None이면 cfg 기본값
 SYMBOL_FILTER = None  # callable(sym, d) -> bool, None이면 전부
 
