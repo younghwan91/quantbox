@@ -153,7 +153,7 @@ def report(tag: str, m: dict, elapsed: float) -> None:
 #  [SEARCH] 신호 생성 — 실험마다 여기만 바꾼다
 # ══════════════════════════════════════════════════════════════════════════════
 
-TAG = "tp-ceiling-removed"
+TAG = "exp11"
 
 
 def generate(data: dict) -> tuple[list, list]:
@@ -164,7 +164,7 @@ def generate(data: dict) -> tuple[list, list]:
     # TP 8%는 최적화 대상이 아니라 천장이다 — 스윕이 격자 끝까지 단조 증가하며
     # 내부 최적점이 없다(exit-audit). 26% 승률/RR 3:1 구조는 소수 대형 승리로 먹고사는데
     # 그 꼬리를 자르고 있다. 사실상 제거해본다.
-    return run_ma_cluster_live_fine_exits(data, exit_ratio=1, tp=1.0, return_directions=True)
+    return run_ma_cluster_live_fine_exits(data, exit_ratio=1, tp=1.0, max_duration=48, min_momentum=0.005, return_directions=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
