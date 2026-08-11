@@ -85,12 +85,18 @@ def evaluate(pnl: np.ndarray, years: float, seed: int = 0) -> dict:
     months = years * MONTHS_PER_YEAR
     if n < 50 or months <= 0:
         return {
-            "median_monthly_pct": 0.0, "best_leverage": 0.0, "p_ruin": 1.0,
-            "max_dd_pct": 100.0, "ann_ret_pct": 0.0, "N": n,
-            "ev_bp": 0.0, "t": 0.0, "trades_per_year": 0.0,
+            "median_monthly_pct": 0.0,
+            "best_leverage": 0.0,
+            "p_ruin": 1.0,
+            "max_dd_pct": 100.0,
+            "ann_ret_pct": 0.0,
+            "N": n,
+            "ev_bp": 0.0,
+            "t": 0.0,
+            "trades_per_year": 0.0,
         }
 
-    per_trade = pnl / cfg.max_concurrent  # 슬롯 분할 후 자기자본 대비
+    per_trade = pnl / (SLOTS if SLOTS is not None else cfg.max_concurrent)  # 슬롯 분할 후 자기자본 대비
     rng = np.random.default_rng(seed)
     order = np.array([rng.permutation(n) for _ in range(N_PATHS)])
 
@@ -124,8 +130,7 @@ def evaluate(pnl: np.ndarray, years: float, seed: int = 0) -> dict:
             best = cand
 
     if best is None:
-        best = {"median_monthly_pct": 0.0, "best_leverage": 0.0, "p_ruin": 1.0,
-                "max_dd_pct": 100.0, "ann_ret_pct": 0.0}
+        best = {"median_monthly_pct": 0.0, "best_leverage": 0.0, "p_ruin": 1.0, "max_dd_pct": 100.0, "ann_ret_pct": 0.0}
 
     ev = float(np.mean(pnl))
     t = ev / (float(np.std(pnl, ddof=1)) / np.sqrt(n)) if n > 1 else 0.0
@@ -155,6 +160,11 @@ def report(tag: str, m: dict, elapsed: float) -> None:
 
 TAG = "exp11"
 
+#: [SEARCH] 포트폴리오 노브 — main()이 읽는다.
+SLOTS: int | None = None  # None이면 cfg.max_concurrent
+DIR_DIVERSITY: bool | None = None  # None이면 cfg 기본값
+SYMBOL_FILTER = None  # callable(sym, d) -> bool, None이면 전부
+
 
 def generate(data: dict) -> tuple[list, list]:
     """거래 후보 생성. (trades, directions) 반환.
@@ -164,7 +174,9 @@ def generate(data: dict) -> tuple[list, list]:
     # TP 8%는 최적화 대상이 아니라 천장이다 — 스윕이 격자 끝까지 단조 증가하며
     # 내부 최적점이 없다(exit-audit). 26% 승률/RR 3:1 구조는 소수 대형 승리로 먹고사는데
     # 그 꼬리를 자르고 있다. 사실상 제거해본다.
-    return run_ma_cluster_live_fine_exits(data, exit_ratio=1, tp=1.0, max_duration=48, min_momentum=0.005, return_directions=True)
+    return run_ma_cluster_live_fine_exits(
+        data, exit_ratio=1, tp=1.0, max_duration=48, min_momentum=0.005, return_directions=True
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -176,12 +188,21 @@ def main() -> None:
     data, years = load_universe()
     print(f"# 심볼 {len(data)}  타임라인 {years:.2f}년  비용 {cfg.round_trip_cost * 1e4:.2f}bp", flush=True)
 
+    if SYMBOL_FILTER is not None:
+        data = {k: v for k, v in data.items() if SYMBOL_FILTER(k, v)}
+        print(f"# 심볼 필터 후 {len(data)}", flush=True)
+
     trades, dirs = generate(data)
     print(f"# 원거래 {len(trades)}", flush=True)
 
+    slots = SLOTS if SLOTS is not None else cfg.max_concurrent
+    dd = DIR_DIVERSITY if DIR_DIVERSITY is not None else cfg.dir_diversity_enabled
     pnl, _acc = portfolio_sim_with_details(
-        trades, cfg.max_concurrent, directions=dirs, cfg=cfg,
-        dir_diversity=cfg.dir_diversity_enabled,
+        trades,
+        slots,
+        directions=dirs,
+        cfg=cfg,
+        dir_diversity=dd,
     )
     pnl = np.asarray(pnl, dtype=np.float64)
     print(f"# 채택 {len(pnl)}", flush=True)
