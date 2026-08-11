@@ -98,7 +98,11 @@ def evaluate(pnl: np.ndarray, years: float, seed: int = 0) -> dict:
 
     per_trade = pnl / (SLOTS if SLOTS is not None else cfg.max_concurrent)  # 슬롯 분할 후 자기자본 대비
     rng = np.random.default_rng(seed)
+    # 순열: 최종 자산은 **순서에 불변**이다(곱셈 교환법칙). 따라서 순열은 경로 의존
+    # 지표(파산·MDD)에만 쓸 수 있고 최종 성장률의 신뢰구간에는 무의미하다.
     order = np.array([rng.permutation(n) for _ in range(N_PATHS)])
+    # 복원추출: 거래 표본 자체를 다시 뽑아야 성장률의 표본분포가 나온다.
+    resample = rng.integers(0, n, size=(N_PATHS, n))
 
     best = None
     for lev in LEVERAGE_GRID:
@@ -122,7 +126,7 @@ def evaluate(pnl: np.ndarray, years: float, seed: int = 0) -> dict:
         # 부트스트랩 5~95 백분위를 부수 지표로 함께 보고한다 — 사후 골대 이동 방지.
         paths = np.exp(np.cumsum(logr[order], axis=1))
         ruin = float(np.mean(np.min(paths, axis=1) <= RUIN_FRACTION))
-        boot_monthly = paths[:, -1] ** (1.0 / months) - 1.0
+        boot_monthly = np.exp(np.sum(logr[resample], axis=1) / months) - 1.0
 
         cand = {
             "median_monthly_pct": monthly * 100.0,
