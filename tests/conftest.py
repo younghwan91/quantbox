@@ -30,8 +30,41 @@ Avoid reimplementing scalper setup in every test file — use these fixtures ins
   L455-633 : rubberband bracket             ← rb_scalper reaches this
 """
 
-import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_recon_journal(tmp_path_factory, monkeypatch):
+    """테스트가 **프로덕션** 리컨실 저널에 쓰지 못하게 막는다.
+
+    `core/lifecycle.py`와 `execution/recon_journal.py`는 `Path("data/journal/recon.db")`를
+    하드코딩한다. 진짜 scalper를 만드는 테스트는 거래 저널만 MagicMock으로 막고 리컨실
+    저널은 그대로 두는 경우가 많아, pytest 1회 실행마다 실제 DB에 53행이 쌓이고 있었다
+    (2026-08-12 발견: 전체 22,836건 중 31%가 `TESTUSDT`).
+
+    운영 기록이 테스트 데이터로 오염되면 가동률·사고 분석이 조용히 틀린다. 개별 테스트를
+    고치는 대신 **경로를 생성 시점에 가로채** 같은 부류의 버그가 다시 생기지 않게 한다.
+    """
+    from quantbox.execution.recon_journal import ReconJournal
+
+    sandbox = tmp_path_factory.mktemp("recon")
+    #: 레포의 실제 데이터 디렉토리. 여기로 향하는 것만 가로챈다 — 스스로 `tmp_path`를
+    #: 넘기는 테스트까지 옮기면 "생성 경로에 파일이 있는가"를 검증하는 테스트가 깨진다.
+    prod_data = (Path(__file__).resolve().parents[1] / "data").resolve()
+    original = ReconJournal.__init__
+
+    def _redirected(self, db_path, *args, **kwargs):
+        p = Path(db_path)
+        resolved = p if p.is_absolute() else (Path.cwd() / p)
+        if resolved.resolve().is_relative_to(prod_data):
+            p = sandbox / p.name
+        original(self, p, *args, **kwargs)
+
+    monkeypatch.setattr(ReconJournal, "__init__", _redirected)
+    yield
 
 
 @pytest.fixture(autouse=True)

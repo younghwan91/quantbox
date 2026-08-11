@@ -86,6 +86,25 @@ def test_offset_must_land_on_bar_grid() -> None:
         MarketData._align({"A": a, "B": b})
 
 
+def test_load_preserves_timestamps_for_alignment(tmp_path) -> None:
+    """`load()`를 거쳐도 시각 정렬이 살아있어야 한다.
+
+    회귀 방어: 위 테스트들은 전부 `_align`을 직접 호출해 타임스탬프를 손수 넣었다.
+    그래서 `load()`가 `timestamps`를 버려 **우측 정렬로 조용히 떨어지던 버그**를
+    아무도 못 잡았다 (2026-08-12 발견). 경로 전체를 지나가는 테스트가 있어야 한다.
+    """
+    for name, start_bar, n in (("OLD", 0, 900), ("DEAD", 0, 600), ("NEW", 300, 600)):
+        np.savez(tmp_path / f"{name}.npz", **_series(start_bar, n))
+
+    md = MarketData.load(cache_dir=tmp_path, pattern="*.npz", include_market_ref=False)
+
+    assert "timestamps" in md["OLD"], "load()가 타임스탬프를 버렸다 — 정렬이 우측으로 떨어진다"
+    # 우측 정렬이었다면 DEAD는 300(=900-600)으로 밀린다. 시각 정렬이면 0이다.
+    assert md["DEAD"]["_offset"] == 0, "폐지 종목이 뒤로 밀렸다 — 우측 정렬로 떨어졌다"
+    assert md["OLD"]["_offset"] == 0
+    assert md["NEW"]["_offset"] == 300
+
+
 def test_contiguity_report_flags_internal_gaps() -> None:
     """내부 결측을 보고한다 — 위치 기반 인덱싱은 연속성을 전제한다."""
     good = _series(0, 100)

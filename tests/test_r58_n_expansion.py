@@ -130,9 +130,12 @@ class TestConfigParity:
         assert D_SL == _cfg.d_sl
         assert D_TP == _cfg.d_tp
 
-    def test_cost_directional(self):
-        """COST_DIRECTIONAL is 0.08% round-trip."""
-        assert abs(COST_DIRECTIONAL - 0.0008) < 1e-9
+    def test_cost_directional(self, _cfg):
+        """COST_DIRECTIONAL은 config의 왕복 비용을 따라간다 (2026-08-12 실측 0.126%).
+
+        절대값을 박으면 비용 정정 때마다 여기서 깨진다 — 파생 관계 자체를 고정한다.
+        """
+        assert abs(COST_DIRECTIONAL - _cfg.round_trip_cost) < 1e-9
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

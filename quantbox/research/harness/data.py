@@ -116,7 +116,10 @@ class MarketData:
                 continue
             if len(npz["close"]) < min_bars:
                 continue
-            data[sym] = {k: npz[k].astype(np.float64) for k in npz.files if k != "timestamps"}
+            # `timestamps`는 float64로 캐스팅하지 않고 원본 dtype(int64 ms)으로 남긴다.
+            # 이 키가 있어야 `_align`이 시각 기반으로 정렬한다 — 버리면 우측 정렬로
+            # 조용히 떨어져 폐지 종목이 현재까지 거래된 것처럼 배치된다.
+            data[sym] = {k: (npz[k] if k == "timestamps" else npz[k].astype(np.float64)) for k in npz.files}
 
         cls._align(data)
         return cls(data=data, source=root)

@@ -117,8 +117,19 @@ class VolStraddleConfig(BaseSettings):
     )
 
     # ── Costs (conservative) ──
-    fee_rate: float = 0.0002  # 0.02% maker fee per side
-    slippage_rate: float = 0.0002  # 0.02% slippage with limit chaser
+    # 2026-08-12 실측 정정. 이전 값 0.0002는 "양쪽 다 maker 체결"을 전제했으나 사실이 아니다.
+    # Binance income history 실조회(2026-02-05~05-04, 7,624행) + ma_cluster 60건 대조:
+    #   실제 요율   maker 2bp / taker 5bp, feeTier 0, BNB 할인 미적용
+    #   왕복 실측   중앙 9.90bp → 편도 블렌디드 **4.3bp**
+    #   내역        10bp×36건(양쪽 taker) / 7bp×18건(maker진입+taker청산) / 4~6bp×6건
+    # 진입 maker 체결률이 30~40%뿐이고 청산은 전량 taker다. 청산이 taker인 것은 구조적이다 —
+    # exit_reason의 97%가 서버 스톱 트리거(STOP_MARKET/TRAILING_STOP_MARKET)이고, 이를 지정가로
+    # 바꾸는 것은 안전장치 제거다. 따라서 이 값은 완화 가능한 가정이 아니라 측정된 사실이다.
+    fee_rate: float = 0.00043  # 4.3bp per side (measured blended maker/taker)
+    # 슬리피지는 실측 불가 상태다 — 소켓 수집 구간(2026-08-09~)과 라이브 체결 구간(~2026-05-04)이
+    # 겹치지 않는다. 스프레드 실측(중앙 2.42bp)에 기반한 모델값은 왕복 3.2bp이나, 모델을 근거로
+    # 비용 가정을 낮추지 않는다(보수성 유지). 라이브 재개 후 실측되면 그때 정정한다.
+    slippage_rate: float = 0.0002  # 0.02% slippage — modeled, deliberately not relaxed
     slippage_mode: str = "flat"  # flat | tiered | conservative
 
     # ── Funding Cost (G3 parity fix) ──
