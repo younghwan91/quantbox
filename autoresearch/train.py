@@ -153,7 +153,7 @@ def report(tag: str, m: dict, elapsed: float) -> None:
 #  [SEARCH] 신호 생성 — 실험마다 여기만 바꾼다
 # ══════════════════════════════════════════════════════════════════════════════
 
-TAG = "baseline-ma_cluster-15m-exits"
+TAG = "tp-ceiling-removed"
 
 
 def generate(data: dict) -> tuple[list, list]:
@@ -161,7 +161,10 @@ def generate(data: dict) -> tuple[list, list]:
 
     baseline: 라이브 ma_cluster 진입 + 15m 청산 해상도, 프로덕션 파라미터 그대로.
     """
-    return run_ma_cluster_live_fine_exits(data, exit_ratio=1, return_directions=True)
+    # TP 8%는 최적화 대상이 아니라 천장이다 — 스윕이 격자 끝까지 단조 증가하며
+    # 내부 최적점이 없다(exit-audit). 26% 승률/RR 3:1 구조는 소수 대형 승리로 먹고사는데
+    # 그 꼬리를 자르고 있다. 사실상 제거해본다.
+    return run_ma_cluster_live_fine_exits(data, exit_ratio=1, tp=1.0, return_directions=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
