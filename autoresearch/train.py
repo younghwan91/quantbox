@@ -1,482 +1,190 @@
-#!/usr/bin/env python3
-"""Autoresearch: Comprehensive Robustness Test for All Successful Strategies.
+"""autoresearch — 폭발적 성장의 수학적 설계.
 
-Tests each strategy under a matrix of realistic conditions:
-  - Cost: 1x, 2x, 3x (fee + slippage)
-  - Entry slippage: 0%, 0.1%, 0.2% (adverse entry price on breakout bars)
-  - Combined worst-case: 3x cost + 0.2% slippage
+목표: 단타로 월 20% 이상의 **실제** 수익. 모든 제약 자유(레버리지 포함).
 
-Primary metric: PF at worst-case scenario.
+## 목적함수를 왜 이렇게 잡았나
+
+레버리지가 자유일 때 "월 수익률 기댓값 최대화"는 **내부 최적점이 없다**. 기댓값은
+레버리지에 선형으로 커지는데, 로그 자산의 기댓값은 f*mu - f^2*sigma^2/2 로 위로 볼록해
+어느 지점을 넘으면 **중앙값 경로가 0으로 간다**. 즉 기댓값을 좇으면 "평균은 무한대,
+실제로 겪는 결과는 파산"이 된다. 실제로 얻는 성장을 최대화하는 유일한 목적함수는
+로그 자산(켈리)이다.
+
+그래서 primary_metric은 **중앙값 월 성장률**이다. 레버리지는 자유변수로 두되, 이 지표가
+자기파괴 구간을 스스로 걸러낸다. 파산확률·MDD는 부수 지표로 함께 보고한다.
+
+## 구조
+
+  [FIXED]  데이터 로딩 · 포트폴리오 · 평가 — 수정하지 않는다.
+  [SEARCH] 신호 생성 · 사이징 — 실험마다 여기만 바꾼다.
+
+정본 경로만 쓴다. `sim_drive`/`portfolio_sim`/`compute_metrics` 재구현 금지.
 """
 
 from __future__ import annotations
 
+import os
 import sys
-from pathlib import Path
+import time
 
-import numba
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-
-from quantbox.backtest.sim_core import run_ma_cluster_live  # noqa: E402
-from quantbox.backtest.trade_sim import (  # noqa: E402
-    G_4TF,
-    build_resampled,
-    bootstrap_pf,
-    collect_trades,
-    compute_metrics,
-    portfolio_sim,
-    precompute_all_vr,
-)
-from quantbox.strategy.vol_straddle.config import VolStraddleConfig  # noqa: E402
-from quantbox.strategy.vol_straddle.signals import compute_momentum  # noqa: E402
-
+from quantbox.backtest.sim_core import run_ma_cluster_live_fine_exits
+from quantbox.backtest.trade_sim import portfolio_sim_with_details
+from quantbox.research.harness.data import MarketData
+from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Data loading
+#  [FIXED] 상수 · 데이터 — 수정하지 않는다
 # ══════════════════════════════════════════════════════════════════════════════
 
-CACHE_DIR = ROOT / "data" / "cache_extended"
-DATA_YEARS = 6.0
-SLOT_LIMIT = 10
+BARS_PER_YEAR_15M = 96 * 365
+MONTHS_PER_YEAR = 12.0
+
+#: 파산 판정 — 초기 자본 대비 이 아래로 내려가면 그 경로는 죽은 것으로 본다.
+RUIN_FRACTION = 0.10
+
+#: 부트스트랩 경로 수 (거래 순서를 섞어 파산확률을 추정).
+N_PATHS = 400
+
+#: 레버리지 탐색 격자. 성장최적점을 이 안에서 찾는다.
+LEVERAGE_GRID = np.concatenate([np.arange(0.5, 10.01, 0.5), np.arange(11.0, 61.0, 2.0)])
+
+_CACHE = os.path.join(os.path.dirname(__file__), "_universe_cache.npz")
 
 
-def load_data():
-    cfg = VolStraddleConfig()
-    whitelist = set(cfg.symbol_whitelist)
-    data_15m: dict = {}
-    max_bars = 0
-    for f in sorted(CACHE_DIR.glob("*_15m_2190d_*.npz")):
-        if "numtrades" in f.name:
-            continue
-        sym = f.name.split("_")[0]
-        if sym not in whitelist:
-            continue
-        d = np.load(f, allow_pickle=False)
-        bars = len(d["close"])
-        if bars > max_bars:
-            max_bars = bars
-        data_15m[sym] = {
-            "close": d["close"].astype(np.float64),
-            "high": d["high"].astype(np.float64),
-            "low": d["low"].astype(np.float64),
-            "volume": d["volume"].astype(np.float64),
-        }
-    for sym in data_15m:
-        data_15m[sym]["_offset"] = max_bars - len(data_15m[sym]["close"])
-        data_15m[sym]["mom_8"] = compute_momentum(data_15m[sym]["close"], 8)
-    data_1h = build_resampled(data_15m, 4)
-    data_4h = build_resampled(data_15m, 16)
-    for ds in [data_1h, data_4h]:
-        for d in ds.values():
-            d["mom_8"] = compute_momentum(d["close"], 8)
-    precompute_all_vr([data_15m, data_1h, data_4h], [(8, 56)])
-    return data_15m, data_1h, data_4h, max_bars
+def load_universe() -> tuple[dict, float]:
+    """760심볼 유니버스와 타임라인 길이(년). 시각 정렬 보장."""
+    md = MarketData.load(cache_dir="data/cache_universe", pattern="*.npz")
+    data = md.data
+    end = max(int(d["_offset"]) + len(d["close"]) for d in data.values())
+    return data, end / BARS_PER_YEAR_15M
 
 
-def collect_existing_trades(data_15m, data_1h, data_4h):
-    cfg = VolStraddleConfig()
-    d_cfg = {
-        "sp": cfg.vr_short,
-        "lp": cfg.vr_long,
-        "d_vr": cfg.d_vr_threshold,
-        "s_vr": cfg.s_vr_threshold,
-        "s_dur": cfg.s_squeeze_dur,
-        "d_sl": cfg.d_sl,
-        "s_sl": cfg.s_sl,
-        "tp": cfg.d_tp,
-        "d_trail_activate": cfg.d_trail_activate,
-        "d_trail_distance": cfg.d_trail_distance,
-        "s_trail_activate": cfg.s_trail_activate,
-        "s_trail_distance": cfg.s_trail_distance,
-        "funding_rate_8h": cfg.default_funding_rate_8h,
-    }
-    vr_trades = collect_trades(
-        d_cfg, data_15m, data_1h, data_4h, "D_mom8", tf_group=G_4TF
-    )
-    # 라이브 규칙(check_ma_cluster 호출)으로 백테스트한다. 재구현판
-    # collect_ma_cluster_trades 는 클러스터 에피소드당 재진입으로 2.32x 과대 —
-    # autoresearch 가 ma_cluster 를 과대평가해 잘못된 포트폴리오를 학습했다. (2026-07-18)
-    ma_trades = run_ma_cluster_live(data_15m, data_4h)
-    return vr_trades + ma_trades
+def evaluate(pnl: np.ndarray, years: float, seed: int = 0) -> dict:
+    """[FIXED] 거래별 손익 → 성장 지표.
 
+    거래 손익은 **명목가 대비**다. 레버리지 L은 자기자본 대비 노출 배수이며,
+    슬롯 분할(max_concurrent)로 나눈 뒤 적용한다 — 한 거래가 계좌 전체를 쓰지 않는다.
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Trade sim WITH entry slippage support
-# ══════════════════════════════════════════════════════════════════════════════
+    각 L에 대해:
+      1. 실제 순서 경로로 중앙값 월 성장률을 얻고,
+      2. 순서를 섞은 N_PATHS 경로로 파산확률을 추정한다.
+    성장최적 L(중앙값 월 성장률 최대)을 골라 보고한다.
 
+    Args:
+        pnl: 채택된 거래별 손익 (명목 대비 비율, 시간순).
+        years: 타임라인 길이 (년).
+        seed: 부트스트랩 시드.
 
-@numba.jit(nopython=True, cache=True)
-def sim_with_slippage(
-    close: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    sig: np.ndarray,
-    dire: np.ndarray,
-    sl: float,
-    tp: float,
-    max_hold: int,
-    cost: float,
-    trail_activate: float,
-    trail_distance: float,
-    warmup: int,
-    entry_slippage: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Trade sim with entry slippage — adverse entry price on signal bars.
-
-    entry_slippage: fraction of price added adversely.
-    LONG:  entry = close[i] * (1 + entry_slippage)  — pay more
-    SHORT: entry = close[i] * (1 - entry_slippage)  — get less
+    Returns:
+        지표 dict. 거래가 부족하면 전부 0.
     """
-    n = len(close)
-    cap = n // 2 + 1
-    pnl = np.empty(cap, dtype=np.float64)
-    ent = np.empty(cap, dtype=np.int64)
-    ext = np.empty(cap, dtype=np.int64)
-    cnt = 0
-    i = warmup
-    while i < n - 1:
-        if sig[i] == 0 or dire[i] == 0:
-            i += 1
+    cfg = VolStraddleConfig()
+    n = len(pnl)
+    months = years * MONTHS_PER_YEAR
+    if n < 50 or months <= 0:
+        return {
+            "median_monthly_pct": 0.0, "best_leverage": 0.0, "p_ruin": 1.0,
+            "max_dd_pct": 100.0, "ann_ret_pct": 0.0, "N": n,
+            "ev_bp": 0.0, "t": 0.0, "trades_per_year": 0.0,
+        }
+
+    per_trade = pnl / cfg.max_concurrent  # 슬롯 분할 후 자기자본 대비
+    rng = np.random.default_rng(seed)
+    order = np.array([rng.permutation(n) for _ in range(N_PATHS)])
+
+    best = None
+    for lev in LEVERAGE_GRID:
+        r = 1.0 + lev * per_trade
+        if np.any(r <= 0):  # 한 거래로 계좌가 0 이하 — 이 레버리지는 정의상 파산
             continue
-        base_entry = close[i]
-        if base_entry <= 0:
-            i += 1
+        logr = np.log(r)
+
+        eq = np.exp(np.cumsum(logr))
+        final = float(eq[-1])
+        peak = np.maximum.accumulate(eq)
+        mdd = float(np.max(1.0 - eq / peak)) * 100.0
+        if final <= 0:
             continue
-        d = dire[i]
-        # Apply adverse entry slippage
-        if d == 1:
-            entry = base_entry * (1.0 + entry_slippage)
-        else:
-            entry = base_entry * (1.0 - entry_slippage)
+        monthly = final ** (1.0 / months) - 1.0
 
-        end = min(i + 1 + max_hold, n)
-        eb = end - 1
-        trade_pnl = 0.0
-        trailing_active = False
-        peak_gain = 0.0
+        # 부트스트랩: 순서를 섞어도 살아남는가
+        paths = np.exp(np.cumsum(logr[order], axis=1))
+        ruin = float(np.mean(np.min(paths, axis=1) <= RUIN_FRACTION))
 
-        for j in range(i + 1, end):
-            if d == 1:
-                cur_gain = (high[j] - entry) / entry
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
-                if trailing_active:
-                    trail_level = entry * (1.0 + peak_gain - trail_distance)
-                    if low[j] <= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-                else:
-                    if low[j] <= entry * (1.0 - sl):
-                        trade_pnl = -sl
-                        eb = j
-                        break
-                if high[j] >= entry * (1.0 + tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-            else:
-                cur_gain = (entry - low[j]) / entry
-                if cur_gain > peak_gain:
-                    peak_gain = cur_gain
-                if not trailing_active and peak_gain >= trail_activate:
-                    trailing_active = True
-                if trailing_active:
-                    trail_level = entry * (1.0 - peak_gain + trail_distance)
-                    if high[j] >= trail_level:
-                        trade_pnl = max(peak_gain - trail_distance, -sl)
-                        eb = j
-                        break
-                else:
-                    if high[j] >= entry * (1.0 + sl):
-                        trade_pnl = -sl
-                        eb = j
-                        break
-                if low[j] <= entry * (1.0 - tp):
-                    trade_pnl = tp
-                    eb = j
-                    break
-        else:
-            if d == 1:
-                trade_pnl = (close[eb] - entry) / entry
-            else:
-                trade_pnl = (entry - close[eb]) / entry
+        cand = {
+            "median_monthly_pct": monthly * 100.0,
+            "best_leverage": float(lev),
+            "p_ruin": ruin,
+            "max_dd_pct": mdd,
+            "ann_ret_pct": (final ** (1.0 / years) - 1.0) * 100.0,
+        }
+        if best is None or cand["median_monthly_pct"] > best["median_monthly_pct"]:
+            best = cand
 
-        if cnt < cap:
-            pnl[cnt] = trade_pnl - cost
-            ent[cnt] = i
-            ext[cnt] = eb
-            cnt += 1
-        i = eb + 1
+    if best is None:
+        best = {"median_monthly_pct": 0.0, "best_leverage": 0.0, "p_ruin": 1.0,
+                "max_dd_pct": 100.0, "ann_ret_pct": 0.0}
 
-    return pnl[:cnt], ent[:cnt], ext[:cnt]
+    ev = float(np.mean(pnl))
+    t = ev / (float(np.std(pnl, ddof=1)) / np.sqrt(n)) if n > 1 else 0.0
+    best |= {"N": n, "ev_bp": ev * 1e4, "t": t, "trades_per_year": n / years}
+    return best
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Signal generators for each strategy
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-@numba.jit(nopython=True, cache=True)
-def compute_vol_sma(volume, period):
-    n = len(volume)
-    out = np.full(n, np.nan)
-    if n < period:
-        return out
-    s = 0.0
-    for i in range(period):
-        s += volume[i]
-    out[period - 1] = s / period
-    for i in range(period, n):
-        s += volume[i] - volume[i - period]
-        out[i] = s / period
-    return out
-
-
-@numba.jit(nopython=True, cache=True)
-def gen_donchian_vol(close, high, low, volume, period, mom_min, vol_sma, vol_mult):
-    n = len(close)
-    sig = np.zeros(n, dtype=np.int64)
-    dire = np.zeros(n, dtype=np.int64)
-    for i in range(period, n):
-        if np.isnan(vol_sma[i]) or vol_sma[i] <= 0:
-            continue
-        if volume[i] < vol_mult * vol_sma[i]:
-            continue
-        chan_high = -1e18
-        chan_low = 1e18
-        for j in range(i - period, i):
-            if high[j] > chan_high:
-                chan_high = high[j]
-            if low[j] < chan_low:
-                chan_low = low[j]
-        if close[i] <= 0:
-            continue
-        if close[i] > chan_high:
-            breakout_pct = (close[i] - chan_high) / close[i]
-            if breakout_pct > mom_min:
-                sig[i] = 1
-                dire[i] = 1
-        elif close[i] < chan_low:
-            breakout_pct = (chan_low - close[i]) / close[i]
-            if breakout_pct > mom_min:
-                sig[i] = 1
-                dire[i] = -1
-    return sig, dire
-
-
-@numba.jit(nopython=True, cache=True)
-def gen_high_vol_momentum(vr, momentum, vr_min, mom_min):
-    n = len(vr)
-    sig = np.zeros(n, dtype=np.int64)
-    dire = np.zeros(n, dtype=np.int64)
-    for i in range(n):
-        if np.isnan(vr[i]) or np.isnan(momentum[i]):
-            continue
-        if vr[i] > vr_min and abs(momentum[i]) > mom_min:
-            sig[i] = 1
-            dire[i] = 1 if momentum[i] > 0 else -1
-    return sig, dire
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Strategy definitions
-# ══════════════════════════════════════════════════════════════════════════════
-
-STRATEGIES = {
-    "donchian_vol": {
-        "tf": "4h",
-        "tf_ratio": 16,
-        "sl": 0.015,
-        "tp": 0.15,
-        "trail_activate": 0.02,
-        "trail_distance": 0.008,
-        "max_hold": 24,
-        "warmup": 55,
-    },
-    "high_vol_momentum": {
-        "tf": "1h",
-        "tf_ratio": 4,
-        "sl": 0.015,
-        "tp": 0.15,
-        "trail_activate": 0.03,
-        "trail_distance": 0.01,
-        "max_hold": 48,
-        "warmup": 60,
-    },
-}
-
-
-def collect_strategy_trades(
-    name: str,
-    cfg: dict,
-    data_tf: dict,
-    data_15m: dict,
-    cost: float,
-    entry_slippage: float,
-) -> list[tuple[str, int, int, float]]:
-    """Collect trades for a strategy with given cost and slippage."""
-    tf_ratio = cfg["tf_ratio"]
-    all_trades: list[tuple[str, int, int, float]] = []
-
-    for sym in sorted(data_tf.keys()):
-        d = data_tf[sym]
-
-        if name == "donchian_vol":
-            if "volume" not in d:
-                continue
-            vol_sma = compute_vol_sma(d["volume"], 20)
-            sig, dire = gen_donchian_vol(
-                d["close"], d["high"], d["low"], d["volume"],
-                50, 0.02, vol_sma, 2.5,
-            )
-        elif name == "high_vol_momentum":
-            vr_key = "vr_8_56"
-            if vr_key not in d or "mom_8" not in d:
-                continue
-            sig, dire = gen_high_vol_momentum(d[vr_key], d["mom_8"], 2.0, 0.03)
-        else:
-            continue
-
-        p, e, x = sim_with_slippage(
-            d["close"], d["high"], d["low"],
-            sig, dire,
-            cfg["sl"], cfg["tp"], cfg["max_hold"], cost,
-            cfg["trail_activate"], cfg["trail_distance"],
-            cfg["warmup"], entry_slippage,
-        )
-
-        offset = int(data_15m[sym].get("_offset", 0))
-        for k in range(len(p)):
-            entry_bar = int(e[k]) * tf_ratio + offset
-            exit_bar = int(x[k]) * tf_ratio + tf_ratio - 1 + offset
-            all_trades.append((sym, entry_bar, exit_bar, float(p[k])))
-
-    return all_trades
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Main — Robustness matrix
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-def main():
-    print("=" * 72)
-    print("  COMPREHENSIVE ROBUSTNESS TEST — ALL SUCCESSFUL STRATEGIES")
-    print("=" * 72)
-    print("\nLoading data...")
-    data_15m, data_1h, data_4h, max_bars = load_data()
-
-    tf_data = {"1h": data_1h, "4h": data_4h}
-
-    print("Collecting existing strategy trades...")
-    existing_trades = collect_existing_trades(data_15m, data_1h, data_4h)
-    existing_pnl = portfolio_sim(existing_trades, SLOT_LIMIT)
-    existing_m = compute_metrics(existing_pnl, DATA_YEARS)
-    print(f"  Existing baseline: N={existing_m['N']}  PF={existing_m['PF']:.3f}\n")
-
-    # Test matrix
-    cost_levels = [
-        ("1x", 0.0008),
-        ("2x", 0.0016),
-        ("3x", 0.0024),
-    ]
-    slippage_levels = [
-        ("0%", 0.0),
-        ("0.1%", 0.001),
-        ("0.2%", 0.002),
-    ]
-
-    for strat_name, strat_cfg in STRATEGIES.items():
-        data_tf = tf_data[strat_cfg["tf"]]
-
-        print(f"\n{'=' * 72}")
-        print(f"  STRATEGY: {strat_name} ({strat_cfg['tf']})")
-        print(f"  SL={strat_cfg['sl']*100:.1f}%  Trail={strat_cfg['trail_activate']*100:.0f}%/{strat_cfg['trail_distance']*100:.1f}%")
-        print(f"{'=' * 72}")
-        print()
-
-        # Header
-        print(f"  {'Cost':>6} {'Slip':>6} | {'PF':>6} {'N':>6} {'WR':>6} {'MaxDD':>7} {'EV_bp':>7} | {'CombPF':>7} {'Delta':>7} | {'Boot':>5} {'P≥1':>5}")
-        print(f"  {'-'*6} {'-'*6} | {'-'*6} {'-'*6} {'-'*6} {'-'*7} {'-'*7} | {'-'*7} {'-'*7} | {'-'*5} {'-'*5}")
-
-        best_worst_pf = 0.0
-        for cost_label, cost_val in cost_levels:
-            for slip_label, slip_val in slippage_levels:
-                trades = collect_strategy_trades(
-                    strat_name, strat_cfg, data_tf, data_15m, cost_val, slip_val,
-                )
-                if not trades:
-                    print(f"  {cost_label:>6} {slip_label:>6} | NO TRADES")
-                    continue
-
-                pnl = portfolio_sim(trades, SLOT_LIMIT)
-                m = compute_metrics(pnl, DATA_YEARS)
-                boot = bootstrap_pf(pnl, 2000)
-
-                # Combined portfolio
-                combined_pnl = portfolio_sim(existing_trades + trades, SLOT_LIMIT)
-                cm = compute_metrics(combined_pnl, DATA_YEARS)
-                delta = cm["PF"] - existing_m["PF"]
-
-                marker = ""
-                if cost_label == "1x" and slip_label == "0%":
-                    marker = " ← base"
-                elif cost_label == "3x" and slip_label == "0.2%":
-                    marker = " ← WORST"
-
-                print(
-                    f"  {cost_label:>6} {slip_label:>6} | "
-                    f"{m['PF']:6.3f} {m['N']:6d} {m['WR']:5.1f}% {m['max_dd_pct']:6.1f}% {m['EV_bp']:7.1f} | "
-                    f"{cm['PF']:7.3f} {delta:+7.3f} | "
-                    f"[{boot.get('CI_lo', 0):.2f}] {boot.get('P_PF_ge_1', 0):4.0f}%{marker}"
-                )
-
-                if cost_label == "3x" and slip_label == "0.2%":
-                    best_worst_pf = m["PF"]
-
-        # Non-overlap (only need to compute once — signals don't change with cost)
-        base_trades = collect_strategy_trades(
-            strat_name, strat_cfg, data_tf, data_15m, 0.0008, 0.0,
-        )
-        non_overlap_raw = len(base_trades)
-        existing_intervals: dict[str, list[tuple[int, int]]] = {}
-        for sym, entry, exit_b, _ in existing_trades:
-            existing_intervals.setdefault(sym, []).append((entry, exit_b))
-        non_overlapping = 0
-        for sym, entry, exit_b, _ in base_trades:
-            intervals = existing_intervals.get(sym, [])
-            overlaps = False
-            for e_entry, e_exit in intervals:
-                if entry <= e_exit and exit_b >= e_entry:
-                    overlaps = True
-                    break
-            if not overlaps:
-                non_overlapping += 1
-        no_pct = non_overlapping / non_overlap_raw * 100 if non_overlap_raw > 0 else 0
-
-        print(f"\n  Non-overlap with existing: {no_pct:.1f}% ({non_overlapping}/{non_overlap_raw})")
-        print(f"  Worst-case PF (3x cost + 0.2% slip): {best_worst_pf:.3f}")
-        verdict = "PASS" if best_worst_pf > 1.3 else ("MARGINAL" if best_worst_pf > 1.0 else "FAIL")
-        print(f"  Verdict: {verdict}")
-
-    # Final summary
-    print(f"\n{'=' * 72}")
-    print("  SUMMARY")
-    print(f"{'=' * 72}")
-    print("  Strategies that survive worst-case (3x cost + 0.2% slippage):")
-    print("  with PF > 1.3 → PRODUCTION VIABLE")
-    print("  with PF > 1.0 → MARGINAL (needs more investigation)")
-    print("  with PF < 1.0 → FAIL (not robust)")
-    print()
+def report(tag: str, m: dict, elapsed: float) -> None:
+    """[FIXED] grep 가능한 요약 블록."""
     print("---")
-    print("primary_metric: 0")
+    print(f"primary_metric: {m['median_monthly_pct']:.4f}")
+    print(f"best_leverage:  {m['best_leverage']:.1f}")
+    print(f"p_ruin:         {m['p_ruin']:.4f}")
+    print(f"max_dd_pct:     {m['max_dd_pct']:.2f}")
+    print(f"ann_ret_pct:    {m['ann_ret_pct']:.2f}")
+    print(f"N:              {m['N']}")
+    print(f"trades_per_year:{m['trades_per_year']:.0f}")
+    print(f"ev_bp:          {m['ev_bp']:.2f}")
+    print(f"t:              {m['t']:.2f}")
+    print(f"tag:            {tag}")
+    print(f"elapsed_s:      {elapsed:.1f}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  [SEARCH] 신호 생성 — 실험마다 여기만 바꾼다
+# ══════════════════════════════════════════════════════════════════════════════
+
+TAG = "baseline-ma_cluster-15m-exits"
+
+
+def generate(data: dict) -> tuple[list, list]:
+    """거래 후보 생성. (trades, directions) 반환.
+
+    baseline: 라이브 ma_cluster 진입 + 15m 청산 해상도, 프로덕션 파라미터 그대로.
+    """
+    return run_ma_cluster_live_fine_exits(data, exit_ratio=1, return_directions=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def main() -> None:
+    t0 = time.time()
+    cfg = VolStraddleConfig()
+    data, years = load_universe()
+    print(f"# 심볼 {len(data)}  타임라인 {years:.2f}년  비용 {cfg.round_trip_cost * 1e4:.2f}bp", flush=True)
+
+    trades, dirs = generate(data)
+    print(f"# 원거래 {len(trades)}", flush=True)
+
+    pnl, _acc = portfolio_sim_with_details(
+        trades, cfg.max_concurrent, directions=dirs, cfg=cfg,
+        dir_diversity=cfg.dir_diversity_enabled,
+    )
+    pnl = np.asarray(pnl, dtype=np.float64)
+    print(f"# 채택 {len(pnl)}", flush=True)
+
+    report(TAG, evaluate(pnl, years), time.time() - t0)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
