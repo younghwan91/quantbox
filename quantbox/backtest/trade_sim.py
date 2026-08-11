@@ -181,10 +181,42 @@ _LOW_LIQ_SYMS: frozenset[str] = frozenset(
     }
 )
 
-# Everything else (mid-tier alts) falls into medium liquidity: 0.12%.
-_COST_HIGH_LIQ: float = 0.0008  # 0.08% round-trip (current flat default)
-_COST_MED_LIQ: float = 0.0012  # 0.12% round-trip
-_COST_LOW_LIQ: float = 0.0016  # 0.16% round-trip (thin markets)
+# Everything else (mid-tier alts) falls into medium liquidity.
+#
+# 티어는 flat 비용에 대한 **배수**로 정의한다. 2026-08-12까지는 0.0008/0.0012/0.0016으로
+# 절대값이 박혀 있었는데, 그 0.0008은 당시 `round_trip_cost`와 같은 값이었다. 수수료 실측
+# 정정으로 flat이 0.00126이 되자 HIGH 티어만 옛 값에 남아 조용히 어긋났다.
+# 비율(1 : 1.5 : 2)은 원래 의도 그대로 보존하고, 기준만 config에서 끌어온다.
+_TIER_MULT_HIGH: float = 1.0  # ≥$500M/day — fills near mid
+_TIER_MULT_MED: float = 1.5  # $50-500M/day — some spread widening
+_TIER_MULT_LOW: float = 2.0  # <$50M/day — thin markets
+
+
+def _flat_cost() -> float:
+    """현재 flat 왕복 비용. 티어의 기준선."""
+    try:
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        return VolStraddleConfig().round_trip_cost
+    except Exception:
+        return 0.00126
+
+
+# G4: 티어 값은 **함수로** 노출한다. 모듈 전역 상수로 두면 import 시점에 굳어
+# 이후의 설정 변경을 무시한다 — 이 파일이 방금 겪은 버그가 정확히 그것이다.
+def cost_high_liq() -> float:
+    """고유동 티어 왕복 비용 (= flat 기준선)."""
+    return _flat_cost() * _TIER_MULT_HIGH
+
+
+def cost_med_liq() -> float:
+    """중유동 티어 왕복 비용."""
+    return _flat_cost() * _TIER_MULT_MED
+
+
+def cost_low_liq() -> float:
+    """저유동 티어 왕복 비용."""
+    return _flat_cost() * _TIER_MULT_LOW
 
 
 def get_symbol_slippage(symbol: str, conservative: bool = False) -> float:
@@ -202,12 +234,13 @@ def get_symbol_slippage(symbol: str, conservative: bool = False) -> float:
     Returns:
         Round-trip cost fraction (e.g. 0.0008 = 0.08%).
     """
+    base = _flat_cost()
     if symbol in _HIGH_LIQ_SYMS:
-        cost = _COST_HIGH_LIQ
+        cost = base * _TIER_MULT_HIGH
     elif symbol in _LOW_LIQ_SYMS:
-        cost = _COST_LOW_LIQ
+        cost = base * _TIER_MULT_LOW
     else:
-        cost = _COST_MED_LIQ
+        cost = base * _TIER_MULT_MED
     if conservative:
         cost *= 1.5
     return cost
@@ -646,7 +679,11 @@ def apply_funding_drag(
     if not funding_rate_8h or funding_rate_8h <= 0:
         return trades
 
-    return [(sym, eb, xb, pnl - funding_rate_8h * ((xb - eb) / BARS_PER_8H_15M)) for sym, eb, xb, pnl in trades]
+    from quantbox.backtest.funding import funding_cost
+
+    # 심볼별 실측 정산 이력이 있으면 그것을 쓴다 — 상수 8h 가정은 4h 주기 심볼에서
+    # 펀딩을 절반만 계산하고(2024년 이후 도입), 심볼별 수준 차이도 놓친다.
+    return [(sym, eb, xb, pnl - funding_cost(sym, xb - eb, funding_rate_8h)) for sym, eb, xb, pnl in trades]
 
 
 # ══════════════════════════════════════════════════════════════════════════════

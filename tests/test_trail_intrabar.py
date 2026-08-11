@@ -116,10 +116,15 @@ def test_real_data_bounds_differ_measurably() -> None:
 
     from quantbox.backtest.sim_core import run_ma_cluster_live
     from quantbox.research.harness import MarketData
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
     md = MarketData.load(["BTCUSDT", "ETHUSDT"])
-    opt = run_ma_cluster_live(md.data)
-    pess = run_ma_cluster_live(md.data, trail_peak_lag=1)
+    # 이 갭은 **트레일 기구**의 성질이다. 프로덕션은 2026-08-10부터 트레일을 끄고 있어
+    # (`ma_cluster_trail_enabled=False`) 기본값으로 부르면 두 경계가 당연히 같아진다.
+    # 재려는 대상이 트레일이므로 여기서는 명시적으로 켠다.
+    trail_on = {"trail_activate": VolStraddleConfig().ma_cluster_trail_activate}
+    opt = run_ma_cluster_live(md.data, **trail_on)
+    pess = run_ma_cluster_live(md.data, trail_peak_lag=1, **trail_on)
 
     assert len(opt) > 0
     changed = sum(1 for a, b in zip(opt, pess, strict=False) if a[:3] != b[:3] or a[3] != b[3])
