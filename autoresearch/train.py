@@ -233,6 +233,29 @@ def main() -> None:
 
     report(TAG, evaluate(pnl, years), time.time() - t0)
 
+    # 시대 분할 — 전 구간 수치가 "엣지가 있던 시절"에서 나온 것인지 판별한다.
+    # 오늘 측정된 감쇠(4분위 +67→-7.5bp)가 이 설정에서도 재현되는지가 핵심이다.
+    eb = np.array([t[1] for t in _acc])
+    order = np.argsort(eb, kind="stable")
+    pnl_o, eb_o = pnl[order], eb[order]
+    end_bar = max(int(d["_offset"]) + len(d["close"]) for d in data.values())
+    print("\n# 시대 분할 (중앙값 월 성장률 %)")
+    for k in range(4):
+        lo, hi = end_bar * k // 4, end_bar * (k + 1) // 4
+        sub = pnl_o[(eb_o >= lo) & (eb_o < hi)]
+        m = evaluate(sub, years / 4)
+        print(
+            f"q{k + 1}: monthly {m['median_monthly_pct']:>8.2f}  lev {m['best_leverage']:>5.1f}  "
+            f"N {m['N']:>5}  ev_bp {m['ev_bp']:>7.2f}  t {m['t']:>6.2f}  p_ruin {m['p_ruin']:.3f}"
+        )
+    half = end_bar // 2
+    for lab, msk in (("전반", eb_o < half), ("후반", eb_o >= half)):
+        m = evaluate(pnl_o[msk], years / 2)
+        print(
+            f"{lab}: monthly {m['median_monthly_pct']:>8.2f}  lev {m['best_leverage']:>5.1f}  "
+            f"N {m['N']:>5}  ev_bp {m['ev_bp']:>7.2f}  t {m['t']:>6.2f}  boot_p05 {m['boot_p05']:>7.2f}"
+        )
+
 
 if __name__ == "__main__":
     sys.exit(main())
