@@ -115,12 +115,20 @@ def evaluate(pnl: np.ndarray, years: float, seed: int = 0) -> dict:
             continue
         monthly = final ** (1.0 / months) - 1.0
 
-        # 부트스트랩: 순서를 섞어도 살아남는가
+        # 부트스트랩: 순서를 섞어도 살아남는가 + 단일 경로 점추정의 신뢰구간
+        #
+        # primary_metric은 **실제 순서 한 경로**의 값이라 점추정이다. 실험 간 차이가
+        # 진짜인지 경로 우연인지 구분하려면 분포가 필요하다. 지표 정의는 그대로 두고
+        # 부트스트랩 5~95 백분위를 부수 지표로 함께 보고한다 — 사후 골대 이동 방지.
         paths = np.exp(np.cumsum(logr[order], axis=1))
         ruin = float(np.mean(np.min(paths, axis=1) <= RUIN_FRACTION))
+        boot_monthly = paths[:, -1] ** (1.0 / months) - 1.0
 
         cand = {
             "median_monthly_pct": monthly * 100.0,
+            "boot_p05": float(np.percentile(boot_monthly, 5)) * 100.0,
+            "boot_p50": float(np.percentile(boot_monthly, 50)) * 100.0,
+            "boot_p95": float(np.percentile(boot_monthly, 95)) * 100.0,
             "best_leverage": float(lev),
             "p_ruin": ruin,
             "max_dd_pct": mdd,
@@ -130,7 +138,16 @@ def evaluate(pnl: np.ndarray, years: float, seed: int = 0) -> dict:
             best = cand
 
     if best is None:
-        best = {"median_monthly_pct": 0.0, "best_leverage": 0.0, "p_ruin": 1.0, "max_dd_pct": 100.0, "ann_ret_pct": 0.0}
+        best = {
+            "median_monthly_pct": 0.0,
+            "boot_p05": 0.0,
+            "boot_p50": 0.0,
+            "boot_p95": 0.0,
+            "best_leverage": 0.0,
+            "p_ruin": 1.0,
+            "max_dd_pct": 100.0,
+            "ann_ret_pct": 0.0,
+        }
 
     ev = float(np.mean(pnl))
     t = ev / (float(np.std(pnl, ddof=1)) / np.sqrt(n)) if n > 1 else 0.0
@@ -143,6 +160,9 @@ def report(tag: str, m: dict, elapsed: float) -> None:
     print("---")
     print(f"primary_metric: {m['median_monthly_pct']:.4f}")
     print(f"best_leverage:  {m['best_leverage']:.1f}")
+    print(f"boot_p05:       {m['boot_p05']:.4f}")
+    print(f"boot_p50:       {m['boot_p50']:.4f}")
+    print(f"boot_p95:       {m['boot_p95']:.4f}")
     print(f"p_ruin:         {m['p_ruin']:.4f}")
     print(f"max_dd_pct:     {m['max_dd_pct']:.2f}")
     print(f"ann_ret_pct:    {m['ann_ret_pct']:.2f}")
