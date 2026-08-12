@@ -118,11 +118,20 @@ def verdict(samples: list[Sample]) -> dict:
     if n < MIN_SAMPLES:
         return {"n": n, "median_bp": float("nan"), "unfillable_frac": float("nan"), "decision": "표본부족"}
 
-    median_bp = float(np.median([b for _, b, _ in window]))
+    # **체결된 표본만으로 중앙값을 낸다.** 체결 불가 표본의 bp는 부분 VWAP에서 나오므로
+    # 비용을 크게 과소평가한다 — 비싼 호가를 못 먹어서 평균 단가가 좋아 보일 뿐이다.
+    # 실측(2026-08-13): 얇은 호가에서 전체 체결 91.8bp인 상황이 최우선 호가만으로는
+    # 1.0bp로 보고됐다(90배). 그 값이 섞이면 판정이 낙관적으로 기운다.
+    # 따라서 중앙값은 "체결 가능할 때의 비용", 별도로 unfillable은 "얼마나 자주 불가능한가"를
+    # 말한다. 두 숫자가 각자 하나씩을 말하게 둔다.
+    filled_bps = [b for _, b, f in window if f]
+    median_bp = float(np.median(filled_bps)) if filled_bps else float("nan")
     unfillable = float(np.mean([not f for _, _, f in window]))
 
     if unfillable > MAX_UNFILLABLE_FRAC:
         decision = "종료"  # 스프레드와 무관하다 — 체결이 안 되면 전략이 성립하지 않는다
+    elif not filled_bps:
+        decision = "종료"  # 창 안에서 한 번도 못 채웠다
     elif median_bp <= PASS_BP:
         decision = "진행"
     elif median_bp <= EXTEND_BP:

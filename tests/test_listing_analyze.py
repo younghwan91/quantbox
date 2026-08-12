@@ -50,6 +50,27 @@ def test_unfillable_overrides_a_good_spread() -> None:
     assert v["decision"] == "종료", "스프레드 1bp에 가려 체결 불가가 무시됐다"
 
 
+def test_unfillable_samples_do_not_sweeten_the_median() -> None:
+    """체결 불가 표본은 중앙값에 끼지 않는다.
+
+    부분 체결 표본의 bp는 부분 VWAP에서 나오므로 비용을 크게 과소평가한다 — 비싼 호가를
+    못 먹어서 평균 단가가 좋아 보일 뿐이다. 실측(2026-08-13): 얇은 호가에서 24달러 전체
+    체결이 91.8bp인 상황이 최우선 호가만으로는 1.0bp로 보고됐다. 그 값이 섞이면
+    "스프레드 좋음"이라는 낙관적 오판을 만든다.
+    """
+    samples = [(2.0, 40.0, True)] * 190 + [(2.0, 1.0, False)] * 10  # 체결불가 5% (게이트 통과)
+    v = verdict(samples)
+
+    assert v["unfillable_frac"] == pytest.approx(0.05)
+    assert v["median_bp"] == pytest.approx(40.0), "체결 불가 1bp가 중앙값을 끌어내렸다"
+    assert v["decision"] == "재검토", "낙관적 중앙값 때문에 '진행'으로 오판했다"
+
+
+def test_nothing_fillable_in_window_is_not_a_pass() -> None:
+    """창 안에서 한 번도 못 채웠으면 스프레드 값과 무관하게 종료다."""
+    assert verdict([(2.0, 1.0, False)] * 200)["decision"] == "종료"
+
+
 def test_only_entry_window_counts() -> None:
     """진입 창(1~24h) 밖 표본은 판정에 안 들어간다."""
     samples = [(0.5, 500.0, True)] * 200 + [(5.0, 10.0, True)] * 200  # 상장 30분은 제외
