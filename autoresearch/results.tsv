@@ -1,2 +1,12 @@
 exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_per_year	ev_bp	t	status	description
 0	81b08b2	1.6673	8.0	0.0000	93.17	21.95	4201	638	7.74	1.60	keep	baseline: ma_cluster live entries + 15m exits, prod params
+15	a7881ba	13.4100	10.0	0.0550	99.91	352.71	2971	38.74		keep	BEST: TP off + max_dur48 + mom0.005 + slots5
+23	wf-ml	29.54	-	-	-	-	2220	29.54	2.95	keep	워크포워드 릿지 선별: 5/5 fold 초과수익 양수, 전체 +23bp
+24	wf-recent	-	-	-	-	-	748	-1.50	-	note	그러나 최근 fold는 선별 후에도 -1.50bp (전체 -17.55)
+25	wf-aggressive	-	-	-	-	-	30	-55.03	-	discard	공격적 선별(keep0.05)은 최근 fold를 -55bp로 악화 — 관계 역전
+26	lookback400	14.27	-	-	-	-	-	3.48	1.48	note	학습창 축소는 최근 fold 개선(-1.50→+3.48) 그러나 전체 약화
+27	honest-protocol	-	-	-	-	-	-	-9.09	-	discard	선택기준(초기fold)으로 고른 조합의 최근fold는 음수 — 테스트셋 과적합 함정 확인
+28	liq1e6	11.2615	3.5	-	-	-	1826	12.50	1.18	test	유동성 1e6 (485심볼)
+29	liq1e7	13.5869	7.0	-	-	-	934	24.52	1.52	keep	유동성 1e7 (121심볼) — 후반 EV +24.52bp, 최근분기 +16.60bp
+30	liq5e7	9.3842	9.5	-	-	-	425	31.45	1.25	test	유동성 5e7 (35심볼)
+31	liq1e7+ml	-	-	-	-	-	127	-8.74	-	discard	유동성 필터 위에 ML 얹으면 악화 — 표본 부족으로 과적합

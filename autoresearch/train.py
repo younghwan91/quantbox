@@ -29,7 +29,13 @@ import time
 
 import numpy as np
 
+import os as _os, sys as _sys
+
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from features import FEATURE_NAMES, extract
+from wf import walk_forward
 from quantbox.backtest.sim_core import run_ma_cluster_live_fine_exits
+from quantbox.backtest.trade_sim import build_resampled
 from quantbox.backtest.trade_sim import portfolio_sim_with_details
 from quantbox.research.harness.data import MarketData
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
@@ -187,7 +193,24 @@ TAG = "exp15-slots5"
 #: [SEARCH] 포트폴리오 노브 — main()이 읽는다.
 SLOTS: int | None = 5
 DIR_DIVERSITY: bool | None = None  # None이면 cfg 기본값
-SYMBOL_FILTER = None  # callable(sym, d) -> bool, None이면 전부
+#: 유동성 필터. 유니버스 760심볼에는 평평한 12.6bp 비용이 전혀 맞지 않는 미소형주가
+#: 대량 포함돼 있다. 실측 스프레드는 BTC 0.02bp ~ ZRX 12.6bp로 600배 갈린다.
+#: 거래 불가능한 종목이 만든 +EV는 허수이므로, 달러 거래대금 하위를 잘라내고 재측정한다.
+MIN_DOLLAR_VOL = 1e7
+
+
+def _liquid(sym: str, d: dict) -> bool:
+    if MIN_DOLLAR_VOL <= 0:
+        return True
+    v, c = d.get("volume"), d.get("close")
+    if v is None or c is None or len(v) < 96:
+        return False
+    import numpy as _np
+
+    return float(_np.median(v[-9600:] * c[-9600:])) * 96 >= MIN_DOLLAR_VOL
+
+
+SYMBOL_FILTER = _liquid
 
 
 def generate(data: dict) -> tuple[list, list]:
@@ -232,6 +255,42 @@ def main() -> None:
     print(f"# 채택 {len(pnl)}", flush=True)
 
     report(TAG, evaluate(pnl, years), time.time() - t0)
+
+    # ── 워크포워드 ML 선별 ────────────────────────────────────────────
+    data4 = build_resampled(data, 16)
+    X, Y, EB = extract(data, data4, trades, dirs)
+    XB = np.array([t[2] for t in trades])[: len(EB)]
+    print(f"\n# 피처 {X.shape}  결측행 {int(np.any(~np.isfinite(X), axis=1).sum())}", flush=True)
+    end_bar = max(int(d["_offset"]) + len(d["close"]) for d in data.values())
+    # 하이퍼파라미터는 **초기 fold들의 평균 초과수익**으로 고른다.
+    # 최근 fold를 보고 고르면 그게 곧 테스트셋 과적합이다 — 최근 fold는 마지막에 한 번만 본다.
+    print("  (선택기준=fold3~6 평균 초과 / 최근fold는 검증용)")
+    for lb in (None, 1500, 800, 400, 250):
+        for kf in (0.3, 0.5, 0.7):
+            r = walk_forward(X, Y, EB, end_bar, n_folds=8, keep_frac=kf, xb=XB, lookback=lb)
+            fs = r["folds"]
+            if len(fs) < 2:
+                continue
+            dev = float(np.mean([f[3] - f[4] for f in fs[:-1]]))
+            last = fs[-1]
+            print(
+                f"lb={str(lb):>5} keep={kf:.1f}: 선택기준={dev:>7.2f}bp  "
+                f"전체 EV={r['ev_sel']:>7.2f} t={r['t_sel']:>5.2f}  |  최근fold {last[3]:>7.2f} vs {last[4]:>7.2f}"
+            )
+    for kf in (0.05, 0.10, 0.15, 0.20, 0.35, 0.50):
+        r = walk_forward(X, Y, EB, end_bar, n_folds=8, keep_frac=kf, xb=XB)
+        print(
+            f"keep{kf:.2f}: 선별 N={r['n_sel']:>5} EV={r['ev_sel']:>7.2f}bp t={r['t_sel']:>5.2f}  |  "
+            f"전체 N={r['n_base']:>5} EV={r['ev_base']:>7.2f}bp t={r['t_base']:>5.2f}  "
+            f"→ 초과 {r['ev_sel'] - r['ev_base']:>+7.2f}bp"
+        )
+        last = r["folds"][-1] if r["folds"] else None
+        if last:
+            print(f"      └ 최근fold: 선별 {last[1]}/{last[2]}  EV {last[3]:>8.2f} vs {last[4]:>8.2f}")
+        if abs(kf - 0.5) < 1e-9:
+            # fold별 상세 — 초기 구간이 전부 만든 값인지, 최근 fold에서도 사는지가 관건이다.
+            for k, ns, nt, es, eb_ in r["folds"]:
+                print(f"    fold{k}: 선별 {ns:>4}/{nt:>4}  EV {es:>8.2f} vs 전체 {eb_:>8.2f}  초과 {es - eb_:>+8.2f}bp")
 
     # 시대 분할 — 전 구간 수치가 "엣지가 있던 시절"에서 나온 것인지 판별한다.
     # 오늘 측정된 감쇠(4분위 +67→-7.5bp)가 이 설정에서도 재현되는지가 핵심이다.
