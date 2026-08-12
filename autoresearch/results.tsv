@@ -18,3 +18,5 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 37	sign-test-late	-	-	-	-	-	58	-3.70	-	discard	후반: 정확히 50% 양수 p=0.552 — 동전던지기
 38	sign-test-q4	-	-	-	-	-	48	-11.94	-	discard	최근1/4: 39.6% 양수 p=0.944, 심볼 중앙 EV -11.94bp — 양수 평균은 소수 이상치
 39	funding-carry-borrow	4.9	1.0	-	-	4.90	33	1.31	-	KEEP	펀딩캐리-차입금리 실측: 26/33 심볼 양수, 이항 p=6.6e-4, 윌콕슨 p=4.4e-3
+40	carry-exe-universe	-	-	-	-	-	299	-0.62	-	discard	실행가능 299심볼: 48.2% 양수 p=0.756 — 33심볼 결과는 저리차입 대형주 선택편향
+41	carry-conditional	-	-	-	-	-	1285	1.74	0.37	discard	조건부 진입 9구성 전부 음수, 양수심볼 15.6~32.9%, 부호p=1.0
