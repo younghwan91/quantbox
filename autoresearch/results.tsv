@@ -26,3 +26,7 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 45	listing-stop-sweep	-	-	-	-	-	76	-	-	discard	스톱은 학습에서만 좋고 검증 전부 음수 — 과적합
 46	listing-nostop-f009	7.5	0.09	-	-	7.5	76	24.5	-	KEEP	무손절 f=0.09: 검증 24.5bp/거래, 연 7.5%
 47	listing-portfolio-all	61.8	0.04	-	35.8	61.8	264	-	-	KEEP	전체상장 동시21건 f=0.04: 검증 연 61.8%, MDD 35.8%
+48	VALIDATION	-	-	-	-	13.6	303	10.8	-	note	워크포워드(f누출제거) 전체상장 연13.6% — 61.8%는 오염값이었음
+49	VALIDATION-sel	-	-	-	-	-30.9	114	-117.7	-	discard	상위25% 선별은 워크포워드에서 연 -30.9% — 선별이 오히려 해로움
+50	VALIDATION-cost	-	-	-	-	-0.2	-	-	-	discard	왕복 100bp에서 손익분기, 200bp에서 음수. 신규상장 스프레드 미실측
+51	VALIDATION-param	-	-	-	-	2.0	-	-	-	discard	파라미터 격자 6개 중앙 연 2.0%, 양수 50%, 범위 -18.7~+15.5%
