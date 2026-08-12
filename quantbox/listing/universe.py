@@ -97,14 +97,16 @@ class SeenStore:
 
         대상 심볼만 등록하면 안 된다 — 오늘 EQUITY인 심볼이 나중에 분류가 바뀌면
         신규로 오인된다. 그리고 이 가드가 없으면 첫 폴링에서 700개를 구독한다.
+
+        저장 실패는 **삼키지 않는다.** 상태 디렉터리가 쓰기 불가면 매 재시작마다
+        조용히 다시 부트스트랩하게 되고, 중복 방지 보장이 사라진 것을 아무도 모른다.
+        기동 시점에 시끄럽게 죽는 편이 낫다. (이벤트 감지 중의 `save` 실패는
+        다르다 — 그때는 기록을 잃지 않는 게 우선이므로 호출자가 감싼다. Task 5 참조.)
         """
         seen = self.load()
         if seen:
             return seen
         seen = {s["symbol"] for s in exchange_info.get("symbols", [])}
-        try:
-            self.save(seen)
-        except (OSError, PermissionError) as e:
-            logger.warning(f"부트스트랩 저장 실패({e}) — 계속 진행한다")
+        self.save(seen)
         logger.info(f"첫 실행 — 기존 {len(seen)}심볼을 등록하고 시작한다")
         return seen

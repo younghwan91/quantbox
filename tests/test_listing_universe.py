@@ -78,12 +78,15 @@ def test_known_types_matches_fixture(info: dict) -> None:
     assert {s["underlyingType"] for s in info["symbols"]} <= KNOWN_TYPES
 
 
-def test_first_run_does_not_flood(info: dict) -> None:
+def test_first_run_does_not_flood(info: dict, tmp_path: Path) -> None:
     """빈 상태 첫 실행에서 기존 심볼이 신규로 잡히면 안 된다.
 
     이 가드가 없으면 첫 폴링에서 700개 구독을 시도한다.
+
+    쓰기 가능한 경로를 쓴다 — `bootstrap`은 등록 결과를 실제로 저장해야 하고,
+    저장 실패를 삼키면 재시작마다 조용히 다시 부트스트랩하게 된다.
     """
-    store = SeenStore(Path("/nonexistent/seen.json"))
+    store = SeenStore(tmp_path / "seen.json")
     seen = store.bootstrap(info)
 
     assert len(seen) == len(info["symbols"]), "부트스트랩이 전 심볼을 등록하지 않았다"
