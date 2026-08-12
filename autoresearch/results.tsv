@@ -1,25 +1,67 @@
-commit	alpha_score	pf	n_trades	wr	non_overlap	boot_p	calmar	max_dd	combined_pf	pf_delta	status	description
-2341ca8	0.8528	1.192	76791	41.3	0.977	100.0	-	99.8	1.197	-0.446	keep	baseline: high_vol_mom VR>1.0 mom>2% 1h
-c00d94d	0.7743	1.749	24355	44.4	0.972	100.0	-	86.5	1.731	+0.088	keep	VR>1.5 mom>3% + MaxDD penalty scoring
-2406456	0.9327	2.456	4665	45.9	0.956	100.0	-	61.7	2.094	+0.451	keep	VR>2.0 mom>3% 1h
-8364406	0.9494	2.701	1277	45.0	0.947	100.0	-	58.0	1.913	+0.270	keep	VR>2.5 mom>3% 1h
-c467c63	0.9528	2.671	314	-	-	100.0	-	42.6	1.713	+0.070	discard	VR>3.0 — too few trades for portfolio impact
-e021aa9	0.9415	2.817	4867	42.0	0.958	100.0	-	60.0	2.248	+0.605	keep	VR>2.0 SL=1.5% mom>3% 1h
-7cd9ca7	0.9710	3.475	5074	-	-	100.0	-	54.2	2.476	+0.833	keep	VR>2.0 SL=1% mom>3% 1h
-0886fc5	0.9921	4.006	5172	-	-	100.0	-	45.4	2.626	+0.983	keep	VR>2.0 SL=0.8% mom>3% 1h
-d031461	0.9923	4.882	5241	-	-	100.0	-	32.0	2.821	+1.178	keep	VR>2.0 SL=0.6% mom>3% 1h
-a8033bc	0.9923	5.529	5287	-	-	100.0	-	27.4	2.935	+1.292	keep	VR>2.0 SL=0.5% mom>3% 1h
-579cdf9	0.9155	2.646	4867	42.0	0.958	100.0	-	65.2	2.173	+0.530	keep	VR>2.0 SL=1.5% 2x cost(0.0016) mom>3% 1h
-bd4659b	0.8838	2.049	20341	45.6	0.961	100.0	-	71.7	2.012	+0.369	keep	Donchian 20-bar 4h mom>1%
-84c9cd3	0.9870	2.744	9146	-	-	100.0	-	51.4	2.446	+0.803	keep	Donchian 50-bar 4h mom>2%
-0dd5aa6	0.9644	3.001	6797	-	-	100.0	-	56.1	2.534	+0.891	discard	Donchian 100-bar — MaxDD worse than 50-bar
-591dfe5	0.8110	1.811	8578	50.2	0.964	100.0	-	80.7	1.774	+0.131	discard	RSI extreme reversal — weak PF, high MaxDD
-f7ceb08	0.9884	2.887	7889	49.5	0.967	100.0	-	51.0	2.499	+0.856	keep	Donchian 50 + vol spike 1.5x 4h
-b849b2d	0.9919	3.046	6282	-	-	100.0	-	50.1	2.529	+0.886	keep	Donchian 50 + vol 2.0x 4h
-62ac2ae	0.9910	3.080	4720	-	-	100.0	-	42.1	2.480	+0.837	keep	Donchian 50 + vol 2.5x 4h
-e1e8fb8	0.9910	2.929	4720	-	-	100.0	-	43.4	2.409	+0.766	keep	Donchian 50 + vol 2.5x 2x_cost ROBUSTNESS
-82e4688	0.9913	3.611	4749	-	-	100.0	-	33.9	2.678	+1.035	keep	Donchian 50 vol 2.5x SL=1.5% 4h
-abfa234	0.9917	4.934	4780	-	-	100.0	-	27.6	3.122	+1.479	keep	Donchian 50 vol 2.5x SL1.5% trail 2%/0.8%
-4622bc8	0.9917	4.627	4780	58.8	0.959	100.0	-	29.1	3.026	+1.383	keep	BEST CONFIG 2x cost: PF 4.6 robust
-6bf34cc	-	4.795	5217	-	-	-	-	32.3	3.139	-	discard	plateau test period=40
-bedc01e	-	4.933	4478	-	-	-	-	25.2	3.058	-	discard	plateau test period=60
+exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_per_year	ev_bp	t	status	description
+0	81b08b2	1.6673	8.0	0.0000	93.17	21.95	4201	638	7.74	1.60	keep	baseline: ma_cluster live entries + 15m exits, prod params
+15	a7881ba	13.4100	10.0	0.0550	99.91	352.71	2971	38.74		keep	BEST: TP off + max_dur48 + mom0.005 + slots5
+23	wf-ml	29.54	-	-	-	-	2220	29.54	2.95	keep	워크포워드 릿지 선별: 5/5 fold 초과수익 양수, 전체 +23bp
+24	wf-recent	-	-	-	-	-	748	-1.50	-	note	그러나 최근 fold는 선별 후에도 -1.50bp (전체 -17.55)
+25	wf-aggressive	-	-	-	-	-	30	-55.03	-	discard	공격적 선별(keep0.05)은 최근 fold를 -55bp로 악화 — 관계 역전
+26	lookback400	14.27	-	-	-	-	-	3.48	1.48	note	학습창 축소는 최근 fold 개선(-1.50→+3.48) 그러나 전체 약화
+27	honest-protocol	-	-	-	-	-	-	-9.09	-	discard	선택기준(초기fold)으로 고른 조합의 최근fold는 음수 — 테스트셋 과적합 함정 확인
+28	liq1e6	11.2615	3.5	-	-	-	1826	12.50	1.18	test	유동성 1e6 (485심볼)
+29	liq1e7	13.5869	7.0	-	-	-	934	24.52	1.52	keep	유동성 1e7 (121심볼) — 후반 EV +24.52bp, 최근분기 +16.60bp
+30	liq5e7	9.3842	9.5	-	-	-	425	31.45	1.25	test	유동성 5e7 (35심볼)
+31	liq1e7+ml	-	-	-	-	-	127	-8.74	-	discard	유동성 필터 위에 ML 얹으면 악화 — 표본 부족으로 과적합
+32	donchian-raw	-	-	-	-	-	3769	263.44	22.51	crash	버그 신호로 판정 — 4h 트레일 아티팩트. 발견으로 보고하지 않음
+33	donchian-trailoff-3sym	-	-	-	-	-	232	83.20	2.12	discard	3심볼 소표본 착시
+34	donchian-trailoff-121sym	-	-	-	-	-	4842	-2.11	-0.28	discard	121심볼에서 전체 -2.11bp. 단 후반만 +7.36
+35	pooled-recent	-	-	-	-	-	4283	10.04	1.27	note	ma_cluster+donchian 풀링 후반 — 유의성 미달
+36	sign-test-all	-	-	-	-	-	60	9.79	-	note	심볼 부호검정 전체: 60% 양수 p=0.078
+37	sign-test-late	-	-	-	-	-	58	-3.70	-	discard	후반: 정확히 50% 양수 p=0.552 — 동전던지기
+38	sign-test-q4	-	-	-	-	-	48	-11.94	-	discard	최근1/4: 39.6% 양수 p=0.944, 심볼 중앙 EV -11.94bp — 양수 평균은 소수 이상치
+39	funding-carry-borrow	4.9	1.0	-	-	4.90	33	1.31	-	KEEP	펀딩캐리-차입금리 실측: 26/33 심볼 양수, 이항 p=6.6e-4, 윌콕슨 p=4.4e-3
+40	carry-exe-universe	-	-	-	-	-	299	-0.62	-	discard	실행가능 299심볼: 48.2% 양수 p=0.756 — 33심볼 결과는 저리차입 대형주 선택편향
+41	carry-conditional	-	-	-	-	-	1285	1.74	0.37	discard	조건부 진입 9구성 전부 음수, 양수심볼 15.6~32.9%, 부호p=1.0
+42	listing-short-all	-	-	-	-	-	757	1214	-	keep	신규상장 전량 숏 30일: 중앙 +12.14% 평균 +2.44% 승률 65.5%
+43	listing-short-accumQ4	-	-	-	-	-	189	2287	-	KEEP	겉보기매집 상위25% 숏: 중앙 +22.87% 평균 +6.10% 승률 73.0%
+44	listing-era-split	-	-	-	-	-	757	-	-	KEEP	3개 시대 전부 양수 p<2.3e-4, 최근구간 p=6.9e-6
+45	listing-stop-sweep	-	-	-	-	-	76	-	-	discard	스톱은 학습에서만 좋고 검증 전부 음수 — 과적합
+46	listing-nostop-f009	7.5	0.09	-	-	7.5	76	24.5	-	KEEP	무손절 f=0.09: 검증 24.5bp/거래, 연 7.5%
+47	listing-portfolio-all	61.8	0.04	-	35.8	61.8	264	-	-	KEEP	전체상장 동시21건 f=0.04: 검증 연 61.8%, MDD 35.8%
+48	VALIDATION	-	-	-	-	13.6	303	10.8	-	note	워크포워드(f누출제거) 전체상장 연13.6% — 61.8%는 오염값이었음
+49	VALIDATION-sel	-	-	-	-	-30.9	114	-117.7	-	discard	상위25% 선별은 워크포워드에서 연 -30.9% — 선별이 오히려 해로움
+50	VALIDATION-cost	-	-	-	-	-0.2	-	-	-	discard	왕복 100bp에서 손익분기, 200bp에서 음수. 신규상장 스프레드 미실측
+51	VALIDATION-param	-	-	-	-	2.0	-	-	-	discard	파라미터 격자 6개 중앙 연 2.0%, 양수 50%, 범위 -18.7~+15.5%
+52	spread-est-calib	-	-	-	-	-	46	-	-	note	Corwin-Schultz 소켓 실측 대조: 넓은구간 배수1.05(정확) 좁은구간 7.81(과대)
+53	listing-final	1.8	0.05	-	-	1.8	152	1.5	-	discard	실측 스프레드 28.9bp→왕복66.4bp에서 연 1.8% — 격자 중앙 2.0%와 동일, 노이즈
+54	liq-fade-lookahead	-	-	-	-	-	62489	93.29	-	discard	유동성 필터가 마지막30일 기준 = 룩어헤드. 제거시 46.84bp
+55	liq-fade-beta	-	-	-	-	-	223152	8.14	-	discard	초과수익 293~299bp가 네 구간 상수 = 진입할인 3%의 산술결과, 알파 아님
+56	liq-fade-recent	-	-	-	-	-	223152	8.14	-	discard	최근분위 50.2% 양수 p=0.47 동전던지기
+57	xsec-momentum	-	-	-	-	-	315	-181.0	-3.46	discard	횡단면 모멘텀 전 구간 음수 → 리버설 시사
+58	xsec-reversal-7d	-	-	-	-	56.0	315	130.6	2.50	keep	횡단면 7일 리버설, 7일주기 리밸런스
+59	power-analysis	-	-	-	-	-	-	-	-	note	전반vs최근 효과크기 차이 Welch p=0.507 — '최근에 죽었다'는 증거 없음, 검정력 부족
+60	xsec-overlap-NW	-	-	-	-	56.0	2208	107.8	2.84	KEEP	중첩포트폴리오+Newey-West: 전체 t=2.84, 최근1/4 +39.3bp t=0.70
+61	xsec-real-cost	-	-	-	-	2.0	594	4.8	0.09	discard	실측 스프레드 60.69bp(가정 25.2의 2.4배) 적용시 최근 소멸
+62	xsec-maker-exec	-	-	-	-	29.4	2208	125.0	3.30	KEEP	전량 지정가(8bp): 전체 t(NW)=3.30 Bonferroni 통과, 최근 +56.5bp
+63	gate1-tradability	-	-	-	-	-	727	-	-	pass	전 종목 거래가능, 최소명목 5달러, 유동성 중앙 일2.4M
+64	gate2-concentration	-	-	-	-	27.8	2208	182.4	4.64	pass	K=40이 통계최적(t=4.64)이자 실행경계($11.79>5). K=5,10은 최근 음수
+65	gate3-maker-fill	-	-	-	-	-	8	-	-	pass	최우선호가 체결률 5분 98.5% / 1시간 99.7% — 8bp 가정 뒷받침
+66	horizon-grid	-	-	-	-	67.3	704	55.3	3.33	KEEP	지평격자: 12h이하 유의하게 음수(모멘텀), 3일이 리버설 최적. 검증기간 6.7년→1.1년
+67	PAPER-START	-	-	-	-	-	1	-	-	live	2026-08-12 페이퍼 기록 개시, 매일 09:17 크론
+68	bybit-replication	-	-	-	-	24.6	937	20.2	0.75	fail	Bybit 3일 방향만 재현(크기 1/3), 7일은 음수
+69	spot-replication	-	-	-	-	14.7	2150	12.1	1.05	fail	바이낸스 현물 414종목 9년: 3일 K=40만 약양수, K=20/7일은 음수
+70	VERDICT-overfit	-	-	-	-	-	-	-	-	discard	48개 조합 격자탐색의 과적합. 독립표본에서 원 결과의 1/5, t~1.0
+71	long-horizon	-	-	-	-	40.8	1119	156.5	2.28	discard	14~90일 지평: 최선 14d t=2.28이나 최근 t=0.81, 나머지 최근 음수
+72	cross-exchange	-	-	-	-	-	315	10.1	-	discard	바이낸스-Bybit 일종가 괴리 중앙 10.1bp < 왕복 25.2bp, 초과 종목 0%
+73	cross-asset-equities	-	-	-	-	-	1652	-	-	discard	크립토연관주(COIN/MSTR/채굴주) → 크립토: 스피어만 |rho|<0.03, 신호 없음
+74	macro-EQVOL	-	-	-	-	-	303	-494	-5.15	KEEP	주식변동성 하위20% → 알트 20일 -6.74% (무조건 -1.80%), p=3.3e-10
+75	macro-BREADTH	-	-	-	-	-	303	350	2.99	keep	시장폭 상위20% → 알트 20일 +350bp 초과, 단 단조성 없음(꼬리만)
+76	macro-lookahead-fix	-	-	-	-	-	1525	695	3.16	KEEP	확장창 임계로 룩어헤드 제거 — 오히려 개선(현물 초과 t 2.29→3.16)
+77	macro-replication	-	-	-	-	-	3	-	-	KEEP	3표본 재현: 초과 +4.94/+6.95/+6.57%, t 2.48/3.16/2.25
+78	MACRO-PAPER-START	-	-	-	-	-	1	-	-	live	2026-08-12 매크로 페이퍼 개시, 평일 10:07 크론. 오늘은 대기(EQ_VOL 0.0090>임계 0.0088)
+79	MACRO-KILLED	-	-	-	-	-	1647	-378	-0.46	discard	임계 기준선을 2016부터로 정상화하니 초과 +6.95%→-3.78%. 코로나 구간 오염된 기준선의 산물
+80	calendar-effects	-	-	-	-	-	2221	288	1.11	discard	요일7+세션3+월말2=13셀 전부 |t|<2.0. 최선 금요일 +28.8bp t=1.11. 절대수익은 전 셀 음수
+81	vol-harvest	-	-	-	-	-	12	-60	-	discard	변동성 수확: 초과 전 격자 음수. 1일리밸 -31%p, 30일리밸 -0.6%p(회전없어 무리밸과 동일). 절대수익 연 -19~-57%
+82	positioning-data	-	-	-	-	-	31	-	-	blocked	미결제약정/롱숏비율/테이커비율 전부 이력 31일 제한 — 검정 불가, 축적 필요
+83	vol-regime-crypto	-	-	-	-	-	2219	727	1.05	discard	크립토 내부 변동성 6셀 전부 |t|<1.4. RV20 상위20% +727bp지만 t=1.05(N=214)
+84	toll-remeasure	-	-	-	-	-	15	400	-	KEEP	소켓 실측: 유동성상위 스프레드 중앙 1.27bp. 양쪽지정가 왕복 4.0bp (가정 12.6의 1/3)
+85	reversal-at-4bp	-	-	-	-	-	1955	467	2.88	discard	통행료 4bp에서 전구간 t 1.82→2.88 개선. 그러나 최근구간 t=0.37로 여전히 사망
+86	residual-rv	-	-	-	-	-	1896	1457	8.83	discard	잔차상대가치: 원표본 t=8.83(최근 4.12)이나 독립표본 현물 -1.30/Bybit -1.46로 부호까지 역전

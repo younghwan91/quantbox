@@ -98,9 +98,21 @@ def compute_vol_sma(volume, period):
 
 @numba.jit(nopython=True, cache=True)
 def sim_donchian_with_direction(
-    close, high, low, volume, vol_sma,
-    period, mom_min, vol_mult, sl, tp, max_hold, cost,
-    trail_activate, trail_distance, warmup,
+    close,
+    high,
+    low,
+    volume,
+    vol_sma,
+    period,
+    mom_min,
+    vol_mult,
+    sl,
+    tp,
+    max_hold,
+    cost,
+    trail_activate,
+    trail_distance,
+    warmup,
 ):
     """Returns pnl, entry_bars, exit_bars, directions (1=LONG, -1=SHORT)."""
     n = len(close)
@@ -219,10 +231,21 @@ def collect_all_trades_with_meta(data_4h, data_15m):
             continue
         vol_sma = compute_vol_sma(d["volume"], VOL_SMA_PERIOD)
         p, e, x, dirs = sim_donchian_with_direction(
-            d["close"], d["high"], d["low"], d["volume"], vol_sma,
-            DONCHIAN_PERIOD, MOM_MIN, VOL_SPIKE_MULT,
-            SL, TP, MAX_HOLD, COST,
-            TRAIL_ACTIVATE, TRAIL_DISTANCE, WARMUP,
+            d["close"],
+            d["high"],
+            d["low"],
+            d["volume"],
+            vol_sma,
+            DONCHIAN_PERIOD,
+            MOM_MIN,
+            VOL_SPIKE_MULT,
+            SL,
+            TP,
+            MAX_HOLD,
+            COST,
+            TRAIL_ACTIVATE,
+            TRAIL_DISTANCE,
+            WARMUP,
         )
         offset = int(data_15m[sym].get("_offset", 0))
         for k in range(len(p)):
@@ -275,7 +298,7 @@ def main():
 
     all_profitable = True
     print(f"\n  {'Year':>6} | {'N':>6} {'PF':>7} {'WR':>6} {'EV_bp':>7} | {'Status'}")
-    print(f"  {'-'*6} | {'-'*6} {'-'*7} {'-'*6} {'-'*7} | {'-'*6}")
+    print(f"  {'-' * 6} | {'-' * 6} {'-' * 7} {'-' * 6} {'-' * 7} | {'-' * 6}")
     for y in sorted(yearly):
         pnls = np.array(yearly[y])
         n = len(pnls)
@@ -309,7 +332,7 @@ def main():
     test_boot = bootstrap_pf(test_pnl, 3000)
 
     print(f"\n  {'':>12} | {'N':>6} {'PF':>7} {'WR':>6} {'MaxDD':>7} {'EV_bp':>7} | {'CI':>14} {'P≥1':>5}")
-    print(f"  {'-'*12} | {'-'*6} {'-'*7} {'-'*6} {'-'*7} {'-'*7} | {'-'*14} {'-'*5}")
+    print(f"  {'-' * 12} | {'-' * 6} {'-' * 7} {'-' * 6} {'-' * 7} {'-' * 7} | {'-' * 14} {'-' * 5}")
     print(
         f"  {'Train (4yr)':>12} | {train_m['N']:>6} {train_m['PF']:7.3f} {train_m['WR']:5.1f}% "
         f"{train_m['max_dd_pct']:6.1f}% {train_m['EV_bp']:7.1f} | "
@@ -323,7 +346,7 @@ def main():
 
     if train_m["PF"] > 0:
         decay = max(0, 1 - test_m["PF"] / train_m["PF"])
-        print(f"\n  OOS decay: {decay*100:.1f}% (test PF / train PF = {test_m['PF']/train_m['PF']:.2f})")
+        print(f"\n  OOS decay: {decay * 100:.1f}% (test PF / train PF = {test_m['PF'] / train_m['PF']:.2f})")
         oos_pass = test_m["PF"] > 1.3 and test_boot.get("P_PF_ge_1", 0) >= 95
         print(f"  OOS verdict: {'PASS' if oos_pass else 'FAIL — OOS DEGRADATION'}")
 
@@ -338,7 +361,7 @@ def main():
     short_pnls = [p for s, e, x, p, d in accepted_meta if d == -1]
 
     print(f"\n  {'Direction':>10} | {'N':>6} {'PF':>7} {'WR':>6} {'EV_bp':>7}")
-    print(f"  {'-'*10} | {'-'*6} {'-'*7} {'-'*6} {'-'*7}")
+    print(f"  {'-' * 10} | {'-' * 6} {'-' * 7} {'-' * 6} {'-' * 7}")
     for label, pnls in [("LONG", long_pnls), ("SHORT", short_pnls)]:
         arr = np.array(pnls) if pnls else np.empty(0)
         n = len(arr)
@@ -381,11 +404,11 @@ def main():
 
     print(f"\n  Total symbols traded: {len(sym_stats)}")
     profitable = sum(1 for _, _, pf, _ in sym_stats if pf > 1.0)
-    print(f"  Profitable symbols: {profitable}/{len(sym_stats)} ({profitable/len(sym_stats)*100:.0f}%)")
+    print(f"  Profitable symbols: {profitable}/{len(sym_stats)} ({profitable / len(sym_stats) * 100:.0f}%)")
 
     print(f"\n  Top 10 contributors:")
     print(f"  {'Symbol':>12} | {'N':>5} {'PF':>7} {'TotalPnL':>10} {'Cum%':>6}")
-    print(f"  {'-'*12} | {'-'*5} {'-'*7} {'-'*10} {'-'*6}")
+    print(f"  {'-' * 12} | {'-' * 5} {'-' * 7} {'-' * 10} {'-' * 6}")
     cum = 0.0
     for s, n, pf, total in sym_stats[:10]:
         cum += total
@@ -417,7 +440,7 @@ def main():
         quarterly.setdefault(key, []).append(p)
 
     print(f"\n  {'Quarter':>8} | {'N':>5} {'PF':>7} {'EV_bp':>7}")
-    print(f"  {'-'*8} | {'-'*5} {'-'*7} {'-'*7}")
+    print(f"  {'-' * 8} | {'-' * 5} {'-' * 7} {'-' * 7}")
     empty_quarters = 0
     losing_quarters = 0
     for q in sorted(quarterly):
@@ -432,7 +455,7 @@ def main():
 
     total_q = len(quarterly)
     print(f"\n  Total quarters: {total_q}")
-    print(f"  Losing quarters: {losing_quarters}/{total_q} ({losing_quarters/total_q*100:.0f}%)")
+    print(f"  Losing quarters: {losing_quarters}/{total_q} ({losing_quarters / total_q * 100:.0f}%)")
 
     # Check for long gaps with no trades
     entries = sorted([e for _, e, _, _, _ in accepted_meta])
