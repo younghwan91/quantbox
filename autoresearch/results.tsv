@@ -54,3 +54,6 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 73	cross-asset-equities	-	-	-	-	-	1652	-	-	discard	크립토연관주(COIN/MSTR/채굴주) → 크립토: 스피어만 |rho|<0.03, 신호 없음
 74	macro-EQVOL	-	-	-	-	-	303	-494	-5.15	KEEP	주식변동성 하위20% → 알트 20일 -6.74% (무조건 -1.80%), p=3.3e-10
 75	macro-BREADTH	-	-	-	-	-	303	350	2.99	keep	시장폭 상위20% → 알트 20일 +350bp 초과, 단 단조성 없음(꼬리만)
+76	macro-lookahead-fix	-	-	-	-	-	1525	695	3.16	KEEP	확장창 임계로 룩어헤드 제거 — 오히려 개선(현물 초과 t 2.29→3.16)
+77	macro-replication	-	-	-	-	-	3	-	-	KEEP	3표본 재현: 초과 +4.94/+6.95/+6.57%, t 2.48/3.16/2.25
+78	MACRO-PAPER-START	-	-	-	-	-	1	-	-	live	2026-08-12 매크로 페이퍼 개시, 평일 10:07 크론. 오늘은 대기(EQ_VOL 0.0090>임계 0.0088)
