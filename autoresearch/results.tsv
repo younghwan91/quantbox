@@ -23,3 +23,6 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 42	listing-short-all	-	-	-	-	-	757	1214	-	keep	신규상장 전량 숏 30일: 중앙 +12.14% 평균 +2.44% 승률 65.5%
 43	listing-short-accumQ4	-	-	-	-	-	189	2287	-	KEEP	겉보기매집 상위25% 숏: 중앙 +22.87% 평균 +6.10% 승률 73.0%
 44	listing-era-split	-	-	-	-	-	757	-	-	KEEP	3개 시대 전부 양수 p<2.3e-4, 최근구간 p=6.9e-6
+45	listing-stop-sweep	-	-	-	-	-	76	-	-	discard	스톱은 학습에서만 좋고 검증 전부 음수 — 과적합
+46	listing-nostop-f009	7.5	0.09	-	-	7.5	76	24.5	-	KEEP	무손절 f=0.09: 검증 24.5bp/거래, 연 7.5%
+47	listing-portfolio-all	61.8	0.04	-	35.8	61.8	264	-	-	KEEP	전체상장 동시21건 f=0.04: 검증 연 61.8%, MDD 35.8%
