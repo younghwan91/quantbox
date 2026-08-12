@@ -1389,7 +1389,8 @@ git commit -m "feat(listing): 상장 감시기 진입점 — 60초 폴링, 감�
 - Produces:
   - `ENTRY_WINDOW_H = (1.0, 24.0)`, `TARGET_NOTIONAL_USD = 24.0`
   - `PASS_BP = 25.0`, `EXTEND_BP = 50.0`, `MAX_UNFILLABLE_FRAC = 0.10`
-  - `read_depth_samples(symbol, socket_root, onboard_ms) -> list[tuple[float, float, bool]]` — `(hours_since_listing, half_spread_bp, filled)`
+  - `read_depth_samples(symbol, socket_root, onboard_ms, max_files=0) -> list[tuple[float, float, bool]]` — `(hours_since_listing, half_spread_bp, filled)`
+  - `read_bookticker_samples(symbol, socket_root, onboard_ms, max_files=0) -> list[tuple[float, float, bool]]` — 기존 58종목 대조용 (1레벨 호가창)
   - `hourly_profile(samples) -> list[dict]` — `{"hour", "n", "median_bp", "p25_bp", "p75_bp", "unfillable_frac"}`
   - `verdict(samples) -> dict` — `{"median_bp", "unfillable_frac", "n", "decision"}` (`decision` ∈ `"진행"`/`"재검토"`/`"종료"`/`"표본부족"`)
 
