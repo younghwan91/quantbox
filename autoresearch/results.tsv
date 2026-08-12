@@ -51,3 +51,6 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 70	VERDICT-overfit	-	-	-	-	-	-	-	-	discard	48개 조합 격자탐색의 과적합. 독립표본에서 원 결과의 1/5, t~1.0
 71	long-horizon	-	-	-	-	40.8	1119	156.5	2.28	discard	14~90일 지평: 최선 14d t=2.28이나 최근 t=0.81, 나머지 최근 음수
 72	cross-exchange	-	-	-	-	-	315	10.1	-	discard	바이낸스-Bybit 일종가 괴리 중앙 10.1bp < 왕복 25.2bp, 초과 종목 0%
+73	cross-asset-equities	-	-	-	-	-	1652	-	-	discard	크립토연관주(COIN/MSTR/채굴주) → 크립토: 스피어만 |rho|<0.03, 신호 없음
+74	macro-EQVOL	-	-	-	-	-	303	-494	-5.15	KEEP	주식변동성 하위20% → 알트 20일 -6.74% (무조건 -1.80%), p=3.3e-10
+75	macro-BREADTH	-	-	-	-	-	303	350	2.99	keep	시장폭 상위20% → 알트 20일 +350bp 초과, 단 단조성 없음(꼬리만)
