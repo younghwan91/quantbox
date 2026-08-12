@@ -20,3 +20,6 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 39	funding-carry-borrow	4.9	1.0	-	-	4.90	33	1.31	-	KEEP	펀딩캐리-차입금리 실측: 26/33 심볼 양수, 이항 p=6.6e-4, 윌콕슨 p=4.4e-3
 40	carry-exe-universe	-	-	-	-	-	299	-0.62	-	discard	실행가능 299심볼: 48.2% 양수 p=0.756 — 33심볼 결과는 저리차입 대형주 선택편향
 41	carry-conditional	-	-	-	-	-	1285	1.74	0.37	discard	조건부 진입 9구성 전부 음수, 양수심볼 15.6~32.9%, 부호p=1.0
+42	listing-short-all	-	-	-	-	-	757	1214	-	keep	신규상장 전량 숏 30일: 중앙 +12.14% 평균 +2.44% 승률 65.5%
+43	listing-short-accumQ4	-	-	-	-	-	189	2287	-	KEEP	겉보기매집 상위25% 숏: 중앙 +22.87% 평균 +6.10% 승률 73.0%
+44	listing-era-split	-	-	-	-	-	757	-	-	KEEP	3개 시대 전부 양수 p<2.3e-4, 최근구간 p=6.9e-6
