@@ -461,12 +461,15 @@ def test_known_types_matches_fixture(info: dict) -> None:
     assert {s["underlyingType"] for s in info["symbols"]} <= KNOWN_TYPES
 
 
-def test_first_run_does_not_flood(info: dict) -> None:
+def test_first_run_does_not_flood(info: dict, tmp_path: Path) -> None:
     """빈 상태 첫 실행에서 기존 심볼이 신규로 잡히면 안 된다.
 
     이 가드가 없으면 첫 폴링에서 700개 구독을 시도한다.
+
+    쓰기 가능한 경로를 쓴다 — `bootstrap`은 등록 결과를 실제로 저장해야 하고,
+    저장 실패를 삼키면 재시작마다 조용히 다시 부트스트랩하게 된다.
     """
-    store = SeenStore(Path("/nonexistent/seen.json"))
+    store = SeenStore(tmp_path / "seen.json")
     seen = store.bootstrap(info)
 
     assert len(seen) == len(info["symbols"]), "부트스트랩이 전 심볼을 등록하지 않았다"
@@ -605,6 +608,11 @@ class SeenStore:
 
         대상 심볼만 등록하면 안 된다 — 오늘 EQUITY인 심볼이 나중에 분류가 바뀌면
         신규로 오인된다. 그리고 이 가드가 없으면 첫 폴링에서 700개를 구독한다.
+
+        저장 실패는 **삼키지 않는다.** 상태 디렉터리가 쓰기 불가면 매 재시작마다
+        조용히 다시 부트스트랩하게 되고, 중복 방지 보장이 사라진 것을 아무도 모른다.
+        기동 시점에 시끄럽게 죽는 편이 낫다. (이벤트 감지 중의 `save` 실패는
+        다르다 — 그때는 기록을 잃지 않는 게 우선이므로 호출자가 감싼다. Task 5 참조.)
         """
         seen = self.load()
         if seen:
@@ -1283,6 +1291,18 @@ def main() -> int:
     pending: dict[str, float] = {}
     recorders: list[threading.Thread] = []
 
+    def remember(symbols: set[str]) -> None:
+        """본 심볼을 저장하되, 실패해도 감시를 멈추지 않는다.
+
+        `bootstrap`의 저장 실패는 기동을 막아야 하지만(중복 방지가 아예 성립하지
+        않으므로) 이벤트 감지 중의 실패는 다르다. 기록을 놓치는 것보다 중복 위험을
+        감수하는 편이 낫다 — 상장은 주당 1건뿐이고 놓치면 몇 주를 다시 기다린다.
+        """
+        try:
+            seen_store.save(symbols)
+        except OSError as e:
+            logger.error(f"본 심볼 저장 실패({e}) — 재시작 시 이 이벤트를 다시 기록할 수 있다")
+
     while not stop.is_set():
         try:
             info = fetch_exchange_info()
@@ -1311,7 +1331,7 @@ def main() -> int:
             if meta.get("status") == "TRADING":
                 logger.info(f"▶ {sym} 거래 시작 — 기록 개시 ({args.days}일)")
                 events.add(sym, meta, time.time_ns())
-                seen_store.save(seen | {sym})
+                remember(seen | {sym})
                 t = threading.Thread(
                     target=record,
                     args=(sym, out_root, args.days * 86400, args.max_gb, stop),
@@ -1323,7 +1343,7 @@ def main() -> int:
                 del pending[sym]
             elif time.monotonic() - pending[sym] > PENDING_TIMEOUT_S:
                 logger.warning(f"{sym} 48시간 동안 TRADING이 되지 않았다 — 포기")
-                seen_store.save(seen | {sym})
+                remember(seen | {sym})
                 del pending[sym]
 
         if args.once:
