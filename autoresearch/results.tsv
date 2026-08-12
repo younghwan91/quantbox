@@ -62,3 +62,5 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 81	vol-harvest	-	-	-	-	-	12	-60	-	discard	변동성 수확: 초과 전 격자 음수. 1일리밸 -31%p, 30일리밸 -0.6%p(회전없어 무리밸과 동일). 절대수익 연 -19~-57%
 82	positioning-data	-	-	-	-	-	31	-	-	blocked	미결제약정/롱숏비율/테이커비율 전부 이력 31일 제한 — 검정 불가, 축적 필요
 83	vol-regime-crypto	-	-	-	-	-	2219	727	1.05	discard	크립토 내부 변동성 6셀 전부 |t|<1.4. RV20 상위20% +727bp지만 t=1.05(N=214)
+84	toll-remeasure	-	-	-	-	-	15	400	-	KEEP	소켓 실측: 유동성상위 스프레드 중앙 1.27bp. 양쪽지정가 왕복 4.0bp (가정 12.6의 1/3)
+85	reversal-at-4bp	-	-	-	-	-	1955	467	2.88	discard	통행료 4bp에서 전구간 t 1.82→2.88 개선. 그러나 최근구간 t=0.37로 여전히 사망
