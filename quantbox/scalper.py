@@ -859,7 +859,7 @@ class RubberBandScalper(
                         pos_side = pos.get("position_side")
                         notional = pos.get("notional", 0.0)
                         qty = notional / entry_price if entry_price > 0 else 0.0
-                        if qty > 0:
+                        if qty > 0 and self.vs_config.is_trail_enabled(strategy_type):
                             cr, _, cs = self._get_trail_params(strategy_type, signal, entry_price)
                             trail_id = self._place_trail_regular(
                                 symbol=api_sym,

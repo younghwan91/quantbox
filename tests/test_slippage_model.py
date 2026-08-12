@@ -7,9 +7,9 @@ import pytest
 
 from quantbox.backtest.trade_sim import (
     COST_DIRECTIONAL,
-    _COST_HIGH_LIQ,
-    _COST_LOW_LIQ,
-    _COST_MED_LIQ,
+    cost_high_liq,
+    cost_low_liq,
+    cost_med_liq,
     _HIGH_LIQ_SYMS,
     _LOW_LIQ_SYMS,
     get_symbol_slippage,
@@ -37,16 +37,16 @@ class TestGetSymbolSlippage:
         assert get_symbol_slippage("SANDUSDT") < get_symbol_slippage("STORJUSDT")
 
     def test_high_liq_returns_correct_rate(self) -> None:
-        assert get_symbol_slippage("SOLUSDT") == pytest.approx(_COST_HIGH_LIQ)
+        assert get_symbol_slippage("SOLUSDT") == pytest.approx(cost_high_liq())
 
     def test_low_liq_returns_correct_rate(self) -> None:
-        assert get_symbol_slippage("RLCUSDT") == pytest.approx(_COST_LOW_LIQ)
+        assert get_symbol_slippage("RLCUSDT") == pytest.approx(cost_low_liq())
 
     def test_med_liq_returns_correct_rate(self) -> None:
         # SANDUSDT is not in HIGH or LOW, so it should be MED
         assert "SANDUSDT" not in _HIGH_LIQ_SYMS
         assert "SANDUSDT" not in _LOW_LIQ_SYMS
-        assert get_symbol_slippage("SANDUSDT") == pytest.approx(_COST_MED_LIQ)
+        assert get_symbol_slippage("SANDUSDT") == pytest.approx(cost_med_liq())
 
     def test_conservative_adds_50pct_buffer(self) -> None:
         """Conservative mode should multiply cost by 1.5."""
@@ -64,15 +64,15 @@ class TestGetSymbolSlippage:
     def test_unknown_symbol_gets_med_cost(self) -> None:
         """Unknown/future symbol not in any tier set → medium cost."""
         cost = get_symbol_slippage("UNKNOWNUSDT")
-        assert cost == pytest.approx(_COST_MED_LIQ)
+        assert cost == pytest.approx(cost_med_liq())
 
     def test_tier_ordering(self) -> None:
         """HIGH < MED < LOW must hold."""
-        assert _COST_HIGH_LIQ < _COST_MED_LIQ < _COST_LOW_LIQ
+        assert cost_high_liq() < cost_med_liq() < cost_low_liq()
 
     def test_high_liq_matches_current_flat(self) -> None:
         """High-liq cost should equal the current flat cost (COST_DIRECTIONAL)."""
-        assert _COST_HIGH_LIQ == pytest.approx(COST_DIRECTIONAL)
+        assert cost_high_liq() == pytest.approx(COST_DIRECTIONAL)
 
     def test_all_whitelist_symbols_resolved(self) -> None:
         """Every symbol in the production whitelist should resolve to a valid cost."""
@@ -80,7 +80,7 @@ class TestGetSymbolSlippage:
         for sym in cfg.symbol_whitelist:
             cost = get_symbol_slippage(sym)
             assert cost > 0, f"{sym} returned non-positive cost"
-            assert cost <= _COST_LOW_LIQ * 1.5 + 1e-9, f"{sym} cost too high: {cost}"
+            assert cost <= cost_low_liq() * 1.5 + 1e-9, f"{sym} cost too high: {cost}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -200,7 +200,7 @@ class TestSimulateWithTieredSlippage:
         # For ICXUSDT (LOW_LIQ): sym_cost=0.0016, flat=0.0008 → delta=0.0008
         sym_cost = get_symbol_slippage("ICXUSDT")
         expected_delta = sym_cost - COST_DIRECTIONAL  # 0.0008
-        assert expected_delta == pytest.approx(_COST_LOW_LIQ - _COST_HIGH_LIQ)
+        assert expected_delta == pytest.approx(cost_low_liq() - cost_high_liq())
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -99,7 +99,12 @@ class TestConfig:
         assert cfg.get_max_hold("4h") == 12
 
     def test_round_trip_cost(self, cfg):
-        assert cfg.round_trip_cost == pytest.approx(0.0008)
+        """2026-08-12 실측 정정: 편도 6.3bp (수수료 4.3 실측 + 슬리피지 2.0 모델) → 왕복 12.6bp.
+
+        이전 8.0bp는 "양쪽 다 maker 체결"을 전제했으나 실제 진입 maker 체결률은 30~40%이고
+        청산은 전량 taker다(exit_reason 97%가 서버 스톱 트리거).
+        """
+        assert cfg.round_trip_cost == pytest.approx(0.00126)
 
     def test_hedge_mode_enabled(self, cfg):
         # hedge_mode is a structural requirement for LONG/SHORT positionSide orders.

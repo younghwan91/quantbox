@@ -467,6 +467,8 @@ class ReconciliationMixin:
                         signal = pos["signal"]
                         entry_price = pos["entry_price"]
                         strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
+                        if not self.vs_config.is_trail_enabled(strategy_type):
+                            continue
                         cr, ap, cs = self._get_trail_params(strategy_type, signal, entry_price)
                         new_trail = self._place_trail_regular(
                             symbol=api_sym,

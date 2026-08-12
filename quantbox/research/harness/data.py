@@ -11,6 +11,7 @@ research/ 전역에 `load_data`가 16벌 복제돼 있었고, 동작이 **6종�
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,9 +21,18 @@ import numpy as np
 from quantbox.backtest.trade_sim import build_resampled
 from quantbox.research.harness.gitinfo import repo_root
 
+logger = logging.getLogger("harness.data")
+
 #: 15m 확장 캐시의 기본 위치/패턴 (research 스크립트들이 수렴해 온 사실상의 표준).
 DEFAULT_CACHE_DIR = "data/cache_extended"
 DEFAULT_PATTERN = "*_15m_2190d_*.npz"
+
+#: 전 종목 유니버스 캐시 (폐지 종목 포함, 타임스탬프 보유).
+UNIVERSE_CACHE_DIR = "data/cache_universe"
+UNIVERSE_PATTERN = "*.npz"
+
+#: 15m 봉 간격 (ms). 타임스탬프 기반 정렬의 격자 단위.
+BAR_MS = 15 * 60 * 1000
 
 #: 이보다 짧은 시계열은 워밍업(SMA200@4h 등) 이후 남는 봉이 없어 통계가 무의미하다.
 MIN_BARS = 500
@@ -92,7 +102,7 @@ class MarketData:
         for f in sorted(root.glob(pattern)):
             if "numtrades" in f.name:
                 continue
-            sym = f.name.split("_")[0]
+            sym = f.name.split("_")[0].removesuffix(".npz")
             if wanted is not None and sym not in wanted:
                 continue
             n_bars = int(np.load(str(f), allow_pickle=False)["close"].shape[0])
@@ -106,19 +116,72 @@ class MarketData:
                 continue
             if len(npz["close"]) < min_bars:
                 continue
-            data[sym] = {k: npz[k].astype(np.float64) for k in npz.files if k != "timestamps"}
+            # `timestamps`는 float64로 캐스팅하지 않고 원본 dtype(int64 ms)으로 남긴다.
+            # 이 키가 있어야 `_align`이 시각 기반으로 정렬한다 — 버리면 우측 정렬로
+            # 조용히 떨어져 폐지 종목이 현재까지 거래된 것처럼 배치된다.
+            data[sym] = {k: (npz[k] if k == "timestamps" else npz[k].astype(np.float64)) for k in npz.files}
 
         cls._align(data)
         return cls(data=data, source=root)
 
     @staticmethod
     def _align(data: dict[str, SymbolData]) -> None:
-        """공통 타임라인 정렬. 캐시는 우측(최신) 정렬이므로 오프셋은 앞쪽 여백이다."""
+        """공통 타임라인 정렬.
+
+        타임스탬프가 있으면 **실제 시각**으로 정렬한다. 없으면 구 캐시 호환을 위해
+        우측(최신) 정렬로 떨어지되 경고한다.
+
+        우측 정렬은 "모든 심볼이 같은 시점에 끝난다"고 가정한다. 상장폐지 종목에는
+        성립하지 않는다 — 2024년에 폐지된 종목이 현재까지 거래된 것처럼 배치되어
+        BTC 게이트·슬롯 경합·일손실 경계가 전부 잘못된 시각으로 계산된다.
+        조용히 틀리므로 반드시 타임스탬프를 쓴다.
+
+        Args:
+            data: 심볼별 OHLCV dict. 제자리에서 ``_offset``을 채운다.
+        """
         if not data:
             return
+
+        if all("timestamps" in d for d in data.values()):
+            t0 = min(float(d["timestamps"][0]) for d in data.values())
+            for sym, d in data.items():
+                ts = d["timestamps"]
+                off = (float(ts[0]) - t0) / BAR_MS
+                if abs(off - round(off)) > 1e-6:
+                    raise ValueError(f"{sym}: 시작 시각이 15m 격자에 맞지 않는다 (offset={off})")
+                d["_offset"] = int(round(off))
+            return
+
+        logger.warning(
+            "타임스탬프 없는 캐시 — 우측 정렬로 대체한다. "
+            "폐지 종목이 섞이면 조용히 어긋나므로 cache_universe 사용을 권장한다."
+        )
         max_bars = max(len(d["close"]) for d in data.values())
         for d in data.values():
             d["_offset"] = max_bars - len(d["close"])
+
+    @staticmethod
+    def _contiguity_report(data: dict[str, SymbolData]) -> dict[str, int]:
+        """심볼별 내부 결측 구간 수.
+
+        위치 기반 인덱싱(``_offset`` + 배열 위치)은 봉이 **연속**임을 전제한다.
+        중간에 빠진 구간이 있으면 그 이후 전부가 시각과 어긋난다.
+
+        Args:
+            data: 심볼별 OHLCV dict.
+
+        Returns:
+            ``{symbol: 결측 구간 수}`` — 0이 아닌 항목만.
+        """
+        out: dict[str, int] = {}
+        for sym, d in data.items():
+            ts = d.get("timestamps")
+            if ts is None or len(ts) < 2:
+                continue
+            n_bad = int(np.count_nonzero(np.diff(ts) != BAR_MS))
+            if n_bad:
+                out[sym] = n_bad
+        return out
 
     def resample(self, ratio: int) -> dict[str, SymbolData]:
         """상위 TF로 리샘플. 완결된 봉만 사용 (프로덕션 `build_resampled` 재사용)."""
