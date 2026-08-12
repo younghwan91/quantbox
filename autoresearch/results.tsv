@@ -14,3 +14,6 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 33	donchian-trailoff-3sym	-	-	-	-	-	232	83.20	2.12	discard	3심볼 소표본 착시
 34	donchian-trailoff-121sym	-	-	-	-	-	4842	-2.11	-0.28	discard	121심볼에서 전체 -2.11bp. 단 후반만 +7.36
 35	pooled-recent	-	-	-	-	-	4283	10.04	1.27	note	ma_cluster+donchian 풀링 후반 — 유의성 미달
+36	sign-test-all	-	-	-	-	-	60	9.79	-	note	심볼 부호검정 전체: 60% 양수 p=0.078
+37	sign-test-late	-	-	-	-	-	58	-3.70	-	discard	후반: 정확히 50% 양수 p=0.552 — 동전던지기
+38	sign-test-q4	-	-	-	-	-	48	-11.94	-	discard	최근1/4: 39.6% 양수 p=0.944, 심볼 중앙 EV -11.94bp — 양수 평균은 소수 이상치
