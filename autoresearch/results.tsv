@@ -39,3 +39,5 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 58	xsec-reversal-7d	-	-	-	-	56.0	315	130.6	2.50	keep	횡단면 7일 리버설, 7일주기 리밸런스
 59	power-analysis	-	-	-	-	-	-	-	-	note	전반vs최근 효과크기 차이 Welch p=0.507 — '최근에 죽었다'는 증거 없음, 검정력 부족
 60	xsec-overlap-NW	-	-	-	-	56.0	2208	107.8	2.84	KEEP	중첩포트폴리오+Newey-West: 전체 t=2.84, 최근1/4 +39.3bp t=0.70
+61	xsec-real-cost	-	-	-	-	2.0	594	4.8	0.09	discard	실측 스프레드 60.69bp(가정 25.2의 2.4배) 적용시 최근 소멸
+62	xsec-maker-exec	-	-	-	-	29.4	2208	125.0	3.30	KEEP	전량 지정가(8bp): 전체 t(NW)=3.30 Bonferroni 통과, 최근 +56.5bp
