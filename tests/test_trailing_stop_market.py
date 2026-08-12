@@ -869,7 +869,11 @@ class TestDeferredTrailPlacement:
         return close, high, low, vol, tb
 
     def test_trail_placed_when_trail_active(self):
-        """When trail_active=True and server_trail_order_id=None, trail is placed."""
+        """When trail_active=True and server_trail_order_id=None, trail is placed.
+
+        MA Cluster는 2026-08-10부터 트레일이 꺼져 있으므로 여기서는 트레일을 쓰는
+        전략(vr_directional)으로 검증한다 — 검증 대상은 지연 배치 메커니즘이다.
+        """
         s = _build_trail_scalper(trail_server_native=True)
         s.paper_mode = False
         _inject_position(
@@ -877,7 +881,7 @@ class TestDeferredTrailPlacement:
             "TESTUSDT:LONG",
             trail_active=True,
             server_trail_order_id=None,
-            strategy_type="ma_cluster",
+            strategy_type="vr_directional",
             peak_gain=0.025,
         )
 
@@ -893,6 +897,32 @@ class TestDeferredTrailPlacement:
         assert call_kwargs.kwargs.get("activation_price") == pytest.approx(102.0)
         pos = s.strategy._positions["TESTUSDT:LONG"]
         assert pos["server_trail_order_id"] == "deferred_trail_999"
+
+    def test_trail_not_placed_for_ma_cluster(self):
+        """MA Cluster는 트레일을 걸지 않는다 (2026-08-10).
+
+        트레일 수익의 95.4%가 봉 집계 아티팩트였고, 실제로는 신호의 엣지를 조기
+        청산으로 잘라내고 있었다. 지연 배치 경로가 이 플래그를 무시하면 진입에서
+        안 걸린 트레일이 여기서 되살아난다.
+        """
+        s = _build_trail_scalper(trail_server_native=True)
+        s.paper_mode = False
+        _inject_position(
+            s,
+            "TESTUSDT:LONG",
+            trail_active=True,
+            server_trail_order_id=None,
+            strategy_type="ma_cluster",
+            peak_gain=0.025,
+        )
+
+        s.download_klines = MagicMock(return_value=self._make_klines(102.0))
+        s.strategy.update_position = MagicMock(return_value=None)
+        s._place_trail_regular = MagicMock(return_value="should_not_happen")
+
+        s._manage_active_positions()
+
+        s._place_trail_regular.assert_not_called()
 
     def test_trail_not_placed_when_trail_inactive(self):
         """When trail_active=False, deferred trail is NOT placed."""

@@ -155,7 +155,7 @@ def test_kernel_bit_parity_default_params():
     cost = 0.0008
 
     mp, me, mx = _run_monolith(close, high, low, p, cost)
-    sp, se, sx, _sd = _run_split(close, high, low, p, cost)
+    sp, se, sx, _sd, _sr = _run_split(close, high, low, p, cost)
 
     assert len(sp) == len(mp), f"trade count differs: split={len(sp)} monolith={len(mp)}"
     assert len(mp) > 0, "fixture produced no trades — parity check would be vacuous"
@@ -171,7 +171,7 @@ def test_kernel_bit_parity_multi_seed(seed):
     p = _cfg_params()
     cost = 0.0008
     mp, me, mx = _run_monolith(close, high, low, p, cost)
-    sp, se, sx, _sd = _run_split(close, high, low, p, cost)
+    sp, se, sx, _sd, _sr = _run_split(close, high, low, p, cost)
     assert len(sp) == len(mp)
     np.testing.assert_array_equal(se, me)
     np.testing.assert_array_equal(sx, mx)
@@ -187,7 +187,7 @@ def test_kernel_bit_parity_duration_gates(min_dur, max_dur):
     p["max_duration"] = max_dur
     cost = 0.0008
     mp, me, mx = _run_monolith(close, high, low, p, cost)
-    sp, se, sx, _sd = _run_split(close, high, low, p, cost)
+    sp, se, sx, _sd, _sr = _run_split(close, high, low, p, cost)
     assert len(sp) == len(mp)
     np.testing.assert_array_equal(se, me)
     np.testing.assert_array_equal(sx, mx)
@@ -221,7 +221,7 @@ def test_state_coupling_freeze_reset_jump():
     cost = 0.0008
 
     mp, me, mx = _run_monolith(close, high, low, p, cost)
-    sp, se, sx, _sd = _run_split(close, high, low, p, cost)
+    sp, se, sx, _sd, _sr = _run_split(close, high, low, p, cost)
 
     np.testing.assert_array_equal(se, me)
     np.testing.assert_array_equal(sx, mx)
@@ -297,7 +297,7 @@ def test_directional_kernel_bit_parity(seed):
     mp, me, mx = sim_directional_trailing(close, high, low, sig, dire, sl, tp, max_hold, cost, tr_act, tr_dist)
 
     bar_kind, entry_ok, direction = directional_conditions(close, sig, dire)
-    sp, se, sx, _sd = sim_drive(
+    sp, se, sx, _sd, _sr = sim_drive(
         close,
         high,
         low,
@@ -372,7 +372,7 @@ def test_donchian_kernel_bit_parity(seed):
     bar_kind, entry_ok, direction = donchian_conditions(
         close, high, low, volume, lookback, vol_sma_period, vol_mult, breakout_pct
     )
-    sp, se, sx, _sd = sim_drive(
+    sp, se, sx, _sd, _sr = sim_drive(
         close,
         high,
         low,

@@ -181,10 +181,42 @@ _LOW_LIQ_SYMS: frozenset[str] = frozenset(
     }
 )
 
-# Everything else (mid-tier alts) falls into medium liquidity: 0.12%.
-_COST_HIGH_LIQ: float = 0.0008  # 0.08% round-trip (current flat default)
-_COST_MED_LIQ: float = 0.0012  # 0.12% round-trip
-_COST_LOW_LIQ: float = 0.0016  # 0.16% round-trip (thin markets)
+# Everything else (mid-tier alts) falls into medium liquidity.
+#
+# 티어는 flat 비용에 대한 **배수**로 정의한다. 2026-08-12까지는 0.0008/0.0012/0.0016으로
+# 절대값이 박혀 있었는데, 그 0.0008은 당시 `round_trip_cost`와 같은 값이었다. 수수료 실측
+# 정정으로 flat이 0.00126이 되자 HIGH 티어만 옛 값에 남아 조용히 어긋났다.
+# 비율(1 : 1.5 : 2)은 원래 의도 그대로 보존하고, 기준만 config에서 끌어온다.
+_TIER_MULT_HIGH: float = 1.0  # ≥$500M/day — fills near mid
+_TIER_MULT_MED: float = 1.5  # $50-500M/day — some spread widening
+_TIER_MULT_LOW: float = 2.0  # <$50M/day — thin markets
+
+
+def _flat_cost() -> float:
+    """현재 flat 왕복 비용. 티어의 기준선."""
+    try:
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+        return VolStraddleConfig().round_trip_cost
+    except Exception:
+        return 0.00126
+
+
+# G4: 티어 값은 **함수로** 노출한다. 모듈 전역 상수로 두면 import 시점에 굳어
+# 이후의 설정 변경을 무시한다 — 이 파일이 방금 겪은 버그가 정확히 그것이다.
+def cost_high_liq() -> float:
+    """고유동 티어 왕복 비용 (= flat 기준선)."""
+    return _flat_cost() * _TIER_MULT_HIGH
+
+
+def cost_med_liq() -> float:
+    """중유동 티어 왕복 비용."""
+    return _flat_cost() * _TIER_MULT_MED
+
+
+def cost_low_liq() -> float:
+    """저유동 티어 왕복 비용."""
+    return _flat_cost() * _TIER_MULT_LOW
 
 
 def get_symbol_slippage(symbol: str, conservative: bool = False) -> float:
@@ -202,12 +234,13 @@ def get_symbol_slippage(symbol: str, conservative: bool = False) -> float:
     Returns:
         Round-trip cost fraction (e.g. 0.0008 = 0.08%).
     """
+    base = _flat_cost()
     if symbol in _HIGH_LIQ_SYMS:
-        cost = _COST_HIGH_LIQ
+        cost = base * _TIER_MULT_HIGH
     elif symbol in _LOW_LIQ_SYMS:
-        cost = _COST_LOW_LIQ
+        cost = base * _TIER_MULT_LOW
     else:
-        cost = _COST_MED_LIQ
+        cost = base * _TIER_MULT_MED
     if conservative:
         cost *= 1.5
     return cost
@@ -381,7 +414,7 @@ def sim_directional_trailing(
     from quantbox.backtest.sim_core import directional_conditions, sim_drive
 
     bar_kind, entry_ok, direction = directional_conditions(close, sig, dire)
-    pnl, ent, ext, _dirs = sim_drive(
+    pnl, ent, ext, _dirs, _rsn = sim_drive(
         close,
         high,
         low,
@@ -605,31 +638,52 @@ def collect_trades(
                     all_trades.append((sym, entry_15m, exit_15m, pnl_val))
                     accepted.append((entry_15m, exit_15m))
 
-    # ── G3 parity fix: deduct funding costs ────────────────────────────────
-    # Binance charges funding every 8h on open positions. At 30x leverage
-    # this is a material drag (0.9-5.4% of notional over 48h holds).
-    # Deduction is post-hoc on collected trades (no Numba signature change).
-    # funding_rate_8h: cost per 8h as fraction of notional (e.g. 0.0001 = 0.01%)
-    if "funding_rate_8h" in cfg:
-        _funding_8h = cfg["funding_rate_8h"]
-    else:
-        try:
-            from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _VSCfg2
-
-            _funding_8h = _VSCfg2().default_funding_rate_8h
-        except Exception:
-            _funding_8h = 0.0001  # conservative default
-
-    if _funding_8h > 0:
-        _BARS_PER_8H_15M = 32  # 8h × 4 bars/h = 32 bars at 15m
-        adjusted: list[tuple[str, int, int, float]] = []
-        for sym, entry_b, exit_b, pnl_val in all_trades:
-            bars_held = exit_b - entry_b
-            funding_drag = _funding_8h * (bars_held / _BARS_PER_8H_15M)
-            adjusted.append((sym, entry_b, exit_b, pnl_val - funding_drag))
-        all_trades = adjusted
+    all_trades = apply_funding_drag(all_trades, cfg.get("funding_rate_8h"))
 
     return all_trades
+
+
+#: 15m 봉 기준 8시간 (펀딩 주기).
+BARS_PER_8H_15M = 32
+
+
+def apply_funding_drag(
+    trades: list[tuple[str, int, int, float]],
+    funding_rate_8h: float | None = None,
+) -> list[tuple[str, int, int, float]]:
+    """보유 기간에 비례한 펀딩비를 트레이드 손익에서 뺀다 (G3 파리티).
+
+    Binance는 8시간마다 명목가 기준으로 펀딩을 청구한다. 30배 명목가에서는
+    무시할 수 없는 드래그이고(48h 보유 시 명목가의 0.9~5.4%), **보유가 길수록
+    커지므로 장기 보유 설계를 평가할 때 특히 중요하다.**
+
+    sim의 손익은 가격 변동률이고 펀딩도 명목가 대비 비율이므로 단위가 같다 —
+    그대로 빼면 된다.
+
+    Args:
+        trades: ``[(symbol, entry_bar_15m, exit_bar_15m, pnl)]``.
+        funding_rate_8h: 8시간당 명목가 대비 비율. None이면 config의
+            ``default_funding_rate_8h``를 읽는다. 0 이하면 아무것도 하지 않는다.
+
+    Returns:
+        펀딩을 차감한 트레이드 리스트. 입력은 변경하지 않는다.
+    """
+    if funding_rate_8h is None:
+        try:
+            from quantbox.strategy.vol_straddle.config import VolStraddleConfig as _C
+
+            funding_rate_8h = _C().default_funding_rate_8h
+        except Exception:
+            funding_rate_8h = 0.0001  # conservative default
+
+    if not funding_rate_8h or funding_rate_8h <= 0:
+        return trades
+
+    from quantbox.backtest.funding import funding_cost
+
+    # 심볼별 실측 정산 이력이 있으면 그것을 쓴다 — 상수 8h 가정은 4h 주기 심볼에서
+    # 펀딩을 절반만 계산하고(2024년 이후 도입), 심볼별 수준 차이도 놓친다.
+    return [(sym, eb, xb, pnl - funding_cost(sym, xb - eb, funding_rate_8h)) for sym, eb, xb, pnl in trades]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1155,7 +1209,7 @@ def sim_ma_cluster_trailing(
     bar_kind, entry_ok, direction = ma_cluster_conditions(
         close, sma20, sma50, sma100, sma200, momentum, cluster_pct, min_momentum
     )
-    pnl, ent, ext, _dirs = sim_drive(
+    pnl, ent, ext, _dirs, _rsn = sim_drive(
         close,
         high,
         low,
@@ -1383,7 +1437,7 @@ def sim_donchian_trailing(
     bar_kind, entry_ok, direction = donchian_conditions(
         close, high, low, volume, lookback, vol_sma_period, vol_mult, breakout_pct
     )
-    pnl, ent, ext, _dirs = sim_drive(
+    pnl, ent, ext, _dirs, _rsn = sim_drive(
         close,
         high,
         low,

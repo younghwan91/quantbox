@@ -369,7 +369,7 @@ class PositionMixin:
         # not by Binance ignoring activationPrice. Fixed by widening to 0.5%.
         trail_order_id: str | None = None
         tp_order_id: str | None = None
-        if self.vs_config.trail_server_native:
+        if self.vs_config.trail_server_native and self.vs_config.is_trail_enabled(strategy_type):
             cr, ap, cs = self._get_trail_params(strategy_type, signal, fill_price)
             trail_order_id = self._place_trail_regular(
                 symbol=symbol,
@@ -1091,8 +1091,14 @@ class PositionMixin:
                         position_side=pos.get("position_side"),
                     )
             # Re-place trail if it was cancelled before the failed close
-            if trail_oid and self.vs_config.trail_server_native and not self.paper_mode:
-                strategy_type = pos.get("strategy_type", VR_DIRECTIONAL)
+            _st_trail = pos.get("strategy_type", VR_DIRECTIONAL)
+            if (
+                trail_oid
+                and self.vs_config.trail_server_native
+                and self.vs_config.is_trail_enabled(_st_trail)
+                and not self.paper_mode
+            ):
+                strategy_type = _st_trail
                 cr, ap, cs = self._get_trail_params(strategy_type, pos["signal"], pos["entry_price"])
                 new_trail_oid = self._place_trail_regular(
                     symbol=api_symbol,
