@@ -41,3 +41,6 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 60	xsec-overlap-NW	-	-	-	-	56.0	2208	107.8	2.84	KEEP	중첩포트폴리오+Newey-West: 전체 t=2.84, 최근1/4 +39.3bp t=0.70
 61	xsec-real-cost	-	-	-	-	2.0	594	4.8	0.09	discard	실측 스프레드 60.69bp(가정 25.2의 2.4배) 적용시 최근 소멸
 62	xsec-maker-exec	-	-	-	-	29.4	2208	125.0	3.30	KEEP	전량 지정가(8bp): 전체 t(NW)=3.30 Bonferroni 통과, 최근 +56.5bp
+63	gate1-tradability	-	-	-	-	-	727	-	-	pass	전 종목 거래가능, 최소명목 5달러, 유동성 중앙 일2.4M
+64	gate2-concentration	-	-	-	-	27.8	2208	182.4	4.64	pass	K=40이 통계최적(t=4.64)이자 실행경계($11.79>5). K=5,10은 최근 음수
+65	gate3-maker-fill	-	-	-	-	-	8	-	-	pass	최우선호가 체결률 5분 98.5% / 1시간 99.7% — 8bp 가정 뒷받침
