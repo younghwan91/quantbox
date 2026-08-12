@@ -1352,8 +1352,12 @@ uv run python scripts/listing_probe.py --once
 ```
 ... | INFO    | 상장 감시 시작 — exchangeInfo 60초 폴링, 주문 없음
 ... | INFO    | 첫 실행 — 기존 859심볼을 등록하고 시작한다
-... | INFO    | 1회 확인 완료 — 대상 699개, 대기 0개
+... | INFO    | 1회 확인 완료 — 대상 651개, 대기 0개
 ```
+
+(`COIN`은 699개지만 `PERPETUAL`+`USDT` 조건이 48개를 더 걸러내 651개가 된다.
+심볼 수는 날짜에 따라 달라지므로 정확히 일치할 필요는 없다 — 전체보다 작고
+0이 아니면 된다.)
 
 `⚠ 처음 보는 underlyingType`이 뜨면 거래소가 분류를 추가한 것이니 `KNOWN_TYPES`를 갱신한다.
 
