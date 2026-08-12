@@ -30,3 +30,5 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 49	VALIDATION-sel	-	-	-	-	-30.9	114	-117.7	-	discard	상위25% 선별은 워크포워드에서 연 -30.9% — 선별이 오히려 해로움
 50	VALIDATION-cost	-	-	-	-	-0.2	-	-	-	discard	왕복 100bp에서 손익분기, 200bp에서 음수. 신규상장 스프레드 미실측
 51	VALIDATION-param	-	-	-	-	2.0	-	-	-	discard	파라미터 격자 6개 중앙 연 2.0%, 양수 50%, 범위 -18.7~+15.5%
+52	spread-est-calib	-	-	-	-	-	46	-	-	note	Corwin-Schultz 소켓 실측 대조: 넓은구간 배수1.05(정확) 좁은구간 7.81(과대)
+53	listing-final	1.8	0.05	-	-	1.8	152	1.5	-	discard	실측 스프레드 28.9bp→왕복66.4bp에서 연 1.8% — 격자 중앙 2.0%와 동일, 노이즈
