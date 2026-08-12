@@ -109,3 +109,31 @@ def test_seen_store_roundtrip(tmp_path: Path) -> None:
 
     store.save({"AAAUSDT", "BBBUSDT"})
     assert SeenStore(tmp_path / "seen.json").load() == {"AAAUSDT", "BBBUSDT"}
+
+
+def test_saving_copies_loses_the_earlier_one(tmp_path: Path) -> None:
+    """회귀 재현: 같은 `seen` 사본에서 두 번 저장하면 먼저 것이 사라진다.
+
+    `listing_probe.py`가 감지된 심볼마다 `remember(seen | {sym})`처럼 원본을 복사해
+    저장하면, 같은 폴링 주기에 두 심볼이 동시에 TRADING이 될 때 두 번째 저장이
+    첫 번째 심볼을 지운다. 다음 폴링에서 그 심볼이 신규로 재감지돼 기록 스레드가
+    하나 더 뜨고, 두 RotatingWriter가 같은 파일에 append하며 gzip 멤버가 엇갈려
+    파일이 깨진다.
+    """
+    store = SeenStore(tmp_path / "seen.json")
+    seen = {"EXISTINGUSDT"}
+    store.save(seen)
+
+    # 버그: 사본을 저장 — 두 번째 저장이 첫 번째 심볼(A)을 지운다.
+    store.save(seen | {"AUSDT"})
+    store.save(seen | {"BUSDT"})
+    assert "AUSDT" not in store.load(), "사본 저장 방식은 A를 지운다 (회귀 재현)"
+
+    # 수정: 제자리 갱신 — 둘 다 남는다.
+    seen2 = {"EXISTINGUSDT"}
+    store.save(seen2)
+    seen2.add("AUSDT")
+    store.save(seen2)
+    seen2.add("BUSDT")
+    store.save(seen2)
+    assert store.load() == {"EXISTINGUSDT", "AUSDT", "BUSDT"}
