@@ -206,6 +206,8 @@ quantbox/
 │   └── discord.py          # Discord Webhook (단방향)
 ├── utils/                   # 유틸리티
 │   └── diagnostics.py      # DiagnosticLogger (진단 로깅)
+├── collect/                 # 소켓 수집 공용 부품 (RotatingWriter)
+├── listing/                 # 신규 상장 비용 측정기 (연구 전용, 주문 없음)
 └── scalper.py              # 코어 엔진 — init, cycle, scan, state (4개 Mixin 상속)
 
 scripts/                    # 유틸리티 스크립트
