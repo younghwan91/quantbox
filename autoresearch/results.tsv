@@ -59,3 +59,4 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 78	MACRO-PAPER-START	-	-	-	-	-	1	-	-	live	2026-08-12 매크로 페이퍼 개시, 평일 10:07 크론. 오늘은 대기(EQ_VOL 0.0090>임계 0.0088)
 79	MACRO-KILLED	-	-	-	-	-	1647	-378	-0.46	discard	임계 기준선을 2016부터로 정상화하니 초과 +6.95%→-3.78%. 코로나 구간 오염된 기준선의 산물
 80	calendar-effects	-	-	-	-	-	2221	288	1.11	discard	요일7+세션3+월말2=13셀 전부 |t|<2.0. 최선 금요일 +28.8bp t=1.11. 절대수익은 전 셀 음수
+81	vol-harvest	-	-	-	-	-	12	-60	-	discard	변동성 수확: 초과 전 격자 음수. 1일리밸 -31%p, 30일리밸 -0.6%p(회전없어 무리밸과 동일). 절대수익 연 -19~-57%
