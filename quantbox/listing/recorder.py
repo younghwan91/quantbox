@@ -63,7 +63,9 @@ def record(
         symbol: 대문자 심볼 (예: `"DOSUSDT"`).
         out_root: `data/socket` 루트. 하위에 `<stream>/<symbol>/<hour>.jsonl.gz`.
         duration_s: 기록 시간. 스펙 기본은 7일(604800).
-        max_gb: 이 이벤트가 쓸 수 있는 상한. 폭주 방어용.
+        max_gb: 이 기록이 쓸 수 있는 **압축 전** 바이트 상한. gzip이 6~8배 줄이므로
+            디스크 실사용은 이보다 훨씬 작다(5GB ≈ 디스크 0.7GB). 폭주 방어용이며,
+            `out_root`는 가동 중인 수집기와 공유하므로 트리 전체를 재면 안 된다.
         stop: 외부 중단 신호.
     """
     symbol = symbol.upper()
@@ -126,9 +128,11 @@ def record(
                 # 공유하는 `data/socket`이고 거기엔 이미 3.7GB가 쌓여 있다(2026-08-13 실측).
                 # 트리 전체를 재면 신규 기록이 시작하자마자 상한의 75%를 쓴 상태가 되고,
                 # 하루 뒤면 이벤트가 와도 60초 만에 중단된다. **이 기록이 쓴 바이트만** 센다.
-                gb = writer.bytes_written / 1e9
-                if gb >= max_gb:
-                    logger.error(f"{symbol} 이벤트 디스크 상한 {max_gb}GB 도달 — 기록 중단")
+                # 단, bytes_written은 submit()이 만든 압축 전 JSON 바이트다(rotating_writer의
+                # gzip 핸들에 쓰이기 전 값) — 디스크 실사용은 gzip으로 6~8배 작다.
+                raw_gb = writer.bytes_written / 1e9
+                if raw_gb >= max_gb:
+                    logger.error(f"{symbol} 이벤트 상한 도달 (압축 전 {max_gb}GB) — 기록 중단")
                     break
     finally:
         stop.set()
