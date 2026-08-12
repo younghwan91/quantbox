@@ -1305,6 +1305,10 @@ def main() -> int:
     # 처음 본 심볼이 아직 TRADING이 아니면 여기서 대기시킨다.
     pending: dict[str, float] = {}
     recorders: list[threading.Thread] = []
+    #: 이 프로세스가 이미 기록을 시작한 심볼. 같은 심볼에 두 번째 스레드가 뜨면
+    #: 두 RotatingWriter가 같은 .jsonl.gz에 각자 버퍼로 append해 gzip 멤버가
+    #: 엇갈리고 파일이 깨진다. 마지막 방어선이다.
+    recording: set[str] = set()
 
     def remember(symbols: set[str]) -> None:
         """본 심볼을 저장하되, 실패해도 감시를 멈추지 않는다.
@@ -1344,9 +1348,17 @@ def main() -> int:
             if meta is None:
                 continue
             if meta.get("status") == "TRADING":
+                del pending[sym]
+                if sym in recording:
+                    continue  # 이미 기록 중 — 두 번째 스레드는 파일을 깨뜨린다
                 logger.info(f"▶ {sym} 거래 시작 — 기록 개시 ({args.days}일)")
                 events.add(sym, meta, time.time_ns())
-                remember(seen | {sym})
+                # `seen`을 제자리에서 갱신한 뒤 저장한다. `remember(seen | {sym})`처럼
+                # 사본을 넘기면 같은 주기에 두 심볼이 감지됐을 때 두 번째 저장이 첫 번째를
+                # 지운다 — 다음 폴링에서 첫 심볼이 신규로 재감지돼 기록 스레드가 하나 더 뜬다.
+                seen.add(sym)
+                remember(seen)
+                recording.add(sym)
                 t = threading.Thread(
                     target=record,
                     args=(sym, out_root, args.days * 86400, args.max_gb, stop),
@@ -1355,10 +1367,10 @@ def main() -> int:
                 )
                 t.start()
                 recorders.append(t)
-                del pending[sym]
             elif time.monotonic() - pending[sym] > PENDING_TIMEOUT_S:
                 logger.warning(f"{sym} 48시간 동안 TRADING이 되지 않았다 — 포기")
-                remember(seen | {sym})
+                seen.add(sym)
+                remember(seen)
                 del pending[sym]
 
         if args.once:
