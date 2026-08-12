@@ -64,3 +64,4 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 83	vol-regime-crypto	-	-	-	-	-	2219	727	1.05	discard	크립토 내부 변동성 6셀 전부 |t|<1.4. RV20 상위20% +727bp지만 t=1.05(N=214)
 84	toll-remeasure	-	-	-	-	-	15	400	-	KEEP	소켓 실측: 유동성상위 스프레드 중앙 1.27bp. 양쪽지정가 왕복 4.0bp (가정 12.6의 1/3)
 85	reversal-at-4bp	-	-	-	-	-	1955	467	2.88	discard	통행료 4bp에서 전구간 t 1.82→2.88 개선. 그러나 최근구간 t=0.37로 여전히 사망
+86	residual-rv	-	-	-	-	-	1896	1457	8.83	discard	잔차상대가치: 원표본 t=8.83(최근 4.12)이나 독립표본 현물 -1.30/Bybit -1.46로 부호까지 역전
