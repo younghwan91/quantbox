@@ -886,6 +886,7 @@ def test_three_streams_are_configured() -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(120)  # 전역 timeout=30 < 기록 30초 — 명시하지 않으면 반드시 타임아웃난다
 def test_records_all_three_streams_live(tmp_path: Path) -> None:
     """실구독 30초. 세 스트림이 모두 파일로 떨어지는가.
 
@@ -901,6 +902,7 @@ def test_records_all_three_streams_live(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(120)
 def test_recorded_depth_feeds_the_spread_calculation(tmp_path: Path) -> None:
     """기록한 depth20이 실효 스프레드 계산에 그대로 들어가는가.
 
