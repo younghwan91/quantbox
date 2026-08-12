@@ -35,3 +35,7 @@ exp	commit	primary_metric	best_leverage	p_ruin	max_dd_pct	ann_ret_pct	N	trades_p
 54	liq-fade-lookahead	-	-	-	-	-	62489	93.29	-	discard	유동성 필터가 마지막30일 기준 = 룩어헤드. 제거시 46.84bp
 55	liq-fade-beta	-	-	-	-	-	223152	8.14	-	discard	초과수익 293~299bp가 네 구간 상수 = 진입할인 3%의 산술결과, 알파 아님
 56	liq-fade-recent	-	-	-	-	-	223152	8.14	-	discard	최근분위 50.2% 양수 p=0.47 동전던지기
+57	xsec-momentum	-	-	-	-	-	315	-181.0	-3.46	discard	횡단면 모멘텀 전 구간 음수 → 리버설 시사
+58	xsec-reversal-7d	-	-	-	-	56.0	315	130.6	2.50	keep	횡단면 7일 리버설, 7일주기 리밸런스
+59	power-analysis	-	-	-	-	-	-	-	-	note	전반vs최근 효과크기 차이 Welch p=0.507 — '최근에 죽었다'는 증거 없음, 검정력 부족
+60	xsec-overlap-NW	-	-	-	-	56.0	2208	107.8	2.84	KEEP	중첩포트폴리오+Newey-West: 전체 t=2.84, 최근1/4 +39.3bp t=0.70
