@@ -1510,12 +1510,17 @@ def test_unfillable_samples_do_not_sweeten_the_median() -> None:
     체결이 91.8bp인 상황이 최우선 호가만으로는 1.0bp로 보고됐다. 그 값이 섞이면
     "스프레드 좋음"이라는 낙관적 오판을 만든다.
     """
-    samples = [(2.0, 40.0, True)] * 190 + [(2.0, 1.0, False)] * 10  # 체결불가 5% (게이트 통과)
+    # 체결불가 정확히 10% — 게이트(>10%)를 통과하므로 여기서 걸러지지 않는다.
+    # 체결 표본이 20bp/60bp로 갈려 있어, 오염 표본 20개가 중앙값 위치를 한 덩어리
+    # 아래로 밀어낸다. 균질한 표본으로는 재현되지 않는다 — 중앙값은 한쪽 꼬리의
+    # 10% 오염에 강건하므로, 분포가 갈려 있어야 차이가 드러난다.
+    samples = [(2.0, 1.0, False)] * 20 + [(2.0, 20.0, True)] * 85 + [(2.0, 60.0, True)] * 95
     v = verdict(samples)
 
-    assert v["unfillable_frac"] == pytest.approx(0.05)
-    assert v["median_bp"] == pytest.approx(40.0), "체결 불가 1bp가 중앙값을 끌어내렸다"
-    assert v["decision"] == "재검토", "낙관적 중앙값 때문에 '진행'으로 오판했다"
+    assert v["unfillable_frac"] == pytest.approx(0.10)
+    # 수정 전: 전체 200개의 중앙값 = 20.0bp → "진행"으로 오판했다.
+    assert v["median_bp"] == pytest.approx(60.0), "체결 불가 표본이 중앙값을 끌어내렸다"
+    assert v["decision"] == "종료", "낙관적 중앙값 때문에 '진행'으로 오판했다"
 
 
 def test_nothing_fillable_in_window_is_not_a_pass() -> None:
