@@ -461,12 +461,15 @@ def test_known_types_matches_fixture(info: dict) -> None:
     assert {s["underlyingType"] for s in info["symbols"]} <= KNOWN_TYPES
 
 
-def test_first_run_does_not_flood(info: dict) -> None:
+def test_first_run_does_not_flood(info: dict, tmp_path: Path) -> None:
     """빈 상태 첫 실행에서 기존 심볼이 신규로 잡히면 안 된다.
 
     이 가드가 없으면 첫 폴링에서 700개 구독을 시도한다.
+
+    쓰기 가능한 경로를 쓴다 — `bootstrap`은 등록 결과를 실제로 저장해야 하고,
+    저장 실패를 삼키면 재시작마다 조용히 다시 부트스트랩하게 된다.
     """
-    store = SeenStore(Path("/nonexistent/seen.json"))
+    store = SeenStore(tmp_path / "seen.json")
     seen = store.bootstrap(info)
 
     assert len(seen) == len(info["symbols"]), "부트스트랩이 전 심볼을 등록하지 않았다"
@@ -605,6 +608,11 @@ class SeenStore:
 
         대상 심볼만 등록하면 안 된다 — 오늘 EQUITY인 심볼이 나중에 분류가 바뀌면
         신규로 오인된다. 그리고 이 가드가 없으면 첫 폴링에서 700개를 구독한다.
+
+        저장 실패는 **삼키지 않는다.** 상태 디렉터리가 쓰기 불가면 매 재시작마다
+        조용히 다시 부트스트랩하게 되고, 중복 방지 보장이 사라진 것을 아무도 모른다.
+        기동 시점에 시끄럽게 죽는 편이 낫다. (이벤트 감지 중의 `save` 실패는
+        다르다 — 그때는 기록을 잃지 않는 게 우선이므로 호출자가 감싼다. Task 5 참조.)
         """
         seen = self.load()
         if seen:
@@ -878,6 +886,7 @@ def test_three_streams_are_configured() -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(120)  # 전역 timeout=30 < 기록 30초 — 명시하지 않으면 반드시 타임아웃난다
 def test_records_all_three_streams_live(tmp_path: Path) -> None:
     """실구독 30초. 세 스트림이 모두 파일로 떨어지는가.
 
@@ -893,6 +902,7 @@ def test_records_all_three_streams_live(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(120)
 def test_recorded_depth_feeds_the_spread_calculation(tmp_path: Path) -> None:
     """기록한 depth20이 실효 스프레드 계산에 그대로 들어가는가.
 
@@ -945,7 +955,7 @@ from pathlib import Path
 
 import websockets
 
-from quantbox.collect.rotating_writer import RotatingWriter, disk_used_gb
+from quantbox.collect.rotating_writer import RotatingWriter
 
 logger = logging.getLogger("listing.recorder")
 
@@ -959,6 +969,11 @@ STREAM_SUFFIXES: tuple[str, ...] = ("bookTicker", "trade", "depth20@500ms")
 RECONNECT_AFTER_S = 23 * 3600  # 바이낸스는 24h에 강제 종료한다 — 그 전에 먼저 재연결
 FLUSH_INTERVAL_S = 5.0
 DISK_CHECK_INTERVAL_S = 60.0
+
+#: 소켓 수신 대기 시간. 종료 신호는 이 대기를 **중간에 깨지 못하므로**, 이 값이
+#: 곧 종료 지연의 상한이다. 아래 `JOIN_TIMEOUT_S`가 이보다 커야 한다.
+RECV_TIMEOUT_S = 30.0
+JOIN_TIMEOUT_S = RECV_TIMEOUT_S + 5.0
 
 
 def stream_kind(stream_name: str) -> str:
@@ -1016,9 +1031,9 @@ def record(
                     deadline = time.monotonic() + RECONNECT_AFTER_S
                     while not stop.is_set() and time.monotonic() < deadline:
                         try:
-                            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                            raw = await asyncio.wait_for(ws.recv(), timeout=RECV_TIMEOUT_S)
                         except asyncio.TimeoutError:
-                            logger.warning(f"{symbol} 30초간 수신 없음")
+                            logger.warning(f"{symbol} {RECV_TIMEOUT_S:.0f}초간 수신 없음")
                             continue
                         handle(json.loads(raw))
             except Exception as e:
@@ -1040,13 +1055,21 @@ def record(
             now = time.monotonic()
             if now - last_disk >= DISK_CHECK_INTERVAL_S:
                 last_disk = now
-                gb = disk_used_gb(out_root)
+                # `disk_used_gb(out_root)`를 쓰면 안 된다 — out_root는 가동 중인 수집기와
+                # 공유하는 `data/socket`이고 거기엔 이미 3.7GB가 쌓여 있다(2026-08-13 실측).
+                # 트리 전체를 재면 신규 기록이 시작하자마자 상한의 75%를 쓴 상태가 되고,
+                # 하루 뒤면 이벤트가 와도 60초 만에 중단된다. **이 기록이 쓴 바이트만** 센다.
+                gb = writer.bytes_written / 1e9
                 if gb >= max_gb:
-                    logger.error(f"{symbol} 디스크 상한 {max_gb}GB 도달 — 기록 중단")
+                    logger.error(f"{symbol} 이벤트 디스크 상한 {max_gb}GB 도달 — 기록 중단")
                     break
     finally:
         stop.set()
-        t.join(timeout=10)
+        # 종료 신호는 대기 중인 recv를 깨지 못한다 — recv 타임아웃보다 넉넉히 기다려야
+        # 스레드가 살아 있는 채로 writer를 닫는 일이 없다.
+        t.join(timeout=JOIN_TIMEOUT_S)
+        if t.is_alive():
+            logger.warning(f"{symbol} 소켓 스레드가 {JOIN_TIMEOUT_S:.0f}초 안에 끝나지 않았다 — 일부 수신이 유실될 수 있다")
         writer.flush()
         writer.close()
         logger.info(f"{symbol} 기록 종료 — {dict(writer.counts)}")
@@ -1282,6 +1305,22 @@ def main() -> int:
     # 처음 본 심볼이 아직 TRADING이 아니면 여기서 대기시킨다.
     pending: dict[str, float] = {}
     recorders: list[threading.Thread] = []
+    #: 이 프로세스가 이미 기록을 시작한 심볼. 같은 심볼에 두 번째 스레드가 뜨면
+    #: 두 RotatingWriter가 같은 .jsonl.gz에 각자 버퍼로 append해 gzip 멤버가
+    #: 엇갈리고 파일이 깨진다. 마지막 방어선이다.
+    recording: set[str] = set()
+
+    def remember(symbols: set[str]) -> None:
+        """본 심볼을 저장하되, 실패해도 감시를 멈추지 않는다.
+
+        `bootstrap`의 저장 실패는 기동을 막아야 하지만(중복 방지가 아예 성립하지
+        않으므로) 이벤트 감지 중의 실패는 다르다. 기록을 놓치는 것보다 중복 위험을
+        감수하는 편이 낫다 — 상장은 주당 1건뿐이고 놓치면 몇 주를 다시 기다린다.
+        """
+        try:
+            seen_store.save(symbols)
+        except OSError as e:
+            logger.error(f"본 심볼 저장 실패({e}) — 재시작 시 이 이벤트를 다시 기록할 수 있다")
 
     while not stop.is_set():
         try:
@@ -1309,9 +1348,17 @@ def main() -> int:
             if meta is None:
                 continue
             if meta.get("status") == "TRADING":
+                del pending[sym]
+                if sym in recording:
+                    continue  # 이미 기록 중 — 두 번째 스레드는 파일을 깨뜨린다
                 logger.info(f"▶ {sym} 거래 시작 — 기록 개시 ({args.days}일)")
                 events.add(sym, meta, time.time_ns())
-                seen_store.save(seen | {sym})
+                # `seen`을 제자리에서 갱신한 뒤 저장한다. `remember(seen | {sym})`처럼
+                # 사본을 넘기면 같은 주기에 두 심볼이 감지됐을 때 두 번째 저장이 첫 번째를
+                # 지운다 — 다음 폴링에서 첫 심볼이 신규로 재감지돼 기록 스레드가 하나 더 뜬다.
+                seen.add(sym)
+                remember(seen)
+                recording.add(sym)
                 t = threading.Thread(
                     target=record,
                     args=(sym, out_root, args.days * 86400, args.max_gb, stop),
@@ -1320,10 +1367,10 @@ def main() -> int:
                 )
                 t.start()
                 recorders.append(t)
-                del pending[sym]
             elif time.monotonic() - pending[sym] > PENDING_TIMEOUT_S:
                 logger.warning(f"{sym} 48시간 동안 TRADING이 되지 않았다 — 포기")
-                seen_store.save(seen | {sym})
+                seen.add(sym)
+                remember(seen)
                 del pending[sym]
 
         if args.once:
@@ -1352,8 +1399,12 @@ uv run python scripts/listing_probe.py --once
 ```
 ... | INFO    | 상장 감시 시작 — exchangeInfo 60초 폴링, 주문 없음
 ... | INFO    | 첫 실행 — 기존 859심볼을 등록하고 시작한다
-... | INFO    | 1회 확인 완료 — 대상 699개, 대기 0개
+... | INFO    | 1회 확인 완료 — 대상 651개, 대기 0개
 ```
+
+(`COIN`은 699개지만 `PERPETUAL`+`USDT` 조건이 48개를 더 걸러내 651개가 된다.
+심볼 수는 날짜에 따라 달라지므로 정확히 일치할 필요는 없다 — 전체보다 작고
+0이 아니면 된다.)
 
 `⚠ 처음 보는 underlyingType`이 뜨면 거래소가 분류를 추가한 것이니 `KNOWN_TYPES`를 갱신한다.
 
@@ -1389,7 +1440,8 @@ git commit -m "feat(listing): 상장 감시기 진입점 — 60초 폴링, 감�
 - Produces:
   - `ENTRY_WINDOW_H = (1.0, 24.0)`, `TARGET_NOTIONAL_USD = 24.0`
   - `PASS_BP = 25.0`, `EXTEND_BP = 50.0`, `MAX_UNFILLABLE_FRAC = 0.10`
-  - `read_depth_samples(symbol, socket_root, onboard_ms) -> list[tuple[float, float, bool]]` — `(hours_since_listing, half_spread_bp, filled)`
+  - `read_depth_samples(symbol, socket_root, onboard_ms, max_files=0) -> list[tuple[float, float, bool]]` — `(hours_since_listing, half_spread_bp, filled)`
+  - `read_bookticker_samples(symbol, socket_root, onboard_ms, max_files=0) -> list[tuple[float, float, bool]]` — 기존 58종목 대조용 (1레벨 호가창)
   - `hourly_profile(samples) -> list[dict]` — `{"hour", "n", "median_bp", "p25_bp", "p75_bp", "unfillable_frac"}`
   - `verdict(samples) -> dict` — `{"median_bp", "unfillable_frac", "n", "decision"}` (`decision` ∈ `"진행"`/`"재검토"`/`"종료"`/`"표본부족"`)
 
@@ -1448,6 +1500,32 @@ def test_unfillable_overrides_a_good_spread() -> None:
 
     assert v["unfillable_frac"] == pytest.approx(0.15)
     assert v["decision"] == "종료", "스프레드 1bp에 가려 체결 불가가 무시됐다"
+
+
+def test_unfillable_samples_do_not_sweeten_the_median() -> None:
+    """체결 불가 표본은 중앙값에 끼지 않는다.
+
+    부분 체결 표본의 bp는 부분 VWAP에서 나오므로 비용을 크게 과소평가한다 — 비싼 호가를
+    못 먹어서 평균 단가가 좋아 보일 뿐이다. 실측(2026-08-13): 얇은 호가에서 24달러 전체
+    체결이 91.8bp인 상황이 최우선 호가만으로는 1.0bp로 보고됐다. 그 값이 섞이면
+    "스프레드 좋음"이라는 낙관적 오판을 만든다.
+    """
+    # 체결불가 정확히 10% — 게이트(>10%)를 통과하므로 여기서 걸러지지 않는다.
+    # 체결 표본이 20bp/60bp로 갈려 있어, 오염 표본 20개가 중앙값 위치를 한 덩어리
+    # 아래로 밀어낸다. 균질한 표본으로는 재현되지 않는다 — 중앙값은 한쪽 꼬리의
+    # 10% 오염에 강건하므로, 분포가 갈려 있어야 차이가 드러난다.
+    samples = [(2.0, 1.0, False)] * 20 + [(2.0, 20.0, True)] * 85 + [(2.0, 60.0, True)] * 95
+    v = verdict(samples)
+
+    assert v["unfillable_frac"] == pytest.approx(0.10)
+    # 수정 전: 전체 200개의 중앙값 = 20.0bp → "진행"으로 오판했다.
+    assert v["median_bp"] == pytest.approx(60.0), "체결 불가 표본이 중앙값을 끌어내렸다"
+    assert v["decision"] == "종료", "낙관적 중앙값 때문에 '진행'으로 오판했다"
+
+
+def test_nothing_fillable_in_window_is_not_a_pass() -> None:
+    """창 안에서 한 번도 못 채웠으면 스프레드 값과 무관하게 종료다."""
+    assert verdict([(2.0, 1.0, False)] * 200)["decision"] == "종료"
 
 
 def test_only_entry_window_counts() -> None:
@@ -1646,11 +1724,20 @@ def verdict(samples: list[Sample]) -> dict:
     if n < MIN_SAMPLES:
         return {"n": n, "median_bp": float("nan"), "unfillable_frac": float("nan"), "decision": "표본부족"}
 
-    median_bp = float(np.median([b for _, b, _ in window]))
+    # **체결된 표본만으로 중앙값을 낸다.** 체결 불가 표본의 bp는 부분 VWAP에서 나오므로
+    # 비용을 크게 과소평가한다 — 비싼 호가를 못 먹어서 평균 단가가 좋아 보일 뿐이다.
+    # 실측(2026-08-13): 얇은 호가에서 전체 체결 91.8bp인 상황이 최우선 호가만으로는
+    # 1.0bp로 보고됐다(90배). 그 값이 섞이면 판정이 낙관적으로 기운다.
+    # 따라서 중앙값은 "체결 가능할 때의 비용", 별도로 unfillable은 "얼마나 자주 불가능한가"를
+    # 말한다. 두 숫자가 각자 하나씩을 말하게 둔다.
+    filled_bps = [b for _, b, f in window if f]
+    median_bp = float(np.median(filled_bps)) if filled_bps else float("nan")
     unfillable = float(np.mean([not f for _, _, f in window]))
 
     if unfillable > MAX_UNFILLABLE_FRAC:
         decision = "종료"  # 스프레드와 무관하다 — 체결이 안 되면 전략이 성립하지 않는다
+    elif not filled_bps:
+        decision = "종료"  # 창 안에서 한 번도 못 채웠다
     elif median_bp <= PASS_BP:
         decision = "진행"
     elif median_bp <= EXTEND_BP:
