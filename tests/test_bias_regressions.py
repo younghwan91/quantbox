@@ -15,6 +15,7 @@ from __future__ import annotations
 import pathlib
 
 import numpy as np
+import pytest
 
 from quantbox.backtest.sim_core import KIND_ACTIVE, sim_drive
 
