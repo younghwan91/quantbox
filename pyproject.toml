@@ -29,6 +29,12 @@ build-backend = "setuptools.build_meta"
 include = ["quantbox*"]
 
 [tool.pytest.ini_options]
+# 수집 범위를 tests/ 로 못박는다. 이게 없으면 pytest 가 저장소 전체를 훑으면서
+# 이름이 `*_test.py` 인 **리서치 스크립트**까지 테스트로 수집한다 — 실제로
+# research/active/r47_r50/r47_exit_ab_test.py 가 S_d8 제거(9a83ebf)로 사라진
+# `COST_STRADDLE` 을 import 해서 매 실행 수집 에러를 냈다. 리서치 스크립트는
+# 임포트 시점에 무거운 일을 하기도 하므로 애초에 수집 대상이 아니다.
+testpaths = ["tests"]
 markers = [
     "slow: marks tests that run full backtests with real data (deselect with '-m \"not slow\"')",
 ]
