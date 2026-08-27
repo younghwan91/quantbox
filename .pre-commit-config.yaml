@@ -56,3 +56,10 @@ repos:
         files: ^quantbox/.*\.py$
         pass_filenames: true
         stages: [pre-commit]
+
+      - id: secret-guard
+        name: secret guard
+        entry: uv run python scripts/check_secrets.py
+        language: system
+        pass_filenames: true
+        stages: [pre-commit]
