@@ -34,7 +34,7 @@ SECRET_KEYS = (
 )
 
 #: 이 중 하나라도 값에 들어 있으면 실제 시크릿이 아니라 예시로 본다.
-PLACEHOLDERS = ("your_", "_here", "xxx", "<", "redacted", "example", "changeme", "dummy")
+PLACEHOLDERS = ("your_", "_here", "xxx", "<", "redacted", "example", "changeme", "dummy", "...")
 
 PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("환경변수에 실값이 붙었다", re.compile(rf"\b({'|'.join(SECRET_KEYS)})\s*=\s*[\"']?([^\s\"']{{20,}})")),
@@ -50,6 +50,42 @@ FORBIDDEN_FILES = re.compile(r"(^|/)\.env(\.|$)|(^|/)[^/]*\.env$|(^|/)secrets\.j
 def _is_placeholder(value: str) -> bool:
     low = value.lower()
     return any(p in low for p in PLACEHOLDERS)
+
+
+def scan_text(path: str, content: str) -> list[str]:
+    """한 파일의 내용에서 시크릿 후보를 찾는다 — 가드와 감사가 공유하는 유일 판정기."""
+    found: list[str] = []
+    for label, pat in PATTERNS:
+        for m in pat.finditer(content):
+            value = m.group(2) if m.re.groups >= 2 else m.group(0)
+            if _is_placeholder(value):
+                continue
+            line = content[: m.start()].count("\n") + 1
+            found.append(f"{path}:{line}: {label}")
+    return found
+
+
+def scan_rev(rev: str) -> list[str]:
+    """git rev의 트리 전체를 훑는다 — 공개 직전 감사용.
+
+    스테이징이 아니라 **커밋된 트리**를 보므로, 공개하려는 브랜치가 실제로 깨끗한지
+    확인할 수 있다. 판정은 `scan_text` 하나만 쓴다(가드와 갈라지면 감사가 무의미하다).
+    """
+    names = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", rev], capture_output=True, text=True, check=False
+    ).stdout.splitlines()
+    out: list[str] = []
+    for path in names:
+        if not path.strip():
+            continue
+        blob = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True, text=True, errors="ignore")
+        if blob.returncode:
+            continue
+        if FORBIDDEN_FILES.search(path) and not path.endswith(".env.example"):
+            out.append(f"{path}: 시크릿 파일이 트리에 있다")
+            continue
+        out.extend(scan_text(path, blob.stdout))
+    return out
 
 
 def _staged_files() -> list[str]:
@@ -68,6 +104,17 @@ def _staged_content(path: str) -> str:
 
 
 def main(argv: list[str]) -> int:
+    # `--rev <ref>`: 커밋된 트리 전체 감사 (공개 직전 확인용).
+    if len(argv) >= 3 and argv[1] == "--rev":
+        violations = scan_rev(argv[2])
+        if violations:
+            print(f"🔴 {argv[2]} 트리에서 시크릿 후보 {len(violations)}건:\n", file=sys.stderr)
+            for v in violations:
+                print(f"  {v}", file=sys.stderr)
+            return 1
+        print(f"✅ {argv[2]} 트리 깨끗 — 시크릿 후보 0건")
+        return 0
+
     files = argv[1:] or _staged_files()
     violations: list[str] = []
 
@@ -81,13 +128,7 @@ def main(argv: list[str]) -> int:
         content = _staged_content(path)
         if not content:
             continue
-        for label, pat in PATTERNS:
-            for m in pat.finditer(content):
-                value = m.group(2) if m.re.groups >= 2 else m.group(0)
-                if _is_placeholder(value):
-                    continue
-                line = content[: m.start()].count("\n") + 1
-                violations.append(f"{path}:{line}: {label}")
+        violations.extend(scan_text(path, content))
 
     if violations:
         print("🔴 시크릿으로 보이는 내용이 스테이징됐다 — 커밋을 막는다:\n", file=sys.stderr)
