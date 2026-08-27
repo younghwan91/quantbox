@@ -63,8 +63,7 @@
 
 - [ ] **디스코드 봇 토큰 리셋** (최우선 — IP 제한 없음, 봇 전체 탈취 가능).
       developers.discord.com → Applications → Bot → Reset Token. 웹 콘솔 전용.
-- [ ] **디스코드 웹훅 삭제** — 웹훅 URL에 HTTP `DELETE`로 **프로그램적으로 가능**하다.
-      서버 설정 → 연동 → 웹훅에서도 삭제 가능.
+- [x] ~~**디스코드 웹훅 삭제**~~ — **2026-08-27 폐기 완료** (HTTP DELETE → 204, 재조회 404).
 - [ ] **바이낸스 키 삭제 후 재발급** — 출금 차단 + IP 제한이라 긴급도는 위 둘보다 낮다.
       API 관리 웹 콘솔 전용(2FA 필요, API로 자기 키 삭제 불가).
 - [ ] 새 값을 로컬 `.env`에만 기록 (추적되지 않음)
@@ -90,10 +89,25 @@ git push public public/clean:main
 히스토리를 살리고 싶다면 `git filter-repo --path .env --invert-paths` 경로로 가되
 위 한계를 감수한다.
 
-### 3. 공개 직전 재확인
+### 3. 공개 직전 재확인 — 명령 두 개로 판정된다
 
-- [ ] `uv run python scripts/check_secrets.py --rev <공개할 ref>` → 0건
-- [ ] 키가 실제로 폐기됐는지 확인 (구 키로 API 호출 시 실패해야 정상)
+```bash
+uv run python scripts/check_secrets.py --rev public/clean   # 트리에 시크릿이 없는가
+uv run python scripts/check_credentials.py                  # 유출된 값이 죽었는가
+```
+
+둘 다 exit 0이면 공개 전환의 기술적 조건은 충족이다.
+
+`check_credentials.py`는 `.env`(현재 값)가 아니라 **유출 커밋에서 직접 뽑은 값**을
+검사한다. 회전 후 `.env`에는 새 값이 들어가므로 현재 값을 보면 "옛 키가 죽었는지"를
+영영 확인할 수 없기 때문이다. 값은 출력하지 않는다.
+
+2026-08-27 기준 실행 결과:
+```
+  🔴 Discord 봇 토큰       아직 살아 있다 — 폐기 필요
+  ✅ Discord 웹훅         폐기 확인
+  🔴 바이낸스 API 키         아직 살아 있다 — 폐기 필요
+```
 
 ## 재발 방지 (적용됨)
 
