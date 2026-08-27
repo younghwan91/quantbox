@@ -151,8 +151,10 @@ def test_sim_returns_directions_aligned_with_trades() -> None:
     from quantbox.research.harness import MarketData
 
     md = MarketData.load(["BTCUSDT"])
-    trades_only = run_ma_cluster_live(md.data)
-    trades, dirs = run_ma_cluster_live(md.data, return_directions=True)
+    # r122로 프로덕션 기본값이 숏 전용이 됐다(`ma_cluster_long_enabled=False`). 이 테스트가
+    # 지키려는 건 방향 배선이지 프로덕션 방향 정책이 아니므로, 롱을 명시적으로 켜고 본다.
+    trades_only = run_ma_cluster_live(md.data, long_enabled=True)
+    trades, dirs = run_ma_cluster_live(md.data, return_directions=True, long_enabled=True)
 
     assert trades == trades_only, "반환 형태가 트레이드 자체를 바꿨다"
     assert len(dirs) == len(trades)

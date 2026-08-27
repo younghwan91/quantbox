@@ -22,6 +22,7 @@ import logging
 
 import numpy as np
 
+from quantbox.core.strategy_names import MA_CLUSTER
 from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
 logger = logging.getLogger("Scalper")
@@ -79,6 +80,26 @@ class RiskGuard:
             return True
         btc_cur = float(btc_close[-1])
         return btc_cur >= btc_ma
+
+    # ── r122: 전략별 방향 게이트 ───────────────────────────────────────────
+
+    def allow_strategy_direction(self, strategy_type: str | None, signal: int) -> tuple[bool, str]:
+        """전략이 그 방향으로 진입해도 되는지.
+
+        현재 규칙은 하나다 — `ma_cluster` 롱. 6.58년 측정에서 이 다리는 '무조건 롱'과
+        구별되지 않았다(초과 EV ~1bp). 숏에는 실제 타이밍 정보가 있으므로 건드리지 않는다.
+        (docs/backtest_results/202608/20260827_b3906aa_r122_long_short_split.md)
+
+        Args:
+            strategy_type: 정규화된 전략명. None이면 게이트 대상이 아니다.
+            signal: +1 롱 / -1 숏 / 2 스트래들(방향 중립).
+
+        Returns:
+            (허용 여부, 차단 사유). 허용이면 사유는 빈 문자열.
+        """
+        if signal == 1 and strategy_type == MA_CLUSTER and not self.cfg.ma_cluster_long_enabled:
+            return False, "ma_cluster_long_disabled (r122: 롱은 타이밍 정보 없음)"
+        return True, ""
 
     # ── Direction diversity filter ────────────────────────────────────────
 

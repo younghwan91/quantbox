@@ -15,9 +15,18 @@
 여기서는 심볼별 **시간당 펀딩 비용률**을 실측에서 직접 얻는다. 총 지불액을 총 시간으로
 나누므로 정산 주기가 몇 시간이든 자동으로 반영된다 — 주기를 따로 알 필요가 없다.
 
-**부호 정책**: 절대값의 합을 쓴다. 즉 "항상 내는 쪽"으로 가정한다. 기존 모델도 항상
-차감했으므로 보수성이 유지되고, 방향을 아는 경우의 수취(숏이 유리한 국면 등)는
-반영하지 않는다 — 방향 인지 펀딩은 별도 작업이다.
+**부호 정책**: 기본은 절대값의 합이다. 즉 "항상 내는 쪽"으로 가정한다. 기존 모델도 항상
+차감했으므로 보수성이 유지된다.
+
+2026-08-27 실측(34심볼 캐시): 시간당 |v| 평균 2.39e-5 vs 부호 있는 평균 7.34e-6.
+20시간 보유로 환산하면 **양방향 모두에게 4.78bp를 물리지만**, 실제로는 롱이 1.47bp를
+내고 숏이 1.47bp를 **받는다**(부호 있는 값이 양수인 심볼이 85.3%). 즉 이 근사는 한쪽을
+편드는 게 아니라 양쪽을 과대 청구하며, 방향 간 상대 격차는 20시간당 약 2.9bp다.
+
+`direction_aware=True`로 부르면 부호 있는 실측을 써서 롱은 지불, 숏은 수취로 계산한다.
+**기본값은 False다** — 비용 가정 완화는 프로젝트 정책상 명시적 선택이어야 하기 때문이다
+(config `funding_direction_aware`). 켜면 백테스트가 낙관적으로 바뀐다는 뜻이므로,
+라이브 실측으로 검증하기 전에는 끄고 쓴다.
 
 데이터가 없는 심볼은 config 상수로 폴백한다. 현재 캐시는 34심볼뿐이다.
 """
@@ -69,6 +78,39 @@ def _rate_table() -> dict[str, float]:
     return table
 
 
+@lru_cache(maxsize=1)
+def _signed_rate_table() -> dict[str, float]:
+    """{symbol: 시간당 **부호 있는** 펀딩률}. 양수 = 롱이 내고 숏이 받는다.
+
+    `_rate_table`과 같은 소스·같은 환산이고 `np.abs`만 없다.
+    """
+    table: dict[str, float] = {}
+    for path in glob.glob(os.path.join(_repo_root(), CACHE_GLOB)):
+        sym = os.path.basename(path).split("_")[0]
+        try:
+            npz = np.load(path, allow_pickle=False)
+            ts, val = npz["timestamps"], npz["values"]
+        except Exception:
+            continue
+        if len(val) < MIN_SETTLEMENTS:
+            continue
+        hours = (float(ts[-1]) - float(ts[0])) / 3_600_000.0
+        if hours <= 0:
+            continue
+        table[sym] = float(np.sum(val)) / hours
+    return table
+
+
+def signed_funding_rate_per_hour(symbol: str, fallback_8h: float) -> float:
+    """심볼의 시간당 부호 있는 펀딩률. 실측이 없으면 상수를 8로 나눠 폴백한다.
+
+    폴백은 부호를 모르므로 양수(롱이 내는 쪽)로 둔다 — 기존 상수 모델의 가정과 같다.
+    """
+    if fallback_8h <= 0:
+        return 0.0
+    return _signed_rate_table().get(symbol, fallback_8h / 8.0)
+
+
 def funding_rate_per_hour(symbol: str, fallback_8h: float) -> float:
     """심볼의 시간당 펀딩 비용률. 실측이 없으면 상수를 8로 나눠 폴백한다.
 
@@ -88,20 +130,34 @@ def funding_rate_per_hour(symbol: str, fallback_8h: float) -> float:
     return _rate_table().get(symbol, fallback_8h / 8.0)
 
 
-def funding_cost(symbol: str, hold_bars_15m: float, fallback_8h: float) -> float:
+def funding_cost(
+    symbol: str,
+    hold_bars_15m: float,
+    fallback_8h: float,
+    *,
+    direction: int = 0,
+    direction_aware: bool = False,
+) -> float:
     """보유 기간 동안의 펀딩 비용 (명목가 대비 비율).
 
     Args:
         symbol: API 심볼.
         hold_bars_15m: 보유 기간 (15m 봉 수).
         fallback_8h: 실측이 없을 때 쓸 8시간당 비율.
+        direction: +1 롱 / -1 숏. `direction_aware=False`면 무시된다.
+        direction_aware: True면 부호 있는 실측을 써서 롱은 지불, 숏은 수취로 계산한다.
+            기본 False — 비용 완화는 명시적 선택이어야 한다(모듈 docstring 참조).
 
     Returns:
-        차감할 비용. 항상 0 이상이다.
+        차감할 값. 기본 모드에서는 항상 0 이상이고, `direction_aware=True`인 숏에서는
+        음수가 될 수 있다(= 수취).
     """
     if hold_bars_15m <= 0 or fallback_8h <= 0:
         return 0.0
-    return funding_rate_per_hour(symbol, fallback_8h) * hold_bars_15m * HOURS_PER_15M_BAR
+    hours = hold_bars_15m * HOURS_PER_15M_BAR
+    if direction_aware and direction != 0:
+        return signed_funding_rate_per_hour(symbol, fallback_8h) * hours * (1 if direction > 0 else -1)
+    return funding_rate_per_hour(symbol, fallback_8h) * hours
 
 
 def coverage() -> tuple[int, float]:

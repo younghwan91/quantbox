@@ -118,6 +118,10 @@ from quantbox.utils.diagnostics import _diag_logger  # noqa: E402
 # ──────────────────────── Scalper Class ────────────────────────────────
 
 
+#: 원금 캡 초과 알림 재전송 간격 — 15m 사이클마다 쏘면 알림이 무의미해진다.
+_EQUITY_CAP_ALERT_COOLDOWN_S = 6 * 3600
+
+
 class RubberBandScalper(
     LoopMixin,
     DataMixin,
@@ -203,6 +207,8 @@ class RubberBandScalper(
 
         # Paper trading state
         self._paper_balance = settings.paper_balance
+        #: 원금 캡 초과 알림 마지막 전송 시각 (monotonic). 0 = 아직 안 보냄.
+        self._last_equity_cap_alert = 0.0
 
         # Risk tracking
         self._initial_balance: float = 0.0
@@ -309,6 +315,38 @@ class RubberBandScalper(
         if self._cycle_balance is None:
             self._cycle_balance = self.get_balance()
         return self._cycle_balance
+
+    def _sizing_balance(self, balance: float) -> float:
+        """진입 사이징에 쓸 잔고 — `equity_cap_usdt` 상한을 적용한다.
+
+        캡을 넘은 잔고는 계좌에 남아 있어도 포지션 크기에 반영하지 않는다. 넘은 만큼을
+        디스코드로 알려 사람이 출금하게 한다(봇은 출금 권한을 갖지 않는다).
+
+        ⚠️ **사이징 전용이다.** 드로다운·HWM 계산에는 실제 잔고를 써야 한다 — 캡 잔고로
+        DD를 재면 손실률이 과소평가된다.
+
+        Args:
+            balance: 거래소에서 조회한 실제 USDT 잔고.
+
+        Returns:
+            캡이 0이면 `balance` 그대로, 아니면 `min(balance, cap)`.
+        """
+        cap = self.vs_config.equity_cap_usdt if self.vs_config else 0.0
+        if cap <= 0 or balance <= cap:
+            return balance
+
+        excess = balance - cap
+        logger.info(f"Equity cap: 잔고 ${balance:.2f} > 캡 ${cap:.2f} — 사이징은 ${cap:.2f} 기준 (초과 ${excess:.2f})")
+        # 쿨다운은 여기서 직접 센다 — 알림 채널의 내부 구현(private)에 기대지 않는다.
+        now = time.monotonic()
+        if now - self._last_equity_cap_alert >= _EQUITY_CAP_ALERT_COOLDOWN_S:
+            self._last_equity_cap_alert = now
+            self.discord.notify_warning(
+                "원금 캡 초과 — 출금 권장",
+                f"잔고 ${balance:.2f}가 캡 ${cap:.2f}를 ${excess:.2f} 초과했습니다.\n"
+                f"사이징은 캡 기준으로 제한됩니다. 초과분 ${excess:.2f}를 현물/USDT로 출금하세요.",
+            )
+        return cap
 
     def _check_risk_limits(self, balance: float) -> bool:
         """Check session drawdown limit.
@@ -991,7 +1029,10 @@ class RubberBandScalper(
 
         btc_close, btc_close_4h = self._sync_exchange()
         self._manage_active_positions()
-        self._scan_entry_opportunities(symbols, btc_close, balance, btc_close_4h, risk_blocked=risk_blocked)
+        # 원금 캡: 진입 사이징만 상한을 받는다. DD/HWM은 위에서 실제 잔고로 이미 처리됐다.
+        self._scan_entry_opportunities(
+            symbols, btc_close, self._sizing_balance(balance), btc_close_4h, risk_blocked=risk_blocked
+        )
         self._cycle_housekeeping(balance)
 
     def _scan_entries(
@@ -1076,6 +1117,16 @@ class RubberBandScalper(
                     logger.info(
                         f"[{sym}] MA 4h gate LONG suppressed: BTC 4h ${btc_4h_cur:.1f} < MA{period} ${btc_4h_ma:.1f}"
                     )
+                    signal = 0
+
+            # r122: ma_cluster 롱 차단 — 백테스트(run_ma_cluster_live)와 **같은 config
+            # 필드**를 읽는 단일 판정기. 6.58년 측정에서 이 다리는 '무조건 롱'과 구별되지
+            # 않았다(초과 EV ~1bp). BTC 게이트 뒤에 두어 로그가 중복되지 않게 한다.
+            if signal != 0 and self.vs_config:
+                _strat = getattr(self.strategy, "_last_signal_source", {}).get(sym)
+                _dir_ok, _dir_reason = self._risk_guard.allow_strategy_direction(_strat, signal)
+                if not _dir_ok:
+                    logger.info(f"[{sym}] {_dir_reason} — 진입 차단")
                     signal = 0
 
             # Donchian 4h BTC gate — block Donchian LONGs during BTC downtrends

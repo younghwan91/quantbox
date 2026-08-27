@@ -112,6 +112,15 @@ class VolStraddleConfig(BaseSettings):
     # ── Risk Management ──
     max_concurrent: int = 10  # 10 slots (VR L/N=30/10=3.0, MA L/N=21/10=2.1)
     max_drawdown_pct: float = 0.25  # 25% session drawdown → halt (2026-04-19: raised 15→25% for quarter-Kelly risk=6%/trade; allows ~4 SL before halt)
+    # 2026-08-27: 원금 캡핑. 선물 계좌 잔고가 이 값을 넘으면 **초과분은 사이징에서
+    # 제외한다** — 계좌에 남아 있어도 포지션을 그만큼 키우지 않는다. 초과분은 디스코드로
+    # 알리고 사람이 현물/USDT로 뺀다(출금 권한을 API 키에 주는 게 더 큰 위험이라 봇이
+    # 직접 출금하지 않는다).
+    # 근거: 실전 트레이더들의 공통 자금관리 규칙 — 복리로 노출을 키우면 단일 청산 사건의
+    # 절대 손실이 같이 커진다. 전략 성과와 무관하게 작동하는 유일한 안전장치다.
+    # 0 = 비활성(기존 동작과 동일).
+    equity_cap_usdt: float = Field(default=0.0, ge=0.0)
+
     max_exposure_multiplier: float = (
         35.0  # Max total open notional / balance. 35x = 17% above 10×30x/10=30x theoretical max
     )
@@ -138,6 +147,13 @@ class VolStraddleConfig(BaseSettings):
     # Default is conservative average from 2024-2025 BTC/altcoin funding data.
     # Set to 0.0 to disable funding in backtest (legacy behavior).
     default_funding_rate_8h: float = 0.0001  # 0.01% per 8h (on notional)
+    # 2026-08-27: 펀딩 부호. 기본 모델은 |펀딩|의 평균을 양방향 모두에게 물린다 —
+    # 실측(34심볼)으로는 20h 보유 기준 4.78bp를 양쪽에 물리지만, 실제로는 롱이 1.47bp를
+    # 내고 숏이 1.47bp를 받는다(부호 있는 평균이 양수인 심볼 85.3%). 즉 한쪽 편들기가
+    # 아니라 **양쪽 과대 청구**이고, 방향 간 상대 격차는 20h당 약 2.9bp다.
+    # True로 켜면 부호 있는 실측을 쓴다 = 백테스트가 낙관적으로 바뀐다. 그래서 기본은
+    # False다 — 비용 가정 완화는 라이브 실측 검증 후에만 한다.
+    funding_direction_aware: bool = False
 
     # ── Direction Diversity ──
     dir_diversity_enabled: bool = True
@@ -339,6 +355,16 @@ class VolStraddleConfig(BaseSettings):
     # r92: 4h BTC trend gate for MA cluster LONGs — prevents entries during multi-day BTC downtrends.
     # Root cause of March 2026 live failure: G6 used 15m MA50 (12.5h), too short for 4h strategy.
     # 4h MA50 = 50 bars × 4h = 200h ≈ 8.3 days — matches MA cluster's strategic timeframe.
+    # r122 (2026-08-27): ma_cluster 롱 차단. 6.58년/760심볼 측정에서 롱은 **타이밍 정보가
+    # 없다** — 같은 심볼·같은 보유기간(20h)·같은 비용의 '무조건 롱' 대비 초과 EV가 ~1bp다.
+    # 연도별로도 2024 −23.7bp(t=−2.24) / 2025 −19.8bp(t=−1.74) / 2026 −4.2bp로 3년 연속 음수.
+    # BTC 게이트(4h MA50 + G6)를 다 걸어도 부호가 안 바뀐다(게이트 후 −7.5bp).
+    # 반면 숏은 무조건 숏 대비 초과 +38.6bp(Welch t=6.82) — 드리프트가 아니라 신호다.
+    # 단일 숫자 최적화가 아니라 '정보 없는 다리'를 떼는 변경이다.
+    # (ref: docs/backtest_results/202608/20260827_b3906aa_r122_long_short_split.md)
+    # 라이브는 risk_guard.allow_strategy_direction, 백테스트는 run_ma_cluster*/collect_*가
+    # **같은 이 필드**를 읽는다 — 한쪽만 막히면 파리티가 깨지므로 분기점을 하나로 둔다.
+    ma_cluster_long_enabled: bool = False
     ma_cluster_btc_gate_enabled: bool = True  # Block MA cluster LONGs when BTC below 4h MA50
     ma_cluster_btc_ma_period_4h: int = 50  # 50 × 4h = 200h ≈ 8.3 days
     # r115: CW conviction sizing — reduces MaxDD 14.1%→10.1% with ~flat PF

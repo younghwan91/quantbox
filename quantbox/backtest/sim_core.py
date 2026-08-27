@@ -455,6 +455,12 @@ def run_ma_cluster(
     It defaults to **off** here because this function's contract is bit-parity
     with the monolith; the live-faithful path (:func:`run_ma_cluster_live`)
     applies it by default instead.
+
+    ⚠️ **r122 롱 차단(`ma_cluster_long_enabled`)이 여기에는 걸리지 않는다.** 이 함수의
+    유일한 계약은 legacy ``collect_ma_cluster_trades``와의 bit-parity이고, 그쪽은
+    방향을 반환하지 않아 같은 필터를 걸 수 없다(tests/test_sim_core_parity.py가 등가를
+    검증한다). 프로덕션 의미가 필요하면 :func:`run_ma_cluster_live`를 써라 — 그쪽은
+    라이브와 같은 config 필드를 읽는다.
     """
     from quantbox.backtest.trade_sim import build_resampled, get_trade_sim_config
     from quantbox.strategy.vol_straddle.config import VolStraddleConfig
@@ -680,6 +686,7 @@ def run_ma_cluster_live(
     return_directions: bool = False,
     trail_peak_lag: int = 0,
     funding: bool = True,
+    long_enabled: bool | None = None,
 ) -> list[tuple[str, int, int, float]] | tuple[list[tuple[str, int, int, float]], list[int]]:
     """MA-cluster trades using the **live** entry rule (``check_ma_cluster``).
 
@@ -725,6 +732,8 @@ def run_ma_cluster_live(
     _cost = cost if cost is not None else cfg.round_trip_cost
     WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
     _fund = cfg.default_funding_rate_8h if funding else 0.0
+    # r122: 롱 차단. 라이브 risk_guard.allow_strategy_direction과 **같은 필드**를 읽는다.
+    _long_ok = cfg.ma_cluster_long_enabled if long_enabled is None else long_enabled
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)
@@ -759,6 +768,8 @@ def run_ma_cluster_live(
             _min_momentum,
             WARMUP_4h,
         )
+        if not _long_ok:
+            entry_ok = entry_ok & (direction != 1)
 
         bar_kind: np.ndarray = np.full(len(c), KIND_ACTIVE, dtype=np.int8)
         p, e, x, dr, _rsn = sim_drive(
@@ -788,7 +799,9 @@ def run_ma_cluster_live(
             # 보유 기간은 종가→종가다. entry_bar는 봉 **시작**을 가리키므로 쓰면 안 된다
             # (15봉 과대 계산 → fine-exits 경로와 어긋난다).
             _hold_15m = (int(x[kk]) - int(e[kk])) * ratio
-            trade_pnl = float(p[kk]) - funding_cost(sym, _hold_15m, _fund)
+            trade_pnl = float(p[kk]) - funding_cost(
+                sym, _hold_15m, _fund, direction=int(dr[kk]), direction_aware=cfg.funding_direction_aware
+            )
             if cw_sizing:
                 trade_pnl *= _cw_mult_at(d, sma20, sma50, sma100, sma200, mom, cfg, int(e[kk]))
             all_trades.append((sym, entry_bar, exit_bar, trade_pnl))
@@ -834,6 +847,7 @@ def run_ma_cluster_live_fine_exits(
     exit_ratio: int = 1,
     return_reasons: bool = False,
     funding: bool = True,
+    long_enabled: bool | None = None,
 ) -> (
     list[tuple[str, int, int, float]]
     | tuple[list[tuple[str, int, int, float]], list[int]]
@@ -904,6 +918,8 @@ def run_ma_cluster_live_fine_exits(
     _cost = cost if cost is not None else cfg.round_trip_cost
     WARMUP_4h = get_trade_sim_config()["tf_4h"][2]
     _fund = cfg.default_funding_rate_8h if funding else 0.0
+    # r122: 롱 차단. 라이브 risk_guard.allow_strategy_direction과 **같은 필드**를 읽는다.
+    _long_ok = cfg.ma_cluster_long_enabled if long_enabled is None else long_enabled
 
     if data_4h is None:
         data_4h = build_resampled(data_15m, ratio)
@@ -941,6 +957,8 @@ def run_ma_cluster_live_fine_exits(
             _min_momentum,
             WARMUP_4h,
         )
+        if not _long_ok:
+            entry_ok_4h = entry_ok_4h & (direction_4h != 1)
 
         dx = data_exit.get(sym)
         if dx is None:
@@ -982,7 +1000,9 @@ def run_ma_cluster_live_fine_exits(
             ex = int(e[kk])
             _hold_15m = (int(x[kk]) - ex) * exit_ratio
             # 펀딩은 명목가 대비이므로 CW 배수 **전에** 뺀다.
-            trade_pnl = float(p[kk]) - funding_cost(sym, _hold_15m, _fund)
+            trade_pnl = float(p[kk]) - funding_cost(
+                sym, _hold_15m, _fund, direction=int(dr[kk]), direction_aware=cfg.funding_direction_aware
+            )
             if cw_sizing:
                 # CW는 진입한 4h 봉의 상태로 판정한다 — 라이브와 같은 시점.
                 trade_pnl *= _cw_mult_at(d4, sma20, sma50, sma100, sma200, mom, cfg, (ex + 1) // per_entry - 1)
