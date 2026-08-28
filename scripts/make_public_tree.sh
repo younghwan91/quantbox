@@ -26,11 +26,36 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
+# 작성자 신원 게이트 — 회사/조직 이메일이 공개본에 실리면 안 된다.
+# 2026-08-28: 다른 세션이 `git -c user.email=<회사주소>`로 커밋해 회사 계정이 author로
+# 박혔고, cherry-pick이 그걸 승계했다. 레포 설정은 개인 이메일이었는데도 그랬다.
+# 사용자에게는 고용 관련 위험이 걸린 항목이라, 사람의 기억이 아니라 게이트로 막는다.
+# 차단할 도메인은 환경변수로 넘길 수 있다 (기본: 개인 도메인이 아닌 모든 것을 훑지는
+# 않고, 알려진 회사 도메인만 본다).
+BLOCKED_EMAIL_PATTERN="${BLOCKED_EMAIL_PATTERN:-employer.example\.com}"
+BAD_AUTHORS=$(git log --format='%ae %ce' HEAD | tr ' ' '\n' | sort -u | grep -iE "$BLOCKED_EMAIL_PATTERN" || true)
+if [ -n "$BAD_AUTHORS" ]; then
+  echo "🔴 커밋 작성자/커미터에 차단 대상 이메일이 있다 — 공개 트리를 만들지 않는다:" >&2
+  echo "$BAD_AUTHORS" | sed 's/^/    /' >&2
+  echo "    해당 커밋: " >&2
+  git log --format='%h %ae %ce %s' HEAD | grep -iE "$BLOCKED_EMAIL_PATTERN" | sed 's/^/    /' >&2
+  exit 1
+fi
+
 SHA=$(git commit-tree "$(git rev-parse HEAD^{tree})" -m "$MSG")
 git branch -f "$BRANCH" "$SHA"
 
 echo "$BRANCH = $(git rev-parse --short "$BRANCH")  (HEAD $(git rev-parse --short HEAD) 스냅샷)"
 echo "  커밋 수: $(git rev-list --count "$BRANCH")  파일: $(git ls-tree -r --name-only "$BRANCH" | wc -l)"
+echo
+
+# 공개 트리 자체의 작성자도 확인한다 (commit-tree는 현재 git 설정을 쓴다).
+TREE_AUTHOR=$(git log -1 --format='%ae %ce' "$BRANCH")
+if echo "$TREE_AUTHOR" | grep -iqE "$BLOCKED_EMAIL_PATTERN"; then
+  echo "🔴 공개 트리 커밋 자체가 차단 이메일로 서명됐다: $TREE_AUTHOR" >&2
+  exit 1
+fi
+echo "작성자: $TREE_AUTHOR"
 echo
 
 uv run python scripts/check_secrets.py --rev "$BRANCH"
