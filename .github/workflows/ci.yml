@@ -25,9 +25,8 @@ jobs:
         run: uv sync --dev
 
       - name: Run tests with coverage
-        env:
-          BINANCE_API_KEY: ci_placeholder
-          BINANCE_API_SECRET: ci_placeholder
+        # 자격증명 자리표시자는 tests/conftest.py가 주입한다 — 훅·CI·수동 실행이
+        # 같은 조건이 되도록 한 곳에만 둔다. 여기 env를 되살리면 또 갈라진다.
         run: uv run pytest tests/ -m "not slow" -q --tb=short --cov=quantbox --cov-report=term-missing --cov-fail-under=75
 
       - name: Ruff format check

@@ -30,10 +30,28 @@ Avoid reimplementing scalper setup in every test file — use these fixtures ins
   L455-633 : rubberband bracket             ← rb_scalper reaches this
 """
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# ── 자격증명 자리표시자 — 테스트 환경의 유일 출처 ────────────────────────────────
+# `QuantBoxSettings`는 binance_api_key/secret을 필수로 요구한다. `.env`도 환경변수도
+# 없는 환경(= 신규 클론, pre-commit 훅)에서는 settings 생성이 ValidationError로 터지고
+# 135개 테스트가 실패한다. CI만 초록이었던 이유는 워크플로가 pytest 앞에 자리표시자를
+# 넣어줬기 때문이고, 같은 사실이 ci.yml과 여기 두 곳에 적혀 있으면 또 갈라진다.
+#
+# 그래서 주입을 여기 한 곳으로 모은다 — 훅·CI·수동 실행이 전부 같은 조건이 된다.
+# fixture가 아니라 모듈 최상단인 이유: fixture는 수집(import) 이후에 도는데, 테스트
+# 모듈이 import 시점에 settings를 만들면 이미 늦다. conftest는 수집 전에 import된다.
+#
+# `setdefault`이므로 이미 설정된 환경변수는 덮지 않는다. 다만 pydantic-settings에서
+# 환경변수는 `.env`보다 우선하므로, `.env`를 가진 개발자 환경에서도 테스트는 이
+# 자리표시자를 보게 된다 — 그게 의도다. 테스트가 개발자의 실제 키에 의존하면
+# "내 컴에선 되는데"가 양방향으로 생긴다. (전체 스위트 2512 passed로 동치 확인.)
+os.environ.setdefault("BINANCE_API_KEY", "test_placeholder")
+os.environ.setdefault("BINANCE_API_SECRET", "test_placeholder")
 
 
 @pytest.fixture(autouse=True)
