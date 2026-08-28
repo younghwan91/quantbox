@@ -73,7 +73,11 @@ def check_binance(key: str, secret: str) -> bool | None:
         return True
     except Exception as e:
         msg = str(e)
-        if any(code in msg for code in ("-2015", "-2014", "-1022", "Invalid API-key")):
+        # -2008 Invalid Api-Key ID = 키 자체가 존재하지 않는다(삭제됨).
+        # -2015 rejected IP/permissions, -2014 bad api-key fmt, -1022 bad signature.
+        # 2026-08-28: -2008이 목록에 없어 삭제된 키를 "판정 불가"로 보고했다.
+        # 검증기가 모르는 코드를 통과시키지 않는 건 옳지만, 아는 코드는 알아야 한다.
+        if any(code in msg for code in ("-2008", "-2015", "-2014", "-1022", "Invalid API-key")):
             return False
         return None
 
