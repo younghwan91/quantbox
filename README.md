@@ -2,6 +2,17 @@
 
 **바이낸스 USDT-M 선물 VR 스퀴즈 시스템 — Dual-Axis Squeeze (VR + MA Cluster)**
 
+> ## ⚠️ 면책 (Disclaimer)
+>
+> 이 저장소는 **교육·연구 목적**으로 공개된다. 투자 조언이 아니다.
+>
+> - 레버리지 선물 거래는 **원금 전액을 잃을 수 있고**, 손실이 입금액을 초과할 수 있다.
+> - 백테스트 성과는 시뮬레이션이며 미래 수익을 보장하지 않는다. 이 저장소의 리포트에는
+>   **엣지가 시간에 따라 소멸한 기록이 그대로 남아 있다** — 과거에 통했다는 것이
+>   지금 통한다는 뜻이 아니라는 실례다.
+> - 이 코드를 실행해 발생한 어떠한 손실에 대해서도 저자는 책임지지 않는다 (MIT, `LICENSE`).
+> - 실행 전 반드시 페이퍼 모드로 검증하고, 잃어도 되는 돈만 쓸 것.
+
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-v14.44.0-green.svg)]()
 [![Tests](https://img.shields.io/badge/tests-2482%20passed-brightgreen.svg)]()
@@ -278,3 +289,7 @@ uv run pytest tests/ -v
 ## ⚠️ 면책 조항
 
 이 소프트웨어는 교육 및 연구 목적으로만 사용해야 합니다. 암호화폐 거래는 상당한 손실 위험이 있습니다.
+
+## 📄 License
+
+MIT — 자세한 내용은 [`LICENSE`](LICENSE) 참조.
