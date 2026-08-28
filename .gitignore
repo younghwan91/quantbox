@@ -42,6 +42,13 @@ secrets.json
 /reports/
 /temp/
 devlog/.coverage
+
+# ── 커버리지 산출물 ──
+# 루트 .coverage가 추적돼 있었다 — 테스트를 돌릴 때마다 바뀌어서 워킹트리가 항상
+# 더럽고, 공개 트리 게이트(scripts/make_public_tree.sh)가 상시 거부됐다.
+.coverage
+.coverage.*
+htmlcov/
 .hypothesis/
 
 # OMC runtime state
