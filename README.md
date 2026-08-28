@@ -146,7 +146,13 @@ bash scripts/start_dashboard.sh stop
 bash scripts/start_dashboard.sh status
 ```
 
-접속: `http://localhost:8501` (같은 PC) 또는 `http://[PC_IP]:8501` (같은 네트워크)
+접속: `http://localhost:8501`
+
+> ⚠️ **대시보드에는 인증이 없다.** 실계좌 잔고·포지션·손익을 그대로 보여주므로 기본
+> 바인딩은 `127.0.0.1`(같은 PC 전용)이다. 다른 기기에서 봐야 한다면
+> `DASHBOARD_BIND=0.0.0.0 ./scripts/start_dashboard.sh start`로 명시적으로 열되,
+> 그 네트워크에 있는 누구나 인증 없이 계좌를 볼 수 있다는 뜻임을 알고 하라.
+> 공개망에 노출하지 말 것.
 
 - 30초마다 자동 새로고침
 - 현재 포지션, 잔고, 전략별 성과, 최근 트레이드 확인

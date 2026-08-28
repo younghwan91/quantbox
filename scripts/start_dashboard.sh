@@ -7,6 +7,12 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PID_FILE="$PROJECT_DIR/logs/dashboard.pid"
 LOG_FILE="$PROJECT_DIR/logs/dashboard.log"
 PORT=8501
+# 바인딩 주소 — 기본은 로컬호스트다.
+# 이 대시보드는 **인증이 없고** 실계좌 잔고·포지션·손익을 그대로 렌더링한다.
+# 0.0.0.0으로 열면 같은 네트워크(포트포워딩·터널이 걸려 있으면 그 너머)의 누구나
+# 인증 없이 계좌를 들여다본다. LAN 접속이 정말 필요하면 아래처럼 명시적으로 켜라:
+#     DASHBOARD_BIND=0.0.0.0 ./scripts/start_dashboard.sh start
+BIND="${DASHBOARD_BIND:-127.0.0.1}"
 
 start() {
     if [ -f "$PID_FILE" ]; then
@@ -23,7 +29,7 @@ start() {
     nohup uv run streamlit run scripts/dashboard.py \
         --server.port "$PORT" \
         --server.headless true \
-        --server.address 0.0.0.0 \
+        --server.address "$BIND" \
         > "$LOG_FILE" 2>&1 &
 
     DASHBOARD_PID=$!
@@ -32,7 +38,10 @@ start() {
 
     if [ -d "/proc/$DASHBOARD_PID" ]; then
         LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-        echo "✅ 대시보드 시작됨 (PID=$DASHBOARD_PID)"
+        echo "✅ 대시보드 시작됨 (PID=$DASHBOARD_PID, bind=$BIND)"
+        if [ "$BIND" != "127.0.0.1" ]; then
+            echo "⚠️  인증 없이 $BIND 로 열려 있다 — 계좌 정보가 네트워크에 노출된다"
+        fi
         echo "   → http://localhost:$PORT  (이 컴퓨터)"
         echo "   → http://$LOCAL_IP:$PORT  (같은 네트워크)"
     else
