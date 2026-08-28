@@ -36,6 +36,10 @@ logs/
 config.local.json
 secrets.json
 
+# ── 로컬 백업 (실 라이브 손익·crontab·tmux 스크롤백이 들어간다) ──
+# 미추적이었지만 무시되지도 않아 `git add -A` 한 번이면 발행됐다.
+.backup/
+
 # ── Misc local-only dirs ──
 /training_data/
 /saved_plots/
