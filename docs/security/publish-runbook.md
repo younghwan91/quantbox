@@ -105,14 +105,29 @@ git push public public/clean:main
 히스토리를 살리고 싶다면 `git filter-repo --path .env --invert-paths` 경로로 가되
 위 한계를 감수한다.
 
-### 3. 공개 직전 재확인 — 명령 두 개로 판정된다
+### 3. 공개 직전 — 명령 하나로 판정된다
 
 ```bash
-uv run python scripts/check_secrets.py --rev public/clean   # 트리에 시크릿이 없는가
-uv run python scripts/check_credentials.py                  # 유출된 값이 죽었는가
+scripts/make_public_tree.sh
 ```
 
-둘 다 exit 0이면 공개 전환의 기술적 조건은 충족이다.
+`public/clean`을 **현재 HEAD에서 재생성**하고, 트리 감사와 자격증명 감사를 이어서 돌린다.
+exit 0이면 공개 전환의 기술적 조건은 충족이다.
+
+⚠️ **`public/clean`은 브랜치를 따라가지 않는다.** HEAD 트리의 스냅샷이라 브랜치에
+커밋해도 자동 갱신되지 않는다. 실제로 낡은 트리를 "공개 준비 완료"로 판단할 뻔했다
+(conftest 수정 이전 트리였고, 이미 고친 pre-commit 결함이 그대로 나갈 뻔했다).
+그래서 재생성과 감사를 한 명령으로 묶었다 — 따로 두면 한쪽만 하게 된다.
+
+이 레포에서 반복된 실패 모양이 전부 같다: **같은 사실을 두 곳이 각자 들고 있다.**
+
+| 갈라진 두 곳 | 증상 |
+|---|---|
+| `ci.yml`의 `env:` ↔ pre-commit 훅 | 훅이 상시 빨강, CI만 초록 |
+| 브랜치 ↔ `public/clean` | 개선이 조용히 사라질 뻔 |
+| `origin/main` ↔ 작업 브랜치 | cherry-pick 필요 |
+
+앞 둘은 각각 conftest 단일화와 이 스크립트로 없앴다.
 
 `check_credentials.py`는 `.env`(현재 값)가 아니라 **유출 커밋에서 직접 뽑은 값**을
 검사한다. 회전 후 `.env`에는 새 값이 들어가므로 현재 값을 보면 "옛 키가 죽었는지"를
