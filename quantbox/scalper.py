@@ -181,11 +181,15 @@ class RubberBandScalper(
         # Execution engine
         self._chaser = LimitOrderChaser(
             client=self.client,
+            # Rule #6: 값은 전부 config에서 읽는다. 하드코딩 시절 initial_offset_ticks가
+            # 아예 전달되지 않아 dataclass 기본값 0으로 돌았고, config가 의도한
+            # "첫 주문 1틱 유리하게"(=1)는 프로덕션에서 한 번도 실행된 적이 없다.
             config=ChaseConfig(
-                max_chase_ticks=10,
-                chase_interval_seconds=1.0,
-                timeout_seconds=30.0,
-                fallback_to_market=True,
+                max_chase_ticks=self.vs_config.max_chase_ticks,
+                chase_interval_seconds=self.vs_config.chase_interval_seconds,
+                timeout_seconds=self.vs_config.timeout_seconds,
+                fallback_to_market=self.vs_config.fallback_to_market,
+                initial_offset_ticks=self.vs_config.initial_offset_ticks,
             ),
             paper_mode=self.paper_mode,
         )

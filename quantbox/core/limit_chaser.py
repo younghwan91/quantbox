@@ -55,7 +55,9 @@ class ChaseConfig:
     chase_interval_seconds: float = 1.0
     timeout_seconds: float = 30.0
     fallback_to_market: bool = True
-    initial_offset_ticks: int = 0
+    # VolStraddleConfig.initial_offset_ticks 와 같은 값이어야 한다 — 어긋나면
+    # 배선이 빠졌을 때 config가 의도한 동작과 다르게 돈다 (실제로 그랬다).
+    initial_offset_ticks: int = 1
 
 
 @dataclass
