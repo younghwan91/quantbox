@@ -21,6 +21,17 @@ from typing import Literal, NewType
 
 from typing import TypedDict
 
+# round_to_tick / to_api_symbol / ALGO_ORDER_DEAD_STATUSES used to be defined
+# here and duplicated (with drift) in the public quantbox-engine repo. Both
+# now delegate to binance-quant-engine, the OSS successor — this module keeps
+# re-exporting the same three names so every existing `from quantbox.core.types
+# import ...` call site is unaffected.
+from binance_quant_engine.execution.utils import (
+    ALGO_ORDER_DEAD_STATUSES as ALGO_ORDER_DEAD_STATUSES,
+    round_to_tick as round_to_tick,
+    to_api_symbol as to_api_symbol,
+)
+
 # ── Primitive domain types ────────────────────────────────────────────────────
 
 ApiSymbol = NewType("ApiSymbol", str)
@@ -57,50 +68,13 @@ SignalValue = Literal[-1, 0, 1]
 """
 
 
-# ── Order status constants ────────────────────────────────────────────────────
-
-ALGO_ORDER_DEAD_STATUSES: frozenset[str] = frozenset(
-    {
-        "CANCELED",  # Binance US spelling (Rule #7)
-        "CANCELLED",  # Binance UK spelling variant
-        "USER_CANCELLED",
-        "EXPIRED",
-        "ERROR",
-        "REJECTED",
-    }
-)
-"""Algo order statuses that indicate the order is no longer active.
-
-Binance uses American spelling (CANCELED) but some endpoints return
-British spelling (CANCELLED). Always check both via this set (Rule #7).
-"""
-
-
-# ── Utility functions ─────────────────────────────────────────────────────────
-
-
-def to_api_symbol(key: str, pos: dict | None = None) -> str:
-    """Extract Binance API symbol from a position key or position dict.
-
-    Handles both one-way (``"BTCUSDT"``) and hedge-mode (``"BTCUSDT:LONG"``) keys.
-    If *pos* is provided and contains a ``"symbol"`` field, uses that first.
-
-    Incident #4 (2026-03-08): compound key sent to API → ``-1022`` error.
-    """
-    if pos and "symbol" in pos:
-        sym: str = str(pos["symbol"])
-        return sym.split(":")[0] if ":" in sym else sym
-    return key.split(":")[0] if ":" in key else key
-
-
-def round_to_tick(price: float, tick_size: float, price_precision: int) -> float:
-    """Round a price to the exchange tick size.
-
-    Binance rejects orders with prices that are not a multiple of tick_size.
-    Uses round-half-even to snap to the nearest tick, then rounds to the
-    symbol's price precision to avoid floating-point trailing digits.
-    """
-    return round(round(price / tick_size) * tick_size, price_precision)
+# ── Order status constants / symbol & price helpers ──────────────────────────
+#
+# ALGO_ORDER_DEAD_STATUSES, to_api_symbol, round_to_tick: see the module
+# docstring above — re-exported from binance_quant_engine.execution.utils.
+# Incident #4 (2026-03-08, compound key → API -1022) and Rule #7 (Binance's
+# US/UK cancel-spelling split) are the reasons these exist; both are now
+# covered by that package's own tests (test_execution_utils.py).
 
 
 def calc_upnl_pct(entry: float, current: float, signal: int) -> float:

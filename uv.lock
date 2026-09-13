@@ -148,6 +148,15 @@ wheels = [
 ]
 
 [[package]]
+name = "binance-quant-engine"
+version = "0.1.1"
+source = { git = "https://github.com/younghwan91/binance-quant-engine.git?rev=v0.1.1#231278c1c07d47b0155d1607ab2d2b57d947cef5" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+]
+
+[[package]]
 name = "blinker"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1935,6 +1944,7 @@ name = "trading-code"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "binance-quant-engine" },
     { name = "cryptography" },
     { name = "discord-py" },
     { name = "matplotlib" },
@@ -1964,6 +1974,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "binance-quant-engine", git = "https://github.com/younghwan91/binance-quant-engine.git?rev=v0.1.1" },
     { name = "cryptography", specifier = ">=46.0.1" },
     { name = "discord-py", specifier = ">=2.0" },
     { name = "matplotlib", specifier = ">=3.10.6" },
