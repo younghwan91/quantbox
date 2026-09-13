@@ -150,10 +150,14 @@ wheels = [
 [[package]]
 name = "binance-quant-engine"
 version = "0.1.1"
-source = { git = "https://github.com/younghwan91/binance-quant-engine.git?rev=v0.1.1#231278c1c07d47b0155d1607ab2d2b57d947cef5" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/db/7b/064cc13c4f9d89880702eb49e642f13aacad72da5816246de17612847ed0/binance_quant_engine-0.1.1.tar.gz", hash = "sha256:43de6304d50894530f5bfdf25fd0d792e831628f7c9d14d7b48ae82ff9ec576e", size = 106703, upload-time = "2026-09-13T07:59:03.202Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/5e/c8b0da789e03525dd88a7702dad4ce97cce00f7be4baa128e8c85e59b6aa/binance_quant_engine-0.1.1-py3-none-any.whl", hash = "sha256:35298c9d9d7019a22731bee6a95bdef21f97c5230a4ac8090214d7ef9bcfd72d", size = 34402, upload-time = "2026-09-13T07:59:01.616Z" },
 ]
 
 [[package]]
@@ -1974,7 +1978,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "binance-quant-engine", git = "https://github.com/younghwan91/binance-quant-engine.git?rev=v0.1.1" },
+    { name = "binance-quant-engine", specifier = ">=0.1.1" },
     { name = "cryptography", specifier = ">=46.0.1" },
     { name = "discord-py", specifier = ">=2.0" },
     { name = "matplotlib", specifier = ">=3.10.6" },
