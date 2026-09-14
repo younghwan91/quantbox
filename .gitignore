@@ -47,3 +47,6 @@ devlog/.coverage
 
 # OMC runtime state
 .omc/
+
+# ── 로컬 운영 백업(크론·tmux 스크롤백·핸드오프) — 커밋하지 않는다 ──
+.backup/
