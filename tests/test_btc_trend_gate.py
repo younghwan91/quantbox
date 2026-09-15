@@ -27,15 +27,14 @@ class TestBtcTrendGateConfig:
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("VS_BTC_LONG_FILTER_ENABLED", "false")
         monkeypatch.setenv("VS_BTC_LONG_MA_PERIOD", "20")
-        # Must re-instantiate to pick up env
-        from importlib import reload
-        import quantbox.strategy.vol_straddle.config as m
+        # BaseSettings 는 인스턴스를 만들 때 환경변수를 읽는다 — 모듈 reload 는 필요 없다.
+        # reload 하면 VolStraddleConfig 클래스가 새로 생겨, 이미 옛 클래스를 import 한
+        # 다른 테스트 모듈(test_vol_straddle 등)과 conftest 의 격리 패치가 어긋났다.
+        from quantbox.strategy.vol_straddle.config import VolStraddleConfig
 
-        reload(m)
-        cfg = m.VolStraddleConfig()
+        cfg = VolStraddleConfig()
         assert cfg.btc_long_filter_enabled is False
         assert cfg.btc_long_ma_period == 20
-        reload(m)  # restore defaults for other tests
 
 
 class TestBtcTrendGateLogic:

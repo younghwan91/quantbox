@@ -48,6 +48,29 @@ def _clear_settings_cache():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_vol_straddle_env_file(monkeypatch):
+    """VolStraddleConfig 가 저장소 루트의 운영 .env 를 읽지 않게 한다.
+
+    두 경로로 새어 들어왔다 — trader .env 의 VS_MIN_CONVICTION_SCORE=5 가 신호를 걸러
+    vol_straddle 테스트 4개가 그 호스트에서만 실패했다(2026-09-16).
+      1. VolStraddleConfig 의 env_file=".env"
+      2. quantbox.scalper 가 import 시점에 load_dotenv() 로 .env 전체를 os.environ 에 넣는다
+         (_isolate_state_file 이 scalper 를 import 하므로 세션 내내 남는다)
+    테스트가 monkeypatch.setenv 로 넣는 VS_* 는 이 fixture 뒤에 적용되므로 그대로 동작한다.
+    """
+    import os
+
+    import dotenv
+    import quantbox.scalper  # noqa: F401 — load_dotenv() 를 먼저 일으킨 뒤 지운다
+    from quantbox.strategy.vol_straddle.config import VolStraddleConfig
+
+    monkeypatch.setitem(VolStraddleConfig.model_config, "env_file", None)
+    monkeypatch.setattr(dotenv, "dotenv_values", lambda *a, **k: {})
+    for key in [k for k in os.environ if k.startswith("VS_") or k == "RB_SYMBOL_WHITELIST"]:
+        monkeypatch.delenv(key)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_state_file(tmp_path):
     """Redirect scalper state file to tmp_path so tests never corrupt
     the production state (data/state/scalper_state.json).
