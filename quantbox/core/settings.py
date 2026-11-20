@@ -140,6 +140,10 @@ class QuantBoxSettings(BaseSettings):
             self.binance_api_secret = self.binance_secret
         if not self.binance_api_secret:
             raise ValueError("BINANCE_API_SECRET (또는 BINANCE_SECRET) 환경변수가 필요합니다. .env 파일을 확인하세요.")
+        # fail-closed: .env.example 의 자리표시자를 그대로 둔 채 실거래 경로가 시작되지 않게 한다.
+        for name, value in (("BINANCE_API_KEY", self.binance_api_key), ("BINANCE_API_SECRET", self.binance_api_secret)):
+            if value.strip().lower().startswith("your_"):
+                raise ValueError(f"{name} 가 자리표시자 값입니다. 실제 값을 환경변수/.env 에 설정하세요.")
         return self
 
     def to_trader_config(self) -> dict:

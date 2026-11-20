@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from enum import Enum
 import json
+import os
 from pathlib import Path
 
 
@@ -55,6 +56,19 @@ class ExchangeConfig:
     rate_limit: float = 0.5  # seconds between requests
     max_retries: int = 3
     retry_delay: float = 2.0
+
+    @classmethod
+    def from_env(cls) -> "ExchangeConfig":
+        """Load exchange credentials from BINANCE_API_KEY / BINANCE_API_SECRET / BINANCE_TESTNET.
+
+        Raises:
+            RuntimeError: key or secret is missing (fail-closed).
+        """
+        key = os.environ.get("BINANCE_API_KEY", "")
+        secret = os.environ.get("BINANCE_API_SECRET", "") or os.environ.get("BINANCE_SECRET", "")
+        if not key or not secret:
+            raise RuntimeError("BINANCE_API_KEY / BINANCE_API_SECRET environment variables are required")
+        return cls(api_key=key, api_secret=secret, testnet=os.environ.get("BINANCE_TESTNET", "").lower() == "true")
 
     @classmethod
     def from_file(cls, filepath: str) -> "ExchangeConfig":

@@ -127,6 +127,14 @@ python -m quantbox.scalper --strategy vol_straddle --paper --once
 python -m quantbox.scalper --strategy vol_straddle
 ```
 
+### 🔐 설정 (비밀값은 환경변수로만)
+
+API 키·디스코드 토큰·웹훅 URL·채널 ID 는 코드나 git 에 두지 않고 환경변수(또는 `.env`)에서만 읽는다.
+`cp .env.example .env` 로 복사해 `BINANCE_API_KEY`, `BINANCE_API_SECRET`(필수), `DISCORD_WEBHOOK_URL`,
+`DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID`(선택)를 채운다. `.env` 는 `.gitignore` 대상이다.
+필수 값이 없거나 `.env.example` 의 자리표시자(`your_...`) 그대로면 실거래 경로는 시작을 거부한다.
+백테스트·테스트는 환경변수 없이 실행된다.
+
 > ⚠️ 실거래 전 `.env`에 `BINANCE_API_KEY/SECRET` 설정 및 Binance Hedge Mode 활성화 필요.  
 > 자세한 설정: `MANUAL.md` 참조.
 

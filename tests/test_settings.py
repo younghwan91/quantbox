@@ -55,6 +55,13 @@ class TestRequiredFields:
         with pytest.raises(ValidationError, match="BINANCE_API_SECRET"):
             _make_settings(env={"BINANCE_API_KEY": "key"})
 
+    def test_placeholder_credentials_rejected(self):
+        """.env.example 자리표시자 값은 거부한다 (fail-closed)."""
+        with pytest.raises(ValidationError, match="자리표시자"):
+            _make_settings(BINANCE_API_KEY="your_api_key_here")
+        with pytest.raises(ValidationError, match="자리표시자"):
+            _make_settings(BINANCE_API_SECRET="YOUR_BINANCE_API_SECRET")
+
     def test_empty_api_key_raises(self):
         """빈 문자열 API_KEY도 pydantic에서 허용하지만,
         model_validator가 secret을 검증."""

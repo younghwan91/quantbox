@@ -30,6 +30,13 @@ Avoid reimplementing scalper setup in every test file — use these fixtures ins
   L455-633 : rubberband bracket             ← rb_scalper reaches this
 """
 
+import os as _os
+
+# 테스트는 실제 비밀값 없이 돈다: 환경변수가 없으면 더미 값을 넣는다(CI 와 동일).
+_os.environ.setdefault("BINANCE_API_KEY", "ci_placeholder")
+_os.environ.setdefault("BINANCE_API_SECRET", "ci_placeholder")
+
+
 import pytest
 from unittest.mock import MagicMock, patch
 
