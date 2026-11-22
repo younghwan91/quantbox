@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <defs>
+    <linearGradient id="qb-bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E1B4B"/>
+      <stop offset="100%" stop-color="#090D16"/>
+    </linearGradient>
+    <linearGradient id="qb-ind" x1="16" y1="14" x2="48" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#qb-bg)"/>
+  <rect x="1" y="1" width="62" height="62" rx="13" stroke="#6366F1" stroke-opacity="0.35" stroke-width="1.5"/>
+  <!-- Isometric modular cube -->
+  <polygon points="32,13 49,22.5 49,41.5 32,51 15,41.5 15,22.5" stroke="url(#qb-ind)" stroke-width="2.4" stroke-linejoin="round" fill="#6366F1" fill-opacity="0.1"/>
+  <path d="M15 22.5L32 32L49 22.5M32 32V51" stroke="#818CF8" stroke-opacity="0.55" stroke-width="1.8" stroke-linejoin="round"/>
+  <!-- VR Squeeze compression-to-breakout pulse -->
+  <path d="M19 36H25L28 33L31 37L34 27L38 22L45 19" stroke="#F43F5E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="45" cy="19" r="2.5" fill="#FDA4AF"/>
+</svg>
