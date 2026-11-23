@@ -1,160 +1,92 @@
+<div align="center">
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/brand/wordmark-dark.svg">
   <img alt="quantbox" src="docs/images/brand/wordmark-light.svg" height="52">
 </picture>
 
-**English** | [한국어](README.ko.md)
+**Binance USDT-M futures Volatility Ratio Squeeze and MA Cluster breakout trading system.**
 
-**Binance USDT-M futures Volatility Ratio Squeeze (VR Squeeze) and MA Cluster breakout trading system — Numba backtesting and live execution share the exact same code path.**
+Numba backtesting and live execution share the exact same `TradingStrategy` code path. Educational and research purposes only.
 
 [![CI](https://github.com/younghwan91/quantbox/actions/workflows/ci.yml/badge.svg)](https://github.com/younghwan91/quantbox/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-younghwan--chae-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/in/younghwan-chae/)
 
-> Code for educational and research purposes. Execution results are not presented as evidence of profitability. Strategy parameters are in [docs/STRATEGIES.md](docs/STRATEGIES.md) and `quantbox/strategy/*/config.py`.
+[Quick start](#quick-start) · [Docs](docs/guide.md) · [Strategies](docs/STRATEGIES.md) · [Manual](MANUAL.md) · [한국어](README.ko.md)
 
-- **Dual Volatility Breakout Signals**: `VolStraddle` (15m/1h/4h VR compression + `D_mom8` / `S_d8` straddle) and `MA Cluster Squeeze` (4h SMA 20/50/100/200 convergence breakout) share a unified slot pool.
-- **Unified Live & Backtest Path**: Identical `TradingStrategy` Protocol-based signal logic runs across the Numba-accelerated dual backtest engines (`vectorized_backtest.py`, `trade_sim.py`) and the paper/live trading engine.
-- **Multi-Layer Live Execution Guards**: Built-in server-side STOP brackets, Limit Chaser, Market Fallback verification, Max Drawdown Breaker, Daily Loss Limit, `ExposureGuard`, and SQLite `ReconJournal`.
-- **Operational Visibility**: Includes a real-time Streamlit dashboard, trade journal CLI, and two-way Discord bot & webhook alerts.
+</div>
 
----
-
-## Installation & Quick Start
+## Quick start
 
 ```bash
-git clone https://github.com/younghwan91/quantbox.git
-cd quantbox
-
-uv sync          # uv recommended (Python 3.13+)
-# or: pip install -e .
-```
-
-### Environment Variables
-
-API keys, Discord tokens, webhook URLs, and channel IDs are never stored in code or git and are read exclusively from `.env`. If required values are missing or left as placeholders (`your_...`) from `.env.example`, config validation refuses to start (including paper mode). Backtests and unit tests run without environment variables.
-
-```bash
-cp .env.example .env   # Fill in BINANCE_API_KEY, BINANCE_API_SECRET, etc. (.env is gitignored)
-```
-
-### Paper Trading
-
-```bash
-# Paper trading (simulation, no real orders)
-python -m quantbox.scalper --strategy vol_straddle --paper
-
-# Run a single cycle
+git clone https://github.com/younghwan91/quantbox.git && cd quantbox
+uv sync
+cp .env.example .env   # fill in BINANCE_API_KEY and BINANCE_API_SECRET
 python -m quantbox.scalper --strategy vol_straddle --paper --once
 ```
 
-Running without `--paper` executes live orders. Before live trading, enable Binance Hedge Mode and configure `.env`. See [MANUAL.md](MANUAL.md) for detailed setup instructions.
+You will see a single paper-trading cycle evaluate completed candles and log signals without placing real orders. Unit tests and backtests run without `.env` credentials (`uv run pytest tests/ -v`).
 
-### Live Dashboard & Journal CLI
+## What it does
+
+- **Dual volatility breakout signals** — `VolStraddle` (15m/1h/4h VR compression with `D_mom8` and `S_d8`) and `MA Cluster Squeeze` (4h SMA 20/50/100/200 breakout) share a unified 10-slot pool.
+- **Unified live and backtest path** — Identical `TradingStrategy` Protocol signal logic runs across the Numba-accelerated backtest engines (`vectorized_backtest.py`, `trade_sim.py`) and the live scalper.
+- **Multi-layer execution guards** — Server-side STOP brackets, Limit Chaser, Market Fallback verification, Max Drawdown Breaker, Daily Loss Limit, `ExposureGuard`, and SQLite `ReconJournal` protect live sessions.
+- **Operational visibility** — Includes a real-time Streamlit dashboard, a trade journal CLI, and two-way Discord bot and webhook alerts.
+
+## Strategies
+
+| Strategy | Timeframe | Mechanism | Reference |
+|---|---|---|---|
+| **VolStraddle (`D_mom8` / `S_d8`)** | 15m · 1h · 4h | VR compression (`ATR(8)/ATR(56)`) + momentum or straddle | [docs/STRATEGIES.md](docs/STRATEGIES.md) |
+| **MA Cluster Squeeze** | 4h | Breakout after SMA(20/50/100/200) convergence | [docs/STRATEGIES.md](docs/STRATEGIES.md) |
+| **RubberBand (legacy)** | — | ATR-adaptive mean reversion (non-production) | `quantbox/strategy/rubberband/` |
+
+## Configuration
+
+API keys, Discord tokens, webhook URLs, and channel IDs are read exclusively from `.env` (gitignored). If required values are missing or left as `.env.example` placeholders (`your_...`), config validation refuses to start, including in `--paper` mode.
+
+Strategy parameters live in `quantbox/strategy/*/config.py` (`VolStraddleConfig`), not `.env`.
+
+## Monitoring & CLI
 
 ```bash
-bash scripts/start_dashboard.sh start   # Start in background (http://localhost:8501, 30s auto-refresh)
-bash scripts/start_dashboard.sh status  # Check status
-bash scripts/start_dashboard.sh stop    # Stop
+bash scripts/start_dashboard.sh start   # Streamlit dashboard at http://localhost:8501
+bash scripts/start_dashboard.sh status  # Check dashboard status
+bash scripts/start_dashboard.sh stop    # Stop dashboard
 
-python3 scripts/journal.py              # Today's trades + overall summary
+python3 scripts/journal.py              # Today's trades and overall summary
 python3 scripts/journal.py symbols      # PnL ranking by symbol
 python3 scripts/journal.py last 10      # Last 10 trades
 python3 scripts/journal.py strategy     # Performance by strategy
 ```
 
----
+## Caveats
 
-## Architecture Overview
+- **Educational and research only** — Execution results are not presented as evidence of profitability; cryptocurrency futures carry substantial risk of loss.
+- **Hedge Mode required for live orders** — Running without `--paper` places real orders; enable Binance Hedge Mode and configure `.env` first.
+- **Completed bars only** — Signal and cross-timeframe logic read closed candles only to prevent lookahead bias.
 
-```mermaid
-flowchart LR
-    Data["Data\n2-Tier Cache (LRU + Disk)"] --> Strategy["Strategy\nVolStraddle · MA Cluster"]
-    Strategy -->|"TradingStrategy Protocol"| Engine["Core Engine\nscalper.py · loop_mixin"]
-    Engine --> Exec["Execution Guards\nBrackets · ExposureGuard · ReconJournal"]
-    Exec --> Exchange[("Binance USDT-M\nFutures API")]
-    Strategy -.->|"Same signal logic"| BT["Dual-Engine Backtest\nvectorized_backtest · trade_sim (Numba)"]
-    Engine -.-> Notify["Discord Bot · Dashboard · Journal"]
-```
+## Docs
 
----
+| Document | Contents |
+|---|---|
+| [Architecture & Reference Guide](docs/guide.md) | Architecture diagram, safety guards, dual-engine backtest, project structure |
+| [Strategy Reference](docs/STRATEGIES.md) | Active strategies, entry/exit rules, and risk gates |
+| [Operations Manual](MANUAL.md) | Detailed setup, live trading checklist, and operational commands |
 
-## Strategies, Safety Guards & Backtesting
+## Contributing
 
-<details>
-<summary>Strategy Suite — VolStraddle, MA Cluster Squeeze, Legacy Strategy</summary>
-
-### VolStraddle — VR Compression Detection
-- **Volatility Ratio (VR) Compression**: Detects volatility compression when the short-term ATR to long-term ATR ratio drops below a threshold.
-- **Multi-Timeframe**: Evaluates 15m/1h/4h signals independently with higher-timeframe priority.
-- **D_mom8**: Enters directionally along 8-bar momentum when a compression signal fires.
-- **S_d8 Straddle**: Enters both directions simultaneously (Hedge Mode) when compression persists for a configured number of bars.
-- **Exits**: Stop-loss, safety-cap take-profit, trailing stop, and maximum holding duration.
-- **No Lookahead**: References completed bars only, excluding the in-progress bar.
-
-### MA Cluster Squeeze — 4h Moving Average Convergence Breakout
-- **MA Cluster Detection**: Captures breakouts after SMA(20/50/100/200) lines stay tightly converged for a minimum duration.
-- **4h Exclusive**: Operates solely on the higher timeframe with minimal overlap against VR signals.
-- **Direction & Filters**: Enters in the momentum direction breaking out of the cluster, filtering out stale clusters and weak momentum signals.
-
-### Legacy Strategy (Non-Production)
-- **Rubber Band Scalper**: ATR-adaptive mean reversion with volume climax filter (`quantbox/strategy/rubberband/`).
-
-</details>
-
-<details>
-<summary>Data Management & Live Trading Safety Guards</summary>
-
-### Data Management
-- **2-Tier Caching**: In-memory LRU + compressed disk cache.
-- **Multi-Timeframe**: 1m, 5m, 15m, 1h, 4h, 1d.
-- **Binance Integration**: Rate limiting and batch fetching.
-
-### Live Execution Safety Guards
-- **Server-Side Stop-Loss**: Binance STOP orders guarantee stop protection even during client crashes or network disconnects.
-- **Leverage Verification**: Aborts order placement if leverage configuration fails.
-- **Limit Chaser & Market Fallback Verification**: Reduces slippage via limit chasing and re-queries ACK responses to prevent phantom fills.
-- **State Persistence**: Saves position state to JSON and reconciles against the exchange on crash recovery.
-- **Max Drawdown Breaker · Daily Loss Limit**: Halts new entries and liquidates positions if drawdown from session peak or daily loss limit is breached.
-- **Consecutive Error Guard · Close Failure Retention**: Liquidates all positions on consecutive errors; retains slot tracking on close failures for retry.
-- **Rate Limiter + Circuit Breaker · In-Flight Order Tracker**: Tracks API rate limits and pending orders.
-- **ExposureGuard · ReconJournal · Config Validators**: Session exposure caps, SQLite audit log, and cross-field config validation (`SL < TP`, `leverage >= 1`).
-- **Discord Bot**: Remote monitoring and commands (position inspection, forced close, etc.).
-
-</details>
-
-<details>
-<summary>Backtesting (Dual-Engine)</summary>
-
-- **Signal-Array Engine** (`vectorized_backtest.py`): Fast single-asset scan using `±1` position arrays.
-- **Trade-Event Engine** (`trade_sim.py`): Discrete trade simulation with High/Low intrabar SL/TP, N-slot portfolio contention, and Numba acceleration. Pipeline: `sim_directional_trades()` / `sim_straddle_trades()` → `collect_trades()` → `portfolio_sim()` → `compute_metrics()`.
-- **Rolling Windows & Metrics**: Formation/Trading period simulation, Sharpe, Sortino, Calmar, Profit Factor, and Bootstrap CI.
-
-</details>
-
----
-
-## Testing & Project Structure
+Run the test suite before opening a pull request:
 
 ```bash
 uv run pytest tests/ -v
 ```
 
-| Path | Description |
-|---|---|
-| `quantbox/core/` | Config (`pydantic-settings`), event loop, state persistence, rate limiter, Discord commands, trade journal |
-| `quantbox/execution/` | Server-side brackets, positions, exchange reconciliation, in-flight tracker, exposure cap, preflight, risk guards |
-| `quantbox/data/` | Binance downloader, 2-tier cache, data loader |
-| `quantbox/strategy/` | `vol_straddle` (VR compression + MA cluster), `rubberband` (legacy), `vol_selector`, `TradingStrategy` Protocol |
-| `quantbox/backtest/` | `vectorized_backtest` (signal array), `trade_sim` (trade event) |
-| `quantbox/notifications/` | Discord bot (two-way) & webhooks (one-way) |
-| `quantbox/utils/` | Diagnostic logging |
-| `quantbox/scalper.py` | Core engine entry point |
-| `scripts/`, `research/`, `autoresearch/`, `docs/`, `tests/` | Utility scripts, research, docs ([STRATEGIES.md](docs/STRATEGIES.md), [MANUAL.md](MANUAL.md)), tests |
+Issues and pull requests are welcome.
 
-## License & Disclaimer
+## License
 
 [MIT](LICENSE) © 2026 Younghwan Chae
-
-This software is intended for **educational and research purposes only**. Cryptocurrency trading carries substantial risk of loss.
