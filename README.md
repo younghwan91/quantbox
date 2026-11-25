@@ -18,16 +18,24 @@ Numba backtesting and live execution share the exact same `TradingStrategy` code
 
 </div>
 
-## Quick start
+## Try it now (no API keys)
 
 ```bash
 git clone https://github.com/younghwan91/quantbox.git && cd quantbox
-uv sync
+uv sync --dev
+uv run pytest tests/test_backtest_live_parity.py tests/test_backtest_plausibility.py -m "not slow" --no-cov -q
+```
+
+Expected: `38 passed` in about 10 seconds. The first file checks that the live signal path makes the same decisions as the backtest engine (signal direction, multi-timeframe gating, leverage, dropping the open candle). The second checks the plausibility gate that rejects lookahead-looking backtests. Both use in-memory test data, so no exchange account or downloaded data is needed.
+
+## Paper trading (needs Binance keys)
+
+```bash
 cp .env.example .env   # fill in BINANCE_API_KEY and BINANCE_API_SECRET
 python -m quantbox.scalper --strategy vol_straddle --paper --once
 ```
 
-You will see a single paper-trading cycle evaluate completed candles and log signals without placing real orders. Unit tests and backtests run without `.env` credentials (`uv run pytest tests/ -v`).
+One paper-trading cycle evaluates completed candles and logs signals without placing real orders. The full suite runs without credentials: `uv run pytest tests/ -v`.
 
 ## What it does
 
@@ -76,6 +84,17 @@ python3 scripts/journal.py strategy     # Performance by strategy
 | [Architecture & Reference Guide](docs/guide.md) | Architecture diagram, safety guards, dual-engine backtest, project structure |
 | [Strategy Reference](docs/STRATEGIES.md) | Active strategies, entry/exit rules, and risk gates |
 | [Operations Manual](MANUAL.md) | Detailed setup, live trading checklist, and operational commands |
+
+## Validation write-ups
+
+Out-of-sample findings, including what looked good and was not, are published in [crypto-quant-insights](https://github.com/younghwan91/crypto-quant-insights). Backtest archives for this repo are in [docs/backtest_results](docs/backtest_results/README.md) and are research records, not a track record.
+
+## More from the same author
+
+- [crypto-quant-insights](https://github.com/younghwan91/crypto-quant-insights) - fourteen chart-backed lessons from validating this system.
+- [crypto-pair-trading](https://github.com/younghwan91/crypto-pair-trading) - event-driven statistical-arbitrage framework with shared backtest and live execution.
+- [kiwoom-client](https://github.com/younghwan91/kiwoom-client) - Kiwoom REST API client for Korean equities.
+- [fin-checkup](https://github.com/younghwan91/fin-checkup) - financial health check-up for Korean listed companies from DART filings.
 
 ## Contributing
 
