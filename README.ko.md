@@ -14,20 +14,28 @@ Numba 백테스트와 실거래가 동일한 `TradingStrategy` 코드 경로에�
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-younghwan--chae-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/in/younghwan-chae/)
 
-[빠른 시작](#빠른-시작) · [가이드](docs/guide.ko.md) · [전략 레퍼런스](docs/STRATEGIES.md) · [매뉴얼](MANUAL.md) · [English](README.md)
+[빠른 시작](#빠른-시작-api-키-불필요) · [가이드](docs/guide.ko.md) · [전략 레퍼런스](docs/STRATEGIES.md) · [매뉴얼](MANUAL.md) · [English](README.md)
 
 </div>
 
-## 빠른 시작
+## 빠른 시작 (API 키 불필요)
 
 ```bash
 git clone https://github.com/younghwan91/quantbox.git && cd quantbox
-uv sync
+uv sync --dev
+uv run pytest tests/test_backtest_live_parity.py tests/test_backtest_plausibility.py -m "not slow" --no-cov -q
+```
+
+약 10초 안에 `38 passed`가 나옵니다. 첫 번째 파일은 실거래 신호 경로가 백테스트 엔진과 같은 판단(신호 방향, 멀티 타임프레임 게이팅, 레버리지, 진행 중인 캔들 제외)을 내리는지 검증합니다. 두 번째 파일은 룩어헤드가 의심되는 백테스트를 걸러내는 타당성 게이트를 검증합니다. 둘 다 메모리 내 테스트 데이터를 쓰므로 거래소 계정이나 내려받은 데이터가 필요하지 않습니다.
+
+## 페이퍼 트레이딩 (Binance 키 필요)
+
+```bash
 cp .env.example .env   # BINANCE_API_KEY, BINANCE_API_SECRET 입력
 python -m quantbox.scalper --strategy vol_straddle --paper --once
 ```
 
-한 사이클 동안 완성된 캔들을 평가하고 실주문 없이 신호를 기록합니다. 단위 테스트와 백테스트는 `.env` 설정 없이 실행됩니다(`uv run pytest tests/ -v`).
+한 번의 페이퍼 트레이딩 사이클 동안 완성된 캔들을 평가하고 실주문 없이 신호를 기록합니다. 전체 테스트 스위트는 자격 증명 없이 실행됩니다(`uv run pytest tests/ -v`).
 
 ## 주요 기능
 
@@ -76,6 +84,17 @@ python3 scripts/journal.py strategy     # 전략별 성과
 | [아키텍처 및 레퍼런스 가이드](docs/guide.ko.md) | 아키텍처 다이어그램, 안전장치, 듀얼 백테스트 엔진, 프로젝트 구조 |
 | [전략 레퍼런스](docs/STRATEGIES.md) | 활성 전략, 진입·청산 규칙, 리스크 게이트 |
 | [운영 매뉴얼](MANUAL.md) | 상세 설치, 실거래 체크리스트, 운영 명령어 |
+
+## 검증 기록
+
+표본 외 검증 결과는 좋아 보였다가 아니었던 사례까지 포함해 [crypto-quant-insights](https://github.com/younghwan91/crypto-quant-insights)에 공개합니다. 이 저장소의 백테스트 아카이브는 [docs/backtest_results](docs/backtest_results/README.md)에 있으며, 연구 기록일 뿐 운용 실적이 아닙니다.
+
+## 같은 저자의 다른 저장소
+
+- [crypto-quant-insights](https://github.com/younghwan91/crypto-quant-insights) - 이 시스템을 검증하며 얻은 차트 기반 교훈 열네 가지.
+- [crypto-pair-trading](https://github.com/younghwan91/crypto-pair-trading) - 백테스트와 실거래 실행을 공유하는 이벤트 기반 통계적 차익거래 프레임워크.
+- [kiwoom-client](https://github.com/younghwan91/kiwoom-client) - 국내 주식용 키움 REST API 클라이언트.
+- [fin-checkup](https://github.com/younghwan91/fin-checkup) - DART 공시로 보는 국내 상장사 재무 건강검진.
 
 ## 기여
 
